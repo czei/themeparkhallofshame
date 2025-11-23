@@ -9,12 +9,20 @@ from sqlalchemy.pool import QueuePool
 from sqlalchemy.engine import Engine, Connection, URL
 from typing import Generator
 
-from ..utils.config import (
-    DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD,
-    DB_POOL_SIZE, DB_POOL_MAX_OVERFLOW, DB_POOL_RECYCLE, DB_POOL_PRE_PING,
-    config
-)
-from ..utils.logger import logger, log_database_error
+try:
+    from ..utils.config import (
+        DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD,
+        DB_POOL_SIZE, DB_POOL_MAX_OVERFLOW, DB_POOL_RECYCLE, DB_POOL_PRE_PING,
+        config
+    )
+    from ..utils.logger import logger, log_database_error
+except ImportError:
+    from utils.config import (
+        DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD,
+        DB_POOL_SIZE, DB_POOL_MAX_OVERFLOW, DB_POOL_RECYCLE, DB_POOL_PRE_PING,
+        config
+    )
+    from utils.logger import logger, log_database_error
 
 
 class DatabaseConnection:
@@ -45,8 +53,9 @@ class DatabaseConnection:
             try:
                 # Build MySQL connection URL using URL.create() to prevent password exposure
                 # This method properly handles credentials and prevents them from appearing in logs
+                # Using pymysql (pure Python driver) for better compatibility
                 connection_url = URL.create(
-                    drivername="mysql+mysqldb",
+                    drivername="mysql+pymysql",
                     username=DB_USER,
                     password=DB_PASSWORD,
                     host=DB_HOST,

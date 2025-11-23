@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS aggregation_log (
 -- Park operating sessions (permanent)
 CREATE TABLE IF NOT EXISTS park_operating_sessions (
     session_id INT PRIMARY KEY AUTO_INCREMENT,
-    park_id INT NOT NULL,
+    park_id INT DEFAULT NULL,
     session_date DATE NOT NULL COMMENT 'Local date of operating session',
     session_start_utc TIMESTAMP DEFAULT NULL COMMENT 'UTC timestamp of first detected ride activity',
     session_end_utc TIMESTAMP DEFAULT NULL COMMENT 'UTC timestamp of last detected ride activity',
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS park_operating_sessions (
 -- Ride daily statistics (permanent)
 CREATE TABLE IF NOT EXISTS ride_daily_stats (
     stat_id INT PRIMARY KEY AUTO_INCREMENT,
-    ride_id INT NOT NULL,
+    ride_id INT DEFAULT NULL,
     stat_date DATE NOT NULL COMMENT 'Local date for this statistic',
     uptime_minutes INT NOT NULL DEFAULT 0 COMMENT 'Minutes ride was open during park operating hours',
     downtime_minutes INT NOT NULL DEFAULT 0 COMMENT 'Minutes ride was closed during park operating hours',
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS ride_daily_stats (
 -- Ride weekly statistics (permanent)
 CREATE TABLE IF NOT EXISTS ride_weekly_stats (
     stat_id INT PRIMARY KEY AUTO_INCREMENT,
-    ride_id INT NOT NULL,
+    ride_id INT DEFAULT NULL,
     year INT NOT NULL,
     week_number INT NOT NULL COMMENT 'ISO week number (1-53)',
     week_start_date DATE NOT NULL COMMENT 'Monday of the ISO week',
@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS ride_weekly_stats (
 -- Ride monthly statistics (permanent)
 CREATE TABLE IF NOT EXISTS ride_monthly_stats (
     stat_id INT PRIMARY KEY AUTO_INCREMENT,
-    ride_id INT NOT NULL,
+    ride_id INT DEFAULT NULL,
     year INT NOT NULL,
     month INT NOT NULL COMMENT 'Month number (1-12)',
     uptime_minutes INT NOT NULL DEFAULT 0,
@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS ride_monthly_stats (
 -- Ride yearly statistics (permanent)
 CREATE TABLE IF NOT EXISTS ride_yearly_stats (
     stat_id INT PRIMARY KEY AUTO_INCREMENT,
-    ride_id INT NOT NULL,
+    ride_id INT DEFAULT NULL,
     year INT NOT NULL,
     uptime_minutes INT NOT NULL DEFAULT 0,
     downtime_minutes INT NOT NULL DEFAULT 0,
@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS ride_yearly_stats (
 -- Park daily statistics (permanent)
 CREATE TABLE IF NOT EXISTS park_daily_stats (
     stat_id INT PRIMARY KEY AUTO_INCREMENT,
-    park_id INT NOT NULL,
+    park_id INT DEFAULT NULL,
     stat_date DATE NOT NULL COMMENT 'Local date for this statistic',
     total_rides_tracked INT NOT NULL DEFAULT 0,
     avg_uptime_percentage DECIMAL(5,2) DEFAULT NULL COMMENT 'Average uptime % across all rides',
@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS park_daily_stats (
 -- Park weekly statistics (permanent)
 CREATE TABLE IF NOT EXISTS park_weekly_stats (
     stat_id INT PRIMARY KEY AUTO_INCREMENT,
-    park_id INT NOT NULL,
+    park_id INT DEFAULT NULL,
     year INT NOT NULL,
     week_number INT NOT NULL,
     week_start_date DATE NOT NULL,
@@ -174,7 +174,7 @@ CREATE TABLE IF NOT EXISTS park_weekly_stats (
 -- Park monthly statistics (permanent)
 CREATE TABLE IF NOT EXISTS park_monthly_stats (
     stat_id INT PRIMARY KEY AUTO_INCREMENT,
-    park_id INT NOT NULL,
+    park_id INT DEFAULT NULL,
     year INT NOT NULL,
     month INT NOT NULL,
     total_rides_tracked INT NOT NULL DEFAULT 0,
@@ -195,7 +195,7 @@ CREATE TABLE IF NOT EXISTS park_monthly_stats (
 -- Park yearly statistics (permanent)
 CREATE TABLE IF NOT EXISTS park_yearly_stats (
     stat_id INT PRIMARY KEY AUTO_INCREMENT,
-    park_id INT NOT NULL,
+    park_id INT DEFAULT NULL,
     year INT NOT NULL,
     total_rides_tracked INT NOT NULL DEFAULT 0,
     avg_uptime_percentage DECIMAL(5,2) DEFAULT NULL,

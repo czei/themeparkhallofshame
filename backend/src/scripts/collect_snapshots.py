@@ -37,11 +37,6 @@ class SnapshotCollector:
 
     def __init__(self):
         self.api_client = QueueTimesClient()
-        self.park_repo = ParkRepository()
-        self.ride_repo = RideRepository()
-        self.snapshot_repo = RideStatusSnapshotRepository()
-        self.park_activity_repo = ParkActivitySnapshotRepository()
-        self.status_change_repo = RideStatusChangeRepository()
 
         self.stats = {
             'parks_processed': 0,
@@ -61,13 +56,20 @@ class SnapshotCollector:
         logger.info("=" * 60)
 
         try:
-            # Step 1: Get all active parks
-            parks = self.park_repo.get_all_active()
-            logger.info(f"Processing {len(parks)} active parks...")
+            # Step 1: Get all active parks with database connection
+            with get_db_connection() as conn:
+                park_repo = ParkRepository(conn)
+                ride_repo = RideRepository(conn)
+                snapshot_repo = RideStatusSnapshotRepository(conn)
+                park_activity_repo = ParkActivitySnapshotRepository(conn)
+                status_change_repo = RideStatusChangeRepository(conn)
 
-            # Step 2: Process each park
-            for park in parks:
-                self._process_park(park)
+                parks = park_repo.get_all_active()
+                logger.info(f"Processing {len(parks)} active parks...")
+
+                # Step 2: Process each park
+                for park in parks:
+                    self._process_park(park, park_activity_repo, ride_repo, snapshot_repo, status_change_repo)
 
             # Step 3: Print summary
             self._print_summary()
@@ -80,12 +82,18 @@ class SnapshotCollector:
             logger.error(f"Fatal error during snapshot collection: {e}", exc_info=True)
             sys.exit(1)
 
-    def _process_park(self, park: Dict):
+    def _process_park(self, park: Dict, park_activity_repo: ParkActivitySnapshotRepository,
+                      ride_repo: RideRepository, snapshot_repo: RideStatusSnapshotRepository,
+                      status_change_repo: RideStatusChangeRepository):
         """
         Process a single park: fetch wait times and store snapshots.
 
         Args:
             park: Park record from database
+            park_activity_repo: Park activity snapshot repository
+            ride_repo: Ride repository
+            snapshot_repo: Ride status snapshot repository
+            status_change_repo: Ride status change repository
         """
         park_id = park['park_id']
         park_name = park['name']
@@ -107,11 +115,11 @@ class SnapshotCollector:
             total_rides = len(rides_data)
             park_appears_open = active_rides > 0
 
-            self._store_park_activity(park_id, park_appears_open, active_rides, total_rides)
+            self._store_park_activity(park_id, park_appears_open, active_rides, total_rides, park_activity_repo)
 
             # Process each ride
             for ride_data in rides_data:
-                self._process_ride(ride_data, park_id)
+                self._process_ride(ride_data, park_id, ride_repo, snapshot_repo, status_change_repo)
 
             logger.info(f"  ✓ Processed {len(rides_data)} rides "
                        f"({active_rides} active, park appears {'open' if park_appears_open else 'closed'})")
@@ -120,7 +128,8 @@ class SnapshotCollector:
             logger.error(f"Error processing park {park_name}: {e}")
             self.stats['errors'] += 1
 
-    def _store_park_activity(self, park_id: int, appears_open: bool, active_count: int, total_count: int):
+    def _store_park_activity(self, park_id: int, appears_open: bool, active_count: int, total_count: int,
+                             park_activity_repo: ParkActivitySnapshotRepository):
         """
         Store park activity snapshot.
 
@@ -129,6 +138,7 @@ class SnapshotCollector:
             appears_open: Whether park appears to be operating
             active_count: Number of active rides
             total_count: Total number of rides tracked
+            park_activity_repo: Park activity snapshot repository
         """
         try:
             activity_record = {
@@ -140,24 +150,28 @@ class SnapshotCollector:
                 'created_at': datetime.now()
             }
 
-            self.park_activity_repo.insert(activity_record)
+            park_activity_repo.insert(activity_record)
 
         except Exception as e:
             logger.error(f"Failed to store park activity: {e}")
 
-    def _process_ride(self, ride_data: Dict, park_id: int):
+    def _process_ride(self, ride_data: Dict, park_id: int, ride_repo: RideRepository,
+                     snapshot_repo: RideStatusSnapshotRepository, status_change_repo: RideStatusChangeRepository):
         """
         Process a single ride: store snapshot and detect status changes.
 
         Args:
             ride_data: Ride data from Queue-Times API
             park_id: Database park ID
+            ride_repo: Ride repository
+            snapshot_repo: Ride status snapshot repository
+            status_change_repo: Ride status change repository
         """
         try:
             queue_times_id = ride_data.get('id')
 
             # Find ride in database
-            ride = self.ride_repo.get_by_queue_times_id(queue_times_id)
+            ride = ride_repo.get_by_queue_times_id(queue_times_id)
             if not ride:
                 logger.warning(f"  Ride ID {queue_times_id} not found in database (may need to run collect_parks)")
                 return
@@ -174,17 +188,18 @@ class SnapshotCollector:
             computed_status = computed_is_open(wait_time, is_open_api)
 
             # Store snapshot
-            self._store_snapshot(ride_id, wait_time, is_open_api, computed_status)
+            self._store_snapshot(ride_id, wait_time, is_open_api, computed_status, snapshot_repo)
 
             # Detect status change
-            self._detect_status_change(ride_id, computed_status)
+            self._detect_status_change(ride_id, computed_status, snapshot_repo, status_change_repo)
 
         except Exception as e:
             logger.error(f"Error processing ride: {e}")
             self.stats['errors'] += 1
 
     def _store_snapshot(self, ride_id: int, wait_time: Optional[int],
-                       is_open_api: Optional[bool], computed_status: bool):
+                       is_open_api: Optional[bool], computed_status: bool,
+                       snapshot_repo: RideStatusSnapshotRepository):
         """
         Store ride status snapshot.
 
@@ -193,6 +208,7 @@ class SnapshotCollector:
             wait_time: Validated wait time (None if invalid)
             is_open_api: API-reported open status
             computed_status: Computed open/closed status
+            snapshot_repo: Ride status snapshot repository
         """
         try:
             snapshot_record = {
@@ -204,24 +220,28 @@ class SnapshotCollector:
                 'created_at': datetime.now()
             }
 
-            self.snapshot_repo.insert(snapshot_record)
+            snapshot_repo.insert(snapshot_record)
             self.stats['snapshots_created'] += 1
 
         except Exception as e:
             logger.error(f"Failed to store snapshot for ride {ride_id}: {e}")
 
-    def _detect_status_change(self, ride_id: int, current_status: bool):
+    def _detect_status_change(self, ride_id: int, current_status: bool,
+                             snapshot_repo: RideStatusSnapshotRepository,
+                             status_change_repo: RideStatusChangeRepository):
         """
         Detect if ride status has changed since last snapshot.
 
         Args:
             ride_id: Database ride ID
             current_status: Current computed open/closed status
+            snapshot_repo: Ride status snapshot repository
+            status_change_repo: Ride status change repository
         """
         try:
             # Get previous status from cache or database
             if ride_id not in self.previous_statuses:
-                last_snapshot = self.snapshot_repo.get_latest_by_ride(ride_id)
+                last_snapshot = snapshot_repo.get_latest_by_ride(ride_id)
                 if last_snapshot:
                     self.previous_statuses[ride_id] = {
                         'status': last_snapshot['computed_is_open'],
@@ -258,7 +278,7 @@ class SnapshotCollector:
                     'created_at': now
                 }
 
-                self.status_change_repo.insert(change_record)
+                status_change_repo.insert(change_record)
                 self.stats['status_changes'] += 1
 
                 status_text = "OPEN → CLOSED" if not current_status else "CLOSED → OPEN"

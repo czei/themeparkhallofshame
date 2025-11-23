@@ -47,8 +47,6 @@ class ParkCollector:
         self.force = force
         self.api_client = QueueTimesClient()
         self.classifier = PatternMatcher()
-        self.park_repo = ParkRepository()
-        self.ride_repo = RideRepository()
 
         self.stats = {
             'parks_processed': 0,
@@ -85,10 +83,14 @@ class ParkCollector:
             parks_data = self._fetch_parks()
             logger.info(f"Found {len(parks_data)} parks from API")
 
-            # Step 2: Process each park
+            # Step 2: Process each park with database connection
             logger.info("Step 2: Processing parks and rides...")
-            for park_data in parks_data:
-                self._process_park(park_data)
+            with get_db_connection() as conn:
+                park_repo = ParkRepository(conn)
+                ride_repo = RideRepository(conn)
+
+                for park_data in parks_data:
+                    self._process_park(park_data, park_repo, ride_repo)
 
             # Step 3: Print summary
             self._print_summary()
@@ -139,12 +141,14 @@ class ParkCollector:
             logger.error(f"Failed to fetch parks: {e}")
             raise
 
-    def _process_park(self, park_data: Dict):
+    def _process_park(self, park_data: Dict, park_repo: ParkRepository, ride_repo: RideRepository):
         """
         Process a single park: store park data and fetch/classify rides.
 
         Args:
             park_data: Park data from Queue-Times API
+            park_repo: Park repository instance with database connection
+            ride_repo: Ride repository instance with database connection
         """
         queue_times_id = park_data.get('id')
         park_name = park_data.get('name', 'Unknown')
@@ -154,7 +158,7 @@ class ParkCollector:
             self.stats['parks_processed'] += 1
 
             # Step 1: Insert or update park
-            park_id = self._upsert_park(park_data)
+            park_id = self._upsert_park(park_data, park_repo)
             if park_id is None:
                 self.stats['parks_skipped'] += 1
                 return
@@ -165,18 +169,19 @@ class ParkCollector:
 
             # Step 3: Process each ride
             for ride_data in rides_data:
-                self._process_ride(ride_data, park_id, park_name)
+                self._process_ride(ride_data, park_id, park_name, ride_repo)
 
         except Exception as e:
             logger.error(f"Error processing park {park_name}: {e}")
             self.stats['errors'] += 1
 
-    def _upsert_park(self, park_data: Dict) -> Optional[int]:
+    def _upsert_park(self, park_data: Dict, park_repo: ParkRepository) -> Optional[int]:
         """
         Insert or update park in database.
 
         Args:
             park_data: Park data from Queue-Times API
+            park_repo: Park repository instance with database connection
 
         Returns:
             park_id if successful, None otherwise
@@ -185,7 +190,7 @@ class ParkCollector:
             queue_times_id = park_data.get('id')
 
             # Check if park already exists
-            existing_park = self.park_repo.get_by_queue_times_id(queue_times_id)
+            existing_park = park_repo.get_by_queue_times_id(queue_times_id)
 
             # Determine operator and flags
             park_name = park_data.get('name', '')
@@ -212,14 +217,14 @@ class ParkCollector:
                 # Update existing park
                 park_record['park_id'] = existing_park['park_id']
                 park_record['updated_at'] = datetime.now()
-                self.park_repo.update(park_record)
+                park_repo.update(park_record)
                 self.stats['parks_updated'] += 1
                 return existing_park['park_id']
             else:
                 # Insert new park
                 park_record['created_at'] = datetime.now()
                 park_record['updated_at'] = datetime.now()
-                park_id = self.park_repo.insert(park_record)
+                park_id = park_repo.insert(park_record)
                 self.stats['parks_inserted'] += 1
                 logger.info(f"  ✓ Inserted park: {park_record['name']}")
                 return park_id
@@ -269,7 +274,7 @@ class ParkCollector:
             logger.error(f"Failed to fetch rides for park {queue_times_park_id}: {e}")
             return []
 
-    def _process_ride(self, ride_data: Dict, park_id: int, park_name: str):
+    def _process_ride(self, ride_data: Dict, park_id: int, park_name: str, ride_repo: RideRepository):
         """
         Process a single ride: classify and store.
 
@@ -277,6 +282,7 @@ class ParkCollector:
             ride_data: Ride data from Queue-Times API
             park_id: Database park ID
             park_name: Park name for classification context
+            ride_repo: Ride repository instance with database connection
         """
         try:
             self.stats['rides_processed'] += 1
@@ -285,7 +291,7 @@ class ParkCollector:
             ride_name = ride_data.get('name', 'Unknown')
 
             # Check if ride already exists
-            existing_ride = self.ride_repo.get_by_queue_times_id(queue_times_id)
+            existing_ride = ride_repo.get_by_queue_times_id(queue_times_id)
 
             # Classify the ride
             classification = self.classifier.classify(ride_name, park_name)
@@ -303,13 +309,13 @@ class ParkCollector:
                 # Update existing ride
                 ride_record['ride_id'] = existing_ride['ride_id']
                 ride_record['updated_at'] = datetime.now()
-                self.ride_repo.update(ride_record)
+                ride_repo.update(ride_record)
                 self.stats['rides_updated'] += 1
             else:
                 # Insert new ride
                 ride_record['created_at'] = datetime.now()
                 ride_record['updated_at'] = datetime.now()
-                ride_id = self.ride_repo.insert(ride_record)
+                ride_id = ride_repo.insert(ride_record)
                 self.stats['rides_inserted'] += 1
 
                 # Store classification

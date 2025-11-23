@@ -46,9 +46,6 @@ class DailyAggregator:
             target_date: Date to aggregate (default: yesterday)
         """
         self.target_date = target_date or (date.today() - timedelta(days=1))
-        self.park_repo = ParkRepository()
-        self.ride_repo = RideRepository()
-        self.aggregation_repo = AggregationLogRepository()
 
         self.stats = {
             'parks_processed': 0,
@@ -63,25 +60,30 @@ class DailyAggregator:
         logger.info("=" * 60)
 
         try:
-            # Check if aggregation already completed for this date
-            if self._check_already_aggregated():
-                logger.warning(f"Daily aggregation already completed for {self.target_date}")
-                logger.info("Use --force to re-aggregate")
-                return
+            with get_db_connection() as conn:
+                aggregation_repo = AggregationLogRepository(conn)
+                park_repo = ParkRepository(conn)
+                ride_repo = RideRepository(conn)
 
-            # Start aggregation log
-            log_id = self._start_aggregation_log()
+                # Check if aggregation already completed for this date
+                if self._check_already_aggregated(aggregation_repo):
+                    logger.warning(f"Daily aggregation already completed for {self.target_date}")
+                    logger.info("Use --force to re-aggregate")
+                    return
 
-            # Step 1: Aggregate ride statistics
-            logger.info("Step 1: Aggregating ride statistics...")
-            self._aggregate_rides()
+                # Start aggregation log
+                log_id = self._start_aggregation_log(aggregation_repo)
 
-            # Step 2: Aggregate park statistics
-            logger.info("Step 2: Aggregating park statistics...")
-            self._aggregate_parks()
+                # Step 1: Aggregate ride statistics
+                logger.info("Step 1: Aggregating ride statistics...")
+                self._aggregate_rides(ride_repo)
 
-            # Step 3: Mark aggregation as complete
-            self._complete_aggregation_log(log_id)
+                # Step 2: Aggregate park statistics
+                logger.info("Step 2: Aggregating park statistics...")
+                self._aggregate_parks(park_repo)
+
+                # Step 3: Mark aggregation as complete
+                self._complete_aggregation_log(log_id, aggregation_repo)
 
             # Step 4: Print summary
             self._print_summary()
@@ -92,25 +94,33 @@ class DailyAggregator:
 
         except Exception as e:
             logger.error(f"Fatal error during aggregation: {e}", exc_info=True)
-            self._fail_aggregation_log(log_id, str(e))
+            with get_db_connection() as conn:
+                aggregation_repo = AggregationLogRepository(conn)
+                self._fail_aggregation_log(log_id, str(e), aggregation_repo)
             sys.exit(1)
 
-    def _check_already_aggregated(self) -> bool:
+    def _check_already_aggregated(self, aggregation_repo: AggregationLogRepository) -> bool:
         """
         Check if aggregation already completed for target date.
+
+        Args:
+            aggregation_repo: Aggregation log repository
 
         Returns:
             True if already aggregated, False otherwise
         """
         try:
-            log = self.aggregation_repo.get_by_date_and_type(self.target_date, 'daily')
+            log = aggregation_repo.get_by_date_and_type(self.target_date, 'daily')
             return log is not None and log.get('status') == 'success'
         except:
             return False
 
-    def _start_aggregation_log(self) -> int:
+    def _start_aggregation_log(self, aggregation_repo: AggregationLogRepository) -> int:
         """
         Create aggregation log entry.
+
+        Args:
+            aggregation_repo: Aggregation log repository
 
         Returns:
             log_id
@@ -125,18 +135,23 @@ class DailyAggregator:
                 'rides_processed': 0
             }
 
-            return self.aggregation_repo.insert(log_record)
+            return aggregation_repo.insert(log_record)
 
         except Exception as e:
             logger.error(f"Failed to create aggregation log: {e}")
             raise
 
-    def _aggregate_rides(self):
-        """Aggregate statistics for all rides."""
+    def _aggregate_rides(self, ride_repo: RideRepository):
+        """
+        Aggregate statistics for all rides.
+
+        Args:
+            ride_repo: Ride repository
+        """
         try:
             with get_db_connection() as conn:
                 # Get all active rides
-                rides = self.ride_repo.get_all_active()
+                rides = ride_repo.get_all_active()
 
                 for ride in rides:
                     try:
@@ -223,12 +238,17 @@ class DailyAggregator:
             'stat_date': self.target_date
         })
 
-    def _aggregate_parks(self):
-        """Aggregate statistics for all parks."""
+    def _aggregate_parks(self, park_repo: ParkRepository):
+        """
+        Aggregate statistics for all parks.
+
+        Args:
+            park_repo: Park repository
+        """
         try:
             with get_db_connection() as conn:
                 # Get all active parks
-                parks = self.park_repo.get_all_active()
+                parks = park_repo.get_all_active()
 
                 for park in parks:
                     try:
@@ -296,15 +316,16 @@ class DailyAggregator:
             'stat_date': self.target_date
         })
 
-    def _complete_aggregation_log(self, log_id: int):
+    def _complete_aggregation_log(self, log_id: int, aggregation_repo: AggregationLogRepository):
         """
         Mark aggregation as successfully completed.
 
         Args:
             log_id: Aggregation log ID
+            aggregation_repo: Aggregation log repository
         """
         try:
-            self.aggregation_repo.update({
+            aggregation_repo.update({
                 'log_id': log_id,
                 'completed_at': datetime.now(),
                 'status': 'success',
@@ -315,16 +336,17 @@ class DailyAggregator:
         except Exception as e:
             logger.error(f"Failed to complete aggregation log: {e}")
 
-    def _fail_aggregation_log(self, log_id: int, error_message: str):
+    def _fail_aggregation_log(self, log_id: int, error_message: str, aggregation_repo: AggregationLogRepository):
         """
         Mark aggregation as failed.
 
         Args:
             log_id: Aggregation log ID
             error_message: Error details
+            aggregation_repo: Aggregation log repository
         """
         try:
-            self.aggregation_repo.update({
+            aggregation_repo.update({
                 'log_id': log_id,
                 'status': 'failed',
                 'error_message': error_message

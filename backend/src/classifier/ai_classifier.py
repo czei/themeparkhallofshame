@@ -8,7 +8,7 @@ import json
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
-from ..utils.logger import logger
+from utils.logger import logger
 
 
 @dataclass

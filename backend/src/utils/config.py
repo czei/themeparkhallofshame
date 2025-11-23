@@ -179,6 +179,9 @@ COLLECTION_INTERVAL_MINUTES = config.get_int('COLLECTION_INTERVAL_MINUTES', 10)
 MAX_RETRY_ATTEMPTS = config.get_int('MAX_RETRY_ATTEMPTS', 3)
 RETRY_BACKOFF_MULTIPLIER = config.get_int('RETRY_BACKOFF_MULTIPLIER', 2)
 
+# Geographic filter for testing phase (US-only)
+FILTER_COUNTRY = config.get('FILTER_COUNTRY', 'US')  # Set to empty string '' for all countries
+
 # API rate limiting
 API_RATE_LIMIT_PER_HOUR = config.get_int('API_RATE_LIMIT_PER_HOUR', 100)
 API_RATE_LIMIT_PER_DAY = config.get_int('API_RATE_LIMIT_PER_DAY', 1000)

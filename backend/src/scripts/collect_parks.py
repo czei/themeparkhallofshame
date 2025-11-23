@@ -26,7 +26,6 @@ sys.path.insert(0, str(backend_src.absolute()))
 from utils.config import FILTER_COUNTRY
 from utils.logger import logger
 from collector.queue_times_client import QueueTimesClient
-from classifier.pattern_matcher import PatternMatcher
 from database.repositories.park_repository import ParkRepository
 from database.repositories.ride_repository import RideRepository
 from database.connection import get_db_connection
@@ -46,7 +45,6 @@ class ParkCollector:
         """
         self.force = force
         self.api_client = QueueTimesClient()
-        self.classifier = PatternMatcher()
 
         self.stats = {
             'parks_processed': 0,
@@ -56,7 +54,6 @@ class ParkCollector:
             'rides_processed': 0,
             'rides_inserted': 0,
             'rides_updated': 0,
-            'rides_classified': 0,
             'errors': 0
         }
 
@@ -128,14 +125,35 @@ class ParkCollector:
             List of park dictionaries
         """
         try:
-            parks = self.api_client.fetch_all_parks()
+            groups = self.api_client.get_parks()
+
+            # Flatten: API returns company groups with nested parks
+            all_parks = []
+            for group in groups:
+                if 'parks' in group:
+                    all_parks.extend(group['parks'])
+                else:
+                    # In case some are individual parks
+                    all_parks.append(group)
+
+            logger.info(f"Total parks found: {len(all_parks)}")
 
             # Filter by country if configured
             if FILTER_COUNTRY:
-                parks = [p for p in parks if p.get('country', '').upper() == FILTER_COUNTRY.upper()]
-                logger.info(f"Filtered to {len(parks)} parks in {FILTER_COUNTRY}")
+                # Support both "US" and "United States"
+                country_filter = FILTER_COUNTRY.upper()
+                filtered_parks = []
+                for p in all_parks:
+                    country = p.get('country', '').upper()
+                    if country == country_filter or \
+                       (country_filter == 'US' and country == 'UNITED STATES') or \
+                       (country_filter == 'UNITED STATES' and country == 'US'):
+                        filtered_parks.append(p)
 
-            return parks
+                logger.info(f"Filtered to {len(filtered_parks)} parks in {FILTER_COUNTRY}")
+                return filtered_parks
+
+            return all_parks
 
         except Exception as e:
             logger.error(f"Failed to fetch parks: {e}")
@@ -198,12 +216,16 @@ class ParkCollector:
             is_disney = 'disney' in park_name.lower()
             is_universal = 'universal' in park_name.lower()
 
+            # Convert country to ISO 2-letter code (API returns full names)
+            country_name = park_data.get('country', '')
+            country_code = self._convert_country_to_iso(country_name)
+
             park_record = {
                 'queue_times_id': queue_times_id,
                 'name': park_data.get('name'),
-                'city': park_data.get('city'),
-                'state_province': park_data.get('state'),
-                'country': park_data.get('country'),
+                'city': park_data.get('city') or 'Unknown',  # API doesn't provide city
+                'state_province': park_data.get('state') or park_data.get('state_province') or '',
+                'country': country_code,
                 'latitude': park_data.get('latitude'),
                 'longitude': park_data.get('longitude'),
                 'timezone': park_data.get('timezone', 'UTC'),
@@ -215,23 +237,51 @@ class ParkCollector:
 
             if existing_park:
                 # Update existing park
-                park_record['park_id'] = existing_park['park_id']
-                park_record['updated_at'] = datetime.now()
-                park_repo.update(park_record)
+                park_id = existing_park.park_id
+                park_repo.update(park_id, park_record)
                 self.stats['parks_updated'] += 1
-                return existing_park['park_id']
+                return park_id
             else:
                 # Insert new park
-                park_record['created_at'] = datetime.now()
-                park_record['updated_at'] = datetime.now()
-                park_id = park_repo.insert(park_record)
+                park = park_repo.create(park_record)
                 self.stats['parks_inserted'] += 1
-                logger.info(f"  ✓ Inserted park: {park_record['name']}")
-                return park_id
+                logger.info(f"  ✓ Inserted park: {park.name}")
+                return park.park_id
 
         except Exception as e:
             logger.error(f"Failed to upsert park: {e}")
             return None
+
+    def _convert_country_to_iso(self, country_name: str) -> str:
+        """
+        Convert country name to ISO 3166-1 alpha-2 code.
+
+        Args:
+            country_name: Full country name from API
+
+        Returns:
+            2-letter ISO country code
+        """
+        # Common country mappings from Queue-Times API
+        country_mapping = {
+            'United States': 'US',
+            'United Kingdom': 'GB',
+            'Canada': 'CA',
+            'France': 'FR',
+            'Germany': 'DE',
+            'Spain': 'ES',
+            'Italy': 'IT',
+            'Netherlands': 'NL',
+            'Belgium': 'BE',
+            'Japan': 'JP',
+            'China': 'CN',
+            'South Korea': 'KR',
+            'Australia': 'AU',
+            'Mexico': 'MX',
+            'Brazil': 'BR',
+        }
+
+        return country_mapping.get(country_name, 'US')  # Default to US if unknown
 
     def _detect_operator(self, park_name: str) -> str:
         """
@@ -269,19 +319,21 @@ class ParkCollector:
             List of ride dictionaries
         """
         try:
-            return self.api_client.fetch_park_rides(queue_times_park_id)
+            result = self.api_client.get_park_wait_times(queue_times_park_id)
+            # Extract rides from the result
+            return result.get('rides', [])
         except Exception as e:
             logger.error(f"Failed to fetch rides for park {queue_times_park_id}: {e}")
             return []
 
     def _process_ride(self, ride_data: Dict, park_id: int, park_name: str, ride_repo: RideRepository):
         """
-        Process a single ride: classify and store.
+        Process a single ride: store ride data (classification happens separately).
 
         Args:
             ride_data: Ride data from Queue-Times API
             park_id: Database park ID
-            park_name: Park name for classification context
+            park_name: Park name (unused, kept for consistency)
             ride_repo: Ride repository instance with database connection
         """
         try:
@@ -293,72 +345,30 @@ class ParkCollector:
             # Check if ride already exists
             existing_ride = ride_repo.get_by_queue_times_id(queue_times_id)
 
-            # Classify the ride
-            classification = self.classifier.classify(ride_name, park_name)
-
             ride_record = {
                 'queue_times_id': queue_times_id,
                 'park_id': park_id,
                 'name': ride_name,
                 'land_area': ride_data.get('land'),
-                'tier': classification.tier,
+                'tier': None,  # Will be populated by separate classification process
                 'is_active': ride_data.get('is_open', True)
             }
 
             if existing_ride:
                 # Update existing ride
-                ride_record['ride_id'] = existing_ride['ride_id']
-                ride_record['updated_at'] = datetime.now()
-                ride_repo.update(ride_record)
+                ride_id = existing_ride.ride_id
+                ride_repo.update(ride_id, ride_record)
                 self.stats['rides_updated'] += 1
+                logger.info(f"    ✓ Updated: {ride_name}")
             else:
                 # Insert new ride
-                ride_record['created_at'] = datetime.now()
-                ride_record['updated_at'] = datetime.now()
-                ride_id = ride_repo.insert(ride_record)
+                ride = ride_repo.create(ride_record)
                 self.stats['rides_inserted'] += 1
-
-                # Store classification
-                self._store_classification(ride_id, classification)
-
-                tier_symbol = "🌟" * classification.tier
-                logger.info(f"    ✓ {ride_name} → Tier {classification.tier} {tier_symbol} "
-                           f"(confidence: {classification.confidence:.2f})")
+                logger.info(f"    ✓ New ride: {ride_name}")
 
         except Exception as e:
             logger.error(f"Error processing ride {ride_data.get('name')}: {e}")
             self.stats['errors'] += 1
-
-    def _store_classification(self, ride_id: int, classification):
-        """
-        Store ride classification in database.
-
-        Args:
-            ride_id: Database ride ID
-            classification: Classification result from PatternMatcher
-        """
-        try:
-            from database.repositories.classification_repository import RideClassificationRepository
-
-            classification_repo = RideClassificationRepository()
-
-            # Tier weights: Tier 1 = 3.0, Tier 2 = 2.0, Tier 3 = 1.0, Tier 4 = 0.5
-            tier_weights = {1: 3.0, 2: 2.0, 3: 1.0, 4: 0.5}
-
-            classification_record = {
-                'ride_id': ride_id,
-                'tier': classification.tier,
-                'tier_weight': tier_weights.get(classification.tier, 1.0),
-                'confidence': classification.confidence,
-                'classification_method': classification.method,
-                'classified_at': datetime.now()
-            }
-
-            classification_repo.insert(classification_record)
-            self.stats['rides_classified'] += 1
-
-        except Exception as e:
-            logger.error(f"Failed to store classification for ride {ride_id}: {e}")
 
     def _print_summary(self):
         """Print collection summary statistics."""
@@ -376,7 +386,6 @@ class ParkCollector:
         logger.info(f"  - Processed:  {self.stats['rides_processed']}")
         logger.info(f"  - Inserted:   {self.stats['rides_inserted']}")
         logger.info(f"  - Updated:    {self.stats['rides_updated']}")
-        logger.info(f"  - Classified: {self.stats['rides_classified']}")
         logger.info("")
         logger.info(f"Errors: {self.stats['errors']}")
         logger.info("=" * 60)

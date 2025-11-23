@@ -7,8 +7,12 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from ...models.park import Park
-from ...utils.logger import logger, log_database_error
+try:
+    from ...models.park import Park
+    from ...utils.logger import logger, log_database_error
+except ImportError:
+    from models.park import Park
+    from utils.logger import logger, log_database_error
 
 
 class ParkRepository:

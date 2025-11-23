@@ -7,8 +7,12 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from ...models.ride import Ride
-from ...utils.logger import logger, log_database_error
+try:
+    from ...models.ride import Ride
+    from ...utils.logger import logger, log_database_error
+except ImportError:
+    from models.ride import Ride
+    from utils.logger import logger, log_database_error
 
 
 class RideRepository:

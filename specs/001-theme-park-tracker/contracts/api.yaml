@@ -1,0 +1,1416 @@
+openapi: 3.0.3
+info:
+  title: Theme Park Downtime Tracker API
+  description: |
+    REST API for the Theme Park Hall of Shame downtime tracking system.
+
+    This API provides endpoints for retrieving park downtime rankings, ride performance statistics,
+    and real-time wait times for North American theme parks. Data is collected from Queue-Times.com
+    every 10 minutes and aggregated into daily, weekly, monthly, and yearly statistics.
+
+    **Key Features**:
+    - Park rankings by total downtime hours
+    - Individual ride performance tracking
+    - Real-time wait time monitoring
+    - Flexible time period filtering (today, 7 days, 30 days)
+    - Disney & Universal park filtering
+
+    **Data Attribution**: All data powered by Queue-Times.com
+  version: 1.0.0
+  contact:
+    name: Theme Park Hall of Shame
+    url: https://themeparkwaits.com
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.themeparkwaits.com/v1
+    description: Production server
+  - url: http://localhost:5000/v1
+    description: Local development server
+
+tags:
+  - name: parks
+    description: Park-level downtime rankings and statistics
+  - name: rides
+    description: Individual ride performance and wait times
+  - name: system
+    description: System health and status endpoints
+
+paths:
+  /parks/downtime:
+    get:
+      tags:
+        - parks
+      summary: Get park downtime rankings
+      description: |
+        Returns parks ranked by total downtime hours for the specified time period.
+        Supports filtering by park operator (Disney & Universal vs all parks).
+
+        **Performance**: Query executes in <50ms for daily data, <100ms for weekly/monthly data.
+
+        **Business Logic**:
+        - Downtime calculated only during park operating hours (excludes overnight closures)
+        - Trend percentage compares current period to previous equivalent period
+        - Affected rides count shows currently closed rides from most recent snapshot
+      operationId: getParkDowntimeRankings
+      parameters:
+        - name: period
+          in: query
+          description: Time period for ranking calculation
+          required: false
+          schema:
+            type: string
+            enum:
+              - today
+              - 7days
+              - 30days
+            default: today
+        - name: filter
+          in: query
+          description: Filter parks by operator
+          required: false
+          schema:
+            type: string
+            enum:
+              - disney-universal
+              - all-parks
+            default: all-parks
+        - name: limit
+          in: query
+          description: Maximum number of parks to return
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: Successful response with park rankings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  period:
+                    type: string
+                    example: today
+                  filter:
+                    type: string
+                    example: all-parks
+                  aggregate_stats:
+                    $ref: '#/components/schemas/AggregateStats'
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ParkDowntimeRanking'
+              examples:
+                todayAllParks:
+                  summary: Today's rankings for all parks
+                  value:
+                    success: true
+                    period: today
+                    filter: all-parks
+                    aggregate_stats:
+                      total_parks_tracked: 85
+                      peak_downtime_hours: 12.5
+                      currently_down_rides: 23
+                    data:
+                      - rank: 1
+                        park_id: 16
+                        park_name: Magic Kingdom
+                        location: Orlando, FL
+                        total_downtime_hours: 12.5
+                        affected_rides_count: 5
+                        uptime_percentage: 89.2
+                        trend_percentage: 15.3
+                        queue_times_url: https://queue-times.com/parks/16
+                      - rank: 2
+                        park_id: 17
+                        park_name: Universal Studios Florida
+                        location: Orlando, FL
+                        total_downtime_hours: 8.7
+                        affected_rides_count: 3
+                        uptime_percentage: 92.5
+                        trend_percentage: -5.2
+                        queue_times_url: https://queue-times.com/parks/17
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /parks/{parkId}/details:
+    get:
+      tags:
+        - parks
+      summary: Get detailed park information
+      description: |
+        Returns detailed information about a specific park including location,
+        operator, current operational status, and summary statistics.
+      operationId: getParkDetails
+      parameters:
+        - name: parkId
+          in: path
+          description: Park identifier
+          required: true
+          schema:
+            type: integer
+            example: 16
+        - name: period
+          in: query
+          description: Time period for statistics
+          required: false
+          schema:
+            type: string
+            enum:
+              - today
+              - 7days
+              - 30days
+            default: today
+      responses:
+        '200':
+          description: Successful response with park details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/ParkDetails'
+              examples:
+                magicKingdom:
+                  summary: Magic Kingdom details
+                  value:
+                    success: true
+                    data:
+                      park_id: 16
+                      name: Magic Kingdom
+                      location:
+                        city: Orlando
+                        state: FL
+                        country: US
+                      coordinates:
+                        latitude: 28.417663
+                        longitude: -81.581213
+                      operator: Disney
+                      timezone: America/New_York
+                      total_rides_tracked: 45
+                      current_status:
+                        rides_open: 42
+                        rides_closed: 3
+                        avg_wait_time: 32.5
+                        max_wait_time: 90
+                      statistics:
+                        period: today
+                        total_downtime_hours: 12.5
+                        avg_uptime_percentage: 89.2
+                        rides_with_downtime: 5
+                      queue_times_url: https://queue-times.com/parks/16
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /rides/downtime:
+    get:
+      tags:
+        - rides
+      summary: Get ride performance rankings by downtime
+      description: |
+        Returns individual rides ranked by total downtime hours for the specified time period.
+        Includes current operational status badge and trend analysis.
+
+        **Performance**: Query executes in <100ms.
+
+        **Business Logic**:
+        - Current status determined from most recent snapshot (within 10 minutes)
+        - Status badges: "Down" (coral) or "Running" (turquoise)
+        - Trend compares current period to previous equivalent period
+      operationId: getRideDowntimeRankings
+      parameters:
+        - name: period
+          in: query
+          description: Time period for ranking calculation
+          required: false
+          schema:
+            type: string
+            enum:
+              - today
+              - 7days
+              - 30days
+            default: 7days
+        - name: filter
+          in: query
+          description: Filter rides by park operator
+          required: false
+          schema:
+            type: string
+            enum:
+              - disney-universal
+              - all-parks
+            default: all-parks
+        - name: limit
+          in: query
+          description: Maximum number of rides to return
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        '200':
+          description: Successful response with ride rankings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  period:
+                    type: string
+                    example: 7days
+                  filter:
+                    type: string
+                    example: all-parks
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RideDowntimeRanking'
+              examples:
+                sevenDayRankings:
+                  summary: 7-day downtime rankings
+                  value:
+                    success: true
+                    period: 7days
+                    filter: all-parks
+                    data:
+                      - rank: 1
+                        ride_id: 1234
+                        ride_name: Space Mountain
+                        park_name: Magic Kingdom
+                        park_id: 16
+                        downtime_hours: 18.5
+                        uptime_percentage: 85.2
+                        current_status: Running
+                        seven_day_avg_downtime_hours: 16.2
+                        trend_percentage: 14.2
+                        queue_times_url: https://queue-times.com/rides/1234
+                      - rank: 2
+                        ride_id: 5678
+                        ride_name: Hagrid's Magical Creatures Motorbike Adventure
+                        park_name: Universal's Islands of Adventure
+                        park_id: 18
+                        downtime_hours: 15.3
+                        uptime_percentage: 88.7
+                        current_status: Down
+                        seven_day_avg_downtime_hours: 12.8
+                        trend_percentage: 19.5
+                        queue_times_url: https://queue-times.com/rides/5678
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /rides/waittimes:
+    get:
+      tags:
+        - rides
+      summary: Get current wait times
+      description: |
+        Returns rides sorted by current wait time in descending order.
+        Includes 7-day average, peak wait time, and trend percentage.
+
+        **Performance**: Query executes in <50ms for live data.
+
+        **Data Freshness**: Live data updated every 10 minutes from Queue-Times.com API.
+      operationId: getRideWaitTimes
+      parameters:
+        - name: mode
+          in: query
+          description: Wait time display mode
+          required: false
+          schema:
+            type: string
+            enum:
+              - live
+              - 7day-average
+              - peak
+            default: live
+        - name: filter
+          in: query
+          description: Filter rides by park operator
+          required: false
+          schema:
+            type: string
+            enum:
+              - disney-universal
+              - all-parks
+            default: all-parks
+        - name: limit
+          in: query
+          description: Maximum number of rides to return
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        '200':
+          description: Successful response with wait times
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  mode:
+                    type: string
+                    example: live
+                  filter:
+                    type: string
+                    example: all-parks
+                  last_updated:
+                    type: string
+                    format: date-time
+                    description: UTC timestamp of most recent data collection
+                    example: '2025-11-22T14:30:00Z'
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RideWaitTime'
+              examples:
+                liveWaitTimes:
+                  summary: Live wait times
+                  value:
+                    success: true
+                    mode: live
+                    filter: all-parks
+                    last_updated: '2025-11-22T14:30:00Z'
+                    data:
+                      - rank: 1
+                        ride_id: 1234
+                        ride_name: Space Mountain
+                        park_name: Magic Kingdom
+                        park_id: 16
+                        current_wait_time: 90
+                        seven_day_avg_wait_time: 65.5
+                        peak_wait_time: 120
+                        trend_percentage: 37.4
+                        is_currently_open: true
+                        queue_times_url: https://queue-times.com/rides/1234
+                      - rank: 2
+                        ride_id: 5678
+                        ride_name: Flight of Passage
+                        park_name: Animal Kingdom
+                        park_id: 19
+                        current_wait_time: 85
+                        seven_day_avg_wait_time: 78.2
+                        peak_wait_time: 150
+                        trend_percentage: 8.7
+                        is_currently_open: true
+                        queue_times_url: https://queue-times.com/rides/5678
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /trends:
+    get:
+      tags:
+        - parks
+        - rides
+      summary: Get performance trends
+      description: |
+        Returns parks and rides showing significant uptime percentage changes (≥5% improvement or decline)
+        comparing current period to previous equivalent period.
+
+        **Four Trend Categories**:
+        - `parks-improving`: Parks with ≥5% uptime improvement
+        - `parks-declining`: Parks with ≥5% uptime decline
+        - `rides-improving`: Rides with ≥5% uptime improvement
+        - `rides-declining`: Rides with ≥5% uptime decline
+
+        **Period Comparisons** (FR-047):
+        - `today`: Compares today vs yesterday uptime percentages
+        - `7days`: Compares current 7 days vs previous 7 days
+        - `30days`: Compares current 30 days vs previous 30 days
+
+        **Performance**: Query executes in <100ms using pre-calculated daily/weekly/monthly statistics.
+
+        **Business Logic** (FR-048, FR-049, FR-050):
+        - Only includes parks/rides with ≥5% absolute uptime percentage change
+        - "Most Improved" ranked by largest uptime percentage improvement
+        - "Declining Performance" ranked by largest uptime percentage decline
+        - Park filter (Disney & Universal / All Parks) applies to all trend results
+      operationId: getPerformanceTrends
+      parameters:
+        - name: period
+          in: query
+          description: Time period for trend calculation
+          required: false
+          schema:
+            type: string
+            enum:
+              - today
+              - 7days
+              - 30days
+            default: 7days
+        - name: category
+          in: query
+          description: Trend category to retrieve
+          required: true
+          schema:
+            type: string
+            enum:
+              - parks-improving
+              - parks-declining
+              - rides-improving
+              - rides-declining
+        - name: filter
+          in: query
+          description: Filter parks/rides by operator (FR-053)
+          required: false
+          schema:
+            type: string
+            enum:
+              - disney-universal
+              - all-parks
+            default: all-parks
+        - name: limit
+          in: query
+          description: Maximum number of results to return
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: Successful response with trend data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  period:
+                    type: string
+                    example: 7days
+                  category:
+                    type: string
+                    example: parks-improving
+                  filter:
+                    type: string
+                    example: all-parks
+                  comparison:
+                    type: object
+                    description: Time period comparison details
+                    properties:
+                      current_period:
+                        type: string
+                        example: "2025-11-15 to 2025-11-22"
+                      previous_period:
+                        type: string
+                        example: "2025-11-08 to 2025-11-15"
+                  count:
+                    type: integer
+                    description: Number of parks/rides meeting ≥5% threshold
+                    example: 12
+                  parks:
+                    type: array
+                    description: Parks with trends (only for parks-* categories)
+                    items:
+                      $ref: '#/components/schemas/ParkTrend'
+                  rides:
+                    type: array
+                    description: Rides with trends (only for rides-* categories)
+                    items:
+                      $ref: '#/components/schemas/RideTrend'
+                  attribution:
+                    type: string
+                    example: "Data powered by Queue-Times.com - https://queue-times.com"
+                  timestamp:
+                    type: string
+                    format: date-time
+                    example: "2025-11-22T14:35:00Z"
+              examples:
+                parks_improving:
+                  summary: Parks showing improvement
+                  value:
+                    success: true
+                    period: 7days
+                    category: parks-improving
+                    filter: all-parks
+                    comparison:
+                      current_period: "2025-11-15 to 2025-11-22"
+                      previous_period: "2025-11-08 to 2025-11-15"
+                    count: 5
+                    parks:
+                      - park_id: 42
+                        park_name: Busch Gardens Tampa
+                        location:
+                          city: Tampa
+                          state: FL
+                          country: US
+                        previous_period_uptime_pct: 70.3
+                        current_period_uptime_pct: 85.5
+                        uptime_change_pct: 15.2
+                        improvement_pct: 15.2
+                        previous_period_downtime_hours: 18.4
+                        current_period_downtime_hours: 8.2
+                        queue_times_url: https://queue-times.com/parks/42
+                      - park_id: 58
+                        park_name: SeaWorld Orlando
+                        location:
+                          city: Orlando
+                          state: FL
+                          country: US
+                        previous_period_uptime_pct: 75.2
+                        current_period_uptime_pct: 85.6
+                        uptime_change_pct: 10.4
+                        improvement_pct: 10.4
+                        previous_period_downtime_hours: 15.7
+                        current_period_downtime_hours: 9.4
+                        queue_times_url: https://queue-times.com/parks/58
+                    attribution: "Data powered by Queue-Times.com - https://queue-times.com"
+                    timestamp: "2025-11-22T14:35:00Z"
+                rides_declining:
+                  summary: Rides showing decline
+                  value:
+                    success: true
+                    period: 7days
+                    category: rides-declining
+                    filter: disney-universal
+                    comparison:
+                      current_period: "2025-11-15 to 2025-11-22"
+                      previous_period: "2025-11-08 to 2025-11-15"
+                    count: 3
+                    rides:
+                      - ride_id: 2134
+                        ride_name: Splash Mountain
+                        park_id: 16
+                        park_name: Disney Magic Kingdom
+                        tier: 1
+                        tier_label: "Tier 1 (Major Attraction)"
+                        previous_period_uptime_pct: 92.1
+                        current_period_uptime_pct: 80.3
+                        uptime_change_pct: -11.8
+                        decline_pct: 11.8
+                        previous_period_downtime_hours: 2.1
+                        current_period_downtime_hours: 4.9
+                        queue_times_url: https://queue-times.com/rides/2134
+                      - ride_id: 5678
+                        ride_name: Kingda Ka
+                        park_id: 23
+                        park_name: Six Flags Great Adventure
+                        tier: 1
+                        tier_label: "Tier 1 (Major Attraction)"
+                        previous_period_uptime_pct: 88.2
+                        current_period_uptime_pct: 76.4
+                        uptime_change_pct: -11.8
+                        decline_pct: 11.8
+                        previous_period_downtime_hours: 4.2
+                        current_period_downtime_hours: 8.5
+                        queue_times_url: https://queue-times.com/rides/5678
+                    attribution: "Data powered by Queue-Times.com - https://queue-times.com"
+                    timestamp: "2025-11-22T14:35:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /health:
+    get:
+      tags:
+        - system
+      summary: Health check endpoint
+      description: |
+        Returns system health status including database connectivity,
+        data freshness, and collection service status.
+
+        **Use Case**: Load balancer health checks, monitoring systems.
+      operationId: getHealthCheck
+      responses:
+        '200':
+          description: System is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheck'
+              examples:
+                healthy:
+                  summary: Healthy system
+                  value:
+                    status: healthy
+                    timestamp: '2025-11-22T14:35:00Z'
+                    version: 1.0.0
+                    checks:
+                      database:
+                        status: healthy
+                        response_time_ms: 12
+                      data_collection:
+                        status: healthy
+                        last_collection: '2025-11-22T14:30:00Z'
+                        minutes_since_last_collection: 5
+                      api:
+                        status: healthy
+                        uptime_seconds: 864000
+        '503':
+          description: System is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheck'
+              examples:
+                unhealthy:
+                  summary: Unhealthy system
+                  value:
+                    status: unhealthy
+                    timestamp: '2025-11-22T14:35:00Z'
+                    version: 1.0.0
+                    checks:
+                      database:
+                        status: unhealthy
+                        error: Connection timeout
+                      data_collection:
+                        status: degraded
+                        last_collection: '2025-11-22T13:00:00Z'
+                        minutes_since_last_collection: 95
+                        warning: Data freshness exceeds 10 minutes
+                      api:
+                        status: healthy
+                        uptime_seconds: 864000
+
+components:
+  schemas:
+    ParkDowntimeRanking:
+      type: object
+      description: Park ranked by weighted downtime score
+      required:
+        - rank
+        - park_id
+        - park_name
+        - location
+        - total_downtime_hours
+        - weighted_downtime_score
+        - score_percentage
+        - tier_distribution
+        - affected_rides_count
+        - uptime_percentage
+        - trend_percentage
+        - queue_times_url
+      properties:
+        rank:
+          type: integer
+          description: Ranking position (1 = highest weighted downtime score)
+          example: 1
+        park_id:
+          type: integer
+          description: Park identifier
+          example: 16
+        park_name:
+          type: string
+          description: Park name
+          example: Magic Kingdom
+        location:
+          type: string
+          description: City and state/province formatted as "City, State"
+          example: Orlando, FL
+        total_downtime_hours:
+          type: number
+          format: float
+          description: Raw total downtime hours for the period (unweighted)
+          example: 12.5
+        weighted_downtime_score:
+          type: number
+          format: float
+          description: Weighted downtime score = total_weighted_downtime_hours / total_park_weight (0.0 to 1.0+)
+          example: 0.7654
+        score_percentage:
+          type: number
+          format: float
+          description: Weighted score as percentage (0-100%) representing % of weighted capacity offline
+          example: 76.54
+        tier_distribution:
+          type: object
+          description: Count of rides by tier (Tier 1=major, Tier 2=standard, Tier 3=minor)
+          required:
+            - tier1_count
+            - tier2_count
+            - tier3_count
+            - total_park_weight
+          properties:
+            tier1_count:
+              type: integer
+              description: Number of Tier 1 rides (3x weight)
+              example: 11
+            tier2_count:
+              type: integer
+              description: Number of Tier 2 rides (2x weight)
+              example: 18
+            tier3_count:
+              type: integer
+              description: Number of Tier 3 rides (1x weight)
+              example: 12
+            total_park_weight:
+              type: integer
+              description: Sum of all ride weights (Tier1*3 + Tier2*2 + Tier3*1)
+              example: 81
+        affected_rides_count:
+          type: integer
+          description: Number of rides currently closed (from most recent snapshot)
+          example: 5
+        uptime_percentage:
+          type: number
+          format: float
+          description: Average uptime percentage during operating hours (unweighted)
+          example: 89.2
+        trend_percentage:
+          type: number
+          format: float
+          description: Percentage change vs previous equivalent period (positive = worse, negative = better)
+          example: 15.3
+        queue_times_url:
+          type: string
+          format: uri
+          description: Link to park details on Queue-Times.com
+          example: https://queue-times.com/parks/16
+
+    ParkDetails:
+      type: object
+      description: Detailed park information
+      required:
+        - park_id
+        - name
+        - location
+        - operator
+        - timezone
+        - total_rides_tracked
+        - current_status
+        - statistics
+        - queue_times_url
+      properties:
+        park_id:
+          type: integer
+          example: 16
+        name:
+          type: string
+          example: Magic Kingdom
+        location:
+          type: object
+          properties:
+            city:
+              type: string
+              example: Orlando
+            state:
+              type: string
+              example: FL
+            country:
+              type: string
+              example: US
+        coordinates:
+          type: object
+          nullable: true
+          properties:
+            latitude:
+              type: number
+              format: float
+              example: 28.417663
+            longitude:
+              type: number
+              format: float
+              example: -81.581213
+        operator:
+          type: string
+          example: Disney
+        timezone:
+          type: string
+          description: IANA timezone identifier
+          example: America/New_York
+        total_rides_tracked:
+          type: integer
+          example: 45
+        current_status:
+          type: object
+          properties:
+            rides_open:
+              type: integer
+              example: 42
+            rides_closed:
+              type: integer
+              example: 3
+            avg_wait_time:
+              type: number
+              format: float
+              nullable: true
+              example: 32.5
+            max_wait_time:
+              type: integer
+              nullable: true
+              example: 90
+        statistics:
+          type: object
+          properties:
+            period:
+              type: string
+              example: today
+            total_downtime_hours:
+              type: number
+              format: float
+              example: 12.5
+            avg_uptime_percentage:
+              type: number
+              format: float
+              example: 89.2
+            rides_with_downtime:
+              type: integer
+              example: 5
+        queue_times_url:
+          type: string
+          format: uri
+          example: https://queue-times.com/parks/16
+
+    RideDowntimeRanking:
+      type: object
+      description: Ride ranked by downtime hours with tier classification
+      required:
+        - rank
+        - ride_id
+        - ride_name
+        - park_name
+        - park_id
+        - tier
+        - tier_label
+        - downtime_hours
+        - uptime_percentage
+        - current_status
+        - seven_day_avg_downtime_hours
+        - trend_percentage
+        - queue_times_url
+      properties:
+        rank:
+          type: integer
+          example: 1
+        ride_id:
+          type: integer
+          example: 1234
+        ride_name:
+          type: string
+          example: Space Mountain
+        park_name:
+          type: string
+          example: Magic Kingdom
+        park_id:
+          type: integer
+          example: 16
+        tier:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+          description: Ride tier classification (1=major/3x weight, 2=standard/2x weight, 3=minor/1x weight)
+          example: 1
+        tier_label:
+          type: string
+          enum:
+            - "Tier 1 (Major)"
+            - "Tier 2 (Standard)"
+            - "Tier 3 (Minor)"
+          description: Human-readable tier label
+          example: "Tier 1 (Major)"
+        downtime_hours:
+          type: number
+          format: float
+          description: Total downtime hours for the period
+          example: 18.5
+        uptime_percentage:
+          type: number
+          format: float
+          description: Uptime percentage during park operating hours
+          example: 85.2
+        current_status:
+          type: string
+          enum:
+            - Running
+            - Down
+          description: Current operational status (Running = turquoise, Down = coral)
+          example: Running
+        seven_day_avg_downtime_hours:
+          type: number
+          format: float
+          description: 7-day average downtime for comparison
+          example: 16.2
+        trend_percentage:
+          type: number
+          format: float
+          description: Percentage change vs previous period
+          example: 14.2
+        queue_times_url:
+          type: string
+          format: uri
+          example: https://queue-times.com/rides/1234
+
+    RideWaitTime:
+      type: object
+      description: Ride wait time information with tier classification
+      required:
+        - rank
+        - ride_id
+        - ride_name
+        - park_name
+        - park_id
+        - tier
+        - tier_label
+        - current_wait_time
+        - seven_day_avg_wait_time
+        - peak_wait_time
+        - trend_percentage
+        - is_currently_open
+        - queue_times_url
+      properties:
+        rank:
+          type: integer
+          example: 1
+        ride_id:
+          type: integer
+          example: 1234
+        ride_name:
+          type: string
+          example: Space Mountain
+        park_name:
+          type: string
+          example: Magic Kingdom
+        park_id:
+          type: integer
+          example: 16
+        tier:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+          description: Ride tier classification (1=major/3x weight, 2=standard/2x weight, 3=minor/1x weight)
+          example: 1
+        tier_label:
+          type: string
+          enum:
+            - "Tier 1 (Major)"
+            - "Tier 2 (Standard)"
+            - "Tier 3 (Minor)"
+          description: Human-readable tier label
+          example: "Tier 1 (Major)"
+        current_wait_time:
+          type: integer
+          description: Current wait time in minutes
+          example: 90
+        seven_day_avg_wait_time:
+          type: number
+          format: float
+          description: 7-day average wait time
+          example: 65.5
+        peak_wait_time:
+          type: integer
+          description: Peak wait time observed in period
+          example: 120
+        trend_percentage:
+          type: number
+          format: float
+          description: Percentage difference from 7-day average
+          example: 37.4
+        is_currently_open:
+          type: boolean
+          description: Whether ride is currently operational
+          example: true
+        queue_times_url:
+          type: string
+          format: uri
+          example: https://queue-times.com/rides/1234
+
+    AggregateStats:
+      type: object
+      description: Top-level aggregate statistics
+      required:
+        - total_parks_tracked
+        - peak_downtime_hours
+        - currently_down_rides
+      properties:
+        total_parks_tracked:
+          type: integer
+          description: Total number of parks in the filtered dataset
+          example: 85
+        peak_downtime_hours:
+          type: number
+          format: float
+          description: Maximum downtime hours among all parks
+          example: 12.5
+        currently_down_rides:
+          type: integer
+          description: Total number of rides currently closed across all parks
+          example: 23
+
+    HealthCheck:
+      type: object
+      description: System health status
+      required:
+        - status
+        - timestamp
+        - version
+        - checks
+      properties:
+        status:
+          type: string
+          enum:
+            - healthy
+            - degraded
+            - unhealthy
+          description: Overall system status
+          example: healthy
+        timestamp:
+          type: string
+          format: date-time
+          description: UTC timestamp of health check
+          example: '2025-11-22T14:35:00Z'
+        version:
+          type: string
+          description: API version
+          example: 1.0.0
+        checks:
+          type: object
+          properties:
+            database:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - healthy
+                    - degraded
+                    - unhealthy
+                response_time_ms:
+                  type: integer
+                  description: Database query response time
+                error:
+                  type: string
+                  nullable: true
+            data_collection:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - healthy
+                    - degraded
+                    - unhealthy
+                last_collection:
+                  type: string
+                  format: date-time
+                minutes_since_last_collection:
+                  type: integer
+                warning:
+                  type: string
+                  nullable: true
+            api:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - healthy
+                    - degraded
+                    - unhealthy
+                uptime_seconds:
+                  type: integer
+
+    Error:
+      type: object
+      description: Error response
+      required:
+        - success
+        - error
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code
+              example: INVALID_PARAMETER
+            message:
+              type: string
+              description: Human-readable error message
+              example: Invalid period parameter. Must be one of: today, 7days, 30days
+            details:
+              type: object
+              nullable: true
+              description: Additional error details
+              additionalProperties: true
+
+    ParkTrend:
+      type: object
+      description: Park performance trend showing uptime percentage change
+      required:
+        - park_id
+        - park_name
+        - location
+        - previous_period_uptime_pct
+        - current_period_uptime_pct
+        - uptime_change_pct
+        - previous_period_downtime_hours
+        - current_period_downtime_hours
+        - queue_times_url
+      properties:
+        park_id:
+          type: integer
+          example: 42
+        park_name:
+          type: string
+          example: Busch Gardens Tampa
+        location:
+          type: object
+          properties:
+            city:
+              type: string
+              example: Tampa
+            state:
+              type: string
+              example: FL
+            country:
+              type: string
+              example: US
+        previous_period_uptime_pct:
+          type: number
+          format: float
+          description: Uptime percentage in previous period (FR-047, FR-051)
+          example: 70.3
+        current_period_uptime_pct:
+          type: number
+          format: float
+          description: Uptime percentage in current period
+          example: 85.5
+        uptime_change_pct:
+          type: number
+          format: float
+          description: Absolute percentage point change (positive = improvement, negative = decline)
+          example: 15.2
+        improvement_pct:
+          type: number
+          format: float
+          description: Improvement percentage (only for parks-improving category)
+          nullable: true
+          example: 15.2
+        decline_pct:
+          type: number
+          format: float
+          description: Decline percentage (only for parks-declining category)
+          nullable: true
+          example: 11.8
+        previous_period_downtime_hours:
+          type: number
+          format: float
+          description: Total downtime hours in previous period
+          example: 18.4
+        current_period_downtime_hours:
+          type: number
+          format: float
+          description: Total downtime hours in current period
+          example: 8.2
+        queue_times_url:
+          type: string
+          format: uri
+          description: Link to detailed park statistics on Queue-Times.com (FR-036)
+          example: https://queue-times.com/parks/42
+
+    RideTrend:
+      type: object
+      description: Ride performance trend showing uptime percentage change
+      required:
+        - ride_id
+        - ride_name
+        - park_id
+        - park_name
+        - tier
+        - tier_label
+        - previous_period_uptime_pct
+        - current_period_uptime_pct
+        - uptime_change_pct
+        - previous_period_downtime_hours
+        - current_period_downtime_hours
+        - queue_times_url
+      properties:
+        ride_id:
+          type: integer
+          example: 2134
+        ride_name:
+          type: string
+          example: Splash Mountain
+        park_id:
+          type: integer
+          example: 16
+        park_name:
+          type: string
+          example: Disney Magic Kingdom
+        tier:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+          description: Ride tier classification (1=major/3x weight, 2=standard/2x weight, 3=minor/1x weight)
+          example: 1
+        tier_label:
+          type: string
+          enum:
+            - "Tier 1 (Major Attraction)"
+            - "Tier 2 (Standard Attraction)"
+            - "Tier 3 (Minor Attraction)"
+          description: Human-readable tier label
+          example: "Tier 1 (Major Attraction)"
+        previous_period_uptime_pct:
+          type: number
+          format: float
+          description: Uptime percentage in previous period (FR-047, FR-052)
+          example: 92.1
+        current_period_uptime_pct:
+          type: number
+          format: float
+          description: Uptime percentage in current period
+          example: 80.3
+        uptime_change_pct:
+          type: number
+          format: float
+          description: Absolute percentage point change (positive = improvement, negative = decline)
+          example: -11.8
+        improvement_pct:
+          type: number
+          format: float
+          description: Improvement percentage (only for rides-improving category)
+          nullable: true
+          example: 15.2
+        decline_pct:
+          type: number
+          format: float
+          description: Decline percentage (only for rides-declining category)
+          nullable: true
+          example: 11.8
+        previous_period_downtime_hours:
+          type: number
+          format: float
+          description: Total downtime hours in previous period
+          example: 2.1
+        current_period_downtime_hours:
+          type: number
+          format: float
+          description: Total downtime hours in current period
+          example: 4.9
+        queue_times_url:
+          type: string
+          format: uri
+          description: Link to detailed ride statistics on Queue-Times.com (FR-036)
+          example: https://queue-times.com/rides/2134
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            invalidPeriod:
+              summary: Invalid period parameter
+              value:
+                success: false
+                error:
+                  code: INVALID_PARAMETER
+                  message: Invalid period parameter. Must be one of: today, 7days, 30days
+                  details:
+                    parameter: period
+                    provided_value: yesterday
+            invalidFilter:
+              summary: Invalid filter parameter
+              value:
+                success: false
+                error:
+                  code: INVALID_PARAMETER
+                  message: Invalid filter parameter. Must be one of: disney-universal, all-parks
+                  details:
+                    parameter: filter
+                    provided_value: six-flags
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            parkNotFound:
+              summary: Park not found
+              value:
+                success: false
+                error:
+                  code: RESOURCE_NOT_FOUND
+                  message: Park with ID 99999 not found
+                  details:
+                    resource_type: park
+                    resource_id: 99999
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            databaseError:
+              summary: Database connection error
+              value:
+                success: false
+                error:
+                  code: INTERNAL_ERROR
+                  message: An unexpected error occurred. Please try again later.
+                  details: null
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API key for authentication. Required for all endpoints.
+
+        **Rate Limits**:
+        - 100 requests per hour per API key
+        - 1000 requests per day per API key
+
+        **Obtaining an API Key**:
+        Contact the administrator or register at https://themeparkwaits.com/api-access
+
+        **Usage**:
+        Include the API key in the request header:
+        ```
+        X-API-Key: your_api_key_here
+        ```
+
+security:
+  - ApiKeyAuth: []

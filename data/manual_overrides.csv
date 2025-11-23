@@ -1,0 +1,11 @@
+# Manual Tier Overrides for Ride Classification
+# Format: park_id,ride_id,override_tier,reason,date_added
+# override_tier: 1 (major, 3x weight), 2 (standard, 2x weight), 3 (minor, 1x weight)
+# This file has HIGHEST priority in classification hierarchy (Priority 1)
+#
+# Example entries:
+# 16,1234,1,"Space Mountain - Classic E-ticket attraction, consistently high wait times",2025-11-23
+# 16,1235,3,"Prince Charming Regal Carrousel - Low-capacity flat ride",2025-11-23
+#
+# Add manual overrides below this line:
+park_id,ride_id,override_tier,reason,date_added

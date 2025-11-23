@@ -1,0 +1,218 @@
+"""
+Theme Park Downtime Tracker - Operating Hours Detector
+Detects park operating hours from ride activity in local timezone.
+"""
+
+from datetime import datetime, date, time, timedelta
+from typing import Optional, Tuple, List, Dict, Any
+from zoneinfo import ZoneInfo
+from sqlalchemy import text
+from sqlalchemy.engine import Connection
+
+from ..utils.logger import logger
+
+
+class OperatingHoursDetector:
+    """
+    Detects park operating hours from ride activity snapshots.
+
+    Uses first/last ride activity to infer park open/close times.
+    All times are handled in the park's local timezone (parks.timezone field).
+    """
+
+    def __init__(self, connection: Connection):
+        """
+        Initialize detector with database connection.
+
+        Args:
+            connection: SQLAlchemy connection object
+        """
+        self.conn = connection
+
+    def detect_operating_session(
+        self,
+        park_id: int,
+        operating_date: date,
+        park_timezone: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Detect operating hours for a park on a specific date.
+
+        Args:
+            park_id: Park ID
+            operating_date: Date to analyze (YYYY-MM-DD)
+            park_timezone: Park's IANA timezone (e.g., 'America/New_York')
+
+        Returns:
+            Dictionary with operating session data or None if no activity
+        """
+        # Convert operating date to UTC boundaries for the park's timezone
+        tz = ZoneInfo(park_timezone)
+        local_start = datetime.combine(operating_date, time(0, 0), tzinfo=tz)
+        local_end = datetime.combine(operating_date, time(23, 59, 59), tzinfo=tz)
+
+        utc_start = local_start.astimezone(ZoneInfo('UTC'))
+        utc_end = local_end.astimezone(ZoneInfo('UTC'))
+
+        # Find first and last ride activity
+        query = text("""
+            SELECT
+                MIN(rss.recorded_at) AS first_activity,
+                MAX(rss.recorded_at) AS last_activity,
+                COUNT(DISTINCT rss.ride_id) AS active_rides_count,
+                SUM(CASE WHEN rss.computed_is_open = TRUE THEN 1 ELSE 0 END) AS open_ride_snapshots
+            FROM ride_status_snapshots rss
+            INNER JOIN rides r ON rss.ride_id = r.ride_id
+            WHERE r.park_id = :park_id
+                AND rss.recorded_at >= :utc_start
+                AND rss.recorded_at <= :utc_end
+                AND r.is_active = TRUE
+        """)
+
+        result = self.conn.execute(query, {
+            "park_id": park_id,
+            "utc_start": utc_start,
+            "utc_end": utc_end
+        })
+
+        row = result.fetchone()
+
+        if not row or not row.first_activity:
+            logger.debug(f"No activity detected for park {park_id} on {operating_date}")
+            return None
+
+        # Convert UTC times back to park's local timezone for display
+        first_activity_utc = row.first_activity
+        last_activity_utc = row.last_activity
+
+        first_activity_local = first_activity_utc.replace(tzinfo=ZoneInfo('UTC')).astimezone(tz)
+        last_activity_local = last_activity_utc.replace(tzinfo=ZoneInfo('UTC')).astimezone(tz)
+
+        # Calculate total operating hours
+        duration = last_activity_utc - first_activity_utc
+        total_hours = duration.total_seconds() / 3600.0
+
+        logger.info(f"Detected operating session for park {park_id} on {operating_date}: "
+                   f"{first_activity_local.strftime('%H:%M')} - {last_activity_local.strftime('%H:%M')} "
+                   f"({total_hours:.2f} hours)")
+
+        return {
+            "park_id": park_id,
+            "operating_date": operating_date,
+            "park_opened_at": first_activity_local.time(),
+            "park_closed_at": last_activity_local.time(),
+            "total_operating_hours": round(total_hours, 2),
+            "first_activity_detected_at": first_activity_utc,
+            "last_activity_detected_at": last_activity_utc,
+            "active_rides_count": row.active_rides_count,
+            "open_ride_snapshots": row.open_ride_snapshots
+        }
+
+    def save_operating_session(self, session_data: Dict[str, Any]) -> int:
+        """
+        Save operating session to database.
+
+        Args:
+            session_data: Dictionary from detect_operating_session()
+
+        Returns:
+            Inserted session_id
+        """
+        query = text("""
+            INSERT INTO park_operating_sessions (
+                park_id, operating_date, park_opened_at, park_closed_at,
+                total_operating_hours, first_activity_detected_at, last_activity_detected_at
+            )
+            VALUES (
+                :park_id, :operating_date, :park_opened_at, :park_closed_at,
+                :total_operating_hours, :first_activity_detected_at, :last_activity_detected_at
+            )
+            ON DUPLICATE KEY UPDATE
+                park_opened_at = VALUES(park_opened_at),
+                park_closed_at = VALUES(park_closed_at),
+                total_operating_hours = VALUES(total_operating_hours),
+                first_activity_detected_at = VALUES(first_activity_detected_at),
+                last_activity_detected_at = VALUES(last_activity_detected_at)
+        """)
+
+        result = self.conn.execute(query, session_data)
+        session_id = result.lastrowid
+
+        logger.info(f"Saved operating session {session_id} for park {session_data['park_id']}")
+        return session_id
+
+    def detect_all_parks_for_date(
+        self,
+        operating_date: date
+    ) -> List[Dict[str, Any]]:
+        """
+        Detect operating sessions for all active parks on a specific date.
+
+        Args:
+            operating_date: Date to analyze
+
+        Returns:
+            List of operating session dictionaries
+        """
+        # Get all active parks with their timezones
+        parks_query = text("""
+            SELECT park_id, name, timezone
+            FROM parks
+            WHERE is_active = TRUE
+            ORDER BY park_id
+        """)
+
+        result = self.conn.execute(parks_query)
+        parks = [dict(row._mapping) for row in result]
+
+        sessions = []
+        for park in parks:
+            session = self.detect_operating_session(
+                park_id=park['park_id'],
+                operating_date=operating_date,
+                park_timezone=park['timezone']
+            )
+
+            if session:
+                sessions.append(session)
+
+        logger.info(f"Detected {len(sessions)} operating sessions for {operating_date}")
+        return sessions
+
+    def backfill_operating_sessions(
+        self,
+        park_id: int,
+        start_date: date,
+        end_date: date,
+        park_timezone: str
+    ) -> int:
+        """
+        Backfill operating sessions for a date range.
+
+        Args:
+            park_id: Park ID
+            start_date: Start date (inclusive)
+            end_date: End date (inclusive)
+            park_timezone: Park's IANA timezone
+
+        Returns:
+            Number of sessions created
+        """
+        sessions_created = 0
+        current_date = start_date
+
+        while current_date <= end_date:
+            session = self.detect_operating_session(
+                park_id=park_id,
+                operating_date=current_date,
+                park_timezone=park_timezone
+            )
+
+            if session:
+                self.save_operating_session(session)
+                sessions_created += 1
+
+            current_date += timedelta(days=1)
+
+        logger.info(f"Backfilled {sessions_created} operating sessions for park {park_id}")
+        return sessions_created

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Theme Park Hall of Shame - Downtime Tracker</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <header>
+        <h1>Theme Park Hall of Shame</h1>
+        <p class="tagline">Tracking attraction reliability across North American theme parks</p>
+    </header>
+
+    <nav id="main-nav">
+        <button class="nav-tab active" data-view="park-rankings">Park Rankings</button>
+        <button class="nav-tab" data-view="ride-performance">Ride Performance</button>
+        <button class="nav-tab" data-view="wait-times">Wait Times</button>
+        <button class="nav-tab" data-view="trends">Trends</button>
+        <a href="#" id="about-link">About This Project</a>
+    </nav>
+
+    <main id="app-container">
+        <!-- Dynamic content will be loaded here -->
+        <div id="loading">Loading...</div>
+    </main>
+
+    <footer>
+        <p class="attribution">
+            Data powered by <a href="https://queue-times.com" target="_blank" rel="noopener">Queue-Times.com</a>
+        </p>
+        <p class="last-update">Last updated: <span id="last-update-time">--</span></p>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="js/api-client.js"></script>
+    <script src="js/components/park-rankings.js"></script>
+    <script src="js/components/ride-performance.js"></script>
+    <script src="js/components/wait-times.js"></script>
+    <script src="js/components/trends.js"></script>
+    <script src="js/components/about-modal.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

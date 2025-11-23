@@ -1,0 +1,28 @@
+# Theme Park Downtime Tracker - Production Dependencies
+# Python 3.11+
+
+# Web Framework
+Flask>=3.0.0
+Flask-CORS>=4.0.0
+
+# Database
+SQLAlchemy>=2.0.0
+mysqlclient>=2.2.0
+
+# API Client & Retry Logic
+requests>=2.31.0
+tenacity>=8.2.3
+
+# Configuration & Secrets
+python-dotenv>=1.0.0
+boto3>=1.28.0  # AWS SSM Parameter Store for production secrets
+
+# Logging
+python-json-logger>=2.0.7
+
+# Data Validation
+pydantic>=2.5.0
+
+# Testing (also in requirements-dev.txt for clarity)
+pytest>=7.4.3
+pytest-cov>=4.1.0

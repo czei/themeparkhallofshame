@@ -1,0 +1,20 @@
+# Ride Classification Script Dependencies
+# Python 3.9+
+
+# HTTP requests and API interaction
+requests>=2.31.0
+
+# Data manipulation and CSV handling
+pandas>=2.1.0
+
+# Retry logic for API calls
+retry>=0.9.2
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# Progress bars for long operations
+tqdm>=4.66.0
+
+# JSON schema validation (optional)
+jsonschema>=4.19.0

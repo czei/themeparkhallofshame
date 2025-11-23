@@ -755,6 +755,10 @@
         .section-header:nth-of-type(1) .section-marker { background: var(--coral); }
         .section-header:nth-of-type(2) .section-marker { background: var(--turquoise); }
         .section-header:nth-of-type(3) .section-marker { background: var(--gold); }
+        .section-header:nth-of-type(4) .section-marker { background: var(--turquoise); }
+        .section-header:nth-of-type(5) .section-marker { background: var(--coral); }
+        .section-header:nth-of-type(6) .section-marker { background: var(--turquoise); }
+        .section-header:nth-of-type(7) .section-marker { background: var(--coral); }
 
         .section-title {
             font-family: 'Space Grotesk', sans-serif;
@@ -858,8 +862,8 @@
             font-size: 0.9rem;
         }
 
-        .trend-up { color: var(--coral); }
-        .trend-down { color: var(--turquoise); }
+        .trend-up { color: var(--turquoise); }
+        .trend-down { color: var(--coral); }
         .trend-neutral { color: var(--gold); }
 
         /* Downtime Visualization */
@@ -1094,10 +1098,10 @@
     <!-- Navigation -->
     <div class="nav-container">
         <div class="nav-grid">
-            <button class="nav-item active"><span>Parks</span></button>
-            <button class="nav-item"><span>Downtime</span></button>
-            <button class="nav-item"><span>Wait Times</span></button>
-            <button class="nav-item"><span>Trends</span></button>
+            <button class="nav-item active" data-view="parks"><span>Parks</span></button>
+            <button class="nav-item" data-view="downtime"><span>Downtime</span></button>
+            <button class="nav-item" data-view="waittimes"><span>Wait Times</span></button>
+            <button class="nav-item" data-view="trends"><span>Trends</span></button>
         </div>
     </div>
 
@@ -1142,12 +1146,12 @@
         </div>
 
         <!-- Parks Table -->
-        <div class="section-header">
+        <div class="section-header" data-section="parks">
             <div class="section-marker"></div>
             <h2 class="section-title">Parks with Most Downtime</h2>
         </div>
 
-        <div class="data-container">
+        <div class="data-container" data-section="parks">
             <div class="table-header">Weekly Performance Rankings</div>
             <table>
                 <thead>
@@ -1241,12 +1245,12 @@
         </div>
 
         <!-- Individual Rides -->
-        <div class="section-header">
+        <div class="section-header" data-section="downtime">
             <div class="section-marker"></div>
             <h2 class="section-title">Individual Ride Performance</h2>
         </div>
 
-        <div class="data-container">
+        <div class="data-container" data-section="downtime">
             <div class="table-header">Highest Downtime Attractions</div>
             <table>
                 <thead>
@@ -1305,12 +1309,12 @@
         </div>
 
         <!-- Wait Times -->
-        <div class="section-header">
+        <div class="section-header" data-section="waittimes">
             <div class="section-marker"></div>
             <h2 class="section-title">Longest Wait Times</h2>
         </div>
 
-        <div class="data-container">
+        <div class="data-container" data-section="waittimes">
             <div class="table-header">Current Queue Performance</div>
             <table>
                 <thead>
@@ -1363,6 +1367,402 @@
                         <td>95 min</td>
                         <td>140 min</td>
                         <td><span class="trend trend-up">â†‘ 26%</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Trends - Parks Improving -->
+        <div class="section-header" data-section="trends">
+            <div class="section-marker"></div>
+            <h2 class="section-title">Parks - Most Improved</h2>
+        </div>
+
+        <div class="data-container" data-section="trends">
+            <div class="table-header">Parks Showing Better Reliability</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Park</th>
+                        <th>Location</th>
+                        <th>Previous Period</th>
+                        <th>Current Period</th>
+                        <th>Change</th>
+                        <th>Improvement</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="park-name">Busch Gardens Tampa</td>
+                        <td>Florida</td>
+                        <td>18.4h downtime</td>
+                        <td>8.2h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>-10.2h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-turquoise" style="width: 55%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-up">↑ 55%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">SeaWorld Orlando</td>
+                        <td>Florida</td>
+                        <td>15.7h downtime</td>
+                        <td>9.4h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>-6.3h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-turquoise" style="width: 40%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-up">↑ 40%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Silver Dollar City</td>
+                        <td>Missouri</td>
+                        <td>12.1h downtime</td>
+                        <td>7.8h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>-4.3h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-turquoise" style="width: 36%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-up">↑ 36%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Dollywood</td>
+                        <td>Tennessee</td>
+                        <td>14.2h downtime</td>
+                        <td>9.8h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>-4.4h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-turquoise" style="width: 31%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-up">↑ 31%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Hersheypark</td>
+                        <td>Pennsylvania</td>
+                        <td>11.3h downtime</td>
+                        <td>8.5h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>-2.8h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-turquoise" style="width: 25%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-up">↑ 25%</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Trends - Parks Declining -->
+        <div class="section-header" data-section="trends">
+            <div class="section-marker"></div>
+            <h2 class="section-title">Parks - Declining Performance</h2>
+        </div>
+
+        <div class="data-container" data-section="trends">
+            <div class="table-header">Parks Showing Worse Reliability</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Park</th>
+                        <th>Location</th>
+                        <th>Previous Period</th>
+                        <th>Current Period</th>
+                        <th>Change</th>
+                        <th>Decline</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="park-name">Cedar Point</td>
+                        <td>Ohio</td>
+                        <td>22.5h downtime</td>
+                        <td>38.2h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>+15.7h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-coral" style="width: 70%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-down">↓ 70%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Six Flags Great Adventure</td>
+                        <td>New Jersey</td>
+                        <td>28.9h downtime</td>
+                        <td>42.5h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>+13.6h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-coral" style="width: 47%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-down">↓ 47%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Six Flags Magic Mountain</td>
+                        <td>California</td>
+                        <td>19.3h downtime</td>
+                        <td>27.8h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>+8.5h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-coral" style="width: 44%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-down">↓ 44%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Knott's Berry Farm</td>
+                        <td>California</td>
+                        <td>21.2h downtime</td>
+                        <td>28.5h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>+7.3h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-coral" style="width: 34%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-down">↓ 34%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Kings Island</td>
+                        <td>Ohio</td>
+                        <td>16.7h downtime</td>
+                        <td>21.4h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>+4.7h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-coral" style="width: 28%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-down">↓ 28%</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Trends - Rides Improving -->
+        <div class="section-header" data-section="trends">
+            <div class="section-marker"></div>
+            <h2 class="section-title">Rides - Most Improved</h2>
+        </div>
+
+        <div class="data-container" data-section="trends">
+            <div class="table-header">Attractions Showing Better Reliability</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Ride</th>
+                        <th>Park</th>
+                        <th>Previous Period</th>
+                        <th>Current Period</th>
+                        <th>Change</th>
+                        <th>Improvement</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="park-name">Expedition Everest</td>
+                        <td>Disney Animal Kingdom</td>
+                        <td>4.8h downtime</td>
+                        <td>1.2h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>-3.6h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-turquoise" style="width: 75%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-up">↑ 75%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Test Track</td>
+                        <td>Disney Epcot</td>
+                        <td>5.4h downtime</td>
+                        <td>2.1h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>-3.3h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-turquoise" style="width: 61%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-up">↑ 61%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Space Mountain</td>
+                        <td>Disney Magic Kingdom</td>
+                        <td>3.2h downtime</td>
+                        <td>1.5h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>-1.7h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-turquoise" style="width: 53%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-up">↑ 53%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Manta</td>
+                        <td>SeaWorld Orlando</td>
+                        <td>4.1h downtime</td>
+                        <td>2.2h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>-1.9h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-turquoise" style="width: 46%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-up">↑ 46%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Lightning Rod</td>
+                        <td>Dollywood</td>
+                        <td>6.8h downtime</td>
+                        <td>3.9h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>-2.9h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-turquoise" style="width: 43%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-up">↑ 43%</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Trends - Rides Declining -->
+        <div class="section-header" data-section="trends">
+            <div class="section-marker"></div>
+            <h2 class="section-title">Rides - Declining Performance</h2>
+        </div>
+
+        <div class="data-container" data-section="trends">
+            <div class="table-header">Attractions Showing Worse Reliability</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Ride</th>
+                        <th>Park</th>
+                        <th>Previous Period</th>
+                        <th>Current Period</th>
+                        <th>Change</th>
+                        <th>Decline</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="park-name">Splash Mountain</td>
+                        <td>Disney Magic Kingdom</td>
+                        <td>2.1h downtime</td>
+                        <td>4.9h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>+2.8h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-coral" style="width: 133%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-down">↓ 133%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Kingda Ka</td>
+                        <td>Six Flags Great Adventure</td>
+                        <td>4.2h downtime</td>
+                        <td>8.5h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>+4.3h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-coral" style="width: 102%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-down">↓ 102%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Millennium Force</td>
+                        <td>Cedar Point</td>
+                        <td>3.9h downtime</td>
+                        <td>7.2h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>+3.3h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-coral" style="width: 85%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-down">↓ 85%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Incredicoaster</td>
+                        <td>Disney California Adventure</td>
+                        <td>3.5h downtime</td>
+                        <td>6.1h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>+2.6h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-coral" style="width: 74%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-down">↓ 74%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Twisted Colossus</td>
+                        <td>Six Flags Magic Mountain</td>
+                        <td>4.1h downtime</td>
+                        <td>6.8h downtime</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>+2.7h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-coral" style="width: 66%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="trend trend-down">↓ 66%</span></td>
                     </tr>
                 </tbody>
             </table>
@@ -1439,11 +1839,25 @@
             }
         });
 
-        // Navigation
+        // Navigation with show/hide functionality
         document.querySelectorAll('.nav-item').forEach(item => {
             item.addEventListener('click', function() {
+                // Update active nav item
                 document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
                 this.classList.add('active');
+                
+                // Get the view to display
+                const view = this.getAttribute('data-view');
+                
+                // Hide all sections
+                document.querySelectorAll('[data-section]').forEach(section => {
+                    section.style.display = 'none';
+                });
+                
+                // Show the selected sections
+                document.querySelectorAll(`[data-section="${view}"]`).forEach(section => {
+                    section.style.display = '';
+                });
             });
         });
 

@@ -1,0 +1,62 @@
+# Theme Park Downtime Tracker - Pre-commit Hooks
+# Enforces code quality and test coverage before commits
+
+repos:
+  # Code Formatting
+  - repo: https://github.com/psf/black
+    rev: 23.12.0
+    hooks:
+      - id: black
+        name: Black Code Formatter
+        language_version: python3.11
+        files: ^backend/src/
+        args: ['--line-length=100']
+
+  # Linting
+  - repo: https://github.com/PyCQA/flake8
+    rev: 6.1.0
+    hooks:
+      - id: flake8
+        name: Flake8 Linter
+        files: ^backend/src/
+        args: ['--max-line-length=100', '--extend-ignore=E203,W503']
+
+  # Type Checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.7.0
+    hooks:
+      - id: mypy
+        name: MyPy Type Checker
+        files: ^backend/src/
+        additional_dependencies: [types-requests, types-python-dateutil]
+        args: ['--ignore-missing-imports', '--no-strict-optional']
+
+  # Test Coverage Enforcement (80% minimum)
+  - repo: local
+    hooks:
+      - id: pytest-coverage
+        name: Pytest Coverage (≥80%)
+        entry: bash -c 'cd backend && pytest tests/unit/ --cov=src --cov-fail-under=80 --cov-report=term-missing -q'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [commit]
+
+  # Trailing Whitespace
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        files: \.(py|yaml|yml|md)$
+      - id: end-of-file-fixer
+        files: \.(py|yaml|yml|md)$
+      - id: check-yaml
+      - id: check-json
+        files: \.json$
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+
+# Installation:
+# 1. Install pre-commit: pip install pre-commit
+# 2. Install hooks: pre-commit install
+# 3. (Optional) Run on all files: pre-commit run --all-files

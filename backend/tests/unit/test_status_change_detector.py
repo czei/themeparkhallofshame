@@ -140,7 +140,11 @@ class TestStatusChangeDetection:
         assert changes[0]['ride_id'] == ride_id
         assert changes[0]['previous_status'] in (True, 1)
         assert changes[0]['new_status'] in (False, 0)
-        assert changes[0]['change_detected_at'] == datetime(2024, 1, 1, 11, 0, 0)
+        # SQLite returns datetime as string, convert for comparison
+        change_time = changes[0]['change_detected_at']
+        if isinstance(change_time, str):
+            change_time = datetime.fromisoformat(change_time.replace(' ', 'T'))
+        assert change_time == datetime(2024, 1, 1, 11, 0, 0)
         assert changes[0]['downtime_duration_minutes'] is None  # No duration for open→closed
 
     def test_detect_single_transition_closed_to_open_with_duration(self, sqlite_connection, sample_park_data, sample_ride_data):
@@ -181,7 +185,11 @@ class TestStatusChangeDetection:
         assert changes[0]['ride_id'] == ride_id
         assert changes[0]['previous_status'] in (False, 0)
         assert changes[0]['new_status'] in (True, 1)
-        assert changes[0]['change_detected_at'] == datetime(2024, 1, 1, 12, 0, 0)
+        # SQLite returns datetime as string
+        change_time = changes[0]['change_detected_at']
+        if isinstance(change_time, str):
+            change_time = datetime.fromisoformat(change_time.replace(' ', 'T'))
+        assert change_time == datetime(2024, 1, 1, 12, 0, 0)
         assert changes[0]['downtime_duration_minutes'] == 120  # 2 hours
 
     def test_detect_multiple_transitions(self, sqlite_connection, sample_park_data, sample_ride_data):
@@ -313,7 +321,8 @@ class TestDowntimeSummary:
         assert summary['ride_id'] == ride_id
         assert summary['downtime_event_count'] == 0
         assert summary['total_downtime_minutes'] == 0
-        assert summary['uptime_percentage'] == 0.0
+        # No downtime = 100% uptime
+        assert summary['uptime_percentage'] == 100.0
 
     def test_calculate_downtime_summary_with_downtime(self, sqlite_connection, sample_park_data, sample_ride_data):
         """calculate_downtime_summary() should calculate correct statistics."""
@@ -392,22 +401,22 @@ class TestDetectAllRides:
         # Insert snapshots for ride 1: open → closed
         sqlite_connection.execute(text("""
             INSERT INTO ride_status_snapshots (ride_id, recorded_at, wait_time, is_open, computed_is_open)
-            VALUES (?, ?, ?, ?, ?)
-        """), (ride1_id, datetime(2024, 1, 1, 10, 0, 0), 30, 1, 1))
+            VALUES (:ride_id, :recorded_at, :wait_time, :is_open, :computed_is_open)
+        """), {'ride_id': ride1_id, 'recorded_at': datetime(2024, 1, 1, 10, 0, 0), 'wait_time': 30, 'is_open': 1, 'computed_is_open': 1})
         sqlite_connection.execute(text("""
             INSERT INTO ride_status_snapshots (ride_id, recorded_at, wait_time, is_open, computed_is_open)
-            VALUES (?, ?, ?, ?, ?)
-        """), (ride1_id, datetime(2024, 1, 1, 11, 0, 0), 0, 0, 0))
+            VALUES (:ride_id, :recorded_at, :wait_time, :is_open, :computed_is_open)
+        """), {'ride_id': ride1_id, 'recorded_at': datetime(2024, 1, 1, 11, 0, 0), 'wait_time': 0, 'is_open': 0, 'computed_is_open': 0})
 
         # Insert snapshots for ride 2: closed → open
         sqlite_connection.execute(text("""
             INSERT INTO ride_status_snapshots (ride_id, recorded_at, wait_time, is_open, computed_is_open)
-            VALUES (?, ?, ?, ?, ?)
-        """), (ride2_id, datetime(2024, 1, 1, 10, 0, 0), 0, 0, 0))
+            VALUES (:ride_id, :recorded_at, :wait_time, :is_open, :computed_is_open)
+        """), {'ride_id': ride2_id, 'recorded_at': datetime(2024, 1, 1, 10, 0, 0), 'wait_time': 0, 'is_open': 0, 'computed_is_open': 0})
         sqlite_connection.execute(text("""
             INSERT INTO ride_status_snapshots (ride_id, recorded_at, wait_time, is_open, computed_is_open)
-            VALUES (?, ?, ?, ?, ?)
-        """), (ride2_id, datetime(2024, 1, 1, 12, 0, 0), 30, 1, 1))
+            VALUES (:ride_id, :recorded_at, :wait_time, :is_open, :computed_is_open)
+        """), {'ride_id': ride2_id, 'recorded_at': datetime(2024, 1, 1, 12, 0, 0), 'wait_time': 30, 'is_open': 1, 'computed_is_open': 1})
 
         sqlite_connection.commit()
 
@@ -456,14 +465,14 @@ class TestLongestDowntimeEvents:
         sqlite_connection.execute(text("""
             INSERT INTO ride_status_changes
             (ride_id, previous_status, new_status, change_detected_at, downtime_duration_minutes)
-            VALUES (?, ?, ?, ?, ?)
-        """), (ride1_id, 0, 1, datetime(2024, 1, 1, 12, 0, 0), 120))  # 2 hours
+            VALUES (:ride_id, :previous_status, :new_status, :change_detected_at, :downtime_duration_minutes)
+        """), {'ride_id': ride1_id, 'previous_status': 0, 'new_status': 1, 'change_detected_at': datetime(2024, 1, 1, 12, 0, 0), 'downtime_duration_minutes': 120})  # 2 hours
 
         sqlite_connection.execute(text("""
             INSERT INTO ride_status_changes
             (ride_id, previous_status, new_status, change_detected_at, downtime_duration_minutes)
-            VALUES (?, ?, ?, ?, ?)
-        """), (ride2_id, 0, 1, datetime(2024, 1, 1, 13, 0, 0), 180))  # 3 hours
+            VALUES (:ride_id, :previous_status, :new_status, :change_detected_at, :downtime_duration_minutes)
+        """), {'ride_id': ride2_id, 'previous_status': 0, 'new_status': 1, 'change_detected_at': datetime(2024, 1, 1, 13, 0, 0), 'downtime_duration_minutes': 180})  # 3 hours
 
         sqlite_connection.commit()
 
@@ -495,8 +504,8 @@ class TestLongestDowntimeEvents:
             sqlite_connection.execute(text("""
                 INSERT INTO ride_status_changes
                 (ride_id, previous_status, new_status, change_detected_at, downtime_duration_minutes)
-                VALUES (?, ?, ?, ?, ?)
-            """), (ride_id, 0, 1, datetime(2024, 1, 1, 12, 0, 0), (i + 1) * 60))
+                VALUES (:ride_id, :previous_status, :new_status, :change_detected_at, :downtime_duration_minutes)
+            """), {'ride_id': ride_id, 'previous_status': 0, 'new_status': 1, 'change_detected_at': datetime(2024, 1, 1, 12, 0, 0), 'downtime_duration_minutes': (i + 1) * 60})
 
         sqlite_connection.commit()
 

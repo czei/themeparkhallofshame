@@ -79,6 +79,12 @@ class StatusChangeDetector:
             current_time = snapshots[i]['recorded_at']
             previous_time = snapshots[i-1]['recorded_at']
 
+            # Convert string datetime to datetime object if needed (SQLite compatibility)
+            if isinstance(current_time, str):
+                current_time = datetime.fromisoformat(current_time.replace(' ', 'T'))
+            if isinstance(previous_time, str):
+                previous_time = datetime.fromisoformat(previous_time.replace(' ', 'T'))
+
             if current_status != previous_status:
                 # Status transition detected
                 change = {
@@ -90,7 +96,7 @@ class StatusChangeDetector:
                 }
 
                 # If transition is closed → open, calculate downtime duration
-                if previous_status is False and current_status is True:
+                if not previous_status and current_status:
                     # Find when it went down (last False status before this True)
                     downtime_start = previous_time
                     downtime_end = current_time
@@ -189,7 +195,7 @@ class StatusChangeDetector:
         changes = self.detect_status_changes(ride_id, start_time, end_time)
 
         # Count downtime events (transitions to closed)
-        downtime_events = [c for c in changes if c['new_status'] is False]
+        downtime_events = [c for c in changes if not c['new_status']]
 
         # Sum total downtime minutes
         total_downtime = sum(

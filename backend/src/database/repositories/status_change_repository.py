@@ -48,11 +48,11 @@ class RideStatusChangeRepository:
         """
         query = text("""
             INSERT INTO ride_status_changes (
-                ride_id, changed_at, old_status, new_status,
+                ride_id, change_detected_at, previous_status, new_status,
                 downtime_duration_minutes
             )
             VALUES (
-                :ride_id, :changed_at, :old_status, :new_status,
+                :ride_id, :change_detected_at, :previous_status, :new_status,
                 :downtime_duration_minutes
             )
         """)
@@ -77,11 +77,11 @@ class RideStatusChangeRepository:
             Dictionary with change data or None if not found
         """
         query = text("""
-            SELECT change_id, ride_id, changed_at, old_status,
+            SELECT change_id, ride_id, change_detected_at, previous_status,
                    new_status, downtime_duration_minutes, created_at
             FROM ride_status_changes
             WHERE ride_id = :ride_id
-            ORDER BY changed_at DESC
+            ORDER BY change_detected_at DESC
             LIMIT 1
         """)
 
@@ -105,12 +105,12 @@ class RideStatusChangeRepository:
             List of dictionaries with change data
         """
         query = text("""
-            SELECT change_id, ride_id, changed_at, old_status,
+            SELECT change_id, ride_id, change_detected_at, previous_status,
                    new_status, downtime_duration_minutes, created_at
             FROM ride_status_changes
             WHERE ride_id = :ride_id
-                AND changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-            ORDER BY changed_at DESC
+                AND change_detected_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+            ORDER BY change_detected_at DESC
         """)
 
         result = self.conn.execute(query, {"ride_id": ride_id, "hours": hours})
@@ -128,13 +128,13 @@ class RideStatusChangeRepository:
             List of dictionaries with downtime events
         """
         query = text("""
-            SELECT change_id, ride_id, changed_at, old_status,
+            SELECT change_id, ride_id, change_detected_at, previous_status,
                    new_status, downtime_duration_minutes, created_at
             FROM ride_status_changes
             WHERE ride_id = :ride_id
                 AND new_status = FALSE
-                AND changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-            ORDER BY changed_at DESC
+                AND change_detected_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+            ORDER BY change_detected_at DESC
         """)
 
         result = self.conn.execute(query, {"ride_id": ride_id, "hours": hours})
@@ -152,13 +152,13 @@ class RideStatusChangeRepository:
             List of dictionaries with uptime events
         """
         query = text("""
-            SELECT change_id, ride_id, changed_at, old_status,
+            SELECT change_id, ride_id, change_detected_at, previous_status,
                    new_status, downtime_duration_minutes, created_at
             FROM ride_status_changes
             WHERE ride_id = :ride_id
                 AND new_status = TRUE
-                AND changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-            ORDER BY changed_at DESC
+                AND change_detected_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+            ORDER BY change_detected_at DESC
         """)
 
         result = self.conn.execute(query, {"ride_id": ride_id, "hours": hours})
@@ -183,17 +183,17 @@ class RideStatusChangeRepository:
         """
         if park_id:
             query = text("""
-                SELECT rsc.change_id, rsc.ride_id, rsc.changed_at,
-                       rsc.old_status, rsc.new_status,
+                SELECT rsc.change_id, rsc.ride_id, rsc.change_detected_at,
+                       rsc.previous_status, rsc.new_status,
                        rsc.downtime_duration_minutes,
                        r.name as ride_name, r.park_id,
                        p.name as park_name
                 FROM ride_status_changes rsc
                 INNER JOIN rides r ON rsc.ride_id = r.ride_id
                 INNER JOIN parks p ON r.park_id = p.park_id
-                WHERE rsc.changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+                WHERE rsc.change_detected_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
                     AND r.park_id = :park_id
-                ORDER BY rsc.changed_at DESC
+                ORDER BY rsc.change_detected_at DESC
                 LIMIT :limit
             """)
             result = self.conn.execute(query, {
@@ -203,16 +203,16 @@ class RideStatusChangeRepository:
             })
         else:
             query = text("""
-                SELECT rsc.change_id, rsc.ride_id, rsc.changed_at,
-                       rsc.old_status, rsc.new_status,
+                SELECT rsc.change_id, rsc.ride_id, rsc.change_detected_at,
+                       rsc.previous_status, rsc.new_status,
                        rsc.downtime_duration_minutes,
                        r.name as ride_name, r.park_id,
                        p.name as park_name
                 FROM ride_status_changes rsc
                 INNER JOIN rides r ON rsc.ride_id = r.ride_id
                 INNER JOIN parks p ON r.park_id = p.park_id
-                WHERE rsc.changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-                ORDER BY rsc.changed_at DESC
+                WHERE rsc.change_detected_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+                ORDER BY rsc.change_detected_at DESC
                 LIMIT :limit
             """)
             result = self.conn.execute(query, {"hours": hours, "limit": limit})
@@ -238,14 +238,14 @@ class RideStatusChangeRepository:
         """
         if park_id:
             query = text("""
-                SELECT rsc.change_id, rsc.ride_id, rsc.changed_at,
+                SELECT rsc.change_id, rsc.ride_id, rsc.change_detected_at,
                        rsc.downtime_duration_minutes,
                        r.name as ride_name, r.park_id,
                        p.name as park_name
                 FROM ride_status_changes rsc
                 INNER JOIN rides r ON rsc.ride_id = r.ride_id
                 INNER JOIN parks p ON r.park_id = p.park_id
-                WHERE rsc.changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+                WHERE rsc.change_detected_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
                     AND rsc.new_status = FALSE
                     AND rsc.downtime_duration_minutes IS NOT NULL
                     AND r.park_id = :park_id
@@ -259,14 +259,14 @@ class RideStatusChangeRepository:
             })
         else:
             query = text("""
-                SELECT rsc.change_id, rsc.ride_id, rsc.changed_at,
+                SELECT rsc.change_id, rsc.ride_id, rsc.change_detected_at,
                        rsc.downtime_duration_minutes,
                        r.name as ride_name, r.park_id,
                        p.name as park_name
                 FROM ride_status_changes rsc
                 INNER JOIN rides r ON rsc.ride_id = r.ride_id
                 INNER JOIN parks p ON r.park_id = p.park_id
-                WHERE rsc.changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+                WHERE rsc.change_detected_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
                     AND rsc.new_status = FALSE
                     AND rsc.downtime_duration_minutes IS NOT NULL
                 ORDER BY rsc.downtime_duration_minutes DESC
@@ -298,7 +298,7 @@ class RideStatusChangeRepository:
                 SUM(CASE WHEN new_status = FALSE THEN 1 ELSE 0 END) as to_closed
             FROM ride_status_changes
             WHERE ride_id = :ride_id
-                AND changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+                AND change_detected_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
         """)
 
         result = self.conn.execute(query, {"ride_id": ride_id, "hours": hours})

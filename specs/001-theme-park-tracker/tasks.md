@@ -66,9 +66,9 @@ Based on plan.md project structure:
 - [X] T023 Implement backend/src/database/repositories/park_repository.py for park CRUD operations
 - [X] T024 Implement backend/src/database/repositories/ride_repository.py for ride CRUD operations
 - [X] T025 Implement backend/src/database/repositories/stats_repository.py for statistics queries
-- [ ] T025a Implement backend/src/database/repositories/snapshot_repository.py (RideStatusSnapshotRepository, ParkActivitySnapshotRepository) - required by collect_snapshots.py
-- [ ] T025b Implement backend/src/database/repositories/status_change_repository.py (RideStatusChangeRepository) - required by collect_snapshots.py
-- [ ] T025c Implement backend/src/database/repositories/aggregation_repository.py (AggregationLogRepository) - required by aggregate_daily.py
+- [X] T025a Implement backend/src/database/repositories/snapshot_repository.py (RideStatusSnapshotRepository, ParkActivitySnapshotRepository) - required by collect_snapshots.py
+- [X] T025b Implement backend/src/database/repositories/status_change_repository.py (RideStatusChangeRepository) - required by collect_snapshots.py
+- [X] T025c Implement backend/src/database/repositories/aggregation_repository.py (AggregationLogRepository) - required by aggregate_daily.py
 
 ### Ride Classification System (FR-022 to FR-032)
 

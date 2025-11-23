@@ -130,8 +130,8 @@ def _create_schema(conn: Connection):
         CREATE TABLE ride_status_changes (
             change_id INTEGER PRIMARY KEY AUTOINCREMENT,
             ride_id INTEGER NOT NULL,
-            changed_at TEXT NOT NULL,
-            old_status INTEGER NOT NULL,
+            change_detected_at TEXT NOT NULL,
+            previous_status INTEGER NOT NULL,
             new_status INTEGER NOT NULL,
             downtime_duration_minutes INTEGER,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

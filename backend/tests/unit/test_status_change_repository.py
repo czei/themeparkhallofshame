@@ -34,8 +34,8 @@ class TestRideStatusChangeRepository:
         repo = RideStatusChangeRepository(sqlite_connection)
         change_data = {
             'ride_id': ride_id,
-            'changed_at': datetime.now(),
-            'old_status': True,
+            'change_detected_at': datetime.now(),
+            'previous_status': True,
             'new_status': False,
             'downtime_duration_minutes': 120
         }
@@ -56,10 +56,10 @@ class TestRideStatusChangeRepository:
         repo = RideStatusChangeRepository(sqlite_connection)
 
         # Insert 2 status changes
-        repo.insert({'ride_id': ride_id, 'changed_at': datetime.now(),
-                    'old_status': 1, 'new_status': 0, 'downtime_duration_minutes': 60})
-        repo.insert({'ride_id': ride_id, 'changed_at': datetime.now(),
-                    'old_status': 0, 'new_status': 1, 'downtime_duration_minutes': 120})
+        repo.insert({'ride_id': ride_id, 'change_detected_at': datetime.now(),
+                    'previous_status': 1, 'new_status': 0, 'downtime_duration_minutes': 60})
+        repo.insert({'ride_id': ride_id, 'change_detected_at': datetime.now(),
+                    'previous_status': 0, 'new_status': 1, 'downtime_duration_minutes': 120})
 
         latest = repo.get_latest_by_ride(ride_id)
 
@@ -86,12 +86,12 @@ class TestRideStatusChangeRepository:
         repo = RideStatusChangeRepository(sqlite_connection)
 
         # Insert changes: 2 to open, 1 to closed
-        repo.insert({'ride_id': ride_id, 'changed_at': datetime.now(),
-                    'old_status': 0, 'new_status': 1, 'downtime_duration_minutes': None})
-        repo.insert({'ride_id': ride_id, 'changed_at': datetime.now(),
-                    'old_status': 0, 'new_status': 1, 'downtime_duration_minutes': None})
-        repo.insert({'ride_id': ride_id, 'changed_at': datetime.now(),
-                    'old_status': 1, 'new_status': 0, 'downtime_duration_minutes': 60})
+        repo.insert({'ride_id': ride_id, 'change_detected_at': datetime.now(),
+                    'previous_status': 0, 'new_status': 1, 'downtime_duration_minutes': None})
+        repo.insert({'ride_id': ride_id, 'change_detected_at': datetime.now(),
+                    'previous_status': 0, 'new_status': 1, 'downtime_duration_minutes': None})
+        repo.insert({'ride_id': ride_id, 'change_detected_at': datetime.now(),
+                    'previous_status': 1, 'new_status': 0, 'downtime_duration_minutes': 60})
 
         counts = repo.count_changes_by_ride(ride_id)
 

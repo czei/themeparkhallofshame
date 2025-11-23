@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from ..utils.logger import logger
+from utils.logger import logger
 
 
 class StatusChangeDetector:

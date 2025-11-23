@@ -11,10 +11,10 @@ from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
-from .pattern_matcher import PatternMatcher, PatternMatchResult
-from .ai_classifier import AIClassifier, AIClassificationResult, AIClassifierError
-from ..utils.logger import logger
-from ..database.connection import get_db_connection
+from classifier.pattern_matcher import PatternMatcher, PatternMatchResult
+from classifier.ai_classifier import AIClassifier, AIClassificationResult, AIClassifierError
+from utils.logger import logger
+from database.connection import get_db_connection
 from sqlalchemy import text
 
 

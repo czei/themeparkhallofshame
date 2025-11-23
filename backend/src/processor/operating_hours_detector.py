@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from ..utils.logger import logger
+from utils.logger import logger
 
 
 class OperatingHoursDetector:
@@ -84,6 +84,12 @@ class OperatingHoursDetector:
         # Convert UTC times back to park's local timezone for display
         first_activity_utc = row.first_activity
         last_activity_utc = row.last_activity
+
+        # Convert string datetime to datetime object if needed (SQLite compatibility)
+        if isinstance(first_activity_utc, str):
+            first_activity_utc = datetime.fromisoformat(first_activity_utc.replace(' ', 'T'))
+        if isinstance(last_activity_utc, str):
+            last_activity_utc = datetime.fromisoformat(last_activity_utc.replace(' ', 'T'))
 
         first_activity_local = first_activity_utc.replace(tzinfo=ZoneInfo('UTC')).astimezone(tz)
         last_activity_local = last_activity_utc.replace(tzinfo=ZoneInfo('UTC')).astimezone(tz)

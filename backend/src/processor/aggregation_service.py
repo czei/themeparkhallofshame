@@ -9,9 +9,9 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from ..utils.logger import logger
-from .operating_hours_detector import OperatingHoursDetector
-from .status_change_detector import StatusChangeDetector
+from utils.logger import logger
+from processor.operating_hours_detector import OperatingHoursDetector
+from processor.status_change_detector import StatusChangeDetector
 
 
 class AggregationService:

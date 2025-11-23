@@ -1,0 +1,32 @@
+# Environment variables and secrets
+.env
+.env.local
+*.key
+*.pem
+
+# Database credentials
+config/database.yml
+config/secrets.yml
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Dependencies (if you add any)
+node_modules/
+vendor/
+
+# Backup files
+*.bak
+*.backup

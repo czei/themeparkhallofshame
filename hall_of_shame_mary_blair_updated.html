@@ -1,0 +1,1480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Theme Park Hall of Shame</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=Space+Grotesk:wght@400;600;700&display=swap');
+        
+        :root {
+            --coral: #FF6B5A;
+            --turquoise: #00B8C5;
+            --gold: #FFB627;
+            --soft-pink: #FF9BAA;
+            --deep-teal: #007B8A;
+            --warm-white: #FFF8F0;
+            --charcoal: #2A2A2A;
+            --light-gray: #F5F5F5;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--warm-white);
+            color: var(--charcoal);
+            line-height: 1.5;
+        }
+
+        /* Geometric Top Bar */
+        .geometric-bar {
+            height: 12px;
+            background: linear-gradient(
+                to right,
+                var(--coral) 0%,
+                var(--coral) 25%,
+                var(--turquoise) 25%,
+                var(--turquoise) 50%,
+                var(--gold) 50%,
+                var(--gold) 75%,
+                var(--soft-pink) 75%,
+                var(--soft-pink) 100%
+            );
+        }
+
+        /* Sponsorship Section - Mary Blair Collage Style */
+        .sponsor-section {
+            background: var(--warm-white);
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+            min-height: 300px;
+        }
+
+        /* Base layer - large blocks */
+        .geo-base-1 {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 35%;
+            height: 100%;
+            background: var(--coral);
+        }
+
+        .geo-base-2 {
+            position: absolute;
+            left: 35%;
+            top: 0;
+            width: 30%;
+            height: 100%;
+            background: var(--turquoise);
+        }
+
+        .geo-base-3 {
+            position: absolute;
+            right: 0;
+            top: 0;
+            width: 35%;
+            height: 100%;
+            background: var(--gold);
+        }
+
+        /* Overlapping rectangular shapes - collage style */
+        .geo-rect-coral-1 {
+            position: absolute;
+            left: 8%;
+            top: 20px;
+            width: 140px;
+            height: 80px;
+            background: #FF8B7A;
+        }
+
+        .geo-rect-coral-2 {
+            position: absolute;
+            left: 20%;
+            bottom: 30px;
+            width: 100px;
+            height: 100px;
+            background: #FF4A36;
+        }
+
+        .geo-rect-teal-1 {
+            position: absolute;
+            left: 30%;
+            top: 15px;
+            width: 120px;
+            height: 70px;
+            background: #00D4E0;
+        }
+
+        .geo-rect-teal-2 {
+            position: absolute;
+            left: 38%;
+            bottom: 20px;
+            width: 90px;
+            height: 90px;
+            background: #005F6A;
+        }
+
+        .geo-rect-gold-1 {
+            position: absolute;
+            right: 20%;
+            top: 25px;
+            width: 130px;
+            height: 75px;
+            background: #FFD052;
+        }
+
+        .geo-rect-gold-2 {
+            position: absolute;
+            right: 8%;
+            bottom: 35px;
+            width: 110px;
+            height: 85px;
+            background: #FFA500;
+        }
+
+        .geo-rect-pink-1 {
+            position: absolute;
+            right: 30%;
+            top: 40px;
+            width: 95px;
+            height: 95px;
+            background: var(--soft-pink);
+        }
+
+        .geo-rect-pink-2 {
+            position: absolute;
+            left: 45%;
+            top: 35px;
+            width: 85px;
+            height: 110px;
+            background: #FFB5C5;
+        }
+
+        /* Small accent squares */
+        .geo-square-1 {
+            position: absolute;
+            left: 15%;
+            top: 50%;
+            width: 45px;
+            height: 45px;
+            background: var(--deep-teal);
+        }
+
+        .geo-square-2 {
+            position: absolute;
+            right: 25%;
+            bottom: 20%;
+            width: 50px;
+            height: 50px;
+            background: #CC5544;
+        }
+
+        .geo-square-3 {
+            position: absolute;
+            left: 42%;
+            bottom: 15%;
+            width: 40px;
+            height: 40px;
+            background: #00A0AA;
+        }
+
+        /* Tall vertical bars */
+        .geo-bar-1 {
+            position: absolute;
+            left: 25%;
+            top: 0;
+            width: 35px;
+            height: 100%;
+            background: #FF6B8A;
+        }
+
+        .geo-bar-2 {
+            position: absolute;
+            right: 35%;
+            top: 0;
+            width: 30px;
+            height: 100%;
+            background: #FFE066;
+        }
+
+        /* Content box with strong border */
+        .sponsor-content-expanded {
+            position: relative;
+            z-index: 100;
+            background: white;
+            padding: 40px 50px;
+            border: 6px solid var(--charcoal);
+            box-shadow: 12px 12px 0 rgba(0, 0, 0, 0.15);
+            display: flex;
+            align-items: center;
+            gap: 40px;
+            max-width: 900px;
+        }
+
+        .sponsor-led-display {
+            flex-shrink: 0;
+        }
+
+        .led-gif {
+            width: 280px;
+            height: 140px;
+            object-fit: cover;
+            object-position: center 60%;
+            border: 4px solid var(--charcoal);
+            display: block;
+        }
+
+        .sponsor-text-content {
+            flex: 1;
+            text-align: left;
+        }
+
+        .sponsor-tagline {
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--deep-teal);
+            margin-bottom: 12px;
+        }
+
+        .sponsor-brand {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 2.2rem;
+            font-weight: 800;
+            color: var(--charcoal);
+            letter-spacing: -0.5px;
+            margin-bottom: 10px;
+            line-height: 1.1;
+        }
+
+        .sponsor-brand a {
+            color: var(--charcoal);
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        .sponsor-brand a:hover {
+            color: var(--coral);
+        }
+
+        .sponsor-description {
+            font-size: 0.95rem;
+            color: var(--charcoal);
+            opacity: 0.8;
+            line-height: 1.4;
+        }
+
+        /* Header Section */
+        .header-section {
+            background: var(--warm-white);
+            padding: 60px 20px 40px;
+            text-align: center;
+            position: relative;
+        }
+
+        /* Geometric Background Elements */
+        .header-section::before {
+            content: '';
+            position: absolute;
+            top: 20px;
+            right: 10%;
+            width: 120px;
+            height: 120px;
+            background: var(--coral);
+            opacity: 0.15;
+            clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+        }
+
+        .header-section::after {
+            content: '';
+            position: absolute;
+            bottom: 20px;
+            left: 8%;
+            width: 80px;
+            height: 80px;
+            background: var(--turquoise);
+            opacity: 0.15;
+            border-radius: 50%;
+        }
+
+        .established {
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 3px;
+            color: var(--deep-teal);
+            text-transform: uppercase;
+            margin-bottom: 15px;
+        }
+
+        h1 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 4rem;
+            font-weight: 800;
+            letter-spacing: -1px;
+            line-height: 0.95;
+            margin-bottom: 20px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .title-line-1 {
+            color: var(--coral);
+        }
+
+        .title-line-2 {
+            color: var(--deep-teal);
+        }
+
+        .subtitle {
+            font-size: 1rem;
+            font-weight: 400;
+            color: var(--charcoal);
+            max-width: 600px;
+            margin: 0 auto;
+            opacity: 0.8;
+        }
+
+        .about-link {
+            display: inline-block;
+            margin-top: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: var(--coral);
+            text-decoration: none;
+            border-bottom: 2px solid var(--coral);
+            padding-bottom: 3px;
+            transition: all 0.3s ease;
+        }
+
+        .about-link:hover {
+            color: var(--deep-teal);
+            border-bottom-color: var(--deep-teal);
+        }
+
+        /* Modal Overlay */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(42, 42, 42, 0.85);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal-content {
+            background: var(--warm-white);
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+            position: relative;
+            border: 6px solid var(--charcoal);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(30px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        /* Geometric decorations in modal */
+        .modal-geo-1 {
+            position: absolute;
+            top: -20px;
+            right: 40px;
+            width: 80px;
+            height: 80px;
+            background: var(--coral);
+            z-index: -1;
+        }
+
+        .modal-geo-2 {
+            position: absolute;
+            bottom: -15px;
+            left: 50px;
+            width: 60px;
+            height: 100px;
+            background: var(--turquoise);
+            z-index: -1;
+        }
+
+        .modal-geo-3 {
+            position: absolute;
+            top: 50%;
+            right: -25px;
+            width: 50px;
+            height: 50px;
+            background: var(--gold);
+            transform: translateY(-50%) rotate(45deg);
+            z-index: -1;
+        }
+
+        .modal-inner {
+            padding: 50px;
+            position: relative;
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 40px;
+            height: 40px;
+            background: var(--charcoal);
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: white;
+            font-weight: 300;
+        }
+
+        .modal-close:hover {
+            background: var(--coral);
+            transform: rotate(90deg);
+        }
+
+        .modal-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: var(--deep-teal);
+            margin-bottom: 10px;
+            letter-spacing: -0.5px;
+            line-height: 1.1;
+        }
+
+        .modal-subtitle {
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--coral);
+            margin-bottom: 30px;
+        }
+
+        .modal-body {
+            font-size: 1rem;
+            line-height: 1.8;
+            color: var(--charcoal);
+        }
+
+        .modal-body p {
+            margin-bottom: 20px;
+        }
+
+        .modal-body strong {
+            font-weight: 700;
+            color: var(--deep-teal);
+        }
+
+        /* Navigation */
+        .nav-container {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+
+        .nav-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 4px;
+            background: var(--charcoal);
+            padding: 4px;
+        }
+
+        .nav-item {
+            background: var(--warm-white);
+            padding: 20px;
+            text-align: center;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.9rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: none;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .nav-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            transition: left 0.3s ease;
+        }
+
+        .nav-item:nth-child(1)::before { background: var(--coral); }
+        .nav-item:nth-child(2)::before { background: var(--turquoise); }
+        .nav-item:nth-child(3)::before { background: var(--gold); }
+        .nav-item:nth-child(4)::before { background: var(--soft-pink); }
+
+        .nav-item:hover::before {
+            left: 0;
+        }
+
+        .nav-item:hover {
+            color: white;
+        }
+
+        .nav-item.active {
+            color: white;
+        }
+
+        .nav-item.active:nth-child(1) { background: var(--coral); }
+        .nav-item.active:nth-child(2) { background: var(--turquoise); }
+        .nav-item.active:nth-child(3) { background: var(--gold); }
+        .nav-item.active:nth-child(4) { background: var(--soft-pink); }
+
+        .nav-item span {
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Time Selector */
+        .time-selector {
+            max-width: 1200px;
+            margin: 30px auto;
+            padding: 0 20px;
+            display: flex;
+            justify-content: center;
+            gap: 0;
+        }
+
+        /* Park Filter */
+        .park-filter {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0;
+        }
+
+        .filter-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--charcoal);
+            margin-right: 15px;
+            opacity: 0.7;
+        }
+
+        .filter-toggle {
+            display: flex;
+            gap: 0;
+            border: 3px solid var(--charcoal);
+            background: white;
+        }
+
+        .filter-btn {
+            padding: 14px 35px;
+            background: white;
+            border: none;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: var(--charcoal);
+            position: relative;
+        }
+
+        .filter-btn:first-child {
+            border-right: 2px solid var(--light-gray);
+        }
+
+        .filter-btn:hover {
+            background: var(--light-gray);
+        }
+
+        .filter-btn.active {
+            background: var(--soft-pink);
+            color: white;
+        }
+
+        .time-btn {
+            padding: 16px 40px;
+            background: white;
+            border: none;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.85rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: var(--charcoal);
+        }
+
+        .time-btn:first-child { border-left: 3px solid var(--coral); }
+        .time-btn:nth-child(2) { border-left: 3px solid var(--turquoise); border-right: 3px solid var(--turquoise); }
+        .time-btn:last-child { border-right: 3px solid var(--gold); }
+
+        .time-btn:hover {
+            background: var(--light-gray);
+        }
+
+        .time-btn.active {
+            background: var(--charcoal);
+            color: white;
+        }
+
+        /* Live Status */
+        .live-status {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--charcoal);
+        }
+
+        .live-indicator {
+            width: 10px;
+            height: 10px;
+            background: var(--coral);
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.9); }
+        }
+
+        /* Content Wrapper */
+        .content-wrapper {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 3px;
+            margin-bottom: 60px;
+            background: var(--charcoal);
+            padding: 3px;
+        }
+
+        .stat-block {
+            background: white;
+            padding: 40px 30px;
+            text-align: center;
+            position: relative;
+        }
+
+        .stat-block:nth-child(1) { border-left: 4px solid var(--coral); }
+        .stat-block:nth-child(2) { border-left: 4px solid var(--turquoise); }
+        .stat-block:nth-child(3) { border-left: 4px solid var(--gold); }
+
+        .stat-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--charcoal);
+            opacity: 0.6;
+            margin-bottom: 12px;
+        }
+
+        .stat-value {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 3.5rem;
+            font-weight: 800;
+            line-height: 1;
+        }
+
+        .stat-block:nth-child(1) .stat-value { color: var(--coral); }
+        .stat-block:nth-child(2) .stat-value { color: var(--turquoise); }
+        .stat-block:nth-child(3) .stat-value { color: var(--gold); }
+
+        /* Section Headers */
+        .section-header {
+            margin: 60px 0 30px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .section-marker {
+            width: 8px;
+            height: 60px;
+            flex-shrink: 0;
+        }
+
+        .section-header:nth-of-type(1) .section-marker { background: var(--coral); }
+        .section-header:nth-of-type(2) .section-marker { background: var(--turquoise); }
+        .section-header:nth-of-type(3) .section-marker { background: var(--gold); }
+
+        .section-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--charcoal);
+            text-transform: uppercase;
+            letter-spacing: -0.5px;
+        }
+
+        /* Data Tables */
+        .data-container {
+            background: white;
+            border: 3px solid var(--charcoal);
+            margin-bottom: 40px;
+        }
+
+        .table-header {
+            padding: 20px 30px;
+            background: var(--charcoal);
+            color: white;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: var(--light-gray);
+        }
+
+        th {
+            padding: 18px 20px;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--charcoal);
+            text-align: left;
+        }
+
+        tbody tr {
+            border-bottom: 1px solid var(--light-gray);
+            transition: background 0.2s ease;
+        }
+
+        tbody tr:hover {
+            background: rgba(255, 107, 90, 0.05);
+        }
+
+        td {
+            padding: 20px;
+            font-size: 0.95rem;
+            color: var(--charcoal);
+        }
+
+        .rank {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 2rem;
+            font-weight: 800;
+            color: var(--coral);
+        }
+
+        .park-name {
+            font-weight: 700;
+            color: var(--deep-teal);
+        }
+
+        /* Status Indicators */
+        .status-badge {
+            display: inline-block;
+            padding: 6px 16px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-radius: 2px;
+        }
+
+        .status-down {
+            background: var(--coral);
+            color: white;
+        }
+
+        .status-running {
+            background: var(--turquoise);
+            color: white;
+        }
+
+        /* Trend Indicators */
+        .trend {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            font-size: 0.9rem;
+        }
+
+        .trend-up { color: var(--coral); }
+        .trend-down { color: var(--turquoise); }
+        .trend-neutral { color: var(--gold); }
+
+        /* Downtime Visualization */
+        .downtime-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .downtime-bar {
+            flex: 1;
+            height: 12px;
+            background: var(--light-gray);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .downtime-fill {
+            height: 100%;
+            transition: width 0.5s ease;
+        }
+
+        /* Geometric Shapes for Visual Interest */
+        .shape-coral { background: var(--coral); }
+        .shape-turquoise { background: var(--turquoise); }
+        .shape-gold { background: var(--gold); }
+
+        /* Footer */
+        .footer {
+            margin-top: 80px;
+            padding: 40px 20px;
+            background: var(--charcoal);
+            color: var(--warm-white);
+            text-align: center;
+        }
+
+        .footer-text {
+            font-size: 0.85rem;
+            opacity: 0.8;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2.5rem;
+            }
+
+            .nav-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .park-filter {
+                flex-direction: column;
+                gap: 12px;
+            }
+
+            .filter-label {
+                margin-right: 0;
+            }
+
+            .filter-toggle {
+                width: 100%;
+            }
+
+            .filter-btn {
+                flex: 1;
+            }
+
+            .time-selector {
+                flex-direction: column;
+            }
+
+            .time-btn {
+                border: none !important;
+                border-top: 3px solid var(--coral) !important;
+            }
+
+            table {
+                font-size: 0.85rem;
+            }
+
+            th, td {
+                padding: 12px 10px;
+            }
+
+            /* Simplify geometric composition on mobile */
+            .sponsor-section {
+                min-height: 180px;
+            }
+
+            .geo-rect-coral-1,
+            .geo-rect-teal-1,
+            .geo-rect-gold-1,
+            .geo-rect-pink-1 {
+                width: 90px;
+                height: 60px;
+            }
+
+            .geo-rect-coral-2,
+            .geo-rect-teal-2,
+            .geo-rect-gold-2,
+            .geo-rect-pink-2 {
+                width: 70px;
+                height: 70px;
+            }
+
+            .geo-square-1,
+            .geo-square-2,
+            .geo-square-3 {
+                width: 30px;
+                height: 30px;
+            }
+
+            .geo-bar-1,
+            .geo-bar-2 {
+                width: 20px;
+            }
+
+            .sponsor-content-expanded {
+                flex-direction: column;
+                padding: 25px;
+                gap: 25px;
+            }
+
+            .led-gif {
+                width: 220px;
+                height: 110px;
+            }
+
+            .sponsor-text-content {
+                text-align: center;
+            }
+
+            .sponsor-brand {
+                font-size: 1.6rem;
+            }
+
+            .sponsor-description {
+                font-size: 0.85rem;
+            }
+
+            .modal-content {
+                max-height: 90vh;
+                border: 4px solid var(--charcoal);
+            }
+
+            .modal-inner {
+                padding: 30px 25px;
+            }
+
+            .modal-title {
+                font-size: 1.8rem;
+            }
+
+            .modal-body {
+                font-size: 0.95rem;
+            }
+
+            .modal-geo-1,
+            .modal-geo-2,
+            .modal-geo-3 {
+                display: none; /* Hide decorative elements on mobile */
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Geometric Top Bar -->
+    <div class="geometric-bar"></div>
+
+    <!-- Sponsorship Section -->
+    <div class="sponsor-section">
+        <!-- Base color blocks -->
+        <div class="geo-base-1"></div>
+        <div class="geo-base-2"></div>
+        <div class="geo-base-3"></div>
+        
+        <!-- Overlapping rectangles - collage style -->
+        <div class="geo-rect-coral-1"></div>
+        <div class="geo-rect-coral-2"></div>
+        <div class="geo-rect-teal-1"></div>
+        <div class="geo-rect-teal-2"></div>
+        <div class="geo-rect-gold-1"></div>
+        <div class="geo-rect-gold-2"></div>
+        <div class="geo-rect-pink-1"></div>
+        <div class="geo-rect-pink-2"></div>
+        
+        <!-- Small accent squares -->
+        <div class="geo-square-1"></div>
+        <div class="geo-square-2"></div>
+        <div class="geo-square-3"></div>
+        
+        <!-- Vertical bars -->
+        <div class="geo-bar-1"></div>
+        <div class="geo-bar-2"></div>
+        
+        <div class="sponsor-content-expanded">
+            <div class="sponsor-led-display">
+                <img src="http://themeparkwaits.com/cdn/shop/files/disney-furniture-brick-square-small3.gif?v=1738711333&width=600" 
+                     alt="ThemeParkWaits LED Display" 
+                     class="led-gif">
+            </div>
+            <div class="sponsor-text-content">
+                <div class="sponsor-tagline">Powered by the same live data you love</div>
+                <div class="sponsor-brand">
+                    <a href="http://www.themeparkwaits.com" target="_blank">ThemeParkWaits.com</a>
+                </div>
+                <div class="sponsor-description">
+                    Track your favorite parks in real-time with our scrolling LED display
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <div class="header-section">
+        <div class="established">Est. 2025</div>
+        <h1>
+            <div class="title-line-1">THEME PARK</div>
+            <div class="title-line-2">HALL OF SHAME</div>
+        </h1>
+        <div class="subtitle">
+            Tracking operational performance across major theme parks
+        </div>
+        <a href="#" class="about-link" id="about-link">About This Project</a>
+    </div>
+
+    <!-- Navigation -->
+    <div class="nav-container">
+        <div class="nav-grid">
+            <button class="nav-item active"><span>Parks</span></button>
+            <button class="nav-item"><span>Downtime</span></button>
+            <button class="nav-item"><span>Wait Times</span></button>
+            <button class="nav-item"><span>Trends</span></button>
+        </div>
+    </div>
+
+    <!-- Park Filter -->
+    <div class="park-filter">
+        <div class="filter-label">Show Parks:</div>
+        <div class="filter-toggle">
+            <button class="filter-btn active">Disney & Universal</button>
+            <button class="filter-btn">All Parks</button>
+        </div>
+    </div>
+
+    <!-- Time Selector -->
+    <div class="time-selector">
+        <button class="time-btn active">Today</button>
+        <button class="time-btn">7 Days</button>
+        <button class="time-btn">30 Days</button>
+    </div>
+
+    <!-- Live Status -->
+    <div class="live-status">
+        <div class="live-indicator"></div>
+        <span>Live Data</span>
+    </div>
+
+    <!-- Content -->
+    <div class="content-wrapper">
+        <!-- Statistics -->
+        <div class="stats-grid">
+            <div class="stat-block">
+                <div class="stat-label">Parks Tracked</div>
+                <div class="stat-value">127</div>
+            </div>
+            <div class="stat-block">
+                <div class="stat-label">Peak Downtime</div>
+                <div class="stat-value">42.5h</div>
+            </div>
+            <div class="stat-block">
+                <div class="stat-label">Currently Down</div>
+                <div class="stat-value">38</div>
+            </div>
+        </div>
+
+        <!-- Parks Table -->
+        <div class="section-header">
+            <div class="section-marker"></div>
+            <h2 class="section-title">Parks with Most Downtime</h2>
+        </div>
+
+        <div class="data-container">
+            <div class="table-header">Weekly Performance Rankings</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Rank</th>
+                        <th>Park</th>
+                        <th>Location</th>
+                        <th>Total Downtime</th>
+                        <th>Affected</th>
+                        <th>Trend</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="rank">1</td>
+                        <td class="park-name">Six Flags Great Adventure</td>
+                        <td>New Jersey</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>42.5h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-coral" style="width: 85%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td>12/35</td>
+                        <td><span class="trend trend-up">â†‘ 23%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="rank">2</td>
+                        <td class="park-name">Cedar Point</td>
+                        <td>Ohio</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>38.2h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-coral" style="width: 76%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td>9/42</td>
+                        <td><span class="trend trend-up">â†‘ 15%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="rank">3</td>
+                        <td class="park-name">Universal Studios Orlando</td>
+                        <td>Florida</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>32.8h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-gold" style="width: 65%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td>8/38</td>
+                        <td><span class="trend trend-neutral">â†’ 0%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="rank">4</td>
+                        <td class="park-name">Knott's Berry Farm</td>
+                        <td>California</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>28.5h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-turquoise" style="width: 57%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td>7/32</td>
+                        <td><span class="trend trend-down">â†“ 8%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="rank">5</td>
+                        <td class="park-name">Disney World - Magic Kingdom</td>
+                        <td>Florida</td>
+                        <td>
+                            <div class="downtime-container">
+                                <span>24.3h</span>
+                                <div class="downtime-bar">
+                                    <div class="downtime-fill shape-turquoise" style="width: 48%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td>6/41</td>
+                        <td><span class="trend trend-down">â†“ 12%</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Individual Rides -->
+        <div class="section-header">
+            <div class="section-marker"></div>
+            <h2 class="section-title">Individual Ride Performance</h2>
+        </div>
+
+        <div class="data-container">
+            <div class="table-header">Highest Downtime Attractions</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Ride</th>
+                        <th>Park</th>
+                        <th>Status</th>
+                        <th>Today</th>
+                        <th>7-Day Avg</th>
+                        <th>Trend</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="park-name">Kingda Ka</td>
+                        <td>Six Flags Great Adventure</td>
+                        <td><span class="status-badge status-down">Down</span></td>
+                        <td>8.5h</td>
+                        <td>7.2h</td>
+                        <td><span class="trend trend-up">â†‘ 18%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Top Thrill Dragster</td>
+                        <td>Cedar Point</td>
+                        <td><span class="status-badge status-running">Running</span></td>
+                        <td>6.2h</td>
+                        <td>8.1h</td>
+                        <td><span class="trend trend-down">â†“ 23%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Hagrid's Motorbike Adventure</td>
+                        <td>Universal Islands of Adventure</td>
+                        <td><span class="status-badge status-running">Running</span></td>
+                        <td>5.8h</td>
+                        <td>6.4h</td>
+                        <td><span class="trend trend-down">â†“ 9%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Rise of the Resistance</td>
+                        <td>Disney Hollywood Studios</td>
+                        <td><span class="status-badge status-down">Down</span></td>
+                        <td>5.3h</td>
+                        <td>6.8h</td>
+                        <td><span class="trend trend-down">â†“ 22%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Xcelerator</td>
+                        <td>Knott's Berry Farm</td>
+                        <td><span class="status-badge status-running">Running</span></td>
+                        <td>4.9h</td>
+                        <td>5.1h</td>
+                        <td><span class="trend trend-down">â†“ 4%</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Wait Times -->
+        <div class="section-header">
+            <div class="section-marker"></div>
+            <h2 class="section-title">Longest Wait Times</h2>
+        </div>
+
+        <div class="data-container">
+            <div class="table-header">Current Queue Performance</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Ride</th>
+                        <th>Park</th>
+                        <th>Current</th>
+                        <th>Average</th>
+                        <th>Peak</th>
+                        <th>Trend</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="park-name">Flight of Passage</td>
+                        <td>Disney Animal Kingdom</td>
+                        <td>185 min</td>
+                        <td>142 min</td>
+                        <td>210 min</td>
+                        <td><span class="trend trend-up">â†‘ 30%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Hagrid's Motorbike Adventure</td>
+                        <td>Universal Islands of Adventure</td>
+                        <td>165 min</td>
+                        <td>128 min</td>
+                        <td>190 min</td>
+                        <td><span class="trend trend-up">â†‘ 29%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Seven Dwarfs Mine Train</td>
+                        <td>Disney Magic Kingdom</td>
+                        <td>145 min</td>
+                        <td>98 min</td>
+                        <td>165 min</td>
+                        <td><span class="trend trend-up">â†‘ 48%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Cosmic Rewind</td>
+                        <td>Disney Epcot</td>
+                        <td>130 min</td>
+                        <td>115 min</td>
+                        <td>155 min</td>
+                        <td><span class="trend trend-up">â†‘ 13%</span></td>
+                    </tr>
+                    <tr>
+                        <td class="park-name">Steel Vengeance</td>
+                        <td>Cedar Point</td>
+                        <td>120 min</td>
+                        <td>95 min</td>
+                        <td>140 min</td>
+                        <td><span class="trend trend-up">â†‘ 26%</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- About Modal -->
+    <div class="modal-overlay" id="about-modal">
+        <div class="modal-content">
+            <div class="modal-geo-1"></div>
+            <div class="modal-geo-2"></div>
+            <div class="modal-geo-3"></div>
+            
+            <div class="modal-inner">
+                <button class="modal-close" id="modal-close">&times;</button>
+                
+                <div class="modal-subtitle">Our Mission</div>
+                <h2 class="modal-title">About This Project</h2>
+                
+                <div class="modal-body">
+                    <p><strong>This site is not meant to denigrate the hard-working maintenance engineers who keep these wonderful places running.</strong></p>
+                    
+                    <p>[Your essay text goes here. Replace this placeholder with your full essay about maintenance, uptime, and the factors that affect ride availability.]</p>
+                    
+                    <p>Uptime is largely a factor of the money that is invested in maintenance. Theme park attractions are incredibly complex mechanical, electrical, and software systems that require constant care and attention.</p>
+                    
+                    <p>[Continue with your essay explaining the purpose of this tracker and your respect for maintenance professionals...]</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+        <div class="geometric-bar" style="height: 8px; margin-bottom: 20px;"></div>
+        <div class="footer-text">
+            Â© 2025 Theme Park Hall of Shame Â· A ThemeParkWaits.com Service
+        </div>
+        <div class="footer-text" style="margin-top: 15px; font-size: 0.75rem;">
+            Data provided by <a href="https://queue-times.com" target="_blank" style="color: var(--coral); text-decoration: none; font-weight: 700;">Queue-Times.com</a>
+        </div>
+    </div>
+
+    <script>
+        // Modal
+        const aboutLink = document.getElementById('about-link');
+        const modal = document.getElementById('about-modal');
+        const modalClose = document.getElementById('modal-close');
+
+        aboutLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden'; // Prevent background scrolling
+        });
+
+        modalClose.addEventListener('click', () => {
+            modal.classList.remove('active');
+            document.body.style.overflow = '';
+        });
+
+        // Close on overlay click
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.classList.remove('active');
+                document.body.style.overflow = '';
+            }
+        });
+
+        // Close on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && modal.classList.contains('active')) {
+                modal.classList.remove('active');
+                document.body.style.overflow = '';
+            }
+        });
+
+        // Navigation
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', function() {
+                document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+                this.classList.add('active');
+            });
+        });
+
+        // Park filter
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                // Here you would trigger data reload based on filter selection
+                console.log('Filter changed to:', this.textContent);
+            });
+        });
+
+        // Time buttons
+        document.querySelectorAll('.time-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+            });
+        });
+
+        // Animate bars
+        window.addEventListener('load', () => {
+            document.querySelectorAll('.downtime-fill').forEach(bar => {
+                const width = bar.style.width;
+                bar.style.width = '0';
+                setTimeout(() => {
+                    bar.style.width = width;
+                }, 100);
+            });
+        });
+    </script>
+</body>
+</html>

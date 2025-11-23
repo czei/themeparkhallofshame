@@ -60,12 +60,15 @@ Based on plan.md project structure:
 
 ### Data Collection Infrastructure
 
-- [ ] T020 Implement backend/src/collector/queue_times_client.py with tenacity retry logic (3 attempts, exponential backoff, handle Timeout/ConnectionError)
-- [ ] T021 Implement backend/src/collector/status_calculator.py for computed_is_open logic (wait_time > 0 OR (is_open = true AND wait_time = 0))
-- [ ] T022 Implement backend/src/collector/data_collection_service.py main collection orchestrator (fetch all parks, insert snapshots, detect status changes)
-- [ ] T023 Implement backend/src/database/repositories/park_repository.py for park CRUD operations
-- [ ] T024 Implement backend/src/database/repositories/ride_repository.py for ride CRUD operations
-- [ ] T025 Implement backend/src/database/repositories/stats_repository.py for statistics queries
+- [X] T020 Implement backend/src/collector/queue_times_client.py with tenacity retry logic (3 attempts, exponential backoff, handle Timeout/ConnectionError)
+- [X] T021 Implement backend/src/collector/status_calculator.py for computed_is_open logic (wait_time > 0 OR (is_open = true AND wait_time = 0))
+- [X] T022 Implement backend/src/scripts/collect_parks.py for park/ride collection and backend/src/scripts/collect_snapshots.py for snapshot collection (data_collection_service.py split into focused scripts - NOTE: collect_snapshots.py needs snapshot_repository.py and status_change_repository.py to be implemented)
+- [X] T023 Implement backend/src/database/repositories/park_repository.py for park CRUD operations
+- [X] T024 Implement backend/src/database/repositories/ride_repository.py for ride CRUD operations
+- [X] T025 Implement backend/src/database/repositories/stats_repository.py for statistics queries
+- [ ] T025a Implement backend/src/database/repositories/snapshot_repository.py (RideStatusSnapshotRepository, ParkActivitySnapshotRepository) - required by collect_snapshots.py
+- [ ] T025b Implement backend/src/database/repositories/status_change_repository.py (RideStatusChangeRepository) - required by collect_snapshots.py
+- [ ] T025c Implement backend/src/database/repositories/aggregation_repository.py (AggregationLogRepository) - required by aggregate_daily.py
 
 ### Ride Classification System (FR-022 to FR-032)
 
@@ -86,7 +89,7 @@ Based on plan.md project structure:
 - [ ] T037 Implement backend/src/processor/aggregation_service.py for daily/weekly/monthly/yearly stats calculation with aggregation_log tracking (FR-007, FR-045)
 - [ ] T038 Implement timezone-aware aggregation logic in aggregation_service.py (iterate through distinct park timezones, FR-045)
 - [ ] T039 Implement retry logic for aggregation with 3 attempts at 12:10 AM, 1:10 AM, 2:10 AM (FR-007)
-- [ ] T040 Create backend/scripts/aggregate_daily.py CLI script for daily aggregation job
+- [X] T040 Create backend/src/scripts/aggregate_daily.py CLI script for daily aggregation job (basic implementation complete, needs operating hours detector and full timezone logic)
 - [ ] T041 Create backend/scripts/cleanup_raw_data.py CLI script with safe cleanup using aggregation_log verification
 
 ### API Framework

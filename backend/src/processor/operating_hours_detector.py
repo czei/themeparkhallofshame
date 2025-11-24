@@ -102,14 +102,15 @@ class OperatingHoursDetector:
                    f"{first_activity_local.strftime('%H:%M')} - {last_activity_local.strftime('%H:%M')} "
                    f"({total_hours:.2f} hours)")
 
+        # Calculate operating minutes
+        operating_minutes = int(duration.total_seconds() / 60)
+
         return {
             "park_id": park_id,
-            "operating_date": operating_date,
-            "park_opened_at": first_activity_local.time(),
-            "park_closed_at": last_activity_local.time(),
-            "total_operating_hours": round(total_hours, 2),
-            "first_activity_detected_at": first_activity_utc,
-            "last_activity_detected_at": last_activity_utc,
+            "session_date": operating_date,
+            "session_start_utc": first_activity_utc,
+            "session_end_utc": last_activity_utc,
+            "operating_minutes": operating_minutes,
             "active_rides_count": row.active_rides_count,
             "open_ride_snapshots": row.open_ride_snapshots
         }
@@ -126,19 +127,15 @@ class OperatingHoursDetector:
         """
         query = text("""
             INSERT INTO park_operating_sessions (
-                park_id, operating_date, park_opened_at, park_closed_at,
-                total_operating_hours, first_activity_detected_at, last_activity_detected_at
+                park_id, session_date, session_start_utc, session_end_utc, operating_minutes
             )
             VALUES (
-                :park_id, :operating_date, :park_opened_at, :park_closed_at,
-                :total_operating_hours, :first_activity_detected_at, :last_activity_detected_at
+                :park_id, :session_date, :session_start_utc, :session_end_utc, :operating_minutes
             )
             ON DUPLICATE KEY UPDATE
-                park_opened_at = VALUES(park_opened_at),
-                park_closed_at = VALUES(park_closed_at),
-                total_operating_hours = VALUES(total_operating_hours),
-                first_activity_detected_at = VALUES(first_activity_detected_at),
-                last_activity_detected_at = VALUES(last_activity_detected_at)
+                session_start_utc = VALUES(session_start_utc),
+                session_end_utc = VALUES(session_end_utc),
+                operating_minutes = VALUES(operating_minutes)
         """)
 
         result = self.conn.execute(query, session_data)

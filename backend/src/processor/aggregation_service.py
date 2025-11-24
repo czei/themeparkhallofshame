@@ -102,7 +102,7 @@ class AggregationService:
             # Update aggregation log with failure
             self._complete_aggregation_log(
                 log_id=log_id,
-                status='error',
+                status='failed',
                 error_message=str(e)
             )
 
@@ -222,30 +222,32 @@ class AggregationService:
         downtime_snapshots = row.total_downtime_snapshots or 0
 
         if total_snapshots > 0:
-            downtime_ratio = downtime_snapshots / total_snapshots
-            operating_hours = operating_session['total_operating_hours']
+            downtime_ratio = float(downtime_snapshots) / float(total_snapshots)
+            operating_minutes = float(operating_session['operating_minutes'])
+            operating_hours = operating_minutes / 60.0
             total_downtime_hours = operating_hours * downtime_ratio
-            avg_uptime_percentage = ((total_snapshots - downtime_snapshots) / total_snapshots) * 100.0
+            avg_uptime_percentage = ((float(total_snapshots) - float(downtime_snapshots)) / float(total_snapshots)) * 100.0
         else:
             total_downtime_hours = 0.0
             avg_uptime_percentage = 0.0
+            operating_hours = float(operating_session['operating_minutes']) / 60.0
 
         # Insert/update park daily stats
         upsert_query = text("""
             INSERT INTO park_daily_stats (
                 park_id, stat_date, total_downtime_hours, avg_uptime_percentage,
-                rides_with_downtime, total_rides_tracked, total_operating_hours
+                rides_with_downtime, total_rides_tracked, operating_hours_minutes
             )
             VALUES (
                 :park_id, :stat_date, :total_downtime_hours, :avg_uptime_percentage,
-                :rides_with_downtime, :total_rides_tracked, :total_operating_hours
+                :rides_with_downtime, :total_rides_tracked, :operating_hours_minutes
             )
             ON DUPLICATE KEY UPDATE
                 total_downtime_hours = VALUES(total_downtime_hours),
                 avg_uptime_percentage = VALUES(avg_uptime_percentage),
                 rides_with_downtime = VALUES(rides_with_downtime),
                 total_rides_tracked = VALUES(total_rides_tracked),
-                total_operating_hours = VALUES(total_operating_hours)
+                operating_hours_minutes = VALUES(operating_hours_minutes)
         """)
 
         self.conn.execute(upsert_query, {
@@ -255,7 +257,7 @@ class AggregationService:
             "avg_uptime_percentage": round(avg_uptime_percentage, 2),
             "rides_with_downtime": row.rides_with_downtime or 0,
             "total_rides_tracked": row.total_rides_tracked or 0,
-            "total_operating_hours": round(operating_session['total_operating_hours'], 2)
+            "operating_hours_minutes": int(operating_minutes)
         })
 
         logger.debug(f"Aggregated park {park_id} daily stats for {stat_date}")
@@ -297,7 +299,7 @@ class AggregationService:
         result = self.conn.execute(rides_query, {"park_id": park_id})
         ride_ids = [row.ride_id for row in result]
 
-        operating_minutes = operating_session['total_operating_hours'] * 60
+        operating_minutes = operating_session['operating_minutes']
 
         for ride_id in ride_ids:
             # Calculate ride statistics
@@ -352,9 +354,9 @@ class AggregationService:
         downtime_snapshots = row.downtime_snapshots or 0
 
         # Calculate uptime/downtime minutes
-        uptime_ratio = uptime_snapshots / total_snapshots if total_snapshots > 0 else 0
-        uptime_minutes = operating_minutes * uptime_ratio
-        downtime_minutes = operating_minutes - uptime_minutes
+        uptime_ratio = float(uptime_snapshots) / float(total_snapshots) if total_snapshots > 0 else 0.0
+        uptime_minutes = float(operating_minutes) * uptime_ratio
+        downtime_minutes = float(operating_minutes) - uptime_minutes
         uptime_percentage = uptime_ratio * 100.0
 
         # Get status changes count
@@ -371,23 +373,24 @@ class AggregationService:
         upsert_query = text("""
             INSERT INTO ride_daily_stats (
                 ride_id, stat_date, uptime_minutes, downtime_minutes, uptime_percentage,
-                total_operating_minutes, avg_wait_time, min_wait_time, peak_wait_time,
-                downtime_event_count, longest_downtime_minutes
+                operating_hours_minutes, avg_wait_time, min_wait_time, max_wait_time, peak_wait_time,
+                status_changes, longest_downtime_minutes
             )
             VALUES (
                 :ride_id, :stat_date, :uptime_minutes, :downtime_minutes, :uptime_percentage,
-                :total_operating_minutes, :avg_wait_time, :min_wait_time, :peak_wait_time,
-                :downtime_event_count, :longest_downtime_minutes
+                :operating_hours_minutes, :avg_wait_time, :min_wait_time, :max_wait_time, :peak_wait_time,
+                :status_changes, :longest_downtime_minutes
             )
             ON DUPLICATE KEY UPDATE
                 uptime_minutes = VALUES(uptime_minutes),
                 downtime_minutes = VALUES(downtime_minutes),
                 uptime_percentage = VALUES(uptime_percentage),
-                total_operating_minutes = VALUES(total_operating_minutes),
+                operating_hours_minutes = VALUES(operating_hours_minutes),
                 avg_wait_time = VALUES(avg_wait_time),
                 min_wait_time = VALUES(min_wait_time),
+                max_wait_time = VALUES(max_wait_time),
                 peak_wait_time = VALUES(peak_wait_time),
-                downtime_event_count = VALUES(downtime_event_count),
+                status_changes = VALUES(status_changes),
                 longest_downtime_minutes = VALUES(longest_downtime_minutes)
         """)
 
@@ -397,11 +400,12 @@ class AggregationService:
             "uptime_minutes": int(uptime_minutes),
             "downtime_minutes": int(downtime_minutes),
             "uptime_percentage": round(uptime_percentage, 2),
-            "total_operating_minutes": int(operating_minutes),
-            "avg_wait_time": round(row.avg_wait_time, 2) if row.avg_wait_time else None,
+            "operating_hours_minutes": int(operating_minutes),
+            "avg_wait_time": round(float(row.avg_wait_time), 2) if row.avg_wait_time else None,
             "min_wait_time": row.min_wait_time,
+            "max_wait_time": row.max_wait_time,
             "peak_wait_time": row.max_wait_time,
-            "downtime_event_count": status_changes,
+            "status_changes": status_changes,
             "longest_downtime_minutes": longest_downtime
         })
 
@@ -423,7 +427,7 @@ class AggregationService:
         aggregation_type: str
     ) -> int:
         """
-        Create aggregation log entry.
+        Create or restart aggregation log entry.
 
         Returns:
             log_id
@@ -435,6 +439,13 @@ class AggregationService:
             VALUES (
                 :aggregation_date, :aggregation_type, 'running', NOW()
             )
+            ON DUPLICATE KEY UPDATE
+                status = 'running',
+                started_at = NOW(),
+                completed_at = NULL,
+                error_message = NULL,
+                parks_processed = 0,
+                rides_processed = 0
         """)
 
         result = self.conn.execute(query, {
@@ -442,7 +453,22 @@ class AggregationService:
             "aggregation_type": aggregation_type
         })
 
-        return result.lastrowid
+        # For ON DUPLICATE KEY UPDATE, lastrowid may not be the actual ID
+        # We need to query for it
+        if result.lastrowid == 0:
+            # Update case - query for the log_id
+            select_query = text("""
+                SELECT log_id FROM aggregation_log
+                WHERE aggregation_date = :aggregation_date
+                AND aggregation_type = :aggregation_type
+            """)
+            log_id = self.conn.execute(select_query, {
+                "aggregation_date": aggregation_date,
+                "aggregation_type": aggregation_type
+            }).scalar()
+            return log_id
+        else:
+            return result.lastrowid
 
     def _complete_aggregation_log(
         self,
@@ -461,8 +487,7 @@ class AggregationService:
                 aggregated_until_ts = :aggregated_until_ts,
                 parks_processed = :parks_processed,
                 rides_processed = :rides_processed,
-                error_message = :error_message,
-                records_aggregated = :rides_processed
+                error_message = :error_message
             WHERE log_id = :log_id
         """)
 

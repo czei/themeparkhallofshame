@@ -1,6 +1,6 @@
 """
 Theme Park Downtime Tracker - AI-Based Ride Classifier
-Implements AI-powered tier classification using Zen MCP (Priority 4 in classification hierarchy).
+Implements AI-powered tier classification using LLM API (Priority 4 in classification hierarchy).
 """
 
 import os
@@ -8,7 +8,15 @@ import json
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
-from utils.logger import logger
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
+try:
+    from ..utils.logger import logger
+except ImportError:
+    from utils.logger import logger
 
 
 @dataclass
@@ -38,11 +46,11 @@ class AIClassifier:
 - Park Location: {park_location}
 
 **Classification Tiers:**
-- **Tier 1 (Major Attractions, 3x weight)**: E-ticket attractions, major roller coasters, signature rides with high capacity and long wait times. Examples: Space Mountain, Expedition Everest, Millennium Falcon, major dark rides.
+- **Tier 1 (Major Attractions, 3x weight)**: E-ticket attractions, major roller coasters, signature rides with high capacity and long wait times. Examples: Space Mountain, Expedition Everest, Millennium Falcon, major dark rides. Will routinely have the longest wait times, averaging over 30m a most times of the day.
 
-- **Tier 2 (Standard Attractions, 2x weight)**: Standard rides and shows with moderate capacity. Most dark rides, water rides, and standard coasters fall here. Examples: Pirates of the Caribbean (if not park's signature), standard flume rides.
+- **Tier 2 (Standard Attractions, 2x weight)**: Standard rides and shows with moderate capacity. Most dark rides, water rides, and standard coasters fall here. Examples: Pirates of the Caribbean (if not park's signature), standard flume rides.  Wait times are low most of the time but can peak to 30 minutes during busy days.
 
-- **Tier 3 (Minor Attractions, 1x weight)**: Kiddie rides, carousels, low-capacity flat rides, playground areas, and walk-through attractions. Examples: Dumbo, Prince Charming Regal Carrousel, teacups, character meet areas.
+- **Tier 3 (Minor Attractions, 1x weight)**: Kiddie rides, carousels, low-capacity flat rides, playground areas, and walk-through attractions. Examples: Dumbo, Prince Charming Regal Carrousel, teacups, character meet areas. These rides almost never have a wait.
 
 **Classification Criteria:**
 1. **Capacity & Throughput**: High-capacity rides (1000+ guests/hour) lean toward Tier 1/2
@@ -121,17 +129,55 @@ class AIClassifier:
         )
 
         try:
-            # Use mcp__zen__chat tool for AI classification
-            # This will be called via the MCP integration
-            # For now, return a placeholder indicating AI call is needed
-            logger.info(f"AI classification needed for: {ride_name} at {park_name}")
+            # Check if OpenAI is available
+            if OpenAI is None:
+                raise AIClassifierError(
+                    "OpenAI package not installed. Run: pip install openai"
+                )
 
-            # This is a placeholder - the actual implementation will use MCP
-            # The classification service will handle the MCP call
-            raise NotImplementedError(
-                "AI classification requires MCP zen__chat integration. "
-                "Use ClassificationService.classify() instead of calling AIClassifier directly."
+            # Get API key from environment
+            api_key = os.getenv('OPENAI_API_KEY')
+            if not api_key:
+                raise AIClassifierError(
+                    "OPENAI_API_KEY environment variable not set. "
+                    "Please set it to your OpenAI API key."
+                )
+
+            logger.info(f"AI classification requested for: {ride_name} at {park_name}")
+
+            # Initialize OpenAI client and make API call
+            client = OpenAI(api_key=api_key)
+
+            response = client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a theme park ride classification expert. Return ONLY valid JSON."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.3,
+                max_tokens=1000
             )
+
+            response_text = response.choices[0].message.content
+            logger.debug(f"AI response for {ride_name}: {response_text[:200]}...")
+
+            # Parse and return the classification result
+            result = self.parse_ai_response(response_text)
+            logger.info(
+                f"AI classified {ride_name} as Tier {result.tier} "
+                f"(confidence: {result.confidence:.2f})"
+            )
+            return result
+
+        except AIClassifierError:
+            # Re-raise our custom errors
+            raise
 
         except Exception as e:
             logger.error(f"AI classification failed for {ride_name}: {e}")

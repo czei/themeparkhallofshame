@@ -13,6 +13,9 @@ mysqlclient>=2.2.0
 requests>=2.31.0
 tenacity>=8.2.3
 
+# AI/LLM Integration
+openai>=1.0.0
+
 # Configuration & Secrets
 python-dotenv>=1.0.0
 boto3>=1.28.0  # AWS SSM Parameter Store for production secrets

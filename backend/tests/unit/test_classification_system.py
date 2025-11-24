@@ -34,8 +34,7 @@ MAGIC_KINGDOM_TIER_1 = [
     "Seven Dwarfs Mine Train",
     "Pirates of the Caribbean",
     "Haunted Mansion",
-    "Jungle Cruise",
-    "Peter Pan's Flight"
+    "TRON Lightcycle Run"
 ]
 
 MAGIC_KINGDOM_TIER_2 = [
@@ -43,25 +42,24 @@ MAGIC_KINGDOM_TIER_2 = [
     "The Many Adventures of Winnie the Pooh",
     "Under the Sea - Journey of the Little Mermaid",
     "it's a small world",
+    "Jungle Cruise",
     "Tomorrowland Speedway",
-    "Astro Orbiter",
-    "The Barnstormer",
-    "Liberty Square Riverboat",
+    "Peter Pan's Flight",
     "Tomorrowland Transit Authority PeopleMover",
-    "Monsters Inc. Laugh Floor",
-    "The Magic Carpets of Aladdin"
+    "Monsters Inc. Laugh Floor"
 ]
 
 MAGIC_KINGDOM_TIER_3 = [
     "Dumbo the Flying Elephant",
     "Mad Tea Party",
+    "The Magic Carpets of Aladdin",
+    "Astro Orbiter",
+    "The Barnstormer",
     "Prince Charming Regal Carrousel",
     "Swiss Family Treehouse",
     "Walt Disney's Enchanted Tiki Room",
     "Country Bear Jamboree",
-    "Casey Jr. Splash 'N' Soak Station",
     "Main Street Vehicles",
-    "Tom Sawyer Island"
 ]
 
 
@@ -213,39 +211,8 @@ class TestClassificationService:
             assert result.classification_method == 'cached_ai'
             assert result.confidence_score == 0.95
 
-    def test_pattern_match_priority(self):
-        """Pattern matcher should have third priority."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create empty override/cache files
-            manual_overrides_path = Path(tmpdir) / "manual_overrides.csv"
-            with open(manual_overrides_path, 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(['park_id', 'ride_id', 'override_tier', 'reason', 'date_added'])
-
-            exact_matches_path = Path(tmpdir) / "exact_matches.json"
-            with open(exact_matches_path, 'w') as f:
-                json.dump({}, f)
-
-            service = ClassificationService(
-                manual_overrides_path=str(manual_overrides_path),
-                exact_matches_path=str(exact_matches_path)
-            )
-
-            # Coaster should match pattern
-            result = service.classify_ride(
-                ride_id=300,
-                ride_name="Space Mountain",
-                park_id=1,
-                park_name="Magic Kingdom"
-            )
-
-            # Should use pattern match
-            assert result.classification_method == 'pattern_match'
-            assert result.tier == 1
-            assert result.confidence_score > 0.0
-
-    def test_ai_fallback_for_unknown_rides(self):
-        """AI classifier (placeholder) should be fallback when no other methods match."""
+    def test_ai_classification_without_cache(self):
+        """AI classifier should be fallback when no other methods match."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manual_overrides_path = Path(tmpdir) / "manual_overrides.csv"
             with open(manual_overrides_path, 'w', newline='') as f:
@@ -254,7 +221,13 @@ class TestClassificationService:
 
             exact_matches_path = Path(tmpdir) / "exact_matches.json"
             with open(exact_matches_path, 'w') as f:
-                json.dump({}, f)
+                json.dump({
+                    "_meta": {
+                        "schema_version": "1.0",
+                        "last_updated": "2024-01-01T00:00:00Z"
+                    },
+                    "classifications": {}
+                }, f)
 
             service = ClassificationService(
                 manual_overrides_path=str(manual_overrides_path),
@@ -269,10 +242,10 @@ class TestClassificationService:
                 park_name="Test Park"
             )
 
-            # Should fall back to AI agent (placeholder returns Tier 2)
+            # Should fall back to AI agent
             assert result.classification_method == 'ai_agent'
-            assert result.tier == 2  # Placeholder default
-            assert result.flagged_for_review == True  # Low confidence
+            assert result.tier in [1, 2, 3]  # AI can return any valid tier
+            assert 0.5 <= result.confidence_score <= 1.0  # AI should return reasonable confidence
 
     def test_confidence_scoring(self):
         """All classification methods should return confidence scores between 0 and 1."""
@@ -366,7 +339,7 @@ class TestMagicKingdomGroundTruth:
     """Test classification against known Magic Kingdom ride tiers."""
 
     @pytest.mark.parametrize("ride_name", MAGIC_KINGDOM_TIER_1)
-    def test_tier_1_rides_pattern_matching(self, ride_name):
+    def test_tier_1_rides_classification(self, ride_name):
         """Magic Kingdom Tier 1 rides should generally match Tier 1 patterns."""
         matcher = PatternMatcher()
         result = matcher.classify(ride_name)
@@ -376,7 +349,7 @@ class TestMagicKingdomGroundTruth:
         assert result.tier in [None, 1, 2], f"{ride_name} unexpected tier {result.tier}"
 
     @pytest.mark.parametrize("ride_name", MAGIC_KINGDOM_TIER_3)
-    def test_tier_3_rides_pattern_matching(self, ride_name):
+    def test_tier_3_rides_classification(self, ride_name):
         """Magic Kingdom Tier 3 rides should match Tier 3 patterns."""
         matcher = PatternMatcher()
         result = matcher.classify(ride_name)
@@ -387,7 +360,7 @@ class TestMagicKingdomGroundTruth:
         assert result.tier in [None, 1, 2, 3], f"{ride_name} unexpected tier {result.tier}"
 
     def test_full_magic_kingdom_classification(self):
-        """Test classification service on full Magic Kingdom ride set."""
+        """Test classification service on ALL 29 Magic Kingdom rides from CSV."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manual_overrides_path = Path(tmpdir) / "manual_overrides.csv"
             with open(manual_overrides_path, 'w', newline='') as f:
@@ -396,24 +369,66 @@ class TestMagicKingdomGroundTruth:
 
             exact_matches_path = Path(tmpdir) / "exact_matches.json"
             with open(exact_matches_path, 'w') as f:
-                json.dump({}, f)
+                json.dump({
+                    "_meta": {
+                        "schema_version": "1.0",
+                        "last_updated": "2024-01-01T00:00:00Z"
+                    },
+                    "classifications": {}
+                }, f)
 
             service = ClassificationService(
                 manual_overrides_path=str(manual_overrides_path),
                 exact_matches_path=str(exact_matches_path)
             )
 
-            # Test a sample of each tier
-            tier_1_sample = service.classify_ride(1, "Space Mountain", 1, "Magic Kingdom")
-            tier_3_sample = service.classify_ride(3, "Dumbo the Flying Elephant", 1, "Magic Kingdom")
+            # Test ALL rides from the CSV
+            all_rides = {
+                **{ride: 1 for ride in MAGIC_KINGDOM_TIER_1},
+                **{ride: 2 for ride in MAGIC_KINGDOM_TIER_2},
+                **{ride: 3 for ride in MAGIC_KINGDOM_TIER_3}
+            }
 
-            # Verify classifications are reasonable
-            assert tier_1_sample.tier in [1, 2]  # Pattern match or AI placeholder
-            assert tier_3_sample.tier in [2, 3]  # Pattern match or AI placeholder
+            errors = []
+            for ride_idx, (ride_name, expected_tier) in enumerate(all_rides.items(), start=1):
+                result = service.classify_ride(
+                    ride_id=ride_idx,
+                    ride_name=ride_name,
+                    park_id=1,
+                    park_name="Magic Kingdom",
+                    park_location="Orlando, FL"
+                )
 
-            # Verify confidence scores exist
-            assert 0.0 <= tier_1_sample.confidence_score <= 1.0
-            assert 0.0 <= tier_3_sample.confidence_score <= 1.0
+                # Verify AI classified correctly
+                if result.tier != expected_tier:
+                    errors.append(
+                        f"{ride_name}: Expected Tier {expected_tier}, got Tier {result.tier} "
+                        f"(confidence: {result.confidence_score:.2f}, reasoning: {result.reasoning_text[:100]}...)"
+                    )
+
+                # Verify confidence scores are reasonable
+                assert 0.5 <= result.confidence_score <= 1.0, \
+                    f"{ride_name} has unreasonable confidence: {result.confidence_score}"
+
+            # Report classification errors (allow up to 20% error rate)
+            accuracy = (len(all_rides) - len(errors)) / len(all_rides)
+            error_threshold = 0.20  # Allow 20% error rate (80% accuracy required)
+
+            if len(errors) > 0:
+                print(f"\nClassification Results: {len(all_rides) - len(errors)}/{len(all_rides)} correct ({accuracy:.1%} accuracy)")
+                print(f"Errors ({len(errors)}):")
+                for error in errors:
+                    print(f"  - {error}")
+
+            if accuracy < (1.0 - error_threshold):
+                error_msg = f"\n{len(errors)} classification errors out of {len(all_rides)} rides ({accuracy:.1%} accuracy):\n" + "\n".join(errors)
+                pytest.fail(error_msg)
+
+            # Verify that high-confidence results were cached
+            with open(exact_matches_path, 'r') as f:
+                cache_data = json.load(f)
+                cached_count = len(cache_data.get('classifications', {}))
+                print(f"\nCached {cached_count} high-confidence AI results for future use")
 
 
 class TestClassificationPerformance:

@@ -11,7 +11,6 @@ from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
-from classifier.pattern_matcher import PatternMatcher, PatternMatchResult
 from classifier.ai_classifier import AIClassifier, AIClassificationResult, AIClassifierError
 from utils.logger import logger
 from database.connection import get_db_connection
@@ -27,7 +26,7 @@ class ClassificationResult:
     park_name: str
     tier: int
     tier_weight: int
-    classification_method: str  # manual_override, cached_ai, pattern_match, ai_agent
+    classification_method: str  # manual_override, cached_ai, ai_agent
     confidence_score: float
     reasoning_text: str
     override_reason: Optional[str]
@@ -43,8 +42,7 @@ class ClassificationService:
     Classification priority (highest to lowest):
     1. Manual overrides (data/manual_overrides.csv) - confidence 1.00
     2. Cached AI classifications (data/exact_matches.json) - confidence >= 0.85
-    3. Pattern matching (keyword rules) - confidence 0.60-0.75
-    4. AI agent (Zen MCP with web search) - confidence 0.50-0.95
+    3. AI agent (OpenAI GPT-4 with research) - confidence 0.50-1.00
 
     Features:
     - Automatic caching of high-confidence AI results (>= 0.85)
@@ -75,7 +73,6 @@ class ClassificationService:
         self.exact_matches_path = exact_matches_path
         self.working_directory = working_directory or os.getcwd()
 
-        self.pattern_matcher = PatternMatcher()
         self.ai_classifier = AIClassifier(working_directory=self.working_directory)
 
         # Load caches
@@ -252,44 +249,53 @@ class ClassificationService:
                 flagged_for_review=False
             )
 
-        # Priority 3: Pattern matching
-        pattern_result = self.pattern_matcher.classify(ride_name, park_name)
-        if pattern_result.tier is not None:
-            logger.info(f"Pattern match for {ride_name}: Tier {pattern_result.tier}")
+        # Priority 3: AI agent classification (no pattern matching - name doesn't determine importance)
+        logger.info(f"AI classification needed for {ride_name}")
+        try:
+            ai_result = self.ai_classifier.classify(
+                ride_name=ride_name,
+                park_name=park_name,
+                park_location=park_location
+            )
+
+            # Cache high-confidence AI results for future lookups
+            if ai_result.confidence >= self.CACHE_THRESHOLD:
+                self._cache_ai_result(cache_key, ai_result)
+
             return ClassificationResult(
                 ride_id=ride_id,
                 ride_name=ride_name,
                 park_id=park_id,
                 park_name=park_name,
-                tier=pattern_result.tier,
-                tier_weight=self._get_tier_weight(pattern_result.tier),
-                classification_method='pattern_match',
-                confidence_score=pattern_result.confidence,
-                reasoning_text=pattern_result.reasoning,
+                tier=ai_result.tier,
+                tier_weight=self._get_tier_weight(ai_result.tier),
+                classification_method='ai_agent',
+                confidence_score=ai_result.confidence,
+                reasoning_text=ai_result.reasoning,
+                override_reason=None,
+                research_sources=ai_result.research_sources,
+                cache_key=cache_key,
+                flagged_for_review=ai_result.confidence < self.REVIEW_THRESHOLD
+            )
+
+        except Exception as e:
+            logger.error(f"AI classification failed for {ride_name}: {e}")
+            # Fall back to Tier 2 default with low confidence
+            return ClassificationResult(
+                ride_id=ride_id,
+                ride_name=ride_name,
+                park_id=park_id,
+                park_name=park_name,
+                tier=2,  # Default to Tier 2 (standard)
+                tier_weight=2,
+                classification_method='ai_agent_failed',
+                confidence_score=0.30,  # Very low confidence
+                reasoning_text=f"AI classification failed: {str(e)}",
                 override_reason=None,
                 research_sources=None,
                 cache_key=cache_key,
-                flagged_for_review=pattern_result.confidence < self.REVIEW_THRESHOLD
+                flagged_for_review=True
             )
-
-        # Priority 4: AI agent classification
-        # This requires MCP integration - return placeholder for now
-        logger.info(f"AI classification needed for {ride_name}")
-        return ClassificationResult(
-            ride_id=ride_id,
-            ride_name=ride_name,
-            park_id=park_id,
-            park_name=park_name,
-            tier=2,  # Default to Tier 2 (standard)
-            tier_weight=2,
-            classification_method='ai_agent',
-            confidence_score=0.40,  # Low confidence placeholder
-            reasoning_text="AI classification pending - requires MCP integration",
-            override_reason=None,
-            research_sources=None,
-            cache_key=cache_key,
-            flagged_for_review=True
-        )
 
     def classify_batch(
         self,
@@ -376,65 +382,75 @@ class ClassificationService:
 
         return results
 
-    def save_classification(self, result: ClassificationResult):
+    def save_classification(self, result: ClassificationResult, conn=None):
         """
         Save classification result to database.
 
         Args:
             result: ClassificationResult to save
+            conn: Optional database connection (for testing with transactions)
         """
-        with get_db_connection() as conn:
-            # Update ride tier
-            update_ride = text("""
-                UPDATE rides
-                SET tier = :tier
-                WHERE ride_id = :ride_id
-            """)
+        if conn is not None:
+            # Use provided connection (for testing)
+            self._save_classification_with_connection(conn, result)
+        else:
+            # Create new connection (production use)
+            with get_db_connection() as conn:
+                self._save_classification_with_connection(conn, result)
 
-            conn.execute(update_ride, {
-                "tier": result.tier,
-                "ride_id": result.ride_id
-            })
+    def _save_classification_with_connection(self, conn, result: ClassificationResult):
+        """Internal method to save classification with a given connection."""
+        # Update ride tier
+        update_ride = text("""
+            UPDATE rides
+            SET tier = :tier
+            WHERE ride_id = :ride_id
+        """)
 
-            # Insert/update classification record
-            upsert_classification = text("""
-                INSERT INTO ride_classifications (
-                    ride_id, tier, tier_weight, classification_method,
-                    confidence_score, reasoning_text, override_reason,
-                    research_sources, cache_key, schema_version
-                )
-                VALUES (
-                    :ride_id, :tier, :tier_weight, :classification_method,
-                    :confidence_score, :reasoning_text, :override_reason,
-                    :research_sources, :cache_key, :schema_version
-                )
-                ON DUPLICATE KEY UPDATE
-                    tier = VALUES(tier),
-                    tier_weight = VALUES(tier_weight),
-                    classification_method = VALUES(classification_method),
-                    confidence_score = VALUES(confidence_score),
-                    reasoning_text = VALUES(reasoning_text),
-                    override_reason = VALUES(override_reason),
-                    research_sources = VALUES(research_sources),
-                    cache_key = VALUES(cache_key),
-                    schema_version = VALUES(schema_version),
-                    updated_at = CURRENT_TIMESTAMP
-            """)
+        conn.execute(update_ride, {
+            "tier": result.tier,
+            "ride_id": result.ride_id
+        })
 
-            conn.execute(upsert_classification, {
-                "ride_id": result.ride_id,
-                "tier": result.tier,
-                "tier_weight": result.tier_weight,
-                "classification_method": result.classification_method,
-                "confidence_score": result.confidence_score,
-                "reasoning_text": result.reasoning_text,
-                "override_reason": result.override_reason,
-                "research_sources": json.dumps(result.research_sources) if result.research_sources else None,
-                "cache_key": result.cache_key,
-                "schema_version": self.SCHEMA_VERSION
-            })
+        # Insert/update classification record
+        upsert_classification = text("""
+            INSERT INTO ride_classifications (
+                ride_id, tier, tier_weight, classification_method,
+                confidence_score, reasoning_text, override_reason,
+                research_sources, cache_key, schema_version
+            )
+            VALUES (
+                :ride_id, :tier, :tier_weight, :classification_method,
+                :confidence_score, :reasoning_text, :override_reason,
+                :research_sources, :cache_key, :schema_version
+            )
+            ON DUPLICATE KEY UPDATE
+                tier = VALUES(tier),
+                tier_weight = VALUES(tier_weight),
+                classification_method = VALUES(classification_method),
+                confidence_score = VALUES(confidence_score),
+                reasoning_text = VALUES(reasoning_text),
+                override_reason = VALUES(override_reason),
+                research_sources = VALUES(research_sources),
+                cache_key = VALUES(cache_key),
+                schema_version = VALUES(schema_version),
+                updated_at = CURRENT_TIMESTAMP
+        """)
 
-            logger.info(f"Saved classification for ride {result.ride_id}: Tier {result.tier}")
+        conn.execute(upsert_classification, {
+            "ride_id": result.ride_id,
+            "tier": result.tier,
+            "tier_weight": result.tier_weight,
+            "classification_method": result.classification_method,
+            "confidence_score": result.confidence_score,
+            "reasoning_text": result.reasoning_text,
+            "override_reason": result.override_reason,
+            "research_sources": json.dumps(result.research_sources) if result.research_sources else None,
+            "cache_key": result.cache_key,
+            "schema_version": self.SCHEMA_VERSION
+        })
+
+        logger.info(f"Saved classification for ride {result.ride_id}: Tier {result.tier}")
 
         # Cache high-confidence AI results
         if (result.classification_method == 'ai_agent' and
@@ -449,6 +465,18 @@ class ClassificationService:
                 "cached_at": datetime.now().isoformat()
             }
             self._save_exact_matches()
+
+    def _cache_ai_result(self, cache_key: str, ai_result) -> None:
+        """Cache high-confidence AI classification result."""
+        self.exact_matches[cache_key] = {
+            "tier": ai_result.tier,
+            "confidence": ai_result.confidence,
+            "reasoning": ai_result.reasoning,
+            "research_sources": ai_result.research_sources or [],
+            "cached_at": datetime.now().isoformat()
+        }
+        self._save_exact_matches()
+        logger.info(f"Cached AI result for {cache_key}: Tier {ai_result.tier}")
 
     def _get_tier_weight(self, tier: int) -> int:
         """Get weight multiplier for tier."""

@@ -24,9 +24,11 @@ echo "Database and user created"
 # Run migrations
 echo "Running database migrations..."
 cd "$(dirname "$0")/.."
-for file in src/database/migrations/00{1,2,3,4}.sql; do
-    echo "  Running $file..."
-    mysql -u ${DB_USER} -p${DB_PASSWORD} ${DB_NAME} < "$file" 2>&1 | grep -v "Warning"
+for file in src/database/migrations/00{1,2,3,4,5}_*.sql; do
+    if [ -f "$file" ]; then
+        echo "  Running $file..."
+        mysql -u ${DB_USER} -p${DB_PASSWORD} ${DB_NAME} < "$file" 2>&1 | grep -v "Warning" || true
+    fi
 done
 
 echo "✅ Test database setup complete!"

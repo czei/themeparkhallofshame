@@ -6,10 +6,10 @@ Main API application with Blueprints, CORS, and middleware.
 from flask import Flask, jsonify
 from flask_cors import CORS
 
-from ..utils.config import FLASK_ENV, FLASK_DEBUG, SECRET_KEY
-from ..utils.logger import logger
-from .routes.health import health_bp
-from .middleware.error_handler import register_error_handlers
+from utils.config import FLASK_ENV, FLASK_DEBUG, SECRET_KEY
+from utils.logger import logger
+from api.routes.health import health_bp
+from api.middleware.error_handler import register_error_handlers
 
 
 def create_app() -> Flask:

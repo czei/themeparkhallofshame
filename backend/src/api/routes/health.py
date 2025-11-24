@@ -7,8 +7,8 @@ from flask import Blueprint, jsonify
 from datetime import datetime
 from sqlalchemy import text
 
-from ...database.connection import get_db_connection
-from ...utils.logger import logger
+from database.connection import get_db_connection
+from utils.logger import logger
 
 health_bp = Blueprint('health', __name__)
 

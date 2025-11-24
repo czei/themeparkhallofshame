@@ -1,0 +1,29 @@
+park_id,ride_id,override_tier,reason,date_added
+# Manual Tier Overrides for Ride Classification System
+#
+# Purpose: Highest-priority classification source (Priority 1) that bypasses all automated classification.
+# Use cases:
+#   - Correct AI/pattern classification errors
+#   - Handle unique rides that don't fit standard criteria
+#   - Override tier changes due to refurbishment/closure
+#
+# Schema:
+#   park_id (INT): Foreign key to parks.park_id
+#   ride_id (INT): Foreign key to rides.ride_id
+#   override_tier (TINYINT): 1 (major, 3x weight), 2 (standard, 2x weight), 3 (minor, 1x weight)
+#   reason (VARCHAR): Human-readable justification for override
+#   date_added (DATE): YYYY-MM-DD format when override was added
+#
+# Classification Confidence: 1.00 (manual overrides are always confidence=1.0)
+# Reasoning: Stored in 'reason' field
+#
+# Example Entries (commented out - add actual overrides below):
+# 1,101,1,"Space Mountain is signature Magic Kingdom attraction despite AI underestimating",2024-01-15
+# 2,305,3,"Dumbo classified as Tier 2 but wait times show Tier 3 pattern",2024-01-20
+# 3,450,2,"AI overestimated importance - average wait times under 15 minutes",2024-02-01
+#
+# Notes:
+# - Lines starting with # are ignored
+# - Overrides take precedence over exact_matches.json and pattern_matcher
+# - Remove row to force re-classification
+# - Changes take effect on next classification_service.classify() call

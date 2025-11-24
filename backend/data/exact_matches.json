@@ -1,0 +1,20 @@
+{
+  "_meta": {
+    "description": "Cached ride tier classifications from AI agent (Priority 2)",
+    "schema_version": "1.0",
+    "cache_invalidation_rules": [
+      "Cached entries are used when confidence_score >= 0.85",
+      "Cache is invalidated when schema_version changes",
+      "Entries can be manually removed to force re-classification"
+    ],
+    "cache_key_format": "{park_id}:{ride_id}",
+    "tier_weights": {
+      "1": 3,
+      "2": 2,
+      "3": 1
+    },
+    "last_updated": "2024-01-01T00:00:00Z"
+  },
+  "classifications": {
+  }
+}

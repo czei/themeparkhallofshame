@@ -1,5 +1,4 @@
 // Theme Park Hall of Shame - Main Application Controller
-// Placeholder - will be enhanced in Phase 12
 
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Theme Park Hall of Shame - Application Loading...');
@@ -7,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Tab switching logic
     const navTabs = document.querySelectorAll('.nav-tab');
     const appContainer = document.getElementById('app-container');
+    let currentComponent = null;
 
     navTabs.forEach(tab => {
         tab.addEventListener('click', () => {
@@ -21,10 +21,65 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    function loadView(viewName) {
-        appContainer.innerHTML = `<div id="loading">Loading ${viewName}...</div>`;
+    async function loadView(viewName) {
+        // Clear container
+        appContainer.innerHTML = '<div id="view-container"></div>';
+
         console.log(`Loading view: ${viewName}`);
-        // View-specific logic will be implemented in Phase 3-10
+
+        try {
+            switch(viewName) {
+                case 'park-rankings':
+                    if (typeof ParkRankings !== 'undefined') {
+                        currentComponent = new ParkRankings(apiClient, 'view-container');
+                        await currentComponent.init();
+                    } else {
+                        throw new Error('ParkRankings component not loaded');
+                    }
+                    break;
+
+                case 'ride-performance':
+                    appContainer.innerHTML = `
+                        <div class="placeholder-view">
+                            <h2>Ride Performance</h2>
+                            <p>Coming soon! This will show individual ride downtime statistics.</p>
+                        </div>
+                    `;
+                    break;
+
+                case 'wait-times':
+                    appContainer.innerHTML = `
+                        <div class="placeholder-view">
+                            <h2>Wait Times</h2>
+                            <p>Coming soon! This will show live and historical wait times.</p>
+                        </div>
+                    `;
+                    break;
+
+                case 'trends':
+                    appContainer.innerHTML = `
+                        <div class="placeholder-view">
+                            <h2>Trends</h2>
+                            <p>Coming soon! This will show downtime trends over time.</p>
+                        </div>
+                    `;
+                    break;
+
+                default:
+                    appContainer.innerHTML = `
+                        <div class="error-view">
+                            <p>Unknown view: ${viewName}</p>
+                        </div>
+                    `;
+            }
+        } catch (error) {
+            console.error(`Error loading view ${viewName}:`, error);
+            appContainer.innerHTML = `
+                <div class="error-view">
+                    <p>Error loading view: ${error.message}</p>
+                </div>
+            `;
+        }
     }
 
     // Load default view (Park Rankings)

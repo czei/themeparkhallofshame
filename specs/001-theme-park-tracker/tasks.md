@@ -136,23 +136,23 @@ Based on plan.md project structure:
 
 ### Implementation for User Story 1
 
-- [ ] T047 [US1] Implement GET /api/parks/downtime endpoint in backend/src/api/routes/parks.py (FR-010, FR-011, FR-012, FR-013)
-- [ ] T048 [US1] Implement query logic for today's park rankings in stats_repository.py using park_daily_stats table (data-model.md Query 1)
-- [ ] T049 [US1] Implement query logic for 7-day park rankings using park_weekly_stats table with trend calculation
-- [ ] T050 [US1] Implement query logic for 30-day park rankings using park_monthly_stats table with trend calculation
-- [ ] T051 [US1] Implement Disney & Universal filter logic (is_disney = TRUE OR is_universal = TRUE, FR-020, FR-021)
-- [ ] T052 [US1] Implement aggregate statistics calculation (total parks tracked, peak downtime, currently down rides, FR-013)
-- [ ] T053 [US1] Add Queue-Times.com attribution to response (FR-033, FR-035)
-- [ ] T054 [US1] Add queue_times_url field to park responses linking to Queue-Times.com park pages (FR-036)
-- [ ] T055 [US1] Create frontend/js/components/park-rankings.js to fetch and render park rankings table
-- [ ] T056 [US1] Implement time period selector (Today, 7 Days, 30 Days) in park-rankings.js
-- [ ] T057 [US1] Implement park filter toggle (Disney & Universal / All Parks) in park-rankings.js
-- [ ] T058 [US1] Display aggregate statistics at top of page (total parks, peak downtime, currently down rides) in park-rankings.js
-- [ ] T059 [US1] Add trend indicators (percentage change arrows) to park rankings display
-- [ ] T060 [US1] Make park names clickable links to Queue-Times.com (FR-036)
-- [ ] T061 [US1] Add "Data powered by Queue-Times.com" footer with link to queue-times.com (FR-033)
+- [X] T047 [US1] Implement GET /api/parks/downtime endpoint in backend/src/api/routes/parks.py (FR-010, FR-011, FR-012, FR-013)
+- [X] T048 [US1] Implement query logic for today's park rankings in stats_repository.py using park_daily_stats table (data-model.md Query 1)
+- [X] T049 [US1] Implement query logic for 7-day park rankings using park_weekly_stats table with trend calculation
+- [X] T050 [US1] Implement query logic for 30-day park rankings using park_monthly_stats table with trend calculation
+- [X] T051 [US1] Implement Disney & Universal filter logic (is_disney = TRUE OR is_universal = TRUE, FR-020, FR-021)
+- [X] T052 [US1] Implement aggregate statistics calculation (total parks tracked, peak downtime, currently down rides, FR-013)
+- [X] T053 [US1] Add Queue-Times.com attribution to response (FR-033, FR-035)
+- [X] T054 [US1] Add queue_times_url field to park responses linking to Queue-Times.com park pages (FR-036)
+- [X] T055 [US1] Create frontend/js/components/park-rankings.js to fetch and render park rankings table
+- [X] T056 [US1] Implement time period selector (Today, 7 Days, 30 Days) in park-rankings.js
+- [X] T057 [US1] Implement park filter toggle (Disney & Universal / All Parks) in park-rankings.js
+- [X] T058 [US1] Display aggregate statistics at top of page (total parks, peak downtime, currently down rides) in park-rankings.js
+- [X] T059 [US1] Add trend indicators (percentage change arrows) to park rankings display
+- [X] T060 [US1] Make park names clickable links to Queue-Times.com (FR-036)
+- [X] T061 [US1] Add "Data powered by Queue-Times.com" footer with link to queue-times.com (FR-033)
 
-**Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
+**Checkpoint**: ✅ User Story 1 is fully functional and ready for testing
 
 ---
 

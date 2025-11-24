@@ -905,10 +905,10 @@ class StatsRepository:
                 p.park_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
-                rds.total_downtime_minutes / 60.0 AS downtime_hours,
+                rds.downtime_minutes / 60.0 AS downtime_hours,
                 rds.uptime_percentage,
-                rds.avg_wait_minutes,
-                rds.peak_wait_minutes,
+                rds.avg_wait_time,
+                rds.peak_wait_time,
                 -- Get current status from most recent snapshot
                 (
                     SELECT computed_is_open
@@ -919,20 +919,20 @@ class StatsRepository:
                 ) AS current_is_open,
                 -- Trend: compare to previous day
                 CASE
-                    WHEN prev_day.total_downtime_minutes > 0 THEN
-                        ((rds.total_downtime_minutes - prev_day.total_downtime_minutes) / prev_day.total_downtime_minutes::float) * 100
+                    WHEN prev_day.downtime_minutes > 0 THEN
+                        ((rds.downtime_minutes - prev_day.downtime_minutes) / prev_day.downtime_minutes * 1.0) * 100
                     ELSE NULL
                 END AS trend_percentage
             FROM ride_daily_stats rds
             JOIN rides r ON rds.ride_id = r.ride_id
             JOIN parks p ON r.park_id = p.park_id
             LEFT JOIN ride_daily_stats prev_day ON rds.ride_id = prev_day.ride_id
-                AND prev_day.stat_date = :stat_date - INTERVAL '1 day'
+                AND prev_day.stat_date = DATE_SUB(:stat_date, INTERVAL 1 DAY)
             WHERE rds.stat_date = :stat_date
                 AND r.is_active = TRUE
                 AND p.is_active = TRUE
                 {:filter_clause}
-            ORDER BY rds.total_downtime_minutes DESC
+            ORDER BY rds.downtime_minutes DESC
             LIMIT :limit
         """.replace(
             "{:filter_clause}",
@@ -973,10 +973,10 @@ class StatsRepository:
                 p.park_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
-                rws.total_downtime_minutes / 60.0 AS downtime_hours,
+                rws.downtime_minutes / 60.0 AS downtime_hours,
                 rws.uptime_percentage,
-                rws.avg_wait_minutes,
-                rws.peak_wait_minutes,
+                rws.avg_wait_time,
+                rws.peak_wait_time,
                 -- Get current status from most recent snapshot
                 (
                     SELECT computed_is_open
@@ -987,8 +987,8 @@ class StatsRepository:
                 ) AS current_is_open,
                 -- Trend: compare to previous week
                 CASE
-                    WHEN prev_week.total_downtime_minutes > 0 THEN
-                        ((rws.total_downtime_minutes - prev_week.total_downtime_minutes) / prev_week.total_downtime_minutes::float) * 100
+                    WHEN prev_week.downtime_minutes > 0 THEN
+                        ((rws.downtime_minutes - prev_week.downtime_minutes) / prev_week.downtime_minutes * 1.0) * 100
                     ELSE NULL
                 END AS trend_percentage
             FROM ride_weekly_stats rws
@@ -1002,7 +1002,7 @@ class StatsRepository:
                 AND r.is_active = TRUE
                 AND p.is_active = TRUE
                 {:filter_clause}
-            ORDER BY rws.total_downtime_minutes DESC
+            ORDER BY rws.downtime_minutes DESC
             LIMIT :limit
         """.replace(
             "{:filter_clause}",
@@ -1053,10 +1053,10 @@ class StatsRepository:
                 p.park_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
-                rms.total_downtime_minutes / 60.0 AS downtime_hours,
+                rms.downtime_minutes / 60.0 AS downtime_hours,
                 rms.uptime_percentage,
-                rms.avg_wait_minutes,
-                rms.peak_wait_minutes,
+                rms.avg_wait_time,
+                rms.peak_wait_time,
                 -- Get current status from most recent snapshot
                 (
                     SELECT computed_is_open
@@ -1067,8 +1067,8 @@ class StatsRepository:
                 ) AS current_is_open,
                 -- Trend: compare to previous month
                 CASE
-                    WHEN prev_month.total_downtime_minutes > 0 THEN
-                        ((rms.total_downtime_minutes - prev_month.total_downtime_minutes) / prev_month.total_downtime_minutes::float) * 100
+                    WHEN prev_month.downtime_minutes > 0 THEN
+                        ((rms.downtime_minutes - prev_month.downtime_minutes) / prev_month.downtime_minutes * 1.0) * 100
                     ELSE NULL
                 END AS trend_percentage
             FROM ride_monthly_stats rms
@@ -1082,7 +1082,7 @@ class StatsRepository:
                 AND r.is_active = TRUE
                 AND p.is_active = TRUE
                 {:filter_clause}
-            ORDER BY rms.total_downtime_minutes DESC
+            ORDER BY rms.downtime_minutes DESC
             LIMIT :limit
         """.replace(
             "{:filter_clause}",
@@ -1131,7 +1131,7 @@ class StatsRepository:
                 rss.recorded_at AS last_updated,
                 -- Get 7-day average for trend comparison
                 (
-                    SELECT AVG(avg_wait_minutes)
+                    SELECT AVG(avg_wait_time)
                     FROM ride_weekly_stats
                     WHERE ride_id = r.ride_id
                         AND year = YEAR(CURDATE())
@@ -1140,20 +1140,20 @@ class StatsRepository:
                 -- Trend percentage (current vs 7-day average)
                 CASE
                     WHEN (
-                        SELECT AVG(avg_wait_minutes)
+                        SELECT AVG(avg_wait_time)
                         FROM ride_weekly_stats
                         WHERE ride_id = r.ride_id
                             AND year = YEAR(CURDATE())
                             AND week_number = WEEK(CURDATE(), 3)
                     ) > 0 THEN
                         ((rss.wait_time - (
-                            SELECT AVG(avg_wait_minutes)
+                            SELECT AVG(avg_wait_time)
                             FROM ride_weekly_stats
                             WHERE ride_id = r.ride_id
                                 AND year = YEAR(CURDATE())
                                 AND week_number = WEEK(CURDATE(), 3)
                         )) / (
-                            SELECT AVG(avg_wait_minutes)
+                            SELECT AVG(avg_wait_time)
                             FROM ride_weekly_stats
                             WHERE ride_id = r.ride_id
                                 AND year = YEAR(CURDATE())
@@ -1207,8 +1207,8 @@ class StatsRepository:
                 p.park_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
-                rws.avg_wait_minutes AS avg_wait_7days,
-                rws.peak_wait_minutes AS peak_wait_7days,
+                rws.avg_wait_time AS avg_wait_7days,
+                rws.peak_wait_time AS peak_wait_7days,
                 -- Get current status
                 (
                     SELECT computed_is_open
@@ -1219,8 +1219,8 @@ class StatsRepository:
                 ) AS current_is_open,
                 -- Trend: compare to previous week's average
                 CASE
-                    WHEN prev_week.avg_wait_minutes > 0 THEN
-                        ((rws.avg_wait_minutes - prev_week.avg_wait_minutes) / prev_week.avg_wait_minutes) * 100
+                    WHEN prev_week.avg_wait_time > 0 THEN
+                        ((rws.avg_wait_time - prev_week.avg_wait_time * 1.0) / prev_week.avg_wait_time) * 100
                     ELSE NULL
                 END AS trend_percentage
             FROM ride_weekly_stats rws
@@ -1231,11 +1231,11 @@ class StatsRepository:
                 AND prev_week.week_number = :prev_week
             WHERE rws.year = :year
                 AND rws.week_number = :week_number
-                AND rws.avg_wait_minutes > 0
+                AND rws.avg_wait_time > 0
                 AND r.is_active = TRUE
                 AND p.is_active = TRUE
                 {:filter_clause}
-            ORDER BY rws.avg_wait_minutes DESC
+            ORDER BY rws.avg_wait_time DESC
             LIMIT :limit
         """.replace(
             "{:filter_clause}",
@@ -1285,8 +1285,8 @@ class StatsRepository:
                 p.park_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
-                rws.peak_wait_minutes AS peak_wait_7days,
-                rws.avg_wait_minutes AS avg_wait_7days,
+                rws.peak_wait_time AS peak_wait_7days,
+                rws.avg_wait_time AS avg_wait_7days,
                 -- Get current status
                 (
                     SELECT computed_is_open
@@ -1297,8 +1297,8 @@ class StatsRepository:
                 ) AS current_is_open,
                 -- Trend: compare to previous week's peak
                 CASE
-                    WHEN prev_week.peak_wait_minutes > 0 THEN
-                        ((rws.peak_wait_minutes - prev_week.peak_wait_minutes) / prev_week.peak_wait_minutes) * 100
+                    WHEN prev_week.peak_wait_time > 0 THEN
+                        ((rws.peak_wait_time - prev_week.peak_wait_time * 1.0) / prev_week.peak_wait_time) * 100
                     ELSE NULL
                 END AS trend_percentage
             FROM ride_weekly_stats rws
@@ -1309,11 +1309,11 @@ class StatsRepository:
                 AND prev_week.week_number = :prev_week
             WHERE rws.year = :year
                 AND rws.week_number = :week_number
-                AND rws.peak_wait_minutes > 0
+                AND rws.peak_wait_time > 0
                 AND r.is_active = TRUE
                 AND p.is_active = TRUE
                 {:filter_clause}
-            ORDER BY rws.peak_wait_minutes DESC
+            ORDER BY rws.peak_wait_time DESC
             LIMIT :limit
         """.replace(
             "{:filter_clause}",

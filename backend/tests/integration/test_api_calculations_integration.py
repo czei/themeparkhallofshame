@@ -696,7 +696,7 @@ def test_live_wait_times_sorted_correctly(mysql_connection, comprehensive_api_te
         ride = wait_times[i]
         assert ride['tier'] == 1
         assert ride['current_wait_minutes'] == 60
-        assert ride['current_is_open'] is True
+        assert ride['current_is_open'] == 1  # MySQL returns TINYINT(1) as 1, not True
 
     # Verify sorting by wait time descending
     for i in range(len(wait_times) - 1):

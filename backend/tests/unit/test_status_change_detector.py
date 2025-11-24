@@ -516,3 +516,101 @@ class TestLongestDowntimeEvents:
         # Should return top 2 longest
         assert events[0]['downtime_duration_minutes'] == 180  # 3 hours
         assert events[1]['downtime_duration_minutes'] == 120  # 2 hours
+
+    def test_get_longest_downtime_events_filters_by_park(self, sqlite_connection):
+        """get_longest_downtime_events() should filter by park_id when provided."""
+        from tests.conftest import insert_sample_park, insert_sample_ride
+        from sqlalchemy import text
+
+        # Create 2 parks
+        park1_id = insert_sample_park(sqlite_connection, {
+            'queue_times_id': 101, 'name': 'Park 1', 'city': 'Orlando',
+            'state_province': 'FL', 'country': 'USA', 'latitude': 28.4177,
+            'longitude': -81.5812, 'timezone': 'America/New_York',
+            'operator': 'Operator 1', 'is_disney': 1, 'is_universal': 0, 'is_active': 1
+        })
+        park2_id = insert_sample_park(sqlite_connection, {
+            'queue_times_id': 102, 'name': 'Park 2', 'city': 'Anaheim',
+            'state_province': 'CA', 'country': 'USA', 'latitude': 33.8121,
+            'longitude': -117.9190, 'timezone': 'America/Los_Angeles',
+            'operator': 'Operator 2', 'is_disney': 1, 'is_universal': 0, 'is_active': 1
+        })
+
+        # Create rides in both parks
+        ride1_id = insert_sample_ride(sqlite_connection, {
+            'queue_times_id': 1001, 'park_id': park1_id, 'name': 'Ride 1',
+            'land_area': 'Area 1', 'tier': 1, 'is_active': 1
+        })
+        ride2_id = insert_sample_ride(sqlite_connection, {
+            'queue_times_id': 1002, 'park_id': park2_id, 'name': 'Ride 2',
+            'land_area': 'Area 2', 'tier': 1, 'is_active': 1
+        })
+
+        # Insert status changes for both rides
+        sqlite_connection.execute(text("""
+            INSERT INTO ride_status_changes
+            (ride_id, previous_status, new_status, change_detected_at, downtime_duration_minutes)
+            VALUES (:ride_id, :previous_status, :new_status, :change_detected_at, :downtime_duration_minutes)
+        """), {'ride_id': ride1_id, 'previous_status': 0, 'new_status': 1, 'change_detected_at': datetime(2024, 1, 1, 12, 0, 0), 'downtime_duration_minutes': 120})
+
+        sqlite_connection.execute(text("""
+            INSERT INTO ride_status_changes
+            (ride_id, previous_status, new_status, change_detected_at, downtime_duration_minutes)
+            VALUES (:ride_id, :previous_status, :new_status, :change_detected_at, :downtime_duration_minutes)
+        """), {'ride_id': ride2_id, 'previous_status': 0, 'new_status': 1, 'change_detected_at': datetime(2024, 1, 1, 13, 0, 0), 'downtime_duration_minutes': 180})
+
+        sqlite_connection.commit()
+
+        detector = StatusChangeDetector(sqlite_connection)
+
+        # Filter by park 1 only
+        events = detector.get_longest_downtime_events(park_id=park1_id, limit=10)
+
+        assert len(events) == 1
+        assert events[0]['park_name'] == 'Park 1'
+        assert events[0]['ride_name'] == 'Ride 1'
+
+    def test_get_longest_downtime_events_filters_by_time_range(self, sqlite_connection, sample_park_data):
+        """get_longest_downtime_events() should filter by start_time and end_time when provided."""
+        from tests.conftest import insert_sample_park, insert_sample_ride
+        from sqlalchemy import text
+
+        park_id = insert_sample_park(sqlite_connection, sample_park_data)
+
+        # Create 2 rides
+        ride1_id = insert_sample_ride(sqlite_connection, {
+            'queue_times_id': 1001, 'park_id': park_id, 'name': 'Ride 1',
+            'land_area': 'Area 1', 'tier': 1, 'is_active': 1
+        })
+        ride2_id = insert_sample_ride(sqlite_connection, {
+            'queue_times_id': 1002, 'park_id': park_id, 'name': 'Ride 2',
+            'land_area': 'Area 2', 'tier': 1, 'is_active': 1
+        })
+
+        # Insert status changes at different times
+        sqlite_connection.execute(text("""
+            INSERT INTO ride_status_changes
+            (ride_id, previous_status, new_status, change_detected_at, downtime_duration_minutes)
+            VALUES (:ride_id, :previous_status, :new_status, :change_detected_at, :downtime_duration_minutes)
+        """), {'ride_id': ride1_id, 'previous_status': 0, 'new_status': 1, 'change_detected_at': datetime(2024, 1, 1, 10, 0, 0), 'downtime_duration_minutes': 120})  # Before time range
+
+        sqlite_connection.execute(text("""
+            INSERT INTO ride_status_changes
+            (ride_id, previous_status, new_status, change_detected_at, downtime_duration_minutes)
+            VALUES (:ride_id, :previous_status, :new_status, :change_detected_at, :downtime_duration_minutes)
+        """), {'ride_id': ride2_id, 'previous_status': 0, 'new_status': 1, 'change_detected_at': datetime(2024, 1, 1, 15, 0, 0), 'downtime_duration_minutes': 180})  # Within time range
+
+        sqlite_connection.commit()
+
+        detector = StatusChangeDetector(sqlite_connection)
+
+        # Filter by time range (12pm - 6pm)
+        events = detector.get_longest_downtime_events(
+            start_time=datetime(2024, 1, 1, 12, 0, 0),
+            end_time=datetime(2024, 1, 1, 18, 0, 0),
+            limit=10
+        )
+
+        assert len(events) == 1
+        assert events[0]['ride_name'] == 'Ride 2'
+        assert events[0]['downtime_duration_minutes'] == 180

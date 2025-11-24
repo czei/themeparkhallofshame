@@ -2,247 +2,28 @@
 Theme Park Downtime Tracker - pytest Configuration and Fixtures
 
 Provides shared test fixtures for:
-- In-memory SQLite database setup
 - Sample data objects (Parks, Rides, etc.)
 - Mock connections and repositories
+- Helper functions for test data insertion
+
+Note: Database connection fixtures are in tests/integration/conftest.py
 """
 
 import pytest
 from datetime import datetime, date, timedelta
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.engine import Connection
 from unittest.mock import Mock
 
+# Note: create_engine import removed - SQLite fixtures deleted
+
 
 # ============================================================================
-# Database Fixtures
+# Sample Data Fixtures
 # ============================================================================
 
-@pytest.fixture
-def sqlite_engine():
-    """
-    Create an in-memory SQLite database engine.
-
-    Returns:
-        SQLAlchemy Engine for in-memory SQLite database
-    """
-    engine = create_engine('sqlite:///:memory:', echo=False)
-    return engine
-
-
-@pytest.fixture
-def sqlite_connection(sqlite_engine):
-    """
-    Create a database connection with schema initialized.
-
-    This fixture:
-    1. Creates all tables matching the MySQL schema
-    2. Yields a connection for testing
-    3. Rolls back and closes after test completes
-
-    Returns:
-        SQLAlchemy Connection object
-    """
-    connection = sqlite_engine.connect()
-
-    # Create schema (simplified MySQL → SQLite mappings)
-    _create_schema(connection)
-
-    yield connection
-
-    # Cleanup
-    connection.close()
-
-
-def _create_schema(conn: Connection):
-    """
-    Create database schema for testing.
-
-    Converts MySQL schema to SQLite-compatible SQL.
-    """
-    # Parks table
-    conn.execute(text("""
-        CREATE TABLE parks (
-            park_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            queue_times_id INTEGER UNIQUE NOT NULL,
-            name TEXT NOT NULL,
-            city TEXT NOT NULL,
-            state_province TEXT,
-            country TEXT NOT NULL,
-            latitude REAL,
-            longitude REAL,
-            timezone TEXT NOT NULL DEFAULT 'UTC',
-            operator TEXT,
-            is_disney INTEGER NOT NULL DEFAULT 0,
-            is_universal INTEGER NOT NULL DEFAULT 0,
-            is_active INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-    """))
-
-    # Rides table
-    conn.execute(text("""
-        CREATE TABLE rides (
-            ride_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            park_id INTEGER NOT NULL,
-            queue_times_id INTEGER UNIQUE NOT NULL,
-            name TEXT NOT NULL,
-            land_area TEXT,
-            tier INTEGER,
-            is_active INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (park_id) REFERENCES parks(park_id) ON DELETE CASCADE
-        )
-    """))
-
-    # Ride Classifications table
-    conn.execute(text("""
-        CREATE TABLE ride_classifications (
-            classification_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ride_id INTEGER NOT NULL,
-            tier INTEGER NOT NULL,
-            classification_method TEXT NOT NULL,
-            confidence_score REAL,
-            classified_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (ride_id) REFERENCES rides(ride_id) ON DELETE CASCADE
-        )
-    """))
-
-    # Ride Status Snapshots table
-    conn.execute(text("""
-        CREATE TABLE ride_status_snapshots (
-            snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ride_id INTEGER NOT NULL,
-            recorded_at TEXT NOT NULL,
-            wait_time INTEGER,
-            is_open INTEGER,
-            computed_is_open INTEGER NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (ride_id) REFERENCES rides(ride_id) ON DELETE CASCADE
-        )
-    """))
-
-    # Ride Status Changes table
-    conn.execute(text("""
-        CREATE TABLE ride_status_changes (
-            change_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ride_id INTEGER NOT NULL,
-            change_detected_at TEXT NOT NULL,
-            previous_status INTEGER NOT NULL,
-            new_status INTEGER NOT NULL,
-            downtime_duration_minutes INTEGER,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (ride_id) REFERENCES rides(ride_id) ON DELETE CASCADE
-        )
-    """))
-
-    # Park Activity Snapshots table
-    conn.execute(text("""
-        CREATE TABLE park_activity_snapshots (
-            activity_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            park_id INTEGER NOT NULL,
-            recorded_at TEXT NOT NULL,
-            park_appears_open INTEGER NOT NULL,
-            active_rides_count INTEGER NOT NULL DEFAULT 0,
-            total_rides_count INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (park_id) REFERENCES parks(park_id) ON DELETE CASCADE
-        )
-    """))
-
-    # Daily Stats table
-    conn.execute(text("""
-        CREATE TABLE daily_stats (
-            stat_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            park_id INTEGER NOT NULL,
-            ride_id INTEGER,
-            stat_date TEXT NOT NULL,
-            total_downtime_minutes INTEGER NOT NULL DEFAULT 0,
-            downtime_percentage REAL NOT NULL DEFAULT 0.0,
-            status_changes_count INTEGER NOT NULL DEFAULT 0,
-            avg_wait_time REAL,
-            max_wait_time INTEGER,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (park_id) REFERENCES parks(park_id) ON DELETE CASCADE,
-            FOREIGN KEY (ride_id) REFERENCES rides(ride_id) ON DELETE CASCADE
-        )
-    """))
-
-    # Weekly Stats table
-    conn.execute(text("""
-        CREATE TABLE weekly_stats (
-            stat_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            park_id INTEGER NOT NULL,
-            ride_id INTEGER,
-            week_start_date TEXT NOT NULL,
-            total_downtime_minutes INTEGER NOT NULL DEFAULT 0,
-            downtime_percentage REAL NOT NULL DEFAULT 0.0,
-            status_changes_count INTEGER NOT NULL DEFAULT 0,
-            avg_wait_time REAL,
-            max_wait_time INTEGER,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (park_id) REFERENCES parks(park_id) ON DELETE CASCADE,
-            FOREIGN KEY (ride_id) REFERENCES rides(ride_id) ON DELETE CASCADE
-        )
-    """))
-
-    # Monthly Stats table
-    conn.execute(text("""
-        CREATE TABLE monthly_stats (
-            stat_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            park_id INTEGER NOT NULL,
-            ride_id INTEGER,
-            month_start_date TEXT NOT NULL,
-            total_downtime_minutes INTEGER NOT NULL DEFAULT 0,
-            downtime_percentage REAL NOT NULL DEFAULT 0.0,
-            status_changes_count INTEGER NOT NULL DEFAULT 0,
-            avg_wait_time REAL,
-            max_wait_time INTEGER,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (park_id) REFERENCES parks(park_id) ON DELETE CASCADE,
-            FOREIGN KEY (ride_id) REFERENCES rides(ride_id) ON DELETE CASCADE
-        )
-    """))
-
-    # Yearly Stats table
-    conn.execute(text("""
-        CREATE TABLE yearly_stats (
-            stat_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            park_id INTEGER NOT NULL,
-            ride_id INTEGER,
-            year INTEGER NOT NULL,
-            total_downtime_minutes INTEGER NOT NULL DEFAULT 0,
-            downtime_percentage REAL NOT NULL DEFAULT 0.0,
-            status_changes_count INTEGER NOT NULL DEFAULT 0,
-            avg_wait_time REAL,
-            max_wait_time INTEGER,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (park_id) REFERENCES parks(park_id) ON DELETE CASCADE,
-            FOREIGN KEY (ride_id) REFERENCES rides(ride_id) ON DELETE CASCADE
-        )
-    """))
-
-    # Aggregation Log table
-    conn.execute(text("""
-        CREATE TABLE aggregation_log (
-            log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            aggregation_date TEXT NOT NULL,
-            aggregation_type TEXT NOT NULL,
-            started_at TEXT NOT NULL,
-            completed_at TEXT,
-            status TEXT NOT NULL,
-            parks_processed INTEGER NOT NULL DEFAULT 0,
-            rides_processed INTEGER NOT NULL DEFAULT 0,
-            error_message TEXT,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-    """))
-
-    conn.commit()
-
+# SQLite fixtures removed - all repository tests now use MySQL integration tests
+# See tests/integration/conftest.py for mysql_connection fixture
 
 # ============================================================================
 # Sample Data Fixtures
@@ -318,9 +99,10 @@ def sample_status_change_data():
     return {
         'ride_id': 1,
         'changed_at': datetime.now(),
-        'old_status': True,
+        'previous_status': True,
         'new_status': False,
-        'downtime_duration_minutes': 120
+        'duration_in_previous_status': 120,
+        'wait_time_at_change': None
     }
 
 
@@ -389,6 +171,10 @@ def insert_sample_park(conn: Connection, park_data: dict) -> int:
 
     Returns:
         park_id of inserted record
+
+    Note:
+        Does NOT commit - relies on test fixture transaction management.
+        For MySQL integration tests, transaction is rolled back after test.
     """
     result = conn.execute(text("""
         INSERT INTO parks (
@@ -402,7 +188,7 @@ def insert_sample_park(conn: Connection, park_data: dict) -> int:
             :is_disney, :is_universal, :is_active
         )
     """), park_data)
-    conn.commit()
+    # No commit - relies on fixture transaction management
     return result.lastrowid
 
 
@@ -416,6 +202,10 @@ def insert_sample_ride(conn: Connection, ride_data: dict) -> int:
 
     Returns:
         ride_id of inserted record
+
+    Note:
+        Does NOT commit - relies on test fixture transaction management.
+        For MySQL integration tests, transaction is rolled back after test.
     """
     result = conn.execute(text("""
         INSERT INTO rides (
@@ -425,5 +215,5 @@ def insert_sample_ride(conn: Connection, ride_data: dict) -> int:
             :queue_times_id, :park_id, :name, :land_area, :tier, :is_active
         )
     """), ride_data)
-    conn.commit()
+    # No commit - relies on fixture transaction management
     return result.lastrowid

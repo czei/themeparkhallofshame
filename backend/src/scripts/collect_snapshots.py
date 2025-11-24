@@ -24,6 +24,7 @@ sys.path.insert(0, str(backend_src.absolute()))
 from utils.logger import logger
 from collector.queue_times_client import QueueTimesClient
 from collector.status_calculator import computed_is_open, validate_wait_time
+from database.connection import get_db_connection
 from database.repositories.park_repository import ParkRepository
 from database.repositories.ride_repository import RideRepository
 from database.repositories.snapshot_repository import RideStatusSnapshotRepository, ParkActivitySnapshotRepository
@@ -95,59 +96,74 @@ class SnapshotCollector:
             snapshot_repo: Ride status snapshot repository
             status_change_repo: Ride status change repository
         """
-        park_id = park['park_id']
-        park_name = park['name']
-        queue_times_id = park['queue_times_id']
+        park_id = park.park_id
+        park_name = park.name
+        queue_times_id = park.queue_times_id
 
         try:
             logger.info(f"Processing: {park_name}")
             self.stats['parks_processed'] += 1
 
             # Fetch current wait times from Queue-Times API
-            rides_data = self.api_client.fetch_park_rides(queue_times_id)
+            api_response = self.api_client.get_park_wait_times(queue_times_id)
+            rides_data = api_response.get('rides', []) if api_response else []
 
             if not rides_data:
                 logger.warning(f"  No ride data returned for {park_name}")
                 return
 
-            # Track park activity
-            active_rides = sum(1 for r in rides_data if r.get('wait_time', 0) > 0 or r.get('is_open'))
+            # Track park activity - calculate statistics
             total_rides = len(rides_data)
-            park_appears_open = active_rides > 0
+            rides_open = sum(1 for r in rides_data if r.get('wait_time', 0) > 0 or r.get('is_open'))
+            rides_closed = total_rides - rides_open
+            park_appears_open = rides_open > 0
 
-            self._store_park_activity(park_id, park_appears_open, active_rides, total_rides, park_activity_repo)
+            # Calculate wait time statistics for open rides
+            open_wait_times = [r.get('wait_time', 0) for r in rides_data
+                             if (r.get('wait_time', 0) > 0 or r.get('is_open')) and r.get('wait_time') is not None]
+            avg_wait = sum(open_wait_times) / len(open_wait_times) if open_wait_times else None
+            max_wait = max(open_wait_times) if open_wait_times else None
+
+            self._store_park_activity(park_id, park_appears_open, total_rides, rides_open,
+                                    rides_closed, avg_wait, max_wait, park_activity_repo)
 
             # Process each ride
             for ride_data in rides_data:
                 self._process_ride(ride_data, park_id, ride_repo, snapshot_repo, status_change_repo)
 
             logger.info(f"  ✓ Processed {len(rides_data)} rides "
-                       f"({active_rides} active, park appears {'open' if park_appears_open else 'closed'})")
+                       f"({rides_open} open, park appears {'open' if park_appears_open else 'closed'})")
 
         except Exception as e:
             logger.error(f"Error processing park {park_name}: {e}")
             self.stats['errors'] += 1
 
-    def _store_park_activity(self, park_id: int, appears_open: bool, active_count: int, total_count: int,
-                             park_activity_repo: ParkActivitySnapshotRepository):
+    def _store_park_activity(self, park_id: int, appears_open: bool, total_rides: int,
+                             rides_open: int, rides_closed: int, avg_wait: Optional[float],
+                             max_wait: Optional[int], park_activity_repo: ParkActivitySnapshotRepository):
         """
         Store park activity snapshot.
 
         Args:
             park_id: Database park ID
             appears_open: Whether park appears to be operating
-            active_count: Number of active rides
-            total_count: Total number of rides tracked
+            total_rides: Total number of rides tracked
+            rides_open: Number of open rides
+            rides_closed: Number of closed rides
+            avg_wait: Average wait time across open rides
+            max_wait: Maximum wait time across all rides
             park_activity_repo: Park activity snapshot repository
         """
         try:
             activity_record = {
                 'park_id': park_id,
                 'recorded_at': datetime.now(),
-                'park_appears_open': appears_open,
-                'active_rides_count': active_count,
-                'total_rides_count': total_count,
-                'created_at': datetime.now()
+                'total_rides_tracked': total_rides,
+                'rides_open': rides_open,
+                'rides_closed': rides_closed,
+                'avg_wait_time': avg_wait,
+                'max_wait_time': max_wait,
+                'park_appears_open': appears_open
             }
 
             park_activity_repo.insert(activity_record)
@@ -176,7 +192,7 @@ class SnapshotCollector:
                 logger.warning(f"  Ride ID {queue_times_id} not found in database (may need to run collect_parks)")
                 return
 
-            ride_id = ride['ride_id']
+            ride_id = ride.ride_id
             self.stats['rides_processed'] += 1
 
             # Extract wait time and status from API
@@ -217,7 +233,7 @@ class SnapshotCollector:
                 'wait_time': wait_time,
                 'is_open': is_open_api,
                 'computed_is_open': computed_status,
-                'created_at': datetime.now()
+                'last_updated_api': None  # Could be populated from API if available
             }
 
             snapshot_repo.insert(snapshot_record)
@@ -272,10 +288,10 @@ class SnapshotCollector:
                 change_record = {
                     'ride_id': ride_id,
                     'changed_at': now,
-                    'old_status': previous_status,
+                    'previous_status': previous_status,
                     'new_status': current_status,
-                    'downtime_duration_minutes': downtime_duration,
-                    'created_at': now
+                    'duration_in_previous_status': downtime_duration or 0,
+                    'wait_time_at_change': None  # Could be populated from current snapshot
                 }
 
                 status_change_repo.insert(change_record)

@@ -70,6 +70,30 @@ Based on plan.md project structure:
 - [X] T025b Implement backend/src/database/repositories/status_change_repository.py (RideStatusChangeRepository) - required by collect_snapshots.py
 - [X] T025c Implement backend/src/database/repositories/aggregation_repository.py (AggregationLogRepository) - required by aggregate_daily.py
 
+### Phase 2b: Repository Schema Validation [CRITICAL]
+
+**Purpose**: Validate all repository SQL queries against actual database schemas with integration tests
+
+**⚠️ CRITICAL**: Repository schema mismatches cause silent failures in production. Unit tests with mocks don't catch these bugs because they never execute SQL against real database schemas.
+
+**Root Cause Analysis**: During initial implementation, 11 schema mismatches were discovered across 3 repositories:
+- stats_repository.py: 9 column name mismatches (operating_hours_minutes, status_changes, session_date, session_start_utc, session_end_utc, operating_minutes)
+- ride_repository.py: 2 column name mismatches (changed_at, duration_in_previous_status)
+- snapshot_repository.py: 4 column name mismatches (total_rides_tracked, rides_open, rides_closed, last_updated_api)
+- status_change_repository.py: 3 column name mismatches (changed_at, duration_in_previous_status, wait_time_at_change)
+
+**Why Unit Tests Missed These**: Unit tests use mocks that return whatever data you specify. SQL queries are never executed against real database, so column names are never validated.
+
+**Tasks**:
+
+- [X] T025d Fix stats_repository.py schema mismatches (9 corrections: park_daily_stats.operating_hours_minutes, ride_daily_stats.status_changes, ride_daily_stats.operating_hours_minutes, ride_weekly_stats.status_changes, park_operating_sessions.session_date, park_operating_sessions.session_start_utc, park_operating_sessions.session_end_utc, park_operating_sessions.operating_minutes, removed non-existent columns)
+- [X] T025e Fix ride_repository.py schema mismatches (2 corrections: changed_at, duration_in_previous_status)
+- [X] T025f Create integration tests for collect_snapshots.py with real MySQL (tests/integration/test_collect_snapshots_integration.py - 6 tests covering snapshot collection, park activity, status changes, error handling)
+- [X] T025g Create integration tests for all repositories with real MySQL to prevent future schema mismatches (Fixed 5 additional schema bugs: aggregation_repository created_at removal, park_repository decimal conversion, ride_repository classification_method ENUM, snapshot tests timestamp ordering, status_change tests timestamp ordering)
+- [X] T025h Run full test suite and verify zero schema validation errors (52 passing integration tests, 0 failures, 27% coverage)
+
+**GATE**: All repository integration tests must pass against real MySQL schemas before proceeding to Phase 3. This prevents production failures from schema mismatches.
+
 ### Ride Classification System (FR-022 to FR-032)
 
 - [ ] T026 Create data/manual_overrides.csv schema (park_id, ride_id, override_tier, reason, date_added) with documentation

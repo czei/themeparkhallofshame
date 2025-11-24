@@ -59,7 +59,7 @@ class StatsRepository:
                 avg_uptime_percentage,
                 rides_with_downtime,
                 total_rides_tracked,
-                total_operating_hours
+                operating_hours_minutes
             FROM park_daily_stats
             WHERE park_id = :park_id
                 AND stat_date >= COALESCE(:start_date, DATE_SUB(CURDATE(), INTERVAL 30 DAY))
@@ -185,10 +185,10 @@ class StatsRepository:
                 ride_id,
                 downtime_minutes,
                 uptime_percentage,
-                downtime_event_count,
+                status_changes,
                 avg_wait_time,
                 peak_wait_time,
-                total_operating_minutes
+                operating_hours_minutes
             FROM ride_daily_stats
             WHERE ride_id = :ride_id
                 AND stat_date >= COALESCE(:start_date, DATE_SUB(CURDATE(), INTERVAL 30 DAY))
@@ -229,7 +229,7 @@ class StatsRepository:
                 ride_id,
                 downtime_minutes,
                 uptime_percentage,
-                downtime_event_count,
+                status_changes,
                 avg_wait_time,
                 peak_wait_time,
                 trend_vs_previous_week
@@ -272,17 +272,15 @@ class StatsRepository:
             SELECT
                 session_id,
                 park_id,
-                operating_date,
-                park_opened_at,
-                park_closed_at,
-                total_operating_hours,
-                first_activity_detected_at,
-                last_activity_detected_at
+                session_date,
+                session_start_utc,
+                session_end_utc,
+                operating_minutes
             FROM park_operating_sessions
             WHERE park_id = :park_id
-                AND operating_date >= COALESCE(:start_date, DATE_SUB(CURDATE(), INTERVAL 30 DAY))
-                AND operating_date <= COALESCE(:end_date, CURDATE())
-            ORDER BY operating_date DESC
+                AND session_date >= COALESCE(:start_date, DATE_SUB(CURDATE(), INTERVAL 30 DAY))
+                AND session_date <= COALESCE(:end_date, CURDATE())
+            ORDER BY session_date DESC
             LIMIT :limit
         """)
 

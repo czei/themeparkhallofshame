@@ -122,7 +122,7 @@ class AggregationLogRepository:
         query = text("""
             SELECT log_id, aggregation_date, aggregation_type,
                    started_at, completed_at, status, parks_processed,
-                   rides_processed, error_message, created_at
+                   rides_processed, error_message
             FROM aggregation_log
             WHERE log_id = :log_id
         """)
@@ -153,7 +153,7 @@ class AggregationLogRepository:
         query = text("""
             SELECT log_id, aggregation_date, aggregation_type,
                    started_at, completed_at, status, parks_processed,
-                   rides_processed, error_message, created_at
+                   rides_processed, error_message
             FROM aggregation_log
             WHERE aggregation_date = :aggregation_date
                 AND aggregation_type = :aggregation_type
@@ -191,7 +191,7 @@ class AggregationLogRepository:
             query = text("""
                 SELECT log_id, aggregation_date, aggregation_type,
                        started_at, completed_at, status, parks_processed,
-                       rides_processed, error_message, created_at
+                       rides_processed, error_message
                 FROM aggregation_log
                 WHERE aggregation_type = :aggregation_type
                 ORDER BY started_at DESC
@@ -205,7 +205,7 @@ class AggregationLogRepository:
             query = text("""
                 SELECT log_id, aggregation_date, aggregation_type,
                        started_at, completed_at, status, parks_processed,
-                       rides_processed, error_message, created_at
+                       rides_processed, error_message
                 FROM aggregation_log
                 ORDER BY started_at DESC
                 LIMIT :limit
@@ -230,7 +230,7 @@ class AggregationLogRepository:
         query = text("""
             SELECT log_id, aggregation_date, aggregation_type,
                    started_at, completed_at, status, parks_processed,
-                   rides_processed, error_message, created_at
+                   rides_processed, error_message
             FROM aggregation_log
             WHERE status = 'failed'
                 AND started_at >= DATE_SUB(NOW(), INTERVAL :days DAY)
@@ -381,7 +381,7 @@ class AggregationLogRepository:
         query = text("""
             SELECT log_id, aggregation_date, aggregation_type,
                    started_at, completed_at, status, parks_processed,
-                   rides_processed, error_message, created_at
+                   rides_processed, error_message
             FROM aggregation_log
             WHERE aggregation_type = :aggregation_type
                 AND status = 'success'

@@ -409,13 +409,13 @@ class RideRepository:
                 ride_id,
                 previous_status,
                 new_status,
-                change_detected_at,
-                downtime_duration_minutes
+                changed_at,
+                duration_in_previous_status
             FROM ride_status_changes
             WHERE ride_id = :ride_id
-                AND change_detected_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+                AND changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
                 AND new_status = FALSE
-            ORDER BY change_detected_at DESC
+            ORDER BY changed_at DESC
         """)
 
         result = self.conn.execute(query, {"ride_id": ride_id, "hours": hours})

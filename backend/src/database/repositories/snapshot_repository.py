@@ -76,7 +76,7 @@ class RideStatusSnapshotRepository:
         """
         query = text("""
             SELECT snapshot_id, ride_id, recorded_at, wait_time,
-                   is_open, computed_is_open, created_at
+                   is_open, computed_is_open, last_updated_api
             FROM ride_status_snapshots
             WHERE ride_id = :ride_id
             ORDER BY recorded_at DESC
@@ -150,7 +150,7 @@ class RideStatusSnapshotRepository:
         """
         query = text("""
             SELECT snapshot_id, ride_id, recorded_at, wait_time,
-                   is_open, computed_is_open, created_at
+                   is_open, computed_is_open, last_updated_api
             FROM ride_status_snapshots
             WHERE ride_id = :ride_id
                 AND recorded_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
@@ -194,12 +194,14 @@ class ParkActivitySnapshotRepository:
         """
         query = text("""
             INSERT INTO park_activity_snapshots (
-                park_id, recorded_at, park_appears_open,
-                active_rides_count, total_rides_count
+                park_id, recorded_at, total_rides_tracked,
+                rides_open, rides_closed, avg_wait_time, max_wait_time,
+                park_appears_open
             )
             VALUES (
-                :park_id, :recorded_at, :park_appears_open,
-                :active_rides_count, :total_rides_count
+                :park_id, :recorded_at, :total_rides_tracked,
+                :rides_open, :rides_closed, :avg_wait_time, :max_wait_time,
+                :park_appears_open
             )
         """)
 
@@ -223,8 +225,9 @@ class ParkActivitySnapshotRepository:
             Dictionary with activity data or None if not found
         """
         query = text("""
-            SELECT activity_id, park_id, recorded_at, park_appears_open,
-                   active_rides_count, total_rides_count, created_at
+            SELECT snapshot_id, park_id, recorded_at, total_rides_tracked,
+                   rides_open, rides_closed, avg_wait_time, max_wait_time,
+                   park_appears_open
             FROM park_activity_snapshots
             WHERE park_id = :park_id
             ORDER BY recorded_at DESC
@@ -251,8 +254,9 @@ class ParkActivitySnapshotRepository:
             List of dictionaries with activity data
         """
         query = text("""
-            SELECT activity_id, park_id, recorded_at, park_appears_open,
-                   active_rides_count, total_rides_count, created_at
+            SELECT snapshot_id, park_id, recorded_at, total_rides_tracked,
+                   rides_open, rides_closed, avg_wait_time, max_wait_time,
+                   park_appears_open
             FROM park_activity_snapshots
             WHERE park_id = :park_id
                 AND recorded_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
@@ -270,13 +274,14 @@ class ParkActivitySnapshotRepository:
             List of dictionaries with activity data
         """
         query = text("""
-            SELECT pas.activity_id, pas.park_id, pas.recorded_at,
-                   pas.park_appears_open, pas.active_rides_count,
-                   pas.total_rides_count, p.name as park_name
+            SELECT pas.snapshot_id, pas.park_id, pas.recorded_at,
+                   pas.total_rides_tracked, pas.rides_open, pas.rides_closed,
+                   pas.avg_wait_time, pas.max_wait_time, pas.park_appears_open,
+                   p.name as park_name
             FROM park_activity_snapshots pas
             INNER JOIN parks p ON pas.park_id = p.park_id
-            WHERE pas.activity_id IN (
-                SELECT MAX(activity_id)
+            WHERE pas.snapshot_id IN (
+                SELECT MAX(snapshot_id)
                 FROM park_activity_snapshots
                 WHERE recorded_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
                 GROUP BY park_id

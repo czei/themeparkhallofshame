@@ -290,11 +290,95 @@ import tempfile
    - Scripts testing
    - Reach 80% coverage
 
+## Critical Finding: Schema Mismatches Discovered
+
+### Summary
+During integration testing of `collect_snapshots.py`, **11 schema mismatches** were discovered across 4 repositories. These bugs were not caught by unit tests because mocks don't validate SQL queries against actual database schemas.
+
+### Root Cause Analysis
+**Why unit tests missed these bugs:**
+- Unit tests use mocks (`MagicMock`) that return whatever data you specify
+- SQL queries are never executed against real database
+- Column names in SQL are never validated against actual table schemas
+- 49.4% coverage metric was misleading - it measured mocking coverage, not functional coverage
+
+**Impact:**
+- These bugs would have caused **silent failures in production**
+- `collect_snapshots.py` runs every 10 minutes - critical production code
+- All 6 integration tests failed initially due to schema mismatches
+
+### Bugs Found and Fixed
+
+#### 1. stats_repository.py (9 schema mismatches) ✅ FIXED
+**Lines affected:** 62, 188, 191, 232, 275-278
+
+| Method | Wrong Column | Correct Column | Table |
+|--------|-------------|----------------|-------|
+| get_park_daily_stats() | total_operating_hours | operating_hours_minutes | park_daily_stats |
+| get_ride_daily_stats() | downtime_event_count | status_changes | ride_daily_stats |
+| get_ride_daily_stats() | total_operating_minutes | operating_hours_minutes | ride_daily_stats |
+| get_ride_weekly_stats() | downtime_event_count | status_changes | ride_weekly_stats |
+| get_park_operating_sessions() | operating_date | session_date | park_operating_sessions |
+| get_park_operating_sessions() | park_opened_at | session_start_utc | park_operating_sessions |
+| get_park_operating_sessions() | park_closed_at | session_end_utc | park_operating_sessions |
+| get_park_operating_sessions() | total_operating_hours | operating_minutes | park_operating_sessions |
+| get_park_operating_sessions() | first_activity_detected_at | (removed - doesn't exist) | park_operating_sessions |
+| get_park_operating_sessions() | last_activity_detected_at | (removed - doesn't exist) | park_operating_sessions |
+
+#### 2. ride_repository.py (2 schema mismatches) ✅ FIXED
+**Lines affected:** 412-413, 416
+
+| Method | Wrong Column | Correct Column | Table |
+|--------|-------------|----------------|-------|
+| get_downtime_changes() | change_detected_at | changed_at | ride_status_changes |
+| get_downtime_changes() | downtime_duration_minutes | duration_in_previous_status | ride_status_changes |
+
+#### 3. snapshot_repository.py (4 schema mismatches) ✅ FIXED (in previous session)
+| Method | Wrong Column | Correct Column | Table |
+|--------|-------------|----------------|-------|
+| ParkActivitySnapshotRepository.insert() | active_rides_count | rides_open | park_activity_snapshots |
+| ParkActivitySnapshotRepository.insert() | total_rides_count | total_rides_tracked | park_activity_snapshots |
+| ParkActivitySnapshotRepository.insert() | (missing) | rides_closed | park_activity_snapshots |
+| RideStatusSnapshotRepository.get_latest_by_ride() | created_at | last_updated_api | ride_status_snapshots |
+
+#### 4. status_change_repository.py (3 schema mismatches) ✅ FIXED (in previous session)
+| Method | Wrong Column | Correct Column | Table |
+|--------|-------------|----------------|-------|
+| Multiple methods | change_detected_at | changed_at | ride_status_changes |
+| Multiple methods | downtime_duration_minutes | duration_in_previous_status | ride_status_changes |
+| insert() | created_at | wait_time_at_change | ride_status_changes |
+
+### Integration Tests Created ✅
+**File:** `tests/integration/test_collect_snapshots_integration.py`
+- **6 test classes** covering complete snapshot collection workflow
+- **All tests passing** after schema fixes
+- Tests validate against **real MySQL database** with actual schemas
+- Coverage includes: snapshot creation, park activity, status changes, error handling, statistics
+
+### Lessons Learned
+
+1. **Integration tests are mandatory** for repository classes with SQL queries
+2. **Unit test coverage percentage is misleading** when mocks are used extensively
+3. **Schema validation requires real database** - mocks can't catch column name mismatches
+4. **Production code must be tested against production-like infrastructure**
+
+### Action Items Added to tasks.md
+
+New Phase 2b added with critical validation tasks:
+- [X] T025d: Fix stats_repository.py schema mismatches (9 corrections)
+- [X] T025e: Fix ride_repository.py schema mismatches (2 corrections)
+- [X] T025f: Create integration tests for collect_snapshots.py
+- [ ] T025g: Create integration tests for all repositories with real MySQL
+- [ ] T025h: Run full test suite and verify zero schema validation errors
+
+**GATE:** All repository integration tests must pass before Phase 3.
+
 ## Notes
 
 - **55 tests already marked** for integration phase
 - **Integration fixtures ready** (tests/integration/conftest.py)
 - **Documentation complete** (TESTING.md)
-- **Solid foundation** established (200 passing tests)
+- **Solid foundation** established (351 passing tests)
+- **Schema validation** now a mandatory gate before production deployment
 
 The path to 80% coverage is clear and well-documented!

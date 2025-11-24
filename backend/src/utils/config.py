@@ -156,11 +156,12 @@ config = Config()
 
 
 # Database configuration
-DB_HOST = config.get('DB_HOST', 'localhost')
-DB_PORT = config.get_int('DB_PORT', 3306)
-DB_NAME = config.get('DB_NAME', 'themepark_tracker_dev')
-DB_USER = config.get('DB_USER', 'root')
-DB_PASSWORD = config.get('DB_PASSWORD', '')
+# Prioritize TEST_DB_* variables for integration tests
+DB_HOST = config.get('TEST_DB_HOST', config.get('DB_HOST', 'localhost'))
+DB_PORT = config.get_int('TEST_DB_PORT', config.get_int('DB_PORT', 3306))
+DB_NAME = config.get('TEST_DB_NAME', config.get('DB_NAME', 'themepark_tracker_dev'))
+DB_USER = config.get('TEST_DB_USER', config.get('DB_USER', 'root'))
+DB_PASSWORD = config.get('TEST_DB_PASSWORD', config.get('DB_PASSWORD', ''))
 
 # Queue-Times.com API configuration
 QUEUE_TIMES_API_BASE_URL = config.get('QUEUE_TIMES_API_BASE_URL', 'https://queue-times.com')

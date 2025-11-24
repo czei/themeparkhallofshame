@@ -138,6 +138,10 @@ def comprehensive_test_data(mysql_connection):
     prev_week = (datetime.now() - timedelta(weeks=1)).isocalendar()[1]
     prev_week_year = (datetime.now() - timedelta(weeks=1)).year
 
+    # Calculate week_start_date for weekly stats
+    current_week_start = date.fromisocalendar(current_year, current_week, 1)
+    prev_week_start = date.fromisocalendar(prev_week_year, prev_week, 1)
+
     current_month = datetime.now().month
     prev_month = current_month - 1 if current_month > 1 else 12
     prev_month_year = current_year if current_month > 1 else current_year - 1
@@ -204,22 +208,22 @@ def comprehensive_test_data(mysql_connection):
 
             conn.execute(text("""
                 INSERT INTO ride_weekly_stats (
-                    ride_id, year, week_number, downtime_minutes, uptime_percentage,
+                    ride_id, year, week_number, week_start_date, downtime_minutes, uptime_percentage,
                     avg_wait_time, peak_wait_time, status_changes
                 ) VALUES (
-                    :ride_id, :year, :week, :downtime, :uptime,
+                    :ride_id, :year, :week, :week_start, :downtime, :uptime,
                     :avg_wait, :peak_wait, :status_changes
                 )
             """), {
                 'ride_id': ride_id,
                 'year': current_year,
                 'week': current_week,
+                'week_start': current_week_start,
                 'downtime': downtime_week,
                 'uptime': uptime_pct_week,
                 'avg_wait': 45 if tier == 1 else (30 if tier == 2 else 15),
                 'peak_wait': 100 if tier == 1 else (70 if tier == 2 else 35),
-                'status_changes': 15 if tier == 1 else 10,
-                'observations': 420
+                'status_changes': 15 if tier == 1 else 10
             })
 
             # Previous week - 10% less downtime
@@ -227,22 +231,22 @@ def comprehensive_test_data(mysql_connection):
 
             conn.execute(text("""
                 INSERT INTO ride_weekly_stats (
-                    ride_id, year, week_number, downtime_minutes, uptime_percentage,
+                    ride_id, year, week_number, week_start_date, downtime_minutes, uptime_percentage,
                     avg_wait_time, peak_wait_time, status_changes
                 ) VALUES (
-                    :ride_id, :year, :week, :downtime, :uptime,
+                    :ride_id, :year, :week, :week_start, :downtime, :uptime,
                     :avg_wait, :peak_wait, :status_changes
                 )
             """), {
                 'ride_id': ride_id,
                 'year': prev_week_year,
                 'week': prev_week,
+                'week_start': prev_week_start,
                 'downtime': downtime_prev_week,
                 'uptime': ((4200 - downtime_prev_week) / 4200.0) * 100,
                 'avg_wait': 42 if tier == 1 else (28 if tier == 2 else 14),
                 'peak_wait': 95 if tier == 1 else (65 if tier == 2 else 32),
-                'status_changes': 14 if tier == 1 else 9,
-                'observations': 420
+                'status_changes': 14 if tier == 1 else 9
             })
 
             # Monthly stats
@@ -334,13 +338,14 @@ def comprehensive_test_data(mysql_connection):
 
         conn.execute(text("""
             INSERT INTO park_weekly_stats (
-                park_id, year, week_number, total_downtime_hours, rides_with_downtime,
+                park_id, year, week_number, week_start_date, total_downtime_hours, rides_with_downtime,
                 avg_uptime_percentage, trend_vs_previous_week
-            ) VALUES (:park_id, :year, :week, :downtime_hours, :rides_down, :avg_uptime, :trend)
+            ) VALUES (:park_id, :year, :week, :week_start, :downtime_hours, :rides_down, :avg_uptime, :trend)
         """), {
             'park_id': park_id,
             'year': current_year,
             'week': current_week,
+            'week_start': current_week_start,
             'downtime_hours': total_downtime_week,
             'rides_down': 10,
             'avg_uptime': 77.78,
@@ -350,13 +355,14 @@ def comprehensive_test_data(mysql_connection):
         # Previous week
         conn.execute(text("""
             INSERT INTO park_weekly_stats (
-                park_id, year, week_number, total_downtime_hours, rides_with_downtime,
+                park_id, year, week_number, week_start_date, total_downtime_hours, rides_with_downtime,
                 avg_uptime_percentage, trend_vs_previous_week
-            ) VALUES (:park_id, :year, :week, :downtime_hours, :rides_down, :avg_uptime, NULL)
+            ) VALUES (:park_id, :year, :week, :week_start, :downtime_hours, :rides_down, :avg_uptime, NULL)
         """), {
             'park_id': park_id,
             'year': prev_week_year,
             'week': prev_week,
+            'week_start': prev_week_start,
             'downtime_hours': total_downtime_week * 0.9,
             'rides_down': 10,
             'avg_uptime': 80.0
@@ -735,11 +741,13 @@ def test_rides_downtime_disney_universal_filter(client, comprehensive_test_data)
     assert len(data['data']) == 80
 
     # Verify all rides belong to Disney or Universal parks
+    disney_universal_parks = {
+        'Magic Kingdom', 'EPCOT', 'Hollywood Studios', 'Animal Kingdom', 'Disneyland',
+        'Universal Studios Florida', 'Islands of Adventure', 'Universal Studios Hollywood'
+    }
     for ride in data['data']:
         park_name = ride['park_name']
-        assert 'Disney' in park_name or 'Universal' in park_name or \
-               'EPCOT' in park_name or 'Hollywood' in park_name or \
-               'Animal Kingdom' in park_name or 'Islands' in park_name
+        assert park_name in disney_universal_parks, f"Park {park_name} should be Disney or Universal"
 
 
 # ============================================================================
@@ -770,7 +778,7 @@ def test_rides_waittimes_live_mode(client, comprehensive_test_data):
         ride = data['data'][i]
         assert ride['tier'] == 1
         assert ride['current_wait_minutes'] == 60
-        assert ride['current_is_open'] is True
+        assert ride['current_is_open'] == 1  # MySQL returns TINYINT(1) as 1, not True
 
     # Verify sorting by wait time descending
     for i in range(len(data['data']) - 1):
@@ -799,12 +807,13 @@ def test_rides_waittimes_7day_average_mode(client, comprehensive_test_data):
     # Verify average wait times
     # Tier 1: 45 min, Tier 2: 30 min, Tier 3: 15 min
     for ride in data['data']:
+        avg_wait = float(ride['avg_wait_7days']) if isinstance(ride['avg_wait_7days'], str) else ride['avg_wait_7days']
         if ride['tier'] == 1:
-            assert ride['avg_wait_7days'] == 45
+            assert avg_wait == 45
         elif ride['tier'] == 2:
-            assert ride['avg_wait_7days'] == 30
+            assert avg_wait == 30
         elif ride['tier'] == 3:
-            assert ride['avg_wait_7days'] == 15
+            assert avg_wait == 15
 
     # Should be sorted by avg_wait_7days descending
     for i in range(len(data['data']) - 1):

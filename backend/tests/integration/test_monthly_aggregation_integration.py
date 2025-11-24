@@ -118,11 +118,10 @@ class TestMonthlyAggregationMath:
         assert abs(uptime_pct - 92.86) < 0.1, f"Uptime percentage should be ~92.86%, got {uptime_pct}"
 
         # Weighted average wait time calculation
-        # Days 1-10: 31,32,33,34,35,36,37,38,39,40 (avg 35.5)
-        # Days 11-20: 31,32,33,34,35,36,37,38,39,40 (avg 35.5)
-        # Days 21-30: 31,32,33,34,35,36,37,38,39,40 (avg 35.5)
-        # Overall average should be around 35.5
-        assert abs(float(ride_stats.avg_wait_time) - 35.5) < 1.0
+        # Days 1-30: wait_time = 30.0 + (day_num % 10)
+        # Results in: 31,32,33,34,35,36,37,38,39,30 (repeats 3 times)
+        # Average: 34.5
+        assert abs(float(ride_stats.avg_wait_time) - 34.5) < 1.0
 
         # Peak should be max across month: 54
         assert ride_stats.peak_wait_time == 54
@@ -499,11 +498,12 @@ class TestParkMonthlyAggregation:
 
         park_id = insert_sample_park(mysql_connection, sample_park_data)
 
-        # Create 3 rides
+        # Create 3 rides with unique queue_times_id
         ride_ids = []
         for i in range(3):
             ride_data = sample_ride_data.copy()
             ride_data['park_id'] = park_id
+            ride_data['queue_times_id'] = sample_ride_data['queue_times_id'] + i
             ride_data['name'] = f"Test Ride {i+1}"
             ride_data['thrill_level'] = ['family', 'moderate', 'extreme'][i]
             ride_id = insert_sample_ride(mysql_connection, ride_data)

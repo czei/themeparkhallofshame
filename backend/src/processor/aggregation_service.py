@@ -155,6 +155,47 @@ class AggregationService:
             logger.error(f"Weekly aggregation failed for {year}-W{week_number:02d}: {e}", exc_info=True)
             raise
 
+    def aggregate_monthly(
+        self,
+        year: int,
+        month: int
+    ) -> Dict[str, Any]:
+        """
+        Run monthly aggregation for a specific month.
+
+        Aggregates FROM daily stats (not raw snapshots).
+        Calculates month-over-month trends.
+
+        Args:
+            year: Year (e.g., 2025)
+            month: Month number (1-12)
+
+        Returns:
+            Dictionary with aggregation results
+        """
+        logger.info(f"Starting monthly aggregation for {year}-{month:02d}")
+
+        try:
+            # Aggregate ride-level monthly stats
+            rides_processed = self._aggregate_rides_monthly_stats(year, month)
+
+            # Aggregate park-level monthly stats
+            parks_processed = self._aggregate_parks_monthly_stats(year, month)
+
+            logger.info(f"Monthly aggregation complete: {parks_processed} parks, {rides_processed} rides")
+
+            return {
+                "status": "success",
+                "year": year,
+                "month": month,
+                "parks_processed": parks_processed,
+                "rides_processed": rides_processed
+            }
+
+        except Exception as e:
+            logger.error(f"Monthly aggregation failed for {year}-{month:02d}: {e}", exc_info=True)
+            raise
+
     def _aggregate_daily_for_timezone(
         self,
         aggregation_date: date,
@@ -881,6 +922,400 @@ class AggregationService:
             "park_id": park_id,
             "year": previous_year,
             "week_number": previous_week
+        })
+        previous_row = result.fetchone()
+
+        if not previous_row or previous_row.total_downtime_hours is None or float(previous_row.total_downtime_hours) == 0:
+            return None
+
+        # Calculate percentage change
+        previous_downtime = float(previous_row.total_downtime_hours)
+        trend = ((float(current_downtime_hours) - previous_downtime) / previous_downtime) * 100.0
+        return round(trend, 2)
+
+    def _aggregate_rides_monthly_stats(
+        self,
+        year: int,
+        month: int
+    ) -> int:
+        """
+        Aggregate ride-level monthly stats from daily stats.
+
+        Args:
+            year: Year
+            month: Month number (1-12)
+
+        Returns:
+            Number of rides processed
+        """
+        # Calculate date range for the month
+        import calendar
+        first_day = date(year, month, 1)
+        last_day_num = calendar.monthrange(year, month)[1]
+        last_day = date(year, month, last_day_num)
+
+        # Get all rides that have daily stats in this month
+        rides_query = text("""
+            SELECT DISTINCT ride_id
+            FROM ride_daily_stats
+            WHERE stat_date >= :month_start
+                AND stat_date <= :month_end
+            ORDER BY ride_id
+        """)
+
+        result = self.conn.execute(rides_query, {
+            "month_start": first_day,
+            "month_end": last_day
+        })
+        ride_ids = [row.ride_id for row in result]
+
+        # Aggregate each ride
+        for ride_id in ride_ids:
+            self._aggregate_single_ride_monthly_stats(
+                ride_id=ride_id,
+                year=year,
+                month=month,
+                month_start=first_day,
+                month_end=last_day
+            )
+
+        logger.info(f"Processed {len(ride_ids)} rides for monthly aggregation")
+        return len(ride_ids)
+
+    def _aggregate_single_ride_monthly_stats(
+        self,
+        ride_id: int,
+        year: int,
+        month: int,
+        month_start: date,
+        month_end: date
+    ) -> None:
+        """
+        Aggregate a single ride's monthly stats from daily stats.
+
+        Args:
+            ride_id: Ride ID
+            year: Year
+            month: Month number (1-12)
+            month_start: First day of the month
+            month_end: Last day of the month
+        """
+        # Sum daily stats for the month
+        monthly_query = text("""
+            SELECT
+                SUM(uptime_minutes) AS uptime_minutes,
+                SUM(downtime_minutes) AS downtime_minutes,
+                SUM(operating_hours_minutes) AS operating_hours_minutes,
+                SUM(status_changes) AS status_changes,
+                MAX(peak_wait_time) AS peak_wait_time,
+                SUM(avg_wait_time * operating_hours_minutes) AS weighted_wait_sum,
+                SUM(operating_hours_minutes) AS total_operating_minutes
+            FROM ride_daily_stats
+            WHERE ride_id = :ride_id
+                AND stat_date >= :month_start
+                AND stat_date <= :month_end
+        """)
+
+        result = self.conn.execute(monthly_query, {
+            "ride_id": ride_id,
+            "month_start": month_start,
+            "month_end": month_end
+        })
+        row = result.fetchone()
+
+        if not row or row.uptime_minutes is None:
+            logger.debug(f"No daily stats found for ride {ride_id} in {year}-{month:02d}")
+            return
+
+        # Calculate uptime percentage
+        total_operating = int(row.operating_hours_minutes) if row.operating_hours_minutes else 0
+        uptime_percentage = 0.0
+        if total_operating > 0:
+            uptime_percentage = (float(row.uptime_minutes) / float(total_operating)) * 100.0
+
+        # Calculate weighted average wait time
+        avg_wait_time = None
+        if row.total_operating_minutes and row.total_operating_minutes > 0 and row.weighted_wait_sum:
+            avg_wait_time = round(float(row.weighted_wait_sum) / float(row.total_operating_minutes), 2)
+
+        # Calculate trend vs previous month
+        trend_vs_previous_month = self._calculate_monthly_trend(
+            ride_id=ride_id,
+            current_year=year,
+            current_month=month,
+            current_downtime=row.downtime_minutes
+        )
+
+        # Insert/update ride monthly stats
+        upsert_query = text("""
+            INSERT INTO ride_monthly_stats (
+                ride_id, year, month,
+                uptime_minutes, downtime_minutes, uptime_percentage,
+                operating_hours_minutes, avg_wait_time, peak_wait_time,
+                status_changes, trend_vs_previous_month
+            )
+            VALUES (
+                :ride_id, :year, :month,
+                :uptime_minutes, :downtime_minutes, :uptime_percentage,
+                :operating_hours_minutes, :avg_wait_time, :peak_wait_time,
+                :status_changes, :trend_vs_previous_month
+            )
+            ON DUPLICATE KEY UPDATE
+                uptime_minutes = VALUES(uptime_minutes),
+                downtime_minutes = VALUES(downtime_minutes),
+                uptime_percentage = VALUES(uptime_percentage),
+                operating_hours_minutes = VALUES(operating_hours_minutes),
+                avg_wait_time = VALUES(avg_wait_time),
+                peak_wait_time = VALUES(peak_wait_time),
+                status_changes = VALUES(status_changes),
+                trend_vs_previous_month = VALUES(trend_vs_previous_month)
+        """)
+
+        self.conn.execute(upsert_query, {
+            "ride_id": ride_id,
+            "year": year,
+            "month": month,
+            "uptime_minutes": row.uptime_minutes,
+            "downtime_minutes": row.downtime_minutes,
+            "uptime_percentage": round(uptime_percentage, 2),
+            "operating_hours_minutes": row.operating_hours_minutes,
+            "avg_wait_time": avg_wait_time,
+            "peak_wait_time": row.peak_wait_time,
+            "status_changes": row.status_changes,
+            "trend_vs_previous_month": trend_vs_previous_month
+        })
+
+        logger.debug(f"Aggregated monthly stats for ride {ride_id}, {year}-{month:02d}")
+
+    def _calculate_monthly_trend(
+        self,
+        ride_id: int,
+        current_year: int,
+        current_month: int,
+        current_downtime: int
+    ) -> Optional[float]:
+        """
+        Calculate month-over-month downtime trend.
+
+        Args:
+            ride_id: Ride ID
+            current_year: Current year
+            current_month: Current month (1-12)
+            current_downtime: Current month's downtime minutes
+
+        Returns:
+            Percentage change (e.g., 20.75 for +20.75%) or None if no previous data
+        """
+        # Calculate previous month
+        # Handle year boundary (month 1 -> previous year month 12)
+        if current_month == 1:
+            previous_year = current_year - 1
+            previous_month = 12
+        else:
+            previous_year = current_year
+            previous_month = current_month - 1
+
+        # Query previous month's downtime
+        previous_query = text("""
+            SELECT downtime_minutes
+            FROM ride_monthly_stats
+            WHERE ride_id = :ride_id
+                AND year = :year
+                AND month = :month
+        """)
+
+        result = self.conn.execute(previous_query, {
+            "ride_id": ride_id,
+            "year": previous_year,
+            "month": previous_month
+        })
+        previous_row = result.fetchone()
+
+        if not previous_row or previous_row.downtime_minutes is None or previous_row.downtime_minutes == 0:
+            return None
+
+        # Calculate percentage change: ((current - previous) / previous) * 100
+        prev_downtime = float(previous_row.downtime_minutes)
+        trend = ((float(current_downtime) - prev_downtime) / prev_downtime) * 100.0
+        return round(trend, 2)
+
+    def _aggregate_parks_monthly_stats(
+        self,
+        year: int,
+        month: int
+    ) -> int:
+        """
+        Aggregate park-level monthly stats from ride monthly stats.
+
+        Args:
+            year: Year
+            month: Month number (1-12)
+
+        Returns:
+            Number of parks processed
+        """
+        # Get all parks that have ride monthly stats
+        parks_query = text("""
+            SELECT DISTINCT r.park_id
+            FROM ride_monthly_stats rms
+            INNER JOIN rides r ON rms.ride_id = r.ride_id
+            WHERE rms.year = :year
+                AND rms.month = :month
+            ORDER BY r.park_id
+        """)
+
+        result = self.conn.execute(parks_query, {
+            "year": year,
+            "month": month
+        })
+        park_ids = [row.park_id for row in result]
+
+        # Aggregate each park
+        for park_id in park_ids:
+            self._aggregate_single_park_monthly_stats(
+                park_id=park_id,
+                year=year,
+                month=month
+            )
+
+        logger.info(f"Processed {len(park_ids)} parks for monthly aggregation")
+        return len(park_ids)
+
+    def _aggregate_single_park_monthly_stats(
+        self,
+        park_id: int,
+        year: int,
+        month: int
+    ) -> None:
+        """
+        Aggregate a single park's monthly stats from ride monthly stats.
+
+        Args:
+            park_id: Park ID
+            year: Year
+            month: Month number (1-12)
+        """
+        # Aggregate ride monthly stats for this park
+        park_query = text("""
+            SELECT
+                COUNT(DISTINCT rms.ride_id) AS total_rides_tracked,
+                AVG(rms.uptime_percentage) AS avg_uptime_percentage,
+                SUM(rms.downtime_minutes) / 60.0 AS total_downtime_hours,
+                SUM(CASE WHEN rms.downtime_minutes > 0 THEN 1 ELSE 0 END) AS rides_with_downtime,
+                SUM(rms.avg_wait_time * rms.operating_hours_minutes) AS weighted_wait_sum,
+                SUM(rms.operating_hours_minutes) AS total_operating_minutes,
+                MAX(rms.peak_wait_time) AS peak_wait_time
+            FROM ride_monthly_stats rms
+            INNER JOIN rides r ON rms.ride_id = r.ride_id
+            WHERE r.park_id = :park_id
+                AND rms.year = :year
+                AND rms.month = :month
+                AND r.is_active = TRUE
+        """)
+
+        result = self.conn.execute(park_query, {
+            "park_id": park_id,
+            "year": year,
+            "month": month
+        })
+        row = result.fetchone()
+
+        if not row or row.total_rides_tracked == 0:
+            logger.debug(f"No ride monthly stats found for park {park_id} in {year}-{month:02d}")
+            return
+
+        # Calculate weighted average wait time
+        avg_wait_time = None
+        if row.total_operating_minutes and row.total_operating_minutes > 0 and row.weighted_wait_sum:
+            avg_wait_time = round(float(row.weighted_wait_sum) / float(row.total_operating_minutes), 2)
+
+        # Calculate park-level trend
+        trend_vs_previous_month = self._calculate_park_monthly_trend(
+            park_id=park_id,
+            current_year=year,
+            current_month=month,
+            current_downtime_hours=row.total_downtime_hours
+        )
+
+        # Insert/update park monthly stats
+        upsert_query = text("""
+            INSERT INTO park_monthly_stats (
+                park_id, year, month,
+                total_rides_tracked, avg_uptime_percentage, total_downtime_hours,
+                rides_with_downtime, avg_wait_time, peak_wait_time,
+                trend_vs_previous_month
+            )
+            VALUES (
+                :park_id, :year, :month,
+                :total_rides_tracked, :avg_uptime_percentage, :total_downtime_hours,
+                :rides_with_downtime, :avg_wait_time, :peak_wait_time,
+                :trend_vs_previous_month
+            )
+            ON DUPLICATE KEY UPDATE
+                total_rides_tracked = VALUES(total_rides_tracked),
+                avg_uptime_percentage = VALUES(avg_uptime_percentage),
+                total_downtime_hours = VALUES(total_downtime_hours),
+                rides_with_downtime = VALUES(rides_with_downtime),
+                avg_wait_time = VALUES(avg_wait_time),
+                peak_wait_time = VALUES(peak_wait_time),
+                trend_vs_previous_month = VALUES(trend_vs_previous_month)
+        """)
+
+        self.conn.execute(upsert_query, {
+            "park_id": park_id,
+            "year": year,
+            "month": month,
+            "total_rides_tracked": row.total_rides_tracked,
+            "avg_uptime_percentage": round(float(row.avg_uptime_percentage), 2) if row.avg_uptime_percentage else None,
+            "total_downtime_hours": round(float(row.total_downtime_hours), 2),
+            "rides_with_downtime": row.rides_with_downtime,
+            "avg_wait_time": avg_wait_time,
+            "peak_wait_time": row.peak_wait_time,
+            "trend_vs_previous_month": trend_vs_previous_month
+        })
+
+        logger.debug(f"Aggregated monthly stats for park {park_id}, {year}-{month:02d}")
+
+    def _calculate_park_monthly_trend(
+        self,
+        park_id: int,
+        current_year: int,
+        current_month: int,
+        current_downtime_hours: float
+    ) -> Optional[float]:
+        """
+        Calculate month-over-month park downtime trend.
+
+        Args:
+            park_id: Park ID
+            current_year: Current year
+            current_month: Current month (1-12)
+            current_downtime_hours: Current month's downtime hours
+
+        Returns:
+            Percentage change or None if no previous data
+        """
+        # Calculate previous month
+        if current_month == 1:
+            previous_year = current_year - 1
+            previous_month = 12
+        else:
+            previous_year = current_year
+            previous_month = current_month - 1
+
+        # Query previous month's downtime
+        previous_query = text("""
+            SELECT total_downtime_hours
+            FROM park_monthly_stats
+            WHERE park_id = :park_id
+                AND year = :year
+                AND month = :month
+        """)
+
+        result = self.conn.execute(previous_query, {
+            "park_id": park_id,
+            "year": previous_year,
+            "month": previous_month
         })
         previous_row = result.fetchone()
 

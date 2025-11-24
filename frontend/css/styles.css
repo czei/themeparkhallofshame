@@ -544,6 +544,64 @@ footer a:hover {
     color: #0066cc;
 }
 
+/* Wait Times Specific Styles */
+.wait-times-view {
+    background: white;
+    border-radius: 8px;
+    padding: 2rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.mode-btn {
+    padding: 0.5rem 1rem;
+    border: 2px solid #cbd5e0;
+    background: white;
+    color: #4a5568;
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.mode-btn:hover {
+    border-color: #3498db;
+    color: #3498db;
+}
+
+.mode-btn.active {
+    background: #3498db;
+    border-color: #3498db;
+    color: white;
+}
+
+.wait-value {
+    font-weight: 600;
+    color: #e67e22;
+    font-size: 1.05rem;
+}
+
+.wait-times-table .top-five {
+    background-color: #fff3e0;
+}
+
+.wait-times-table .top-five:hover {
+    background-color: #ffe0b2;
+}
+
+.wait-col,
+.avg-col {
+    text-align: center;
+    font-weight: 600;
+}
+
+/* Wait time color coding */
+.wait-value {
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    display: inline-block;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .rankings-controls {

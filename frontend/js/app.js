@@ -48,12 +48,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     break;
 
                 case 'wait-times':
-                    appContainer.innerHTML = `
-                        <div class="placeholder-view">
-                            <h2>Wait Times</h2>
-                            <p>Coming soon! This will show live and historical wait times.</p>
-                        </div>
-                    `;
+                    if (typeof WaitTimes !== 'undefined') {
+                        currentComponent = new WaitTimes(apiClient, 'view-container');
+                        await currentComponent.init();
+                    } else {
+                        throw new Error('WaitTimes component not loaded');
+                    }
                     break;
 
                 case 'trends':

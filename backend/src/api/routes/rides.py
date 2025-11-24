@@ -105,3 +105,90 @@ def get_ride_downtime_rankings():
             "success": False,
             "error": "Internal server error"
         }), 500
+
+
+@rides_bp.route('/rides/waittimes', methods=['GET'])
+def get_ride_wait_times():
+    """
+    Get ride wait times with multiple display modes.
+
+    Query Parameters:
+        mode (str): Display mode - 'live', '7day-average', 'peak-times' (default: 'live')
+        filter (str): Park filter - 'disney-universal', 'all-parks' (default: 'all-parks')
+        limit (int): Maximum results (default: 100, max: 200)
+
+    Returns:
+        JSON response with wait times sorted by longest waits descending
+
+    Performance: <100ms for all modes
+    """
+    # Parse query parameters
+    mode = request.args.get('mode', 'live')
+    filter_type = request.args.get('filter', 'all-parks')
+    limit = min(int(request.args.get('limit', 100)), 200)
+
+    # Validate mode
+    if mode not in ['live', '7day-average', 'peak-times']:
+        return jsonify({
+            "success": False,
+            "error": "Invalid mode. Must be 'live', '7day-average', or 'peak-times'"
+        }), 400
+
+    # Validate filter
+    if filter_type not in ['disney-universal', 'all-parks']:
+        return jsonify({
+            "success": False,
+            "error": "Invalid filter. Must be 'disney-universal' or 'all-parks'"
+        }), 400
+
+    try:
+        with get_db_connection() as conn:
+            stats_repo = StatsRepository(conn)
+
+            # Get wait times based on mode
+            if mode == 'live':
+                wait_times = stats_repo.get_live_wait_times(
+                    filter_disney_universal=(filter_type == 'disney-universal'),
+                    limit=limit
+                )
+            elif mode == '7day-average':
+                wait_times = stats_repo.get_average_wait_times(
+                    filter_disney_universal=(filter_type == 'disney-universal'),
+                    limit=limit
+                )
+            else:  # peak-times
+                wait_times = stats_repo.get_peak_wait_times(
+                    filter_disney_universal=(filter_type == 'disney-universal'),
+                    limit=limit
+                )
+
+            # Add Queue-Times.com URLs and rank to wait times
+            wait_times_with_urls = []
+            for rank_idx, ride in enumerate(wait_times, start=1):
+                ride_dict = dict(ride)
+                ride_dict['rank'] = rank_idx
+                ride_dict['queue_times_url'] = f"https://queue-times.com/rides/{ride_dict['ride_id']}"
+                wait_times_with_urls.append(ride_dict)
+
+            # Build response
+            response = {
+                "success": True,
+                "mode": mode,
+                "filter": filter_type,
+                "data": wait_times_with_urls,
+                "attribution": {
+                    "data_source": "Queue-Times.com",
+                    "url": "https://queue-times.com"
+                }
+            }
+
+            logger.info(f"Wait times requested: mode={mode}, filter={filter_type}, results={len(wait_times_with_urls)}")
+
+            return jsonify(response), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching wait times: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "Internal server error"
+        }), 500

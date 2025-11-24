@@ -187,15 +187,15 @@ Based on plan.md project structure:
 
 ### Implementation for User Story 3
 
-- [ ] T072 [US3] Implement GET /api/rides/waittimes endpoint in backend/src/api/routes/rides.py (FR-017, FR-018, FR-019)
-- [ ] T073 [US3] Implement Live mode query (current wait times from most recent snapshots, data-model.md Query 3)
-- [ ] T074 [US3] Implement 7 Day Average mode query (average wait times from ride_weekly_stats)
-- [ ] T075 [US3] Implement Peak Times mode query (max wait times from ride_weekly_stats.peak_wait_time)
-- [ ] T076 [US3] Add trend percentage calculation (current vs 7-day average)
-- [ ] T077 [US3] Create frontend/js/components/wait-times.js to fetch and render wait times table
-- [ ] T078 [US3] Implement mode selector (Live, 7 Day Average, Peak Times) in wait-times.js
-- [ ] T079 [US3] Display wait times sorted by longest waits descending
-- [ ] T080 [US3] Add trend percentage indicators (current vs average)
+- [X] T072 [US3] Implement GET /api/rides/waittimes endpoint in backend/src/api/routes/rides.py (FR-017, FR-018, FR-019)
+- [X] T073 [US3] Implement Live mode query (current wait times from most recent snapshots, data-model.md Query 3)
+- [X] T074 [US3] Implement 7 Day Average mode query (average wait times from ride_weekly_stats)
+- [X] T075 [US3] Implement Peak Times mode query (max wait times from ride_weekly_stats.peak_wait_time)
+- [X] T076 [US3] Add trend percentage calculation (current vs 7-day average)
+- [X] T077 [US3] Create frontend/js/components/wait-times.js to fetch and render wait times table
+- [X] T078 [US3] Implement mode selector (Live, 7 Day Average, Peak Times) in wait-times.js
+- [X] T079 [US3] Display wait times sorted by longest waits descending
+- [X] T080 [US3] Add trend percentage indicators (current vs average)
 
 **Checkpoint**: All core user stories (US1, US2, US3) should now be independently functional
 

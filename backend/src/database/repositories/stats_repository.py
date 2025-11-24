@@ -1098,3 +1098,240 @@ class StatsRepository:
         })
 
         return [dict(row._mapping) for row in result.fetchall()]
+
+    def get_live_wait_times(
+        self,
+        filter_disney_universal: bool = False,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get current live wait times from most recent snapshots.
+
+        Args:
+            filter_disney_universal: If True, only include Disney & Universal parks
+            limit: Maximum number of rides to return
+
+        Returns:
+            List of rides sorted by longest current wait times descending
+        """
+        query = text("""
+            SELECT
+                r.ride_id,
+                r.name AS ride_name,
+                r.tier,
+                p.park_id,
+                p.name AS park_name,
+                CONCAT(p.city, ', ', p.state_province) AS location,
+                rss.wait_time AS current_wait_minutes,
+                rss.computed_is_open AS current_is_open,
+                rss.recorded_at AS last_updated,
+                -- Get 7-day average for trend comparison
+                (
+                    SELECT AVG(avg_wait_minutes)
+                    FROM ride_weekly_stats
+                    WHERE ride_id = r.ride_id
+                        AND year = YEAR(CURDATE())
+                        AND week_number = WEEK(CURDATE(), 3)
+                ) AS avg_wait_7days,
+                -- Trend percentage (current vs 7-day average)
+                CASE
+                    WHEN (
+                        SELECT AVG(avg_wait_minutes)
+                        FROM ride_weekly_stats
+                        WHERE ride_id = r.ride_id
+                            AND year = YEAR(CURDATE())
+                            AND week_number = WEEK(CURDATE(), 3)
+                    ) > 0 THEN
+                        ((rss.wait_time - (
+                            SELECT AVG(avg_wait_minutes)
+                            FROM ride_weekly_stats
+                            WHERE ride_id = r.ride_id
+                                AND year = YEAR(CURDATE())
+                                AND week_number = WEEK(CURDATE(), 3)
+                        )) / (
+                            SELECT AVG(avg_wait_minutes)
+                            FROM ride_weekly_stats
+                            WHERE ride_id = r.ride_id
+                                AND year = YEAR(CURDATE())
+                                AND week_number = WEEK(CURDATE(), 3)
+                        )) * 100
+                    ELSE NULL
+                END AS trend_percentage
+            FROM rides r
+            JOIN parks p ON r.park_id = p.park_id
+            JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            WHERE rss.recorded_at = (
+                    SELECT MAX(recorded_at)
+                    FROM ride_status_snapshots
+                    WHERE ride_id = r.ride_id
+                )
+                AND rss.computed_is_open = TRUE
+                AND rss.wait_time > 0
+                AND r.is_active = TRUE
+                AND p.is_active = TRUE
+                {:filter_clause}
+            ORDER BY rss.wait_time DESC
+            LIMIT :limit
+        """.replace(
+            "{:filter_clause}",
+            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+        ))
+
+        result = self.conn.execute(query, {"limit": limit})
+        return [dict(row._mapping) for row in result.fetchall()]
+
+    def get_average_wait_times(
+        self,
+        filter_disney_universal: bool = False,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get 7-day average wait times from weekly stats.
+
+        Args:
+            filter_disney_universal: If True, only include Disney & Universal parks
+            limit: Maximum number of rides to return
+
+        Returns:
+            List of rides sorted by longest average wait times descending
+        """
+        query = text("""
+            SELECT
+                r.ride_id,
+                r.name AS ride_name,
+                r.tier,
+                p.park_id,
+                p.name AS park_name,
+                CONCAT(p.city, ', ', p.state_province) AS location,
+                rws.avg_wait_minutes AS avg_wait_7days,
+                rws.peak_wait_minutes AS peak_wait_7days,
+                -- Get current status
+                (
+                    SELECT computed_is_open
+                    FROM ride_status_snapshots
+                    WHERE ride_id = r.ride_id
+                    ORDER BY recorded_at DESC
+                    LIMIT 1
+                ) AS current_is_open,
+                -- Trend: compare to previous week's average
+                CASE
+                    WHEN prev_week.avg_wait_minutes > 0 THEN
+                        ((rws.avg_wait_minutes - prev_week.avg_wait_minutes) / prev_week.avg_wait_minutes) * 100
+                    ELSE NULL
+                END AS trend_percentage
+            FROM ride_weekly_stats rws
+            JOIN rides r ON rws.ride_id = r.ride_id
+            JOIN parks p ON r.park_id = p.park_id
+            LEFT JOIN ride_weekly_stats prev_week ON rws.ride_id = prev_week.ride_id
+                AND prev_week.year = :prev_year
+                AND prev_week.week_number = :prev_week
+            WHERE rws.year = :year
+                AND rws.week_number = :week_number
+                AND rws.avg_wait_minutes > 0
+                AND r.is_active = TRUE
+                AND p.is_active = TRUE
+                {:filter_clause}
+            ORDER BY rws.avg_wait_minutes DESC
+            LIMIT :limit
+        """.replace(
+            "{:filter_clause}",
+            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+        ))
+
+        # Calculate current and previous week
+        from datetime import datetime, timedelta
+        current_date = datetime.now()
+        year = current_date.year
+        week_number = current_date.isocalendar()[1]
+
+        prev_week_date = current_date - timedelta(weeks=1)
+        prev_year = prev_week_date.year
+        prev_week_num = prev_week_date.isocalendar()[1]
+
+        result = self.conn.execute(query, {
+            "year": year,
+            "week_number": week_number,
+            "prev_year": prev_year,
+            "prev_week": prev_week_num,
+            "limit": limit
+        })
+
+        return [dict(row._mapping) for row in result.fetchall()]
+
+    def get_peak_wait_times(
+        self,
+        filter_disney_universal: bool = False,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get peak wait times from weekly stats.
+
+        Args:
+            filter_disney_universal: If True, only include Disney & Universal parks
+            limit: Maximum number of rides to return
+
+        Returns:
+            List of rides sorted by longest peak wait times descending
+        """
+        query = text("""
+            SELECT
+                r.ride_id,
+                r.name AS ride_name,
+                r.tier,
+                p.park_id,
+                p.name AS park_name,
+                CONCAT(p.city, ', ', p.state_province) AS location,
+                rws.peak_wait_minutes AS peak_wait_7days,
+                rws.avg_wait_minutes AS avg_wait_7days,
+                -- Get current status
+                (
+                    SELECT computed_is_open
+                    FROM ride_status_snapshots
+                    WHERE ride_id = r.ride_id
+                    ORDER BY recorded_at DESC
+                    LIMIT 1
+                ) AS current_is_open,
+                -- Trend: compare to previous week's peak
+                CASE
+                    WHEN prev_week.peak_wait_minutes > 0 THEN
+                        ((rws.peak_wait_minutes - prev_week.peak_wait_minutes) / prev_week.peak_wait_minutes) * 100
+                    ELSE NULL
+                END AS trend_percentage
+            FROM ride_weekly_stats rws
+            JOIN rides r ON rws.ride_id = r.ride_id
+            JOIN parks p ON r.park_id = p.park_id
+            LEFT JOIN ride_weekly_stats prev_week ON rws.ride_id = prev_week.ride_id
+                AND prev_week.year = :prev_year
+                AND prev_week.week_number = :prev_week
+            WHERE rws.year = :year
+                AND rws.week_number = :week_number
+                AND rws.peak_wait_minutes > 0
+                AND r.is_active = TRUE
+                AND p.is_active = TRUE
+                {:filter_clause}
+            ORDER BY rws.peak_wait_minutes DESC
+            LIMIT :limit
+        """.replace(
+            "{:filter_clause}",
+            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+        ))
+
+        # Calculate current and previous week
+        from datetime import datetime, timedelta
+        current_date = datetime.now()
+        year = current_date.year
+        week_number = current_date.isocalendar()[1]
+
+        prev_week_date = current_date - timedelta(weeks=1)
+        prev_year = prev_week_date.year
+        prev_week_num = prev_week_date.isocalendar()[1]
+
+        result = self.conn.execute(query, {
+            "year": year,
+            "week_number": week_number,
+            "prev_year": prev_year,
+            "prev_week": prev_week_num,
+            "limit": limit
+        })
+
+        return [dict(row._mapping) for row in result.fetchall()]

@@ -69,7 +69,6 @@ def comprehensive_test_data(mysql_connection):
     conn.execute(text("DELETE FROM ride_classifications"))
     conn.execute(text("DELETE FROM rides"))
     conn.execute(text("DELETE FROM parks"))
-    conn.commit()
 
     # === CREATE 10 PARKS ===
     parks_data = [
@@ -426,7 +425,6 @@ def comprehensive_test_data(mysql_connection):
 
             ride_id += 1
 
-    conn.commit()
 
     return {
         'num_parks': 10,

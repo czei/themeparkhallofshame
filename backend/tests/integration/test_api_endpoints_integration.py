@@ -58,36 +58,38 @@ def comprehensive_test_data(mysql_connection):
     """
     conn = mysql_connection
 
-    # Clean up any existing test data (including committed data from other tests)
-    conn.execute(text("DELETE FROM ride_status_snapshots WHERE ride_id <= 200"))
-    conn.execute(text("DELETE FROM ride_status_changes WHERE ride_id <= 200"))
-    conn.execute(text("DELETE FROM ride_daily_stats WHERE ride_id <= 200"))
-    conn.execute(text("DELETE FROM ride_weekly_stats WHERE ride_id <= 200"))
-    conn.execute(text("DELETE FROM ride_monthly_stats WHERE ride_id <= 200"))
-    conn.execute(text("DELETE FROM park_activity_snapshots WHERE park_id <= 20"))
-    conn.execute(text("DELETE FROM park_daily_stats WHERE park_id <= 20"))
-    conn.execute(text("DELETE FROM park_weekly_stats WHERE park_id <= 20"))
-    conn.execute(text("DELETE FROM park_monthly_stats WHERE park_id <= 20"))
-    conn.execute(text("DELETE FROM ride_classifications WHERE ride_id <= 200"))
-    conn.execute(text("DELETE FROM rides WHERE ride_id <= 200"))
-    conn.execute(text("DELETE FROM parks WHERE park_id <= 20"))
+    # Clean up any existing test data from this test file (queue_times_id 9000+)
+    # This handles committed data from previous runs of these tests
+    conn.execute(text("DELETE FROM ride_status_snapshots WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 90000)"))
+    conn.execute(text("DELETE FROM ride_status_changes WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 90000)"))
+    conn.execute(text("DELETE FROM ride_daily_stats WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 90000)"))
+    conn.execute(text("DELETE FROM ride_weekly_stats WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 90000)"))
+    conn.execute(text("DELETE FROM ride_monthly_stats WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 90000)"))
+    conn.execute(text("DELETE FROM park_activity_snapshots WHERE park_id IN (SELECT park_id FROM parks WHERE queue_times_id >= 9000)"))
+    conn.execute(text("DELETE FROM park_daily_stats WHERE park_id IN (SELECT park_id FROM parks WHERE queue_times_id >= 9000)"))
+    conn.execute(text("DELETE FROM park_weekly_stats WHERE park_id IN (SELECT park_id FROM parks WHERE queue_times_id >= 9000)"))
+    conn.execute(text("DELETE FROM park_monthly_stats WHERE park_id IN (SELECT park_id FROM parks WHERE queue_times_id >= 9000)"))
+    conn.execute(text("DELETE FROM ride_classifications WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 90000)"))
+    conn.execute(text("DELETE FROM rides WHERE queue_times_id >= 90000"))
+    conn.execute(text("DELETE FROM parks WHERE queue_times_id >= 9000"))
     conn.commit()  # Commit deletes so Flask app can see clean state
 
     # === CREATE 10 PARKS ===
+    # Use high ID range (9001-9010) to avoid conflicts with conftest.py fixtures (which use 101)
     parks_data = [
         # Disney Parks (5)
-        (1, 101, 'Magic Kingdom', 'Bay Lake', 'FL', 'US', 'America/New_York', 'Disney', True, False, True),
-        (2, 102, 'EPCOT', 'Bay Lake', 'FL', 'US', 'America/New_York', 'Disney', True, False, True),
-        (3, 103, 'Hollywood Studios', 'Bay Lake', 'FL', 'US', 'America/New_York', 'Disney', True, False, True),
-        (4, 104, 'Animal Kingdom', 'Bay Lake', 'FL', 'US', 'America/New_York', 'Disney', True, False, True),
-        (5, 105, 'Disneyland', 'Anaheim', 'CA', 'US', 'America/Los_Angeles', 'Disney', True, False, True),
+        (1, 9001, 'Magic Kingdom', 'Bay Lake', 'FL', 'US', 'America/New_York', 'Disney', True, False, True),
+        (2, 9002, 'EPCOT', 'Bay Lake', 'FL', 'US', 'America/New_York', 'Disney', True, False, True),
+        (3, 9003, 'Hollywood Studios', 'Bay Lake', 'FL', 'US', 'America/New_York', 'Disney', True, False, True),
+        (4, 9004, 'Animal Kingdom', 'Bay Lake', 'FL', 'US', 'America/New_York', 'Disney', True, False, True),
+        (5, 9005, 'Disneyland', 'Anaheim', 'CA', 'US', 'America/Los_Angeles', 'Disney', True, False, True),
         # Universal Parks (3)
-        (6, 106, 'Universal Studios Florida', 'Orlando', 'FL', 'US', 'America/New_York', 'Universal', False, True, True),
-        (7, 107, 'Islands of Adventure', 'Orlando', 'FL', 'US', 'America/New_York', 'Universal', False, True, True),
-        (8, 108, 'Universal Studios Hollywood', 'Los Angeles', 'CA', 'US', 'America/Los_Angeles', 'Universal', False, True, True),
+        (6, 9006, 'Universal Studios Florida', 'Orlando', 'FL', 'US', 'America/New_York', 'Universal', False, True, True),
+        (7, 9007, 'Islands of Adventure', 'Orlando', 'FL', 'US', 'America/New_York', 'Universal', False, True, True),
+        (8, 9008, 'Universal Studios Hollywood', 'Los Angeles', 'CA', 'US', 'America/Los_Angeles', 'Universal', False, True, True),
         # Other Parks (2)
-        (9, 109, 'SeaWorld Orlando', 'Orlando', 'FL', 'US', 'America/New_York', 'SeaWorld', False, False, True),
-        (10, 110, 'Busch Gardens Tampa', 'Tampa', 'FL', 'US', 'America/New_York', 'Busch Gardens', False, False, True),
+        (9, 9009, 'SeaWorld Orlando', 'Orlando', 'FL', 'US', 'America/New_York', 'SeaWorld', False, False, True),
+        (10, 9010, 'Busch Gardens Tampa', 'Tampa', 'FL', 'US', 'America/New_York', 'Busch Gardens', False, False, True),
     ]
 
     for park in parks_data:
@@ -103,6 +105,7 @@ def comprehensive_test_data(mysql_connection):
     conn.commit()  # Commit parks so Flask app can see them
 
     # === CREATE 100 RIDES (10 per park, mixed tiers) ===
+    # Use high ID range (90001-90100) to avoid conflicts with conftest.py fixtures
     ride_id = 1
     for park_id in range(1, 11):
         # Each park gets: 2 Tier 1, 5 Tier 2, 3 Tier 3
@@ -113,7 +116,7 @@ def comprehensive_test_data(mysql_connection):
                 VALUES (:ride_id, :qt_id, :park_id, :name, :land, :tier, TRUE)
             """), {
                 'ride_id': ride_id,
-                'qt_id': 1000 + ride_id,
+                'qt_id': 90000 + ride_id,
                 'park_id': park_id,
                 'name': f'Ride_{park_id}_{i}_T{tier}',
                 'land': f'Land_{i}',

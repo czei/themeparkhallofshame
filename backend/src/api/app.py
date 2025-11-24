@@ -9,6 +9,7 @@ from flask_cors import CORS
 from utils.config import FLASK_ENV, FLASK_DEBUG, SECRET_KEY
 from utils.logger import logger
 from api.routes.health import health_bp
+from api.routes.parks import parks_bp
 from api.middleware.error_handler import register_error_handlers
 
 
@@ -38,6 +39,7 @@ def create_app() -> Flask:
 
     # Register blueprints
     app.register_blueprint(health_bp, url_prefix='/api')
+    app.register_blueprint(parks_bp, url_prefix='/api')
 
     # Register error handlers
     register_error_handlers(app)

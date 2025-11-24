@@ -13,8 +13,55 @@
       "2": 2,
       "3": 1
     },
-    "last_updated": "2024-01-01T00:00:00Z"
+    "last_updated": "2025-11-24T13:04:07.342901"
   },
   "classifications": {
+    "480:1174": {
+      "tier": 1,
+      "confidence": 0.95,
+      "reasoning": "Major roller coaster with high capacity",
+      "research_sources": [
+        "https://rcdb.com/test"
+      ],
+      "cached_at": "2025-11-24T13:04:07.327922"
+    },
+    "482:1176": {
+      "tier": 3,
+      "confidence": 0.9,
+      "reasoning": "Tier 3 classification",
+      "research_sources": [],
+      "cached_at": "2025-11-24T13:04:07.335237"
+    },
+    "483:1": {
+      "tier": 1,
+      "confidence": 0.9,
+      "reasoning": "Classified as Tier 1",
+      "research_sources": [],
+      "cached_at": "2025-11-24T13:04:07.337195"
+    },
+    "483:2": {
+      "tier": 2,
+      "confidence": 0.9,
+      "reasoning": "Classified as Tier 2",
+      "research_sources": [],
+      "cached_at": "2025-11-24T13:04:07.338211"
+    },
+    "483:3": {
+      "tier": 3,
+      "confidence": 0.9,
+      "reasoning": "Classified as Tier 3",
+      "research_sources": [],
+      "cached_at": "2025-11-24T13:04:07.338974"
+    },
+    "485:1177": {
+      "tier": 1,
+      "confidence": 0.95,
+      "reasoning": "Iconic indoor roller coaster with high capacity and long wait times",
+      "research_sources": [
+        "https://rcdb.com/123",
+        "https://wikipedia.org/Space_Mountain"
+      ],
+      "cached_at": "2025-11-24T13:04:07.342897"
+    }
   }
 }

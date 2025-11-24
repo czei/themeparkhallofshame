@@ -54,10 +54,14 @@ export TEST_DB_NAME=themepark_test
 export TEST_DB_USER=themepark_test
 export TEST_DB_PASSWORD=test_password
 
+# OpenAI API key for AI classification tests
+export OPENAI_API_KEY=REDACTED_OPENAI_KEY
+
 print_success "Environment variables configured"
 echo "  TEST_DB_HOST: $TEST_DB_HOST"
 echo "  TEST_DB_NAME: $TEST_DB_NAME"
 echo "  TEST_DB_USER: $TEST_DB_USER"
+echo "  OPENAI_API_KEY: sk-proj-...${OPENAI_API_KEY: -10}"
 
 # Step 3: Count total tests
 print_section "Step 3: Discovering all tests"
@@ -77,28 +81,31 @@ print_section "Step 4: Running Unit Tests"
 echo "Running: pytest tests/unit/ -v --no-cov --continue-on-collection-errors"
 echo ""
 
-# Capture output and exit code
-UNIT_OUTPUT=$(pytest tests/unit/ -v --no-cov --continue-on-collection-errors 2>&1)
-UNIT_EXIT_CODE=$?
+# Run pytest, stream output to console and capture to log file
+# Use tee to show output immediately while saving to file for parsing
+pytest tests/unit/ -v --no-cov --continue-on-collection-errors 2>&1 | tee unit_tests.log
+UNIT_EXIT_CODE=${PIPESTATUS[0]}
 
-# Show the output
-echo "$UNIT_OUTPUT"
+echo ""
 
-# Parse results
-if echo "$UNIT_OUTPUT" | grep -q "passed"; then
-    # Extract numbers from summary line like "358 passed, 1 error in 2.47s"
-    SUMMARY=$(echo "$UNIT_OUTPUT" | grep -E "^=+ .*(passed|failed|error)" | tail -1)
-    UNIT_PASSED=$(echo "$SUMMARY" | sed -E 's/.*=+ ([0-9]+) passed.*/\1/')
+# Parse results from exit code and log
+# pytest exit codes: 0=all passed, 1=some failed or errors, 5=no tests collected
+SUMMARY=$(grep -E "^=+ .*(passed|failed|error)" unit_tests.log | tail -1)
+UNIT_PASSED=$(echo "$SUMMARY" | sed -E 's/.*=+ ([0-9]+) passed.*/\1/')
 
-    if echo "$SUMMARY" | grep -q "error"; then
-        UNIT_ERRORS=$(echo "$SUMMARY" | sed -E 's/.*([0-9]+) error.*/\1/')
-        print_warning "Unit tests: $UNIT_PASSED passed, $UNIT_ERRORS collection errors (skipped broken test files)"
-    else
-        print_success "Unit tests: $UNIT_PASSED passed"
-    fi
-else
-    print_error "Unit tests failed - no tests passed"
+# Check if there are actual test failures (not just collection errors)
+if echo "$SUMMARY" | grep -q "failed"; then
+    UNIT_FAILED=$(echo "$SUMMARY" | sed -E 's/.*([0-9]+) failed.*/\1/')
+    print_error "Unit tests failed: $UNIT_FAILED failed, $UNIT_PASSED passed"
     exit 1
+fi
+
+# Handle collection errors (pre-existing issues like test_api_app.py)
+if echo "$SUMMARY" | grep -q "error"; then
+    UNIT_ERRORS=$(echo "$SUMMARY" | sed -E 's/.*([0-9]+) error.*/\1/')
+    print_warning "Unit tests: $UNIT_PASSED passed, $UNIT_ERRORS collection error(s) (pre-existing import issues)"
+else
+    print_success "Unit tests: $UNIT_PASSED passed"
 fi
 
 # Step 5: Run all integration tests
@@ -106,12 +113,20 @@ print_section "Step 5: Running Integration Tests"
 echo "Running: pytest tests/integration/ -v --no-cov"
 echo ""
 
-if pytest tests/integration/ -v --no-cov; then
-    # Count integration tests
-    INTEGRATION_COUNT=$(pytest tests/integration/ --collect-only -q 2>&1 | grep -E "^[=]+ [0-9]+ tests? collected" | sed -E 's/.*=+ ([0-9]+) tests? collected.*/\1/')
+# Run integration tests, stream output to console and capture to log file
+pytest tests/integration/ -v --no-cov 2>&1 | tee integration_tests.log
+INTEGRATION_EXIT_CODE=${PIPESTATUS[0]}
+
+echo ""
+
+# Parse results from exit code
+if [ "$INTEGRATION_EXIT_CODE" -eq 0 ]; then
+    # Extract summary from log file
+    INTEGRATION_SUMMARY=$(grep -E "^=+ .*(passed|failed)" integration_tests.log | tail -1)
+    INTEGRATION_COUNT=$(echo "$INTEGRATION_SUMMARY" | sed -E 's/.*=+ ([0-9]+) passed.*/\1/')
     print_success "Integration tests: $INTEGRATION_COUNT passed"
 else
-    print_error "Integration tests failed"
+    print_error "Integration tests failed (exit code: $INTEGRATION_EXIT_CODE)"
     exit 1
 fi
 

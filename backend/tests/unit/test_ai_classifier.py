@@ -307,14 +307,19 @@ class TestParseAIResponseErrors:
 class TestClassify:
     """Test classify() method - requires MCP integration."""
 
-    def test_classify_raises_ai_classifier_error(self):
-        """classify() should raise AIClassifierError (MCP integration not implemented)."""
+    def test_classify_space_mountain_returns_tier_1(self):
+        """classify() should successfully classify Space Mountain as Tier 1 using real API."""
         classifier = AIClassifier()
 
-        with pytest.raises(AIClassifierError) as exc_info:
-            classifier.classify("Space Mountain", "Magic Kingdom")
+        result = classifier.classify("Space Mountain", "Magic Kingdom", "Orlando, FL")
 
-        assert "MCP" in str(exc_info.value) or "Failed to classify" in str(exc_info.value)
+        # Verify we got a valid result
+        assert result.tier in [1, 2, 3], f"Expected tier 1-3, got {result.tier}"
+        assert result.confidence >= 0.5, f"Expected confidence >= 0.5, got {result.confidence}"
+        assert len(result.reasoning) > 0, "Expected reasoning text"
+
+        # Space Mountain should be classified as Tier 1 (iconic E-ticket)
+        assert result.tier == 1, f"Space Mountain should be Tier 1, got Tier {result.tier}"
 
 
 class TestBatchClassify:

@@ -13,9 +13,11 @@ The project has **456 comprehensive tests** covering all functionality.
 This single command will:
 1. ✅ Setup test database (creates DB, runs migrations)
 2. ✅ Configure environment variables
-3. ✅ Run all 359 unit tests
-4. ✅ Run all 97 integration tests
+3. ✅ Run all 359 unit tests (streams output in real-time)
+4. ✅ Run all 97 integration tests (streams output in real-time)
 5. ✅ Display comprehensive summary
+
+**Note:** Tests stream to console in real-time, so you'll see immediate feedback. The full run takes 2-3 minutes. Log files are saved to `backend/unit_tests.log` and `backend/integration_tests.log`.
 
 ### Expected Output
 
@@ -60,6 +62,9 @@ export TEST_DB_PORT=3306
 export TEST_DB_NAME=themepark_test
 export TEST_DB_USER=themepark_test
 export TEST_DB_PASSWORD=test_password
+
+# OpenAI API key for AI classification tests
+export OPENAI_API_KEY=REDACTED_OPENAI_KEY
 ```
 
 ### Run All Tests

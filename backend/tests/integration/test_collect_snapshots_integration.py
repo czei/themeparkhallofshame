@@ -36,32 +36,32 @@ from database.repositories.status_change_repository import RideStatusChangeRepos
 def sample_api_response_open_park():
     """Queue-Times API response for park with multiple operating rides."""
     return {
-        'id': 101,
+        'id': 201,
         'name': 'Magic Kingdom',
         'rides': [
             {
-                'id': 1001,
+                'id': 2001,
                 'name': 'Space Mountain',
                 'wait_time': 45,
                 'is_open': True,
                 'land': 'Tomorrowland'
             },
             {
-                'id': 1002,
+                'id': 2002,
                 'name': 'Haunted Mansion',
                 'wait_time': 30,
                 'is_open': True,
                 'land': 'Liberty Square'
             },
             {
-                'id': 1003,
+                'id': 2003,
                 'name': 'Big Thunder Mountain',
                 'wait_time': 0,
                 'is_open': False,  # Closed for maintenance
                 'land': 'Frontierland'
             },
             {
-                'id': 1004,
+                'id': 2004,
                 'name': 'Pirates of the Caribbean',
                 'wait_time': 25,
                 'is_open': True,
@@ -75,18 +75,18 @@ def sample_api_response_open_park():
 def sample_api_response_closed_park():
     """Queue-Times API response for park that appears closed."""
     return {
-        'id': 101,
+        'id': 201,
         'name': 'Magic Kingdom',
         'rides': [
             {
-                'id': 1001,
+                'id': 2001,
                 'name': 'Space Mountain',
                 'wait_time': 0,
                 'is_open': False,
                 'land': 'Tomorrowland'
             },
             {
-                'id': 1002,
+                'id': 2002,
                 'name': 'Haunted Mansion',
                 'wait_time': 0,
                 'is_open': False,
@@ -100,7 +100,7 @@ def sample_api_response_closed_park():
 def sample_api_response_empty():
     """Queue-Times API response with no rides."""
     return {
-        'id': 101,
+        'id': 201,
         'name': 'Magic Kingdom',
         'rides': []
     }
@@ -113,10 +113,20 @@ def sample_api_response_empty():
 @pytest.fixture
 def setup_test_park(mysql_connection):
     """Create a test park in database and return park_id."""
+    # Clean up any existing test data (from this or other test files)
+    from sqlalchemy import text
+    mysql_connection.execute(text("DELETE FROM ride_status_snapshots"))
+    mysql_connection.execute(text("DELETE FROM ride_status_changes"))
+    mysql_connection.execute(text("DELETE FROM park_activity_snapshots"))
+    mysql_connection.execute(text("DELETE FROM ride_classifications WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id BETWEEN 2001 AND 2010)"))
+    mysql_connection.execute(text("DELETE FROM rides WHERE queue_times_id BETWEEN 2001 AND 2010"))
+    mysql_connection.execute(text("DELETE FROM parks WHERE queue_times_id = 201"))
+    mysql_connection.commit()
+
     park_repo = ParkRepository(mysql_connection)
 
     park_data = {
-        'queue_times_id': 101,
+        'queue_times_id': 201,
         'name': 'Magic Kingdom',
         'city': 'Orlando',
         'state_province': 'FL',
@@ -131,6 +141,7 @@ def setup_test_park(mysql_connection):
     }
 
     park = park_repo.create(park_data)
+    mysql_connection.commit()  # Commit so mocked collector can see the park
     # park_repo.create() returns a Park object, extract park_id
     return park.park_id if hasattr(park, 'park_id') else park['park_id']
 
@@ -138,12 +149,17 @@ def setup_test_park(mysql_connection):
 @pytest.fixture
 def setup_test_rides(mysql_connection, setup_test_park):
     """Create test rides in database and return list of ride_ids."""
+    # Clean up any existing rides with these queue_times_ids
+    from sqlalchemy import text
+    mysql_connection.execute(text("DELETE FROM rides WHERE queue_times_id BETWEEN 2001 AND 2010"))
+    mysql_connection.commit()
+
     park_id = setup_test_park
     ride_repo = RideRepository(mysql_connection)
 
     rides_data = [
         {
-            'queue_times_id': 1001,
+            'queue_times_id': 2001,
             'park_id': park_id,
             'name': 'Space Mountain',
             'land_area': 'Tomorrowland',
@@ -151,7 +167,7 @@ def setup_test_rides(mysql_connection, setup_test_park):
             'is_active': True
         },
         {
-            'queue_times_id': 1002,
+            'queue_times_id': 2002,
             'park_id': park_id,
             'name': 'Haunted Mansion',
             'land_area': 'Liberty Square',
@@ -159,7 +175,7 @@ def setup_test_rides(mysql_connection, setup_test_park):
             'is_active': True
         },
         {
-            'queue_times_id': 1003,
+            'queue_times_id': 2003,
             'park_id': park_id,
             'name': 'Big Thunder Mountain',
             'land_area': 'Frontierland',
@@ -167,7 +183,7 @@ def setup_test_rides(mysql_connection, setup_test_park):
             'is_active': True
         },
         {
-            'queue_times_id': 1004,
+            'queue_times_id': 2004,
             'park_id': park_id,
             'name': 'Pirates of the Caribbean',
             'land_area': 'Adventureland',
@@ -182,6 +198,7 @@ def setup_test_rides(mysql_connection, setup_test_park):
         # ride_repo.create() returns a Ride object, extract ride_id
         ride_ids.append(ride.ride_id if hasattr(ride, 'ride_id') else ride['ride_id'])
 
+    mysql_connection.commit()  # Commit so mocked collector can see the rides
     return ride_ids
 
 
@@ -281,10 +298,10 @@ class TestStatusChangeDetection:
 
         # First collection - ride is open
         mock_client.get_park_wait_times.return_value = {
-            'id': 101,
+            'id': 201,
             'name': 'Magic Kingdom',
             'rides': [
-                {'id': 1001, 'name': 'Space Mountain', 'wait_time': 45, 'is_open': True}
+                {'id': 2001, 'name': 'Space Mountain', 'wait_time': 45, 'is_open': True}
             ]
         }
 
@@ -293,10 +310,10 @@ class TestStatusChangeDetection:
 
         # Second collection - ride is closed
         mock_client.get_park_wait_times.return_value = {
-            'id': 101,
+            'id': 201,
             'name': 'Magic Kingdom',
             'rides': [
-                {'id': 1001, 'name': 'Space Mountain', 'wait_time': 0, 'is_open': False}
+                {'id': 2001, 'name': 'Space Mountain', 'wait_time': 0, 'is_open': False}
             ]
         }
 

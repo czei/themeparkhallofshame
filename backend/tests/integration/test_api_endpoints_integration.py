@@ -58,17 +58,20 @@ def comprehensive_test_data(mysql_connection):
     """
     conn = mysql_connection
 
-    # Clean up any existing test data
-    conn.execute(text("DELETE FROM ride_status_snapshots"))
-    conn.execute(text("DELETE FROM ride_daily_stats"))
-    conn.execute(text("DELETE FROM ride_weekly_stats"))
-    conn.execute(text("DELETE FROM ride_monthly_stats"))
-    conn.execute(text("DELETE FROM park_daily_stats"))
-    conn.execute(text("DELETE FROM park_weekly_stats"))
-    conn.execute(text("DELETE FROM park_monthly_stats"))
-    conn.execute(text("DELETE FROM ride_classifications"))
-    conn.execute(text("DELETE FROM rides"))
-    conn.execute(text("DELETE FROM parks"))
+    # Clean up any existing test data (including committed data from other tests)
+    conn.execute(text("DELETE FROM ride_status_snapshots WHERE ride_id <= 200"))
+    conn.execute(text("DELETE FROM ride_status_changes WHERE ride_id <= 200"))
+    conn.execute(text("DELETE FROM ride_daily_stats WHERE ride_id <= 200"))
+    conn.execute(text("DELETE FROM ride_weekly_stats WHERE ride_id <= 200"))
+    conn.execute(text("DELETE FROM ride_monthly_stats WHERE ride_id <= 200"))
+    conn.execute(text("DELETE FROM park_activity_snapshots WHERE park_id <= 20"))
+    conn.execute(text("DELETE FROM park_daily_stats WHERE park_id <= 20"))
+    conn.execute(text("DELETE FROM park_weekly_stats WHERE park_id <= 20"))
+    conn.execute(text("DELETE FROM park_monthly_stats WHERE park_id <= 20"))
+    conn.execute(text("DELETE FROM ride_classifications WHERE ride_id <= 200"))
+    conn.execute(text("DELETE FROM rides WHERE ride_id <= 200"))
+    conn.execute(text("DELETE FROM parks WHERE park_id <= 20"))
+    conn.commit()  # Commit deletes so Flask app can see clean state
 
     # === CREATE 10 PARKS ===
     parks_data = [
@@ -79,12 +82,12 @@ def comprehensive_test_data(mysql_connection):
         (4, 104, 'Animal Kingdom', 'Bay Lake', 'FL', 'US', 'America/New_York', 'Disney', True, False, True),
         (5, 105, 'Disneyland', 'Anaheim', 'CA', 'US', 'America/Los_Angeles', 'Disney', True, False, True),
         # Universal Parks (3)
-        (6, 201, 'Universal Studios Florida', 'Orlando', 'FL', 'US', 'America/New_York', 'Universal', False, True, True),
-        (7, 202, 'Islands of Adventure', 'Orlando', 'FL', 'US', 'America/New_York', 'Universal', False, True, True),
-        (8, 203, 'Universal Studios Hollywood', 'Los Angeles', 'CA', 'US', 'America/Los_Angeles', 'Universal', False, True, True),
+        (6, 106, 'Universal Studios Florida', 'Orlando', 'FL', 'US', 'America/New_York', 'Universal', False, True, True),
+        (7, 107, 'Islands of Adventure', 'Orlando', 'FL', 'US', 'America/New_York', 'Universal', False, True, True),
+        (8, 108, 'Universal Studios Hollywood', 'Los Angeles', 'CA', 'US', 'America/Los_Angeles', 'Universal', False, True, True),
         # Other Parks (2)
-        (9, 301, 'SeaWorld Orlando', 'Orlando', 'FL', 'US', 'America/New_York', 'SeaWorld', False, False, True),
-        (10, 302, 'Busch Gardens Tampa', 'Tampa', 'FL', 'US', 'America/New_York', 'Busch Gardens', False, False, True),
+        (9, 109, 'SeaWorld Orlando', 'Orlando', 'FL', 'US', 'America/New_York', 'SeaWorld', False, False, True),
+        (10, 110, 'Busch Gardens Tampa', 'Tampa', 'FL', 'US', 'America/New_York', 'Busch Gardens', False, False, True),
     ]
 
     for park in parks_data:
@@ -96,6 +99,8 @@ def comprehensive_test_data(mysql_connection):
             'state': park[4], 'country': park[5], 'tz': park[6], 'operator': park[7],
             'is_disney': park[8], 'is_universal': park[9], 'is_active': park[10]
         })
+
+    conn.commit()  # Commit parks so Flask app can see them
 
     # === CREATE 100 RIDES (10 per park, mixed tiers) ===
     ride_id = 1
@@ -127,6 +132,8 @@ def comprehensive_test_data(mysql_connection):
             })
 
             ride_id += 1
+
+    conn.commit()  # Commit rides and classifications so Flask app can see them
 
     # === CREATE REALISTIC STATS DATA ===
     today = date.today()
@@ -297,6 +304,8 @@ def comprehensive_test_data(mysql_connection):
 
             ride_id += 1
 
+    conn.commit()  # Commit all ride stats so Flask app can see them
+
     # === CREATE PARK DAILY STATS (aggregated from rides) ===
     for park_id in range(1, 11):
         # Today: Sum of all rides in park
@@ -401,6 +410,8 @@ def comprehensive_test_data(mysql_connection):
             'avg_uptime': 82.0
         })
 
+    conn.commit()  # Commit all park stats so Flask app can see them
+
     # === CREATE RIDE STATUS SNAPSHOTS (for current wait times) ===
     now = datetime.now()
     ride_id = 1
@@ -425,6 +436,7 @@ def comprehensive_test_data(mysql_connection):
 
             ride_id += 1
 
+    conn.commit()  # Commit snapshots so Flask app can see them
 
     return {
         'num_parks': 10,

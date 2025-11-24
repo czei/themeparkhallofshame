@@ -87,8 +87,8 @@ class TestParkRepositoryCRUD:
         """
         Fetch park by Queue-Times.com external ID.
 
-        Given: Park exists with queue_times_id=101
-        When: get_by_queue_times_id(101) is called
+        Given: Park exists with queue_times_id=601
+        When: get_by_queue_times_id(601) is called
         Then: Return Park object
         """
         repo = ParkRepository(mysql_connection)
@@ -176,7 +176,7 @@ class TestParkRepositoryQueries:
 
         # Create 2 active parks
         park1_data = {
-            'queue_times_id': 101, 'name': 'Magic Kingdom', 'city': 'Orlando',
+            'queue_times_id': 601, 'name': 'Magic Kingdom', 'city': 'Orlando',
             'state_province': 'FL', 'country': 'US', 'latitude': 28.385,
             'longitude': -81.563, 'timezone': 'America/New_York',
             'operator': 'Disney', 'is_disney': 1, 'is_universal': 0, 'is_active': 1
@@ -246,7 +246,7 @@ class TestParkRepositoryQueries:
 
         # Disney parks
         disney1 = {
-            'queue_times_id': 101, 'name': 'Magic Kingdom', 'city': 'Orlando',
+            'queue_times_id': 601, 'name': 'Magic Kingdom', 'city': 'Orlando',
             'state_province': 'FL', 'country': 'US', 'latitude': 28.385,
             'longitude': -81.563, 'timezone': 'America/New_York',
             'operator': 'Disney', 'is_disney': 1, 'is_universal': 0, 'is_active': 1

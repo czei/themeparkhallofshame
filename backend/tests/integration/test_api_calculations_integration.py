@@ -118,8 +118,10 @@ def comprehensive_api_test_data(mysql_connection):
 
     current_year = datetime.now().year
     current_week = datetime.now().isocalendar()[1]
+    current_week_start = date.fromisocalendar(current_year, current_week, 1)
     prev_week = (datetime.now() - timedelta(weeks=1)).isocalendar()[1]
     prev_week_year = (datetime.now() - timedelta(weeks=1)).year
+    prev_week_start = date.fromisocalendar(prev_week_year, prev_week, 1)
 
     current_month = datetime.now().month
     prev_month = current_month - 1 if current_month > 1 else 12
@@ -186,44 +188,44 @@ def comprehensive_api_test_data(mysql_connection):
             downtime_week = downtime_today * 7
             conn.execute(text("""
                 INSERT INTO ride_weekly_stats (
-                    ride_id, year, week_number, downtime_minutes, uptime_percentage,
+                    ride_id, year, week_number, week_start_date, downtime_minutes, uptime_percentage,
                     avg_wait_time, peak_wait_time, status_changes
                 ) VALUES (
-                    :ride_id, :year, :week, :downtime, :uptime,
+                    :ride_id, :year, :week, :week_start, :downtime, :uptime,
                     :avg_wait, :peak_wait, :status_changes
                 )
             """), {
                 'ride_id': ride_id,
                 'year': current_year,
                 'week': current_week,
+                'week_start': current_week_start,
                 'downtime': downtime_week,
                 'uptime': uptime_pct_today,
                 'avg_wait': 45 if tier == 1 else (30 if tier == 2 else 15),
                 'peak_wait': 100 if tier == 1 else (70 if tier == 2 else 35),
-                'status_changes': 15,
-                'observations': 420
+                'status_changes': 15
             })
 
             # Previous week - 10% less for trend
             downtime_prev_week = int(downtime_week * 0.9)
             conn.execute(text("""
                 INSERT INTO ride_weekly_stats (
-                    ride_id, year, week_number, downtime_minutes, uptime_percentage,
+                    ride_id, year, week_number, week_start_date, downtime_minutes, uptime_percentage,
                     avg_wait_time, peak_wait_time, status_changes
                 ) VALUES (
-                    :ride_id, :year, :week, :downtime, :uptime,
+                    :ride_id, :year, :week, :week_start, :downtime, :uptime,
                     :avg_wait, :peak_wait, :status_changes
                 )
             """), {
                 'ride_id': ride_id,
                 'year': prev_week_year,
                 'week': prev_week,
+                'week_start': prev_week_start,
                 'downtime': downtime_prev_week,
                 'uptime': ((4200 - downtime_prev_week) / 4200.0) * 100,
                 'avg_wait': 42 if tier == 1 else (28 if tier == 2 else 14),
                 'peak_wait': 95 if tier == 1 else (65 if tier == 2 else 32),
-                'status_changes': 14,
-                'observations': 420
+                'status_changes': 14
             })
 
             # Monthly stats

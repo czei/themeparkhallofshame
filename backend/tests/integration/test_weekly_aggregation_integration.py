@@ -73,9 +73,9 @@ class TestWeeklyAggregationMath:
             mysql_connection.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": stat_date,
-                "uptime_minutes": 760,
+                "uptime_minutes": 761,
                 "downtime_minutes": 69,
-                "uptime_percentage": 91.67,
+                "uptime_percentage": 91.69,
                 "operating_hours_minutes": 830,
                 "avg_wait_time": 35.0 + day_offset,  # Varies by day
                 "min_wait_time": 20,
@@ -120,7 +120,7 @@ class TestWeeklyAggregationMath:
         assert ride_stats is not None, "ride_weekly_stats record should exist"
 
         # Verify sums
-        assert ride_stats.uptime_minutes == 5320, "Sum of 7 days: 760 × 7"
+        assert ride_stats.uptime_minutes == 5327, "Sum of 7 days: 761 × 7"
         assert ride_stats.downtime_minutes == 483, "Sum of 7 days: 69 × 7"
         assert ride_stats.operating_hours_minutes == 5810, "Sum of 7 days: 830 × 7"
         assert ride_stats.status_changes == 21, "Sum of 7 days: 3 × 7"
@@ -357,13 +357,13 @@ class TestParkWeeklyAggregation:
         downtime_hours = float(park_stats.total_downtime_hours)
         assert abs(downtime_hours - 24.38) < 0.1
 
-        # Average uptime: (800 + 760 + 720) / (830 + 830 + 830) × 100 = 89.16%
-        # But this needs to be across 7 days: (2280 × 3) / (2490 × 3) × 100 = 91.57%
-        # Actually: Total uptime = (800 + 760 + 720) × 7 = 15,680
-        #           Total operating = 830 × 3 × 7 = 17,430
-        #           Percentage = 15,680 / 17,430 × 100 = 89.96%
+        # Average uptime percentage (simple average of ride percentages):
+        # Ride 1: (800×7) / (830×7) × 100 = 96.39%
+        # Ride 2: (760×7) / (830×7) × 100 = 91.57%
+        # Ride 3: (720×7) / (830×7) × 100 = 86.75%
+        # Average: (96.39 + 91.57 + 86.75) / 3 = 91.57%
         uptime_pct = float(park_stats.avg_uptime_percentage)
-        assert abs(uptime_pct - 89.96) < 0.5
+        assert abs(uptime_pct - 91.57) < 0.5
 
         assert park_stats.rides_with_downtime == 3
         assert park_stats.total_rides_tracked == 3

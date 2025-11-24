@@ -109,6 +109,52 @@ class AggregationService:
             logger.error(f"Daily aggregation failed: {e}", exc_info=True)
             raise
 
+    def aggregate_weekly(
+        self,
+        year: int,
+        week_number: int
+    ) -> Dict[str, Any]:
+        """
+        Run weekly aggregation for a specific ISO week.
+
+        Aggregates FROM daily stats (not raw snapshots).
+        Calculates week-over-week trends.
+
+        Args:
+            year: Year (e.g., 2025)
+            week_number: ISO week number (1-53)
+
+        Returns:
+            Dictionary with aggregation results
+        """
+        logger.info(f"Starting weekly aggregation for {year}-W{week_number:02d}")
+
+        # Calculate week_start_date from ISO week
+        # ISO week starts on Monday (use %G-W%V-%u for ISO 8601 format)
+        week_start_date = datetime.strptime(f'{year}-W{week_number:02d}-1', '%G-W%V-%u').date()
+
+        try:
+            # Aggregate ride-level weekly stats
+            rides_processed = self._aggregate_rides_weekly_stats(year, week_number, week_start_date)
+
+            # Aggregate park-level weekly stats
+            parks_processed = self._aggregate_parks_weekly_stats(year, week_number, week_start_date)
+
+            logger.info(f"Weekly aggregation complete: {parks_processed} parks, {rides_processed} rides")
+
+            return {
+                "status": "success",
+                "year": year,
+                "week_number": week_number,
+                "week_start_date": week_start_date,
+                "parks_processed": parks_processed,
+                "rides_processed": rides_processed
+            }
+
+        except Exception as e:
+            logger.error(f"Weekly aggregation failed for {year}-W{week_number:02d}: {e}", exc_info=True)
+            raise
+
     def _aggregate_daily_for_timezone(
         self,
         aggregation_date: date,
@@ -440,6 +486,411 @@ class AggregationService:
             "status_changes": status_changes,
             "longest_downtime_minutes": longest_downtime
         })
+
+    def _aggregate_rides_weekly_stats(
+        self,
+        year: int,
+        week_number: int,
+        week_start_date: date
+    ) -> int:
+        """
+        Aggregate ride-level weekly stats from daily stats.
+
+        Args:
+            year: Year
+            week_number: ISO week number
+            week_start_date: Monday of the ISO week
+
+        Returns:
+            Number of rides processed
+        """
+        # Calculate date range for the week (Monday to Sunday)
+        week_end_date = week_start_date + timedelta(days=6)
+
+        # Get all rides that have daily stats in this week
+        rides_query = text("""
+            SELECT DISTINCT ride_id
+            FROM ride_daily_stats
+            WHERE stat_date >= :week_start
+                AND stat_date <= :week_end
+            ORDER BY ride_id
+        """)
+
+        result = self.conn.execute(rides_query, {
+            "week_start": week_start_date,
+            "week_end": week_end_date
+        })
+        ride_ids = [row.ride_id for row in result]
+
+        # Aggregate each ride
+        for ride_id in ride_ids:
+            self._aggregate_single_ride_weekly_stats(
+                ride_id=ride_id,
+                year=year,
+                week_number=week_number,
+                week_start_date=week_start_date,
+                week_end_date=week_end_date
+            )
+
+        logger.info(f"Processed {len(ride_ids)} rides for weekly aggregation")
+        return len(ride_ids)
+
+    def _aggregate_single_ride_weekly_stats(
+        self,
+        ride_id: int,
+        year: int,
+        week_number: int,
+        week_start_date: date,
+        week_end_date: date
+    ) -> None:
+        """
+        Aggregate a single ride's weekly stats from daily stats.
+
+        Args:
+            ride_id: Ride ID
+            year: Year
+            week_number: ISO week number
+            week_start_date: Monday of the ISO week
+            week_end_date: Sunday of the ISO week
+        """
+        # Sum daily stats for the week
+        weekly_query = text("""
+            SELECT
+                SUM(uptime_minutes) AS uptime_minutes,
+                SUM(downtime_minutes) AS downtime_minutes,
+                SUM(operating_hours_minutes) AS operating_hours_minutes,
+                SUM(status_changes) AS status_changes,
+                MAX(peak_wait_time) AS peak_wait_time,
+                SUM(avg_wait_time * operating_hours_minutes) AS weighted_wait_sum,
+                SUM(operating_hours_minutes) AS total_operating_minutes
+            FROM ride_daily_stats
+            WHERE ride_id = :ride_id
+                AND stat_date >= :week_start
+                AND stat_date <= :week_end
+        """)
+
+        result = self.conn.execute(weekly_query, {
+            "ride_id": ride_id,
+            "week_start": week_start_date,
+            "week_end": week_end_date
+        })
+        row = result.fetchone()
+
+        if not row or row.uptime_minutes is None:
+            logger.debug(f"No daily stats found for ride {ride_id} in week {year}-W{week_number:02d}")
+            return
+
+        # Calculate uptime percentage
+        total_operating = int(row.operating_hours_minutes) if row.operating_hours_minutes else 0
+        uptime_percentage = 0.0
+        if total_operating > 0:
+            uptime_percentage = (float(row.uptime_minutes) / float(total_operating)) * 100.0
+
+        # Calculate weighted average wait time
+        avg_wait_time = None
+        if row.total_operating_minutes and row.total_operating_minutes > 0 and row.weighted_wait_sum:
+            avg_wait_time = round(float(row.weighted_wait_sum) / float(row.total_operating_minutes), 2)
+
+        # Calculate trend vs previous week
+        trend_vs_previous_week = self._calculate_weekly_trend(
+            ride_id=ride_id,
+            current_year=year,
+            current_week=week_number,
+            current_downtime=row.downtime_minutes
+        )
+
+        # Insert/update ride weekly stats
+        upsert_query = text("""
+            INSERT INTO ride_weekly_stats (
+                ride_id, year, week_number, week_start_date,
+                uptime_minutes, downtime_minutes, uptime_percentage,
+                operating_hours_minutes, avg_wait_time, peak_wait_time,
+                status_changes, trend_vs_previous_week
+            )
+            VALUES (
+                :ride_id, :year, :week_number, :week_start_date,
+                :uptime_minutes, :downtime_minutes, :uptime_percentage,
+                :operating_hours_minutes, :avg_wait_time, :peak_wait_time,
+                :status_changes, :trend_vs_previous_week
+            )
+            ON DUPLICATE KEY UPDATE
+                week_start_date = VALUES(week_start_date),
+                uptime_minutes = VALUES(uptime_minutes),
+                downtime_minutes = VALUES(downtime_minutes),
+                uptime_percentage = VALUES(uptime_percentage),
+                operating_hours_minutes = VALUES(operating_hours_minutes),
+                avg_wait_time = VALUES(avg_wait_time),
+                peak_wait_time = VALUES(peak_wait_time),
+                status_changes = VALUES(status_changes),
+                trend_vs_previous_week = VALUES(trend_vs_previous_week)
+        """)
+
+        self.conn.execute(upsert_query, {
+            "ride_id": ride_id,
+            "year": year,
+            "week_number": week_number,
+            "week_start_date": week_start_date,
+            "uptime_minutes": row.uptime_minutes,
+            "downtime_minutes": row.downtime_minutes,
+            "uptime_percentage": round(uptime_percentage, 2),
+            "operating_hours_minutes": row.operating_hours_minutes,
+            "avg_wait_time": avg_wait_time,
+            "peak_wait_time": row.peak_wait_time,
+            "status_changes": row.status_changes,
+            "trend_vs_previous_week": trend_vs_previous_week
+        })
+
+        logger.debug(f"Aggregated weekly stats for ride {ride_id}, week {year}-W{week_number:02d}")
+
+    def _calculate_weekly_trend(
+        self,
+        ride_id: int,
+        current_year: int,
+        current_week: int,
+        current_downtime: int
+    ) -> Optional[float]:
+        """
+        Calculate week-over-week downtime trend.
+
+        Args:
+            ride_id: Ride ID
+            current_year: Current year
+            current_week: Current ISO week number
+            current_downtime: Current week's downtime minutes
+
+        Returns:
+            Percentage change (e.g., 20.75 for +20.75%) or None if no previous data
+        """
+        # Calculate previous week
+        # Handle year boundary (week 1 -> previous year's last week)
+        if current_week == 1:
+            previous_year = current_year - 1
+            # Get last week of previous year (usually 52, sometimes 53)
+            previous_week_date = datetime.strptime(f'{previous_year}-12-28', '%Y-%m-%d').date()
+            previous_week = previous_week_date.isocalendar()[1]
+        else:
+            previous_year = current_year
+            previous_week = current_week - 1
+
+        # Query previous week's downtime
+        previous_query = text("""
+            SELECT downtime_minutes
+            FROM ride_weekly_stats
+            WHERE ride_id = :ride_id
+                AND year = :year
+                AND week_number = :week_number
+        """)
+
+        result = self.conn.execute(previous_query, {
+            "ride_id": ride_id,
+            "year": previous_year,
+            "week_number": previous_week
+        })
+        previous_row = result.fetchone()
+
+        if not previous_row or previous_row.downtime_minutes is None or previous_row.downtime_minutes == 0:
+            return None
+
+        # Calculate percentage change: ((current - previous) / previous) * 100
+        prev_downtime = float(previous_row.downtime_minutes)
+        trend = ((float(current_downtime) - prev_downtime) / prev_downtime) * 100.0
+        return round(trend, 2)
+
+    def _aggregate_parks_weekly_stats(
+        self,
+        year: int,
+        week_number: int,
+        week_start_date: date
+    ) -> int:
+        """
+        Aggregate park-level weekly stats from ride weekly stats.
+
+        Args:
+            year: Year
+            week_number: ISO week number
+            week_start_date: Monday of the ISO week
+
+        Returns:
+            Number of parks processed
+        """
+        # Get all parks that have ride weekly stats
+        parks_query = text("""
+            SELECT DISTINCT r.park_id
+            FROM ride_weekly_stats rws
+            INNER JOIN rides r ON rws.ride_id = r.ride_id
+            WHERE rws.year = :year
+                AND rws.week_number = :week_number
+            ORDER BY r.park_id
+        """)
+
+        result = self.conn.execute(parks_query, {
+            "year": year,
+            "week_number": week_number
+        })
+        park_ids = [row.park_id for row in result]
+
+        # Aggregate each park
+        for park_id in park_ids:
+            self._aggregate_single_park_weekly_stats(
+                park_id=park_id,
+                year=year,
+                week_number=week_number,
+                week_start_date=week_start_date
+            )
+
+        logger.info(f"Processed {len(park_ids)} parks for weekly aggregation")
+        return len(park_ids)
+
+    def _aggregate_single_park_weekly_stats(
+        self,
+        park_id: int,
+        year: int,
+        week_number: int,
+        week_start_date: date
+    ) -> None:
+        """
+        Aggregate a single park's weekly stats from ride weekly stats.
+
+        Args:
+            park_id: Park ID
+            year: Year
+            week_number: ISO week number
+            week_start_date: Monday of the ISO week
+        """
+        # Aggregate ride weekly stats for this park
+        park_query = text("""
+            SELECT
+                COUNT(DISTINCT rws.ride_id) AS total_rides_tracked,
+                AVG(rws.uptime_percentage) AS avg_uptime_percentage,
+                SUM(rws.downtime_minutes) / 60.0 AS total_downtime_hours,
+                SUM(CASE WHEN rws.downtime_minutes > 0 THEN 1 ELSE 0 END) AS rides_with_downtime,
+                SUM(rws.avg_wait_time * rws.operating_hours_minutes) AS weighted_wait_sum,
+                SUM(rws.operating_hours_minutes) AS total_operating_minutes,
+                MAX(rws.peak_wait_time) AS peak_wait_time
+            FROM ride_weekly_stats rws
+            INNER JOIN rides r ON rws.ride_id = r.ride_id
+            WHERE r.park_id = :park_id
+                AND rws.year = :year
+                AND rws.week_number = :week_number
+                AND r.is_active = TRUE
+        """)
+
+        result = self.conn.execute(park_query, {
+            "park_id": park_id,
+            "year": year,
+            "week_number": week_number
+        })
+        row = result.fetchone()
+
+        if not row or row.total_rides_tracked == 0:
+            logger.debug(f"No ride weekly stats found for park {park_id} in week {year}-W{week_number:02d}")
+            return
+
+        # Calculate weighted average wait time
+        avg_wait_time = None
+        if row.total_operating_minutes and row.total_operating_minutes > 0 and row.weighted_wait_sum:
+            avg_wait_time = round(float(row.weighted_wait_sum) / float(row.total_operating_minutes), 2)
+
+        # Calculate park-level trend
+        trend_vs_previous_week = self._calculate_park_weekly_trend(
+            park_id=park_id,
+            current_year=year,
+            current_week=week_number,
+            current_downtime_hours=row.total_downtime_hours
+        )
+
+        # Insert/update park weekly stats
+        upsert_query = text("""
+            INSERT INTO park_weekly_stats (
+                park_id, year, week_number, week_start_date,
+                total_rides_tracked, avg_uptime_percentage, total_downtime_hours,
+                rides_with_downtime, avg_wait_time, peak_wait_time,
+                trend_vs_previous_week
+            )
+            VALUES (
+                :park_id, :year, :week_number, :week_start_date,
+                :total_rides_tracked, :avg_uptime_percentage, :total_downtime_hours,
+                :rides_with_downtime, :avg_wait_time, :peak_wait_time,
+                :trend_vs_previous_week
+            )
+            ON DUPLICATE KEY UPDATE
+                week_start_date = VALUES(week_start_date),
+                total_rides_tracked = VALUES(total_rides_tracked),
+                avg_uptime_percentage = VALUES(avg_uptime_percentage),
+                total_downtime_hours = VALUES(total_downtime_hours),
+                rides_with_downtime = VALUES(rides_with_downtime),
+                avg_wait_time = VALUES(avg_wait_time),
+                peak_wait_time = VALUES(peak_wait_time),
+                trend_vs_previous_week = VALUES(trend_vs_previous_week)
+        """)
+
+        self.conn.execute(upsert_query, {
+            "park_id": park_id,
+            "year": year,
+            "week_number": week_number,
+            "week_start_date": week_start_date,
+            "total_rides_tracked": row.total_rides_tracked,
+            "avg_uptime_percentage": round(float(row.avg_uptime_percentage), 2) if row.avg_uptime_percentage else None,
+            "total_downtime_hours": round(float(row.total_downtime_hours), 2),
+            "rides_with_downtime": row.rides_with_downtime,
+            "avg_wait_time": avg_wait_time,
+            "peak_wait_time": row.peak_wait_time,
+            "trend_vs_previous_week": trend_vs_previous_week
+        })
+
+        logger.debug(f"Aggregated weekly stats for park {park_id}, week {year}-W{week_number:02d}")
+
+    def _calculate_park_weekly_trend(
+        self,
+        park_id: int,
+        current_year: int,
+        current_week: int,
+        current_downtime_hours: float
+    ) -> Optional[float]:
+        """
+        Calculate week-over-week park downtime trend.
+
+        Args:
+            park_id: Park ID
+            current_year: Current year
+            current_week: Current ISO week number
+            current_downtime_hours: Current week's downtime hours
+
+        Returns:
+            Percentage change or None if no previous data
+        """
+        # Calculate previous week
+        if current_week == 1:
+            previous_year = current_year - 1
+            previous_week_date = datetime.strptime(f'{previous_year}-12-28', '%Y-%m-%d').date()
+            previous_week = previous_week_date.isocalendar()[1]
+        else:
+            previous_year = current_year
+            previous_week = current_week - 1
+
+        # Query previous week's downtime
+        previous_query = text("""
+            SELECT total_downtime_hours
+            FROM park_weekly_stats
+            WHERE park_id = :park_id
+                AND year = :year
+                AND week_number = :week_number
+        """)
+
+        result = self.conn.execute(previous_query, {
+            "park_id": park_id,
+            "year": previous_year,
+            "week_number": previous_week
+        })
+        previous_row = result.fetchone()
+
+        if not previous_row or previous_row.total_downtime_hours is None or float(previous_row.total_downtime_hours) == 0:
+            return None
+
+        # Calculate percentage change
+        previous_downtime = float(previous_row.total_downtime_hours)
+        trend = ((float(current_downtime_hours) - previous_downtime) / previous_downtime) * 100.0
+        return round(trend, 2)
 
     def _get_distinct_timezones(self) -> List[str]:
         """Get list of distinct timezones from active parks."""

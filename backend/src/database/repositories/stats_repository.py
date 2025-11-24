@@ -4,10 +4,14 @@ Provides data access layer for aggregate statistics tables.
 """
 
 from typing import List, Dict, Any, Optional
+from datetime import date, datetime, timedelta
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from ...utils.logger import logger
+try:
+    from ...utils.logger import logger
+except ImportError:
+    from utils.logger import logger
 
 
 class StatsRepository:

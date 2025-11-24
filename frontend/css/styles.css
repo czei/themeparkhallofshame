@@ -417,6 +417,133 @@ footer a:hover {
     background: #2980b9;
 }
 
+/* Ride Performance Specific Styles */
+.ride-performance-view {
+    background: white;
+    border-radius: 8px;
+    padding: 2rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.ride-table .top-five {
+    background-color: #f0f8ff;
+}
+
+.ride-table .top-five:hover {
+    background-color: #e6f3ff;
+}
+
+/* Status Badges */
+.status-badge {
+    display: inline-block;
+    padding: 0.35rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-running {
+    background: #d4edda;
+    color: #155724;
+}
+
+.status-down {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.status-unknown {
+    background: #e9ecef;
+    color: #6c757d;
+}
+
+/* Tier Badges */
+.tier-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 0.85rem;
+    cursor: help;
+}
+
+.tier-1 {
+    background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
+    color: #333;
+    box-shadow: 0 2px 4px rgba(255,215,0,0.3);
+}
+
+.tier-2 {
+    background: linear-gradient(135deg, #c0c0c0 0%, #e8e8e8 100%);
+    color: #333;
+    box-shadow: 0 2px 4px rgba(192,192,192,0.3);
+}
+
+.tier-3 {
+    background: linear-gradient(135deg, #cd7f32 0%, #d4a574 100%);
+    color: white;
+    box-shadow: 0 2px 4px rgba(205,127,50,0.3);
+}
+
+.tier-unknown {
+    background: #e9ecef;
+    color: #6c757d;
+}
+
+/* Ride Link */
+.ride-link {
+    color: #3498db;
+    text-decoration: none;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.ride-link:hover {
+    text-decoration: underline;
+}
+
+/* Park Info in Ride Table */
+.park-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.park-name {
+    font-weight: 500;
+    color: #2c3e50;
+}
+
+.park-location {
+    font-size: 0.85rem;
+    color: #7f8c8d;
+}
+
+/* Rank Number for Rides */
+.rank-number {
+    display: inline-block;
+    width: 32px;
+    height: 32px;
+    line-height: 32px;
+    text-align: center;
+    border-radius: 6px;
+    background: #f8f9fa;
+    color: #495057;
+    font-weight: 600;
+}
+
+.top-five .rank-number {
+    background: #e6f3ff;
+    color: #0066cc;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .rankings-controls {
@@ -448,5 +575,15 @@ footer a:hover {
 
     .uptime-display {
         min-width: 80px;
+    }
+
+    .park-info {
+        font-size: 0.85rem;
+    }
+
+    .status-badge,
+    .tier-badge {
+        font-size: 0.7rem;
+        padding: 0.25rem 0.5rem;
     }
 }

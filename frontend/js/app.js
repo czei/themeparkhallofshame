@@ -39,12 +39,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     break;
 
                 case 'ride-performance':
-                    appContainer.innerHTML = `
-                        <div class="placeholder-view">
-                            <h2>Ride Performance</h2>
-                            <p>Coming soon! This will show individual ride downtime statistics.</p>
-                        </div>
-                    `;
+                    if (typeof RidePerformance !== 'undefined') {
+                        currentComponent = new RidePerformance(apiClient, 'view-container');
+                        await currentComponent.init();
+                    } else {
+                        throw new Error('RidePerformance component not loaded');
+                    }
                     break;
 
                 case 'wait-times':

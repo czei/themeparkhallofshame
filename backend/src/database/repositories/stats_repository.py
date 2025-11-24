@@ -875,3 +875,226 @@ class StatsRepository:
         result = self.conn.execute(query, {"park_id": park_id})
         row = result.fetchone()
         return dict(row._mapping) if row else {}
+
+    def get_ride_daily_rankings(
+        self,
+        stat_date: date,
+        filter_disney_universal: bool = False,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get ride downtime rankings for a specific day.
+
+        Args:
+            stat_date: Date to get rankings for
+            filter_disney_universal: If True, only include Disney & Universal parks
+            limit: Maximum number of rides to return
+
+        Returns:
+            List of rides ranked by downtime hours with current status
+        """
+        query = text("""
+            SELECT
+                r.ride_id,
+                r.name AS ride_name,
+                r.tier,
+                p.park_id,
+                p.name AS park_name,
+                CONCAT(p.city, ', ', p.state_province) AS location,
+                rds.total_downtime_minutes / 60.0 AS downtime_hours,
+                rds.uptime_percentage,
+                rds.avg_wait_minutes,
+                rds.peak_wait_minutes,
+                -- Get current status from most recent snapshot
+                (
+                    SELECT computed_is_open
+                    FROM ride_status_snapshots
+                    WHERE ride_id = r.ride_id
+                    ORDER BY recorded_at DESC
+                    LIMIT 1
+                ) AS current_is_open,
+                -- Trend: compare to previous day
+                CASE
+                    WHEN prev_day.total_downtime_minutes > 0 THEN
+                        ((rds.total_downtime_minutes - prev_day.total_downtime_minutes) / prev_day.total_downtime_minutes::float) * 100
+                    ELSE NULL
+                END AS trend_percentage
+            FROM ride_daily_stats rds
+            JOIN rides r ON rds.ride_id = r.ride_id
+            JOIN parks p ON r.park_id = p.park_id
+            LEFT JOIN ride_daily_stats prev_day ON rds.ride_id = prev_day.ride_id
+                AND prev_day.stat_date = :stat_date - INTERVAL '1 day'
+            WHERE rds.stat_date = :stat_date
+                AND r.is_active = TRUE
+                AND p.is_active = TRUE
+                {:filter_clause}
+            ORDER BY rds.total_downtime_minutes DESC
+            LIMIT :limit
+        """.replace(
+            "{:filter_clause}",
+            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+        ))
+
+        result = self.conn.execute(query, {
+            "stat_date": stat_date,
+            "limit": limit
+        })
+
+        return [dict(row._mapping) for row in result.fetchall()]
+
+    def get_ride_weekly_rankings(
+        self,
+        year: int,
+        week_number: int,
+        filter_disney_universal: bool = False,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get ride downtime rankings for a specific week.
+
+        Args:
+            year: Year
+            week_number: ISO week number
+            filter_disney_universal: If True, only include Disney & Universal parks
+            limit: Maximum number of rides to return
+
+        Returns:
+            List of rides ranked by downtime hours with current status
+        """
+        query = text("""
+            SELECT
+                r.ride_id,
+                r.name AS ride_name,
+                r.tier,
+                p.park_id,
+                p.name AS park_name,
+                CONCAT(p.city, ', ', p.state_province) AS location,
+                rws.total_downtime_minutes / 60.0 AS downtime_hours,
+                rws.uptime_percentage,
+                rws.avg_wait_minutes,
+                rws.peak_wait_minutes,
+                -- Get current status from most recent snapshot
+                (
+                    SELECT computed_is_open
+                    FROM ride_status_snapshots
+                    WHERE ride_id = r.ride_id
+                    ORDER BY recorded_at DESC
+                    LIMIT 1
+                ) AS current_is_open,
+                -- Trend: compare to previous week
+                CASE
+                    WHEN prev_week.total_downtime_minutes > 0 THEN
+                        ((rws.total_downtime_minutes - prev_week.total_downtime_minutes) / prev_week.total_downtime_minutes::float) * 100
+                    ELSE NULL
+                END AS trend_percentage
+            FROM ride_weekly_stats rws
+            JOIN rides r ON rws.ride_id = r.ride_id
+            JOIN parks p ON r.park_id = p.park_id
+            LEFT JOIN ride_weekly_stats prev_week ON rws.ride_id = prev_week.ride_id
+                AND prev_week.year = :prev_year
+                AND prev_week.week_number = :prev_week
+            WHERE rws.year = :year
+                AND rws.week_number = :week_number
+                AND r.is_active = TRUE
+                AND p.is_active = TRUE
+                {:filter_clause}
+            ORDER BY rws.total_downtime_minutes DESC
+            LIMIT :limit
+        """.replace(
+            "{:filter_clause}",
+            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+        ))
+
+        # Calculate previous week
+        from datetime import datetime, timedelta
+        current_date = datetime.strptime(f"{year}-W{week_number:02d}-1", "%Y-W%W-%w")
+        prev_week_date = current_date - timedelta(weeks=1)
+        prev_year = prev_week_date.year
+        prev_week_num = prev_week_date.isocalendar()[1]
+
+        result = self.conn.execute(query, {
+            "year": year,
+            "week_number": week_number,
+            "prev_year": prev_year,
+            "prev_week": prev_week_num,
+            "limit": limit
+        })
+
+        return [dict(row._mapping) for row in result.fetchall()]
+
+    def get_ride_monthly_rankings(
+        self,
+        year: int,
+        month: int,
+        filter_disney_universal: bool = False,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get ride downtime rankings for a specific month.
+
+        Args:
+            year: Year
+            month: Month (1-12)
+            filter_disney_universal: If True, only include Disney & Universal parks
+            limit: Maximum number of rides to return
+
+        Returns:
+            List of rides ranked by downtime hours with current status
+        """
+        query = text("""
+            SELECT
+                r.ride_id,
+                r.name AS ride_name,
+                r.tier,
+                p.park_id,
+                p.name AS park_name,
+                CONCAT(p.city, ', ', p.state_province) AS location,
+                rms.total_downtime_minutes / 60.0 AS downtime_hours,
+                rms.uptime_percentage,
+                rms.avg_wait_minutes,
+                rms.peak_wait_minutes,
+                -- Get current status from most recent snapshot
+                (
+                    SELECT computed_is_open
+                    FROM ride_status_snapshots
+                    WHERE ride_id = r.ride_id
+                    ORDER BY recorded_at DESC
+                    LIMIT 1
+                ) AS current_is_open,
+                -- Trend: compare to previous month
+                CASE
+                    WHEN prev_month.total_downtime_minutes > 0 THEN
+                        ((rms.total_downtime_minutes - prev_month.total_downtime_minutes) / prev_month.total_downtime_minutes::float) * 100
+                    ELSE NULL
+                END AS trend_percentage
+            FROM ride_monthly_stats rms
+            JOIN rides r ON rms.ride_id = r.ride_id
+            JOIN parks p ON r.park_id = p.park_id
+            LEFT JOIN ride_monthly_stats prev_month ON rms.ride_id = prev_month.ride_id
+                AND prev_month.year = :prev_year
+                AND prev_month.month = :prev_month
+            WHERE rms.year = :year
+                AND rms.month = :month
+                AND r.is_active = TRUE
+                AND p.is_active = TRUE
+                {:filter_clause}
+            ORDER BY rms.total_downtime_minutes DESC
+            LIMIT :limit
+        """.replace(
+            "{:filter_clause}",
+            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+        ))
+
+        # Calculate previous month
+        prev_year = year if month > 1 else year - 1
+        prev_month_num = month - 1 if month > 1 else 12
+
+        result = self.conn.execute(query, {
+            "year": year,
+            "month": month,
+            "prev_year": prev_year,
+            "prev_month": prev_month_num,
+            "limit": limit
+        })
+
+        return [dict(row._mapping) for row in result.fetchall()]

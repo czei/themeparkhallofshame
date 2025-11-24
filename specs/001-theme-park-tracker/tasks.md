@@ -164,16 +164,16 @@ Based on plan.md project structure:
 
 ### Implementation for User Story 2
 
-- [ ] T062 [US2] Implement GET /api/rides/downtime endpoint in backend/src/api/routes/rides.py (FR-014, FR-015, FR-016)
-- [ ] T063 [US2] Implement query logic for ride performance rankings using ride_weekly_stats table (data-model.md Query 2)
-- [ ] T064 [US2] Implement current status badge logic by querying most recent ride_status_snapshots (FR-016)
-- [ ] T065 [US2] Add ride tier display (1/2/3) alongside ride name in response (FR-027)
-- [ ] T066 [US2] Add Queue-Times.com attribution and ride detail links to response (FR-033, FR-036)
-- [ ] T067 [US2] Create frontend/js/components/ride-performance.js to fetch and render ride performance table
-- [ ] T068 [US2] Implement status badges (Down/Running) with color coding in ride-performance.js
-- [ ] T069 [US2] Display ride tier badges (Tier 1/2/3) alongside ride names
-- [ ] T070 [US2] Make ride names clickable links to Queue-Times.com ride pages (FR-036)
-- [ ] T071 [US2] Add time period selector (Today, 7 Days, 30 Days) to ride performance view
+- [X] T062 [US2] Implement GET /api/rides/downtime endpoint in backend/src/api/routes/rides.py (FR-014, FR-015, FR-016)
+- [X] T063 [US2] Implement query logic for ride performance rankings using ride_weekly_stats table (data-model.md Query 2)
+- [X] T064 [US2] Implement current status badge logic by querying most recent ride_status_snapshots (FR-016)
+- [X] T065 [US2] Add ride tier display (1/2/3) alongside ride name in response (FR-027)
+- [X] T066 [US2] Add Queue-Times.com attribution and ride detail links to response (FR-033, FR-036)
+- [X] T067 [US2] Create frontend/js/components/ride-performance.js to fetch and render ride performance table
+- [X] T068 [US2] Implement status badges (Down/Running) with color coding in ride-performance.js
+- [X] T069 [US2] Display ride tier badges (Tier 1/2/3) alongside ride names
+- [X] T070 [US2] Make ride names clickable links to Queue-Times.com ride pages (FR-036)
+- [X] T071 [US2] Add time period selector (Today, 7 Days, 30 Days) to ride performance view
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 

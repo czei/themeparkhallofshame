@@ -475,6 +475,88 @@ class TestDailyAggregationMath:
         assert updated_downtime != initial_downtime, "Downtime should have changed"
 
 
+    def test_100_percent_downtime_ride(
+        self, mysql_connection, sample_park_data, sample_ride_data
+    ):
+        """
+        Test ride that is down for 100% of the operating day.
+
+        Scenario:
+        - Ride closed for maintenance entire day
+        - All snapshots show downtime (computed_is_open = FALSE)
+        - Operating hours: 830 minutes
+
+        Expected:
+        - downtime_minutes = 830 (100% of operating time)
+        - uptime_minutes = 0
+        - uptime_percentage = 0%
+        - avg_wait_time = NULL (no wait time when closed)
+        """
+        from tests.conftest import insert_sample_park, insert_sample_ride
+
+        # Setup: Create park and ride
+        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        sample_ride_data['park_id'] = park_id  # Link ride to park
+        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+
+        aggregation_date = date.today()
+        tz = ZoneInfo(sample_park_data['timezone'])
+        session_start = datetime.combine(aggregation_date, time(9, 0), tzinfo=tz).astimezone(ZoneInfo('UTC'))
+
+        # Create 84 snapshots - ALL showing downtime
+        snapshot_insert = text("""
+            INSERT INTO ride_status_snapshots (
+                ride_id, recorded_at, is_open, wait_time, last_updated_api, computed_is_open
+            ) VALUES (
+                :ride_id, :recorded_at, :is_open, :wait_time, :last_updated_api, :computed_is_open
+            )
+        """)
+
+        current_time = session_start
+        for i in range(84):
+            mysql_connection.execute(snapshot_insert, {
+                "ride_id": ride_id,
+                "recorded_at": current_time,
+                "is_open": False,
+                "wait_time": 0,
+                "last_updated_api": current_time,
+                "computed_is_open": False  # ALL down
+            })
+            current_time += timedelta(minutes=10)
+
+        # Act: Run aggregation
+        service = AggregationService(mysql_connection)
+        result = service.aggregate_daily(
+            aggregation_date=aggregation_date,
+            park_timezone=sample_park_data['timezone']
+        )
+
+        # Assert: Aggregation succeeded
+        assert result['status'] == 'success'
+        assert result['rides_processed'] == 1
+
+        # Assert: 100% downtime recorded
+        ride_stats_query = text("""
+            SELECT
+                uptime_minutes,
+                downtime_minutes,
+                uptime_percentage,
+                avg_wait_time
+            FROM ride_daily_stats
+            WHERE ride_id = :ride_id AND stat_date = :stat_date
+        """)
+        ride_stats = mysql_connection.execute(ride_stats_query, {
+            "ride_id": ride_id,
+            "stat_date": aggregation_date
+        }).fetchone()
+
+        assert ride_stats is not None
+        assert ride_stats.downtime_minutes == 830, "Should have 100% downtime"
+        assert ride_stats.uptime_minutes == 0, "Should have 0 uptime"
+        assert float(ride_stats.uptime_percentage) == 0.0, "Uptime percentage should be 0%"
+        assert ride_stats.avg_wait_time is None, "No wait time when ride is closed"
+
+
 class TestTimezoneAwareAggregation:
     """Test aggregation respects park timezones."""
 

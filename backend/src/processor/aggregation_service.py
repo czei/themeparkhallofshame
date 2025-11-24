@@ -346,8 +346,35 @@ class AggregationService:
         row = result.fetchone()
         total_snapshots = row.total_snapshots or 0
 
+        # Always create a record, even with zero snapshots (data consistency)
         if total_snapshots == 0:
-            # No data for this ride
+            # No snapshots for this ride - create record with zeros
+            zero_stats_query = text("""
+                INSERT INTO ride_daily_stats (
+                    ride_id, stat_date, uptime_minutes, downtime_minutes, uptime_percentage,
+                    operating_hours_minutes, avg_wait_time, min_wait_time, max_wait_time, peak_wait_time,
+                    status_changes, longest_downtime_minutes
+                )
+                VALUES (
+                    :ride_id, :stat_date, 0, 0, 0.0, 0, NULL, NULL, NULL, NULL, 0, NULL
+                )
+                ON DUPLICATE KEY UPDATE
+                    uptime_minutes = 0,
+                    downtime_minutes = 0,
+                    uptime_percentage = 0.0,
+                    operating_hours_minutes = 0,
+                    avg_wait_time = NULL,
+                    min_wait_time = NULL,
+                    max_wait_time = NULL,
+                    peak_wait_time = NULL,
+                    status_changes = 0,
+                    longest_downtime_minutes = NULL
+            """)
+            self.conn.execute(zero_stats_query, {
+                "ride_id": ride_id,
+                "stat_date": stat_date
+            })
+            logger.debug(f"Created zero-snapshot record for ride {ride_id} on {stat_date}")
             return
 
         uptime_snapshots = row.uptime_snapshots or 0
@@ -394,6 +421,11 @@ class AggregationService:
                 longest_downtime_minutes = VALUES(longest_downtime_minutes)
         """)
 
+        # Handle NULL wait times safely
+        avg_wait = None
+        if row.avg_wait_time is not None:
+            avg_wait = round(float(row.avg_wait_time), 2)
+
         self.conn.execute(upsert_query, {
             "ride_id": ride_id,
             "stat_date": stat_date,
@@ -401,7 +433,7 @@ class AggregationService:
             "downtime_minutes": int(downtime_minutes),
             "uptime_percentage": round(uptime_percentage, 2),
             "operating_hours_minutes": int(operating_minutes),
-            "avg_wait_time": round(float(row.avg_wait_time), 2) if row.avg_wait_time else None,
+            "avg_wait_time": avg_wait,
             "min_wait_time": row.min_wait_time,
             "max_wait_time": row.max_wait_time,
             "peak_wait_time": row.max_wait_time,

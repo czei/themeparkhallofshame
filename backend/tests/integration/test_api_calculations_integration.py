@@ -306,13 +306,14 @@ def comprehensive_api_test_data(mysql_connection):
     for park_id in range(1, 11):
         conn.execute(text("""
             INSERT INTO park_weekly_stats (
-                park_id, year, week_number, total_downtime_hours, rides_with_downtime,
+                park_id, year, week_number, week_start_date, total_downtime_hours, rides_with_downtime,
                 avg_uptime_percentage, trend_vs_previous_week
-            ) VALUES (:park_id, :year, :week, :downtime_hours, :rides_down, :avg_uptime, :trend)
+            ) VALUES (:park_id, :year, :week, :week_start, :downtime_hours, :rides_down, :avg_uptime, :trend)
         """), {
             'park_id': park_id,
             'year': current_year,
             'week': current_week,
+            'week_start': current_week_start,
             'downtime_hours': 750 * 7 / 60.0,  # 87.5 hours
             'rides_down': 10,
             'avg_uptime': 77.78,
@@ -321,13 +322,14 @@ def comprehensive_api_test_data(mysql_connection):
 
         conn.execute(text("""
             INSERT INTO park_weekly_stats (
-                park_id, year, week_number, total_downtime_hours, rides_with_downtime,
+                park_id, year, week_number, week_start_date, total_downtime_hours, rides_with_downtime,
                 avg_uptime_percentage, trend_vs_previous_week
-            ) VALUES (:park_id, :year, :week, :downtime_hours, :rides_down, :avg_uptime, NULL)
+            ) VALUES (:park_id, :year, :week, :week_start, :downtime_hours, :rides_down, :avg_uptime, NULL)
         """), {
             'park_id': park_id,
             'year': prev_week_year,
             'week': prev_week,
+            'week_start': prev_week_start,
             'downtime_hours': 750 * 7 * 0.9 / 60.0,  # 78.75 hours
             'rides_down': 10,
             'avg_uptime': 80.0

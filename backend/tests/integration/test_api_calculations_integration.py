@@ -57,18 +57,18 @@ def comprehensive_api_test_data(mysql_connection):
     # === CREATE 10 PARKS ===
     parks_data = [
         # Disney Parks (5)
-        (1, 101, 'Magic Kingdom', 'Bay Lake', 'FL', 'United States', 'America/New_York', 'Disney', True, False, True),
-        (2, 102, 'EPCOT', 'Bay Lake', 'FL', 'United States', 'America/New_York', 'Disney', True, False, True),
-        (3, 103, 'Hollywood Studios', 'Bay Lake', 'FL', 'United States', 'America/New_York', 'Disney', True, False, True),
-        (4, 104, 'Animal Kingdom', 'Bay Lake', 'FL', 'United States', 'America/New_York', 'Disney', True, False, True),
-        (5, 105, 'Disneyland', 'Anaheim', 'CA', 'United States', 'America/Los_Angeles', 'Disney', True, False, True),
+        (1, 101, 'Magic Kingdom', 'Bay Lake', 'FL', 'US', 'America/New_York', 'Disney', True, False, True),
+        (2, 102, 'EPCOT', 'Bay Lake', 'FL', 'US', 'America/New_York', 'Disney', True, False, True),
+        (3, 103, 'Hollywood Studios', 'Bay Lake', 'FL', 'US', 'America/New_York', 'Disney', True, False, True),
+        (4, 104, 'Animal Kingdom', 'Bay Lake', 'FL', 'US', 'America/New_York', 'Disney', True, False, True),
+        (5, 105, 'Disneyland', 'Anaheim', 'CA', 'US', 'America/Los_Angeles', 'Disney', True, False, True),
         # Universal Parks (3)
-        (6, 201, 'Universal Studios Florida', 'Orlando', 'FL', 'United States', 'America/New_York', 'Universal', False, True, True),
-        (7, 202, 'Islands of Adventure', 'Orlando', 'FL', 'United States', 'America/New_York', 'Universal', False, True, True),
-        (8, 203, 'Universal Studios Hollywood', 'Los Angeles', 'CA', 'United States', 'America/Los_Angeles', 'Universal', False, True, True),
+        (6, 201, 'Universal Studios Florida', 'Orlando', 'FL', 'US', 'America/New_York', 'Universal', False, True, True),
+        (7, 202, 'Islands of Adventure', 'Orlando', 'FL', 'US', 'America/New_York', 'Universal', False, True, True),
+        (8, 203, 'Universal Studios Hollywood', 'Los Angeles', 'CA', 'US', 'America/Los_Angeles', 'Universal', False, True, True),
         # Other Parks (2)
-        (9, 301, 'SeaWorld Orlando', 'Orlando', 'FL', 'United States', 'America/New_York', 'SeaWorld', False, False, True),
-        (10, 302, 'Busch Gardens Tampa', 'Tampa', 'FL', 'United States', 'America/New_York', 'Busch Gardens', False, False, True),
+        (9, 301, 'SeaWorld Orlando', 'Orlando', 'FL', 'US', 'America/New_York', 'SeaWorld', False, False, True),
+        (10, 302, 'Busch Gardens Tampa', 'Tampa', 'FL', 'US', 'America/New_York', 'Busch Gardens', False, False, True),
     ]
 
     for park in parks_data:
@@ -103,7 +103,7 @@ def comprehensive_api_test_data(mysql_connection):
             tier_weights = {1: 3, 2: 2, 3: 1}
             conn.execute(text("""
                 INSERT INTO ride_classifications (ride_id, tier, tier_weight, classification_method, confidence_score)
-                VALUES (:ride_id, :tier, :weight, 'manual', 1.0)
+                VALUES (:ride_id, :tier, :weight, 'manual_override', 1.0)
             """), {
                 'ride_id': ride_id,
                 'tier': tier,
@@ -141,11 +141,11 @@ def comprehensive_api_test_data(mysql_connection):
 
             conn.execute(text("""
                 INSERT INTO ride_daily_stats (
-                    ride_id, stat_date, total_downtime_minutes, uptime_percentage,
-                    avg_wait_minutes, peak_wait_minutes, status_changes, observations
+                    ride_id, stat_date, downtime_minutes, uptime_percentage,
+                    avg_wait_time, peak_wait_time, status_changes
                 ) VALUES (
                     :ride_id, :stat_date, :downtime, :uptime,
-                    :avg_wait, :peak_wait, :status_changes, :observations
+                    :avg_wait, :peak_wait, :status_changes
                 )
             """), {
                 'ride_id': ride_id,
@@ -165,11 +165,11 @@ def comprehensive_api_test_data(mysql_connection):
 
             conn.execute(text("""
                 INSERT INTO ride_daily_stats (
-                    ride_id, stat_date, total_downtime_minutes, uptime_percentage,
-                    avg_wait_minutes, peak_wait_minutes, status_changes, observations
+                    ride_id, stat_date, downtime_minutes, uptime_percentage,
+                    avg_wait_time, peak_wait_time, status_changes
                 ) VALUES (
                     :ride_id, :stat_date, :downtime, :uptime,
-                    :avg_wait, :peak_wait, :status_changes, :observations
+                    :avg_wait, :peak_wait, :status_changes
                 )
             """), {
                 'ride_id': ride_id,
@@ -186,11 +186,11 @@ def comprehensive_api_test_data(mysql_connection):
             downtime_week = downtime_today * 7
             conn.execute(text("""
                 INSERT INTO ride_weekly_stats (
-                    ride_id, year, week_number, total_downtime_minutes, uptime_percentage,
-                    avg_wait_minutes, peak_wait_minutes, status_changes, observations
+                    ride_id, year, week_number, downtime_minutes, uptime_percentage,
+                    avg_wait_time, peak_wait_time, status_changes
                 ) VALUES (
                     :ride_id, :year, :week, :downtime, :uptime,
-                    :avg_wait, :peak_wait, :status_changes, :observations
+                    :avg_wait, :peak_wait, :status_changes
                 )
             """), {
                 'ride_id': ride_id,
@@ -208,11 +208,11 @@ def comprehensive_api_test_data(mysql_connection):
             downtime_prev_week = int(downtime_week * 0.9)
             conn.execute(text("""
                 INSERT INTO ride_weekly_stats (
-                    ride_id, year, week_number, total_downtime_minutes, uptime_percentage,
-                    avg_wait_minutes, peak_wait_minutes, status_changes, observations
+                    ride_id, year, week_number, downtime_minutes, uptime_percentage,
+                    avg_wait_time, peak_wait_time, status_changes
                 ) VALUES (
                     :ride_id, :year, :week, :downtime, :uptime,
-                    :avg_wait, :peak_wait, :status_changes, :observations
+                    :avg_wait, :peak_wait, :status_changes
                 )
             """), {
                 'ride_id': ride_id,
@@ -230,11 +230,11 @@ def comprehensive_api_test_data(mysql_connection):
             downtime_month = downtime_today * 30
             conn.execute(text("""
                 INSERT INTO ride_monthly_stats (
-                    ride_id, year, month, total_downtime_minutes, uptime_percentage,
-                    avg_wait_minutes, peak_wait_minutes, status_changes, observations
+                    ride_id, year, month, downtime_minutes, uptime_percentage,
+                    avg_wait_time, peak_wait_time, status_changes
                 ) VALUES (
                     :ride_id, :year, :month, :downtime, :uptime,
-                    :avg_wait, :peak_wait, :status_changes, :observations
+                    :avg_wait, :peak_wait, :status_changes
                 )
             """), {
                 'ride_id': ride_id,
@@ -252,11 +252,11 @@ def comprehensive_api_test_data(mysql_connection):
             downtime_prev_month = int(downtime_month * 0.85)
             conn.execute(text("""
                 INSERT INTO ride_monthly_stats (
-                    ride_id, year, month, total_downtime_minutes, uptime_percentage,
-                    avg_wait_minutes, peak_wait_minutes, status_changes, observations
+                    ride_id, year, month, downtime_minutes, uptime_percentage,
+                    avg_wait_time, peak_wait_time, status_changes
                 ) VALUES (
                     :ride_id, :year, :month, :downtime, :uptime,
-                    :avg_wait, :peak_wait, :status_changes, :observations
+                    :avg_wait, :peak_wait, :status_changes
                 )
             """), {
                 'ride_id': ride_id,

@@ -157,11 +157,11 @@ def comprehensive_test_data(mysql_connection):
 
             conn.execute(text("""
                 INSERT INTO ride_daily_stats (
-                    ride_id, stat_date, total_downtime_minutes, uptime_percentage,
-                    avg_wait_minutes, peak_wait_minutes, status_changes, observations
+                    ride_id, stat_date, downtime_minutes, uptime_percentage,
+                    avg_wait_time, peak_wait_time, status_changes
                 ) VALUES (
                     :ride_id, :stat_date, :downtime, :uptime,
-                    :avg_wait, :peak_wait, :status_changes, :observations
+                    :avg_wait, :peak_wait, :status_changes
                 )
             """), {
                 'ride_id': ride_id,
@@ -181,11 +181,11 @@ def comprehensive_test_data(mysql_connection):
 
             conn.execute(text("""
                 INSERT INTO ride_daily_stats (
-                    ride_id, stat_date, total_downtime_minutes, uptime_percentage,
-                    avg_wait_minutes, peak_wait_minutes, status_changes, observations
+                    ride_id, stat_date, downtime_minutes, uptime_percentage,
+                    avg_wait_time, peak_wait_time, status_changes
                 ) VALUES (
                     :ride_id, :stat_date, :downtime, :uptime,
-                    :avg_wait, :peak_wait, :status_changes, :observations
+                    :avg_wait, :peak_wait, :status_changes
                 )
             """), {
                 'ride_id': ride_id,
@@ -204,11 +204,11 @@ def comprehensive_test_data(mysql_connection):
 
             conn.execute(text("""
                 INSERT INTO ride_weekly_stats (
-                    ride_id, year, week_number, total_downtime_minutes, uptime_percentage,
-                    avg_wait_minutes, peak_wait_minutes, status_changes, observations
+                    ride_id, year, week_number, downtime_minutes, uptime_percentage,
+                    avg_wait_time, peak_wait_time, status_changes
                 ) VALUES (
                     :ride_id, :year, :week, :downtime, :uptime,
-                    :avg_wait, :peak_wait, :status_changes, :observations
+                    :avg_wait, :peak_wait, :status_changes
                 )
             """), {
                 'ride_id': ride_id,
@@ -227,11 +227,11 @@ def comprehensive_test_data(mysql_connection):
 
             conn.execute(text("""
                 INSERT INTO ride_weekly_stats (
-                    ride_id, year, week_number, total_downtime_minutes, uptime_percentage,
-                    avg_wait_minutes, peak_wait_minutes, status_changes, observations
+                    ride_id, year, week_number, downtime_minutes, uptime_percentage,
+                    avg_wait_time, peak_wait_time, status_changes
                 ) VALUES (
                     :ride_id, :year, :week, :downtime, :uptime,
-                    :avg_wait, :peak_wait, :status_changes, :observations
+                    :avg_wait, :peak_wait, :status_changes
                 )
             """), {
                 'ride_id': ride_id,
@@ -251,11 +251,11 @@ def comprehensive_test_data(mysql_connection):
 
             conn.execute(text("""
                 INSERT INTO ride_monthly_stats (
-                    ride_id, year, month, total_downtime_minutes, uptime_percentage,
-                    avg_wait_minutes, peak_wait_minutes, status_changes, observations
+                    ride_id, year, month, downtime_minutes, uptime_percentage,
+                    avg_wait_time, peak_wait_time, status_changes
                 ) VALUES (
                     :ride_id, :year, :month, :downtime, :uptime,
-                    :avg_wait, :peak_wait, :status_changes, :observations
+                    :avg_wait, :peak_wait, :status_changes
                 )
             """), {
                 'ride_id': ride_id,
@@ -274,11 +274,11 @@ def comprehensive_test_data(mysql_connection):
 
             conn.execute(text("""
                 INSERT INTO ride_monthly_stats (
-                    ride_id, year, month, total_downtime_minutes, uptime_percentage,
-                    avg_wait_minutes, peak_wait_minutes, status_changes, observations
+                    ride_id, year, month, downtime_minutes, uptime_percentage,
+                    avg_wait_time, peak_wait_time, status_changes
                 ) VALUES (
                     :ride_id, :year, :month, :downtime, :uptime,
-                    :avg_wait, :peak_wait, :status_changes, :observations
+                    :avg_wait, :peak_wait, :status_changes
                 )
             """), {
                 'ride_id': ride_id,

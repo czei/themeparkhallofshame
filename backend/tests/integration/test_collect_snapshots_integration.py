@@ -110,19 +110,29 @@ def sample_api_response_empty():
 # FIXTURES - Database Setup
 # ============================================================================
 
-@pytest.fixture
-def setup_test_park(mysql_connection):
-    """Create a test park in database and return park_id."""
-    # Clean up any existing test data (from this or other test files)
+@pytest.fixture(scope="module", autouse=True)
+def cleanup_before_collect_snapshots_tests(mysql_connection):
+    """Clean up all test data once at start of this test module."""
     from sqlalchemy import text
     mysql_connection.execute(text("DELETE FROM ride_status_snapshots"))
     mysql_connection.execute(text("DELETE FROM ride_status_changes"))
     mysql_connection.execute(text("DELETE FROM park_activity_snapshots"))
-    mysql_connection.execute(text("DELETE FROM ride_classifications WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id BETWEEN 2001 AND 2010)"))
-    mysql_connection.execute(text("DELETE FROM rides WHERE queue_times_id BETWEEN 2001 AND 2010"))
-    mysql_connection.execute(text("DELETE FROM parks WHERE queue_times_id = 201"))
+    mysql_connection.execute(text("DELETE FROM ride_daily_stats"))
+    mysql_connection.execute(text("DELETE FROM ride_weekly_stats"))
+    mysql_connection.execute(text("DELETE FROM ride_monthly_stats"))
+    mysql_connection.execute(text("DELETE FROM park_daily_stats"))
+    mysql_connection.execute(text("DELETE FROM park_weekly_stats"))
+    mysql_connection.execute(text("DELETE FROM park_monthly_stats"))
+    mysql_connection.execute(text("DELETE FROM ride_classifications"))
+    mysql_connection.execute(text("DELETE FROM rides"))
+    mysql_connection.execute(text("DELETE FROM parks"))
     mysql_connection.commit()
+    yield
 
+
+@pytest.fixture
+def setup_test_park(mysql_connection):
+    """Create a test park in database and return park_id."""
     park_repo = ParkRepository(mysql_connection)
 
     park_data = {
@@ -149,11 +159,6 @@ def setup_test_park(mysql_connection):
 @pytest.fixture
 def setup_test_rides(mysql_connection, setup_test_park):
     """Create test rides in database and return list of ride_ids."""
-    # Clean up any existing rides with these queue_times_ids
-    from sqlalchemy import text
-    mysql_connection.execute(text("DELETE FROM rides WHERE queue_times_id BETWEEN 2001 AND 2010"))
-    mysql_connection.commit()
-
     park_id = setup_test_park
     ride_repo = RideRepository(mysql_connection)
 
@@ -234,7 +239,7 @@ class TestSnapshotCollectionBasicFlow:
         # Check Space Mountain snapshot (45 min wait)
         from database.repositories.ride_repository import RideRepository
         ride_repo = RideRepository(mysql_connection)
-        space_mountain = ride_repo.get_by_queue_times_id(1001)
+        space_mountain = ride_repo.get_by_queue_times_id(2001)
         snapshot = snapshot_repo.get_latest_by_ride(space_mountain.ride_id)
 
         assert snapshot is not None
@@ -264,7 +269,7 @@ class TestSnapshotCollectionBasicFlow:
         # Verify park activity snapshot
         from database.repositories.park_repository import ParkRepository
         park_repo = ParkRepository(mysql_connection)
-        park = park_repo.get_by_queue_times_id(101)
+        park = park_repo.get_by_queue_times_id(201)
 
         park_activity_repo = ParkActivitySnapshotRepository(mysql_connection)
         activity = park_activity_repo.get_latest_by_park(park.park_id)
@@ -324,7 +329,7 @@ class TestStatusChangeDetection:
         status_change_repo = RideStatusChangeRepository(mysql_connection)
         from database.repositories.ride_repository import RideRepository
         ride_repo = RideRepository(mysql_connection)
-        space_mountain = ride_repo.get_by_queue_times_id(1001)
+        space_mountain = ride_repo.get_by_queue_times_id(2001)
 
         # Get recent status changes for this ride
         from sqlalchemy import text

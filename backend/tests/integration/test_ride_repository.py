@@ -22,6 +22,30 @@ from models.ride import Ride
 
 
 # ============================================================================
+# FIXTURES - Cleanup
+# ============================================================================
+
+@pytest.fixture(scope="module", autouse=True)
+def cleanup_before_ride_repository_tests(mysql_connection):
+    """Clean up all test data once at start of this test module."""
+    from sqlalchemy import text
+    mysql_connection.execute(text("DELETE FROM ride_status_snapshots"))
+    mysql_connection.execute(text("DELETE FROM ride_status_changes"))
+    mysql_connection.execute(text("DELETE FROM park_activity_snapshots"))
+    mysql_connection.execute(text("DELETE FROM ride_daily_stats"))
+    mysql_connection.execute(text("DELETE FROM ride_weekly_stats"))
+    mysql_connection.execute(text("DELETE FROM ride_monthly_stats"))
+    mysql_connection.execute(text("DELETE FROM park_daily_stats"))
+    mysql_connection.execute(text("DELETE FROM park_weekly_stats"))
+    mysql_connection.execute(text("DELETE FROM park_monthly_stats"))
+    mysql_connection.execute(text("DELETE FROM ride_classifications"))
+    mysql_connection.execute(text("DELETE FROM rides"))
+    mysql_connection.execute(text("DELETE FROM parks"))
+    mysql_connection.commit()
+    yield
+
+
+# ============================================================================
 # Test Class: CRUD Operations
 # ============================================================================
 

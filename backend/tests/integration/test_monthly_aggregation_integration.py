@@ -16,6 +16,29 @@ from sqlalchemy import text
 from processor.aggregation_service import AggregationService
 
 
+# ============================================================================
+# FIXTURES - Cleanup
+# ============================================================================
+
+@pytest.fixture(scope="module", autouse=True)
+def cleanup_before_monthly_aggregation_tests(mysql_connection):
+    """Clean up all test data once at start of this test module."""
+    mysql_connection.execute(text("DELETE FROM ride_status_snapshots"))
+    mysql_connection.execute(text("DELETE FROM ride_status_changes"))
+    mysql_connection.execute(text("DELETE FROM park_activity_snapshots"))
+    mysql_connection.execute(text("DELETE FROM ride_daily_stats"))
+    mysql_connection.execute(text("DELETE FROM ride_weekly_stats"))
+    mysql_connection.execute(text("DELETE FROM ride_monthly_stats"))
+    mysql_connection.execute(text("DELETE FROM park_daily_stats"))
+    mysql_connection.execute(text("DELETE FROM park_weekly_stats"))
+    mysql_connection.execute(text("DELETE FROM park_monthly_stats"))
+    mysql_connection.execute(text("DELETE FROM ride_classifications"))
+    mysql_connection.execute(text("DELETE FROM rides"))
+    mysql_connection.execute(text("DELETE FROM parks"))
+    mysql_connection.commit()
+    yield
+
+
 class TestMonthlyAggregationMath:
     """Test mathematical correctness of monthly aggregation calculations."""
 

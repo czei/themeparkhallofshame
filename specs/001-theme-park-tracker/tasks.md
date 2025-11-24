@@ -209,11 +209,11 @@ Based on plan.md project structure:
 
 ### Implementation for User Story 4
 
-- [ ] T081 [US4] Implement weighted downtime scoring logic in stats_repository.py (FR-024: Park Score = Σ(downtime_hours × tier_weight) / Σ(all_ride_weights))
-- [ ] T082 [US4] Add weighted scoring query from data-model.md Query 1b (park_weights CTE, weighted_downtime CTE)
-- [ ] T083 [US4] Add weighted=true query parameter to GET /api/parks/downtime endpoint
-- [ ] T084 [US4] Update frontend park-rankings.js to display weighted scores when enabled
-- [ ] T085 [US4] Add weighted ranking toggle switch in park-rankings.js UI
+- [X] T081 [US4] Implement weighted downtime scoring logic in stats_repository.py (FR-024: Park Score = Σ(downtime_hours × tier_weight) / Σ(all_ride_weights))
+- [X] T082 [US4] Add weighted scoring query from data-model.md Query 1b (park_weights CTE, weighted_downtime CTE)
+- [X] T083 [US4] Add weighted=true query parameter to GET /api/parks/downtime endpoint
+- [X] T084 [US4] Update frontend park-rankings.js to display weighted scores when enabled
+- [X] T085 [US4] Add weighted ranking toggle switch in park-rankings.js UI
 
 **Checkpoint**: Weighted downtime scoring functional
 

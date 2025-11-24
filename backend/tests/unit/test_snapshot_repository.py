@@ -77,6 +77,20 @@ class TestRideStatusSnapshotRepository:
 
         assert result is None
 
+    def test_insert_snapshot_database_error(self, sqlite_connection):
+        """Insert should raise exception on database error."""
+        repo = RideStatusSnapshotRepository(sqlite_connection)
+
+        # Invalid data that will cause database error (missing required fields)
+        invalid_data = {
+            'ride_id': None,  # NULL constraint violation
+            'recorded_at': datetime.now(),
+            'wait_time': 45
+        }
+
+        with pytest.raises(Exception):
+            repo.insert(invalid_data)
+
 
 class TestParkActivitySnapshotRepository:
     """Test park activity snapshot operations."""
@@ -127,3 +141,17 @@ class TestParkActivitySnapshotRepository:
         result = repo.get_latest_by_park(999)
 
         assert result is None
+
+    def test_insert_activity_database_error(self, sqlite_connection):
+        """Insert should raise exception on database error."""
+        repo = ParkActivitySnapshotRepository(sqlite_connection)
+
+        # Invalid data that will cause database error (missing required fields)
+        invalid_data = {
+            'park_id': None,  # NULL constraint violation
+            'recorded_at': datetime.now(),
+            'park_appears_open': True
+        }
+
+        with pytest.raises(Exception):
+            repo.insert(invalid_data)

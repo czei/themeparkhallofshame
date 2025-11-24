@@ -96,8 +96,8 @@ Based on plan.md project structure:
 
 ### Ride Classification System (FR-022 to FR-032)
 
-- [ ] T026 Create data/manual_overrides.csv schema (park_id, ride_id, override_tier, reason, date_added) with documentation
-- [ ] T027 Create data/exact_matches.json schema (cache_key format: {park_id}:{ride_id}, tier, confidence, reasoning, research_sources, schema_version)
+- [X] T026 Create data/manual_overrides.csv schema (park_id, ride_id, override_tier, reason, date_added) with documentation
+- [X] T027 Create data/exact_matches.json schema (cache_key format: {park_id}:{ride_id}, tier, confidence, reasoning, research_sources, schema_version)
 - [X] T028 Implement backend/src/classifier/pattern_matcher.py with keyword rules (Tier 3: "kiddie", "carousel", "theater"; Tier 1: "coaster", "mountain", "space") - TESTED: 32 passing tests validate pattern matching, tier assignment, and Magic Kingdom ground truth
 - [X] T029 Implement backend/src/classifier/ai_classifier.py using mcp__zen__chat with Gemini-2.5-pro and web search capability (FR-029) - NOTE: AI integration pending MCP implementation, placeholder returns Tier 2
 - [X] T030 Implement backend/src/classifier/classification_service.py with 4-tier hierarchical logic (manual_overrides → exact_matches.json → pattern_matcher → ai_agent) - TESTED: Priority hierarchy validated
@@ -108,23 +108,23 @@ Based on plan.md project structure:
 
 ### Aggregation & Processing
 
-- [ ] T035 Implement backend/src/processor/operating_hours_detector.py to detect park open/close from ride activity in local timezone (FR-003, uses parks.timezone field)
-- [ ] T036 Implement backend/src/processor/status_change_detector.py to detect ride status transitions (open↔closed) and calculate duration
-- [ ] T037 Implement backend/src/processor/aggregation_service.py for daily/weekly/monthly/yearly stats calculation with aggregation_log tracking (FR-007, FR-045)
-- [ ] T038 Implement timezone-aware aggregation logic in aggregation_service.py (iterate through distinct park timezones, FR-045)
-- [ ] T039 Implement retry logic for aggregation with 3 attempts at 12:10 AM, 1:10 AM, 2:10 AM (FR-007)
+- [X] T035 Implement backend/src/processor/operating_hours_detector.py to detect park open/close from ride activity in local timezone (FR-003, uses parks.timezone field)
+- [X] T036 Implement backend/src/processor/status_change_detector.py to detect ride status transitions (open↔closed) and calculate duration
+- [X] T037 Implement backend/src/processor/aggregation_service.py for daily/weekly/monthly/yearly stats calculation with aggregation_log tracking (FR-007, FR-045)
+- [X] T038 Implement timezone-aware aggregation logic in aggregation_service.py (iterate through distinct park timezones, FR-045)
+- [X] T039 Implement retry logic for aggregation with 3 attempts at 12:10 AM, 1:10 AM, 2:10 AM (FR-007)
 - [X] T040 Create backend/src/scripts/aggregate_daily.py CLI script for daily aggregation job (basic implementation complete, needs operating hours detector and full timezone logic)
-- [ ] T041 Create backend/scripts/cleanup_raw_data.py CLI script with safe cleanup using aggregation_log verification
+- [X] T041 Create backend/scripts/cleanup_raw_data.py CLI script with safe cleanup using aggregation_log verification
 
 ### API Framework
 
-- [ ] T042 Create backend/src/api/app.py Flask application with Blueprints structure and Flask-CORS middleware
-- [ ] T043 Implement API key authentication middleware in backend/src/api/middleware/auth.py (X-API-Key header validation, FR-041, FR-043)
-- [ ] T044 Implement rate limiting middleware in backend/src/api/middleware/rate_limiter.py (100 req/hour, 1000 req/day per API key, FR-042, FR-044)
-- [ ] T045 Implement backend/src/api/routes/health.py with GET /api/health endpoint (database connectivity, last collection timestamp)
-- [ ] T046 Create backend/src/api/middleware/error_handler.py for standardized error responses (400, 401, 404, 429, 500)
+- [X] T042 Create backend/src/api/app.py Flask application with Blueprints structure and Flask-CORS middleware
+- [X] T043 Implement API key authentication middleware in backend/src/api/middleware/auth.py (X-API-Key header validation, FR-041, FR-043)
+- [X] T044 Implement rate limiting middleware in backend/src/api/middleware/rate_limiter.py (100 req/hour, 1000 req/day per API key, FR-042, FR-044)
+- [X] T045 Implement backend/src/api/routes/health.py with GET /api/health endpoint (database connectivity, last collection timestamp)
+- [X] T046 Create backend/src/api/middleware/error_handler.py for standardized error responses (400, 401, 404, 429, 500)
 
-**Checkpoint**: Foundation ready - user story implementation can now begin in parallel
+**Checkpoint**: ✅ Foundation ready - user story implementation can now begin in parallel
 
 ---
 

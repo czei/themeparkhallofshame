@@ -81,7 +81,7 @@ def preview_deletion(conn, threshold: datetime) -> dict:
     changes_query = text("""
         SELECT COUNT(*) AS count
         FROM ride_status_changes
-        WHERE change_detected_at < :threshold
+        WHERE changed_at < :threshold
     """)
 
     result = conn.execute(changes_query, {"threshold": threshold})
@@ -131,7 +131,7 @@ def execute_cleanup(conn, threshold: datetime) -> dict:
     # Delete ride status changes
     changes_delete = text("""
         DELETE FROM ride_status_changes
-        WHERE change_detected_at < :threshold
+        WHERE changed_at < :threshold
     """)
 
     result = conn.execute(changes_delete, {"threshold": threshold})

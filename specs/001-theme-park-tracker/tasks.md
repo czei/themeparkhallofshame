@@ -300,9 +300,36 @@ Based on plan.md project structure:
 
 ---
 
-## Phase 11: Scheduled Jobs & Automation
+## Phase 11a: Local Script Validation (Dev Environment)
 
-**Purpose**: Implement cron jobs for data collection and aggregation
+**Purpose**: Validate core Python scripts work correctly before deploying to production
+
+**⚠️ HYBRID APPROACH**: Test script logic locally on macOS, but skip macOS-specific automation (launchd). Scheduled job setup happens directly on production (Linux/systemd).
+
+**Why this approach**:
+- macOS uses launchd, not systemd/cron - different setup would be throwaway work
+- AWS-specific integrations (SSM, CloudWatch) can't be tested locally anyway
+- No existing production data to corrupt - safe to iterate on prod
+- Faster path to real-world validation
+
+### Local Validation Tasks
+
+- [ ] T115a Manually run collect_parks.py locally and verify parks are fetched from Queue-Times API
+- [ ] T115b Manually run collect_snapshots.py locally and verify snapshots are stored in local MySQL
+- [ ] T115c Manually run aggregate_daily.py locally and verify daily stats are calculated correctly
+- [ ] T115d Manually run cleanup_raw_data.py locally and verify safe cleanup with aggregation_log verification
+- [ ] T115e Verify all scripts have proper error handling (test with DB down, API timeout scenarios)
+- [ ] T115f Verify structured JSON logging output is correct for CloudWatch compatibility
+
+**Checkpoint**: All scripts run successfully in isolation on dev environment
+
+---
+
+## Phase 11b: Scheduled Jobs & Automation (Production Only)
+
+**Purpose**: Implement cron jobs for data collection and aggregation on AWS Linux production server
+
+**⚠️ NOTE**: Skip macOS automation entirely. These tasks are for production (systemd/cron) only.
 
 - [ ] T115 Create backend/scripts/collect.py CLI entry point for data collection (calls data_collection_service.py)
 - [ ] T116 Add error handling and logging to collect.py (log to CloudWatch with structured JSON)
@@ -312,6 +339,8 @@ Based on plan.md project structure:
 - [ ] T120 Create deployment/systemd/api.service systemd service definition for Flask API
 - [ ] T121 Create crontab configuration in deployment/scripts/setup-cron.sh (*/10 collect.py, 10 0 aggregate_daily.py with flock)
 - [ ] T122 Add CloudWatch "dead man's switch" monitoring alarm for collection failures (alert if no collection in 15 minutes)
+
+**Soft Launch Period**: After enabling scheduled jobs, collect data for 1-2 weeks before exposing frontend publicly to validate data quality
 
 ---
 
@@ -399,11 +428,30 @@ Based on plan.md project structure:
 - **User Stories (Phase 3-10)**: All depend on Foundational phase completion
   - User stories can then proceed in parallel (if staffed)
   - Or sequentially in priority order (P1 → P2 → P3 → P4 → P5 → P6 → P7 → P8)
-- **Scheduled Jobs (Phase 11)**: Depends on Foundational (data collection/aggregation infrastructure)
+- **Local Script Validation (Phase 11a)**: Depends on User Stories - validates scripts work before deployment
 - **Frontend Polish (Phase 12)**: Depends on at least US1, US2, US3 being complete
-- **Deployment (Phase 13)**: Depends on all desired user stories being complete
+- **Deployment (Phase 13)**: Depends on Phase 11a validation passing - sets up production infrastructure
+- **Scheduled Jobs (Phase 11b)**: Depends on Phase 13 deployment - runs directly on production
 - **Testing (Phase 14)**: Can start after Foundational, expand as user stories complete
-- **Polish (Phase 15)**: Depends on all desired user stories being complete
+- **Polish (Phase 15)**: Depends on Phase 11b running successfully in production
+
+### Recommended Execution Order (Hybrid Approach)
+
+**Post-User-Stories execution order**:
+
+1. **Phase 11a** - Validate scripts locally (dev/macOS)
+2. **Phase 12** - Frontend polish (can parallel with 11a)
+3. **Phase 13** - Deploy infrastructure to production
+4. **Phase 11b** - Enable scheduled jobs on production
+5. **Soft Launch** - Collect data 1-2 weeks, validate quality
+6. **Phase 14** - Production validation testing
+7. **Phase 15** - Final polish and documentation
+
+**Why this order**:
+- Validates script logic works before touching production
+- Skips throwaway macOS automation setup (launchd ≠ systemd)
+- Gets real data flowing quickly for production shakeout
+- AWS-specific issues (SSM, CloudWatch, networking) caught early in real environment
 
 ### User Story Dependencies
 
@@ -438,41 +486,53 @@ Based on plan.md project structure:
 
 ## Implementation Strategy
 
-### MVP First (User Story 1-3 Only)
+### Current Status: All User Stories Complete ✅
 
-1. Complete Phase 1: Setup
-2. Complete Phase 2: Foundational (CRITICAL - blocks all stories)
-3. Complete Phase 3: User Story 1 (Park Rankings)
-4. Complete Phase 4: User Story 2 (Ride Performance)
-5. Complete Phase 5: User Story 3 (Wait Times)
-6. Complete Phase 10: Scheduled Jobs (enable data collection)
-7. Complete Phase 11: Frontend Polish
-8. **STOP and VALIDATE**: Test US1-3 independently
-9. Deploy/demo if ready
+All 8 user stories (US1-US8) are implemented. Next steps focus on deployment and production validation.
 
-### Incremental Delivery
+### Hybrid Deployment Strategy (Recommended)
 
-1. Complete Setup + Foundational → Foundation ready
-2. Add User Story 1 → Test independently → Deploy/Demo (Park Rankings!)
-3. Add User Story 2 → Test independently → Deploy/Demo (+ Ride Performance!)
-4. Add User Story 3 → Test independently → Deploy/Demo (+ Wait Times!)
-5. Add User Story 4 → Test independently → Deploy/Demo (+ Weighted Scoring!)
-6. Add User Story 5 → Test independently → Deploy/Demo (+ Filtering!)
-7. Add User Story 6 → Test independently → Deploy/Demo (+ Park Details!)
-8. Add User Story 7 → Test independently → Deploy/Demo (+ About Mission!)
-9. Each story adds value without breaking previous stories
+**Phase 1: Local Validation (Dev/macOS)**
+1. Run Phase 11a tasks - manually test all Python scripts
+2. Verify collect_parks.py, collect_snapshots.py, aggregate_daily.py work
+3. Test error handling scenarios (DB down, API timeout)
+4. **DO NOT** set up macOS automation (launchd) - it's throwaway work
 
-### Parallel Team Strategy
+**Phase 2: Production Infrastructure (AWS Linux)**
+1. Complete Phase 13 - deploy backend, database, API to production
+2. Run migrations, configure Apache/mod_wsgi, SSL certs
+3. Test API endpoints work in production environment
 
-With multiple developers:
+**Phase 3: Enable Data Collection (Production)**
+1. Complete Phase 11b - set up systemd services and cron jobs
+2. Start collecting real data from Queue-Times API
+3. Monitor CloudWatch for errors and "dead man's switch" alerts
 
-1. Team completes Setup + Foundational together
-2. Once Foundational is done:
-   - Developer A: User Story 1 (Park Rankings)
-   - Developer B: User Story 2 (Ride Performance)
-   - Developer C: User Story 3 (Wait Times)
-   - Developer D: Classification System + Scheduled Jobs
-3. Stories complete and integrate independently
+**Phase 4: Soft Launch Period (1-2 Weeks)**
+1. Let data collection run without public frontend
+2. Validate data quality, check for gaps or anomalies
+3. Debug any production-specific issues (networking, timeouts, AWS SSM)
+4. Verify daily aggregation runs correctly across timezones
+
+**Phase 5: Public Launch**
+1. Complete Phase 12 - frontend polish
+2. Deploy frontend to production
+3. Complete Phase 14/15 - final testing and documentation
+
+### Why Skip Dev Automation
+
+- macOS uses `launchd`, production uses `systemd`/`cron` - completely different
+- AWS SSM Parameter Store, CloudWatch can't be tested locally
+- No production data at risk - Queue-Times API is read-only
+- Faster to iterate on real production issues than simulate them locally
+
+### Rollback Strategy
+
+If production data collection has issues:
+1. Stop cron jobs (no data loss - just gaps)
+2. Debug and fix scripts
+3. Re-enable collection
+4. Backfill missing data if needed (re-run aggregation)
 
 ---
 

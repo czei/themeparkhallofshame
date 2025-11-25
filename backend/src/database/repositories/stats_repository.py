@@ -1376,10 +1376,10 @@ class StatsRepository:
                 WITH current_period AS (
                     SELECT
                         pds.park_id,
-                        p.park_name,
-                        p.queue_times_slug,
-                        pds.uptime_percentage,
-                        pds.total_downtime_minutes
+                        p.name AS park_name,
+                        p.location,
+                        pds.avg_uptime_percentage,
+                        pds.total_downtime_hours
                     FROM park_daily_stats pds
                     JOIN parks p ON pds.park_id = p.park_id
                     WHERE pds.stat_date = :current_date
@@ -1389,8 +1389,8 @@ class StatsRepository:
                 previous_period AS (
                     SELECT
                         pds.park_id,
-                        pds.uptime_percentage,
-                        pds.total_downtime_minutes
+                        pds.avg_uptime_percentage,
+                        pds.total_downtime_hours
                     FROM park_daily_stats pds
                     JOIN parks p ON pds.park_id = p.park_id
                     WHERE pds.stat_date = :previous_date
@@ -1400,15 +1400,15 @@ class StatsRepository:
                 SELECT
                     cp.park_id,
                     cp.park_name,
-                    cp.uptime_percentage AS current_uptime,
-                    pp.uptime_percentage AS previous_uptime,
-                    (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
-                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
-                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
-                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                    cp.location,
+                    cp.avg_uptime_percentage AS current_uptime,
+                    pp.avg_uptime_percentage AS previous_uptime,
+                    (cp.avg_uptime_percentage - pp.avg_uptime_percentage) AS improvement_percentage,
+                    cp.total_downtime_hours AS current_downtime_hours,
+                    pp.total_downtime_hours AS previous_downtime_hours
                 FROM current_period cp
                 JOIN previous_period pp ON cp.park_id = pp.park_id
-                WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
+                WHERE (cp.avg_uptime_percentage - pp.avg_uptime_percentage) >= 5.0
                 ORDER BY improvement_percentage DESC
                 LIMIT :limit
             """)
@@ -1434,10 +1434,10 @@ class StatsRepository:
                 WITH current_period AS (
                     SELECT
                         pws.park_id,
-                        p.park_name,
-                        p.queue_times_slug,
-                        pws.uptime_percentage,
-                        pws.total_downtime_minutes
+                        p.name AS park_name,
+                        p.location,
+                        pws.avg_uptime_percentage,
+                        pws.total_downtime_hours
                     FROM park_weekly_stats pws
                     JOIN parks p ON pws.park_id = p.park_id
                     WHERE pws.year = :current_year
@@ -1448,8 +1448,8 @@ class StatsRepository:
                 previous_period AS (
                     SELECT
                         pws.park_id,
-                        pws.uptime_percentage,
-                        pws.total_downtime_minutes
+                        pws.avg_uptime_percentage,
+                        pws.total_downtime_hours
                     FROM park_weekly_stats pws
                     JOIN parks p ON pws.park_id = p.park_id
                     WHERE pws.year = :prev_year
@@ -1460,15 +1460,15 @@ class StatsRepository:
                 SELECT
                     cp.park_id,
                     cp.park_name,
-                    cp.uptime_percentage AS current_uptime,
-                    pp.uptime_percentage AS previous_uptime,
-                    (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
-                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
-                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
-                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                    cp.location,
+                    cp.avg_uptime_percentage AS current_uptime,
+                    pp.avg_uptime_percentage AS previous_uptime,
+                    (cp.avg_uptime_percentage - pp.avg_uptime_percentage) AS improvement_percentage,
+                    cp.total_downtime_hours AS current_downtime_hours,
+                    pp.total_downtime_hours AS previous_downtime_hours
                 FROM current_period cp
                 JOIN previous_period pp ON cp.park_id = pp.park_id
-                WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
+                WHERE (cp.avg_uptime_percentage - pp.avg_uptime_percentage) >= 5.0
                 ORDER BY improvement_percentage DESC
                 LIMIT :limit
             """)
@@ -1496,10 +1496,10 @@ class StatsRepository:
                 WITH current_period AS (
                     SELECT
                         pms.park_id,
-                        p.park_name,
-                        p.queue_times_slug,
-                        pms.uptime_percentage,
-                        pms.total_downtime_minutes
+                        p.name AS park_name,
+                        p.location,
+                        pms.avg_uptime_percentage,
+                        pms.total_downtime_hours
                     FROM park_monthly_stats pms
                     JOIN parks p ON pms.park_id = p.park_id
                     WHERE pms.year = :current_year
@@ -1510,8 +1510,8 @@ class StatsRepository:
                 previous_period AS (
                     SELECT
                         pms.park_id,
-                        pms.uptime_percentage,
-                        pms.total_downtime_minutes
+                        pms.avg_uptime_percentage,
+                        pms.total_downtime_hours
                     FROM park_monthly_stats pms
                     JOIN parks p ON pms.park_id = p.park_id
                     WHERE pms.year = :prev_year
@@ -1522,15 +1522,15 @@ class StatsRepository:
                 SELECT
                     cp.park_id,
                     cp.park_name,
-                    cp.uptime_percentage AS current_uptime,
-                    pp.uptime_percentage AS previous_uptime,
-                    (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
-                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
-                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
-                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                    cp.location,
+                    cp.avg_uptime_percentage AS current_uptime,
+                    pp.avg_uptime_percentage AS previous_uptime,
+                    (cp.avg_uptime_percentage - pp.avg_uptime_percentage) AS improvement_percentage,
+                    cp.total_downtime_hours AS current_downtime_hours,
+                    pp.total_downtime_hours AS previous_downtime_hours
                 FROM current_period cp
                 JOIN previous_period pp ON cp.park_id = pp.park_id
-                WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
+                WHERE (cp.avg_uptime_percentage - pp.avg_uptime_percentage) >= 5.0
                 ORDER BY improvement_percentage DESC
                 LIMIT :limit
             """)
@@ -1577,10 +1577,10 @@ class StatsRepository:
                 WITH current_period AS (
                     SELECT
                         pds.park_id,
-                        p.park_name,
-                        p.queue_times_slug,
-                        pds.uptime_percentage,
-                        pds.total_downtime_minutes
+                        p.name AS park_name,
+                        p.location,
+                        pds.avg_uptime_percentage,
+                        pds.total_downtime_hours
                     FROM park_daily_stats pds
                     JOIN parks p ON pds.park_id = p.park_id
                     WHERE pds.stat_date = :current_date
@@ -1590,8 +1590,8 @@ class StatsRepository:
                 previous_period AS (
                     SELECT
                         pds.park_id,
-                        pds.uptime_percentage,
-                        pds.total_downtime_minutes
+                        pds.avg_uptime_percentage,
+                        pds.total_downtime_hours
                     FROM park_daily_stats pds
                     JOIN parks p ON pds.park_id = p.park_id
                     WHERE pds.stat_date = :previous_date
@@ -1601,15 +1601,15 @@ class StatsRepository:
                 SELECT
                     cp.park_id,
                     cp.park_name,
-                    cp.uptime_percentage AS current_uptime,
-                    pp.uptime_percentage AS previous_uptime,
-                    (pp.uptime_percentage - cp.uptime_percentage) AS decline_percentage,
-                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
-                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
-                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                    cp.location,
+                    cp.avg_uptime_percentage AS current_uptime,
+                    pp.avg_uptime_percentage AS previous_uptime,
+                    (pp.avg_uptime_percentage - cp.avg_uptime_percentage) AS decline_percentage,
+                    cp.total_downtime_hours AS current_downtime_hours,
+                    pp.total_downtime_hours AS previous_downtime_hours
                 FROM current_period cp
                 JOIN previous_period pp ON cp.park_id = pp.park_id
-                WHERE (pp.uptime_percentage - cp.uptime_percentage) >= 5.0
+                WHERE (pp.avg_uptime_percentage - cp.avg_uptime_percentage) >= 5.0
                 ORDER BY decline_percentage DESC
                 LIMIT :limit
             """)
@@ -1635,10 +1635,10 @@ class StatsRepository:
                 WITH current_period AS (
                     SELECT
                         pws.park_id,
-                        p.park_name,
-                        p.queue_times_slug,
-                        pws.uptime_percentage,
-                        pws.total_downtime_minutes
+                        p.name AS park_name,
+                        p.location,
+                        pws.avg_uptime_percentage,
+                        pws.total_downtime_hours
                     FROM park_weekly_stats pws
                     JOIN parks p ON pws.park_id = p.park_id
                     WHERE pws.year = :current_year
@@ -1649,8 +1649,8 @@ class StatsRepository:
                 previous_period AS (
                     SELECT
                         pws.park_id,
-                        pws.uptime_percentage,
-                        pws.total_downtime_minutes
+                        pws.avg_uptime_percentage,
+                        pws.total_downtime_hours
                     FROM park_weekly_stats pws
                     JOIN parks p ON pws.park_id = p.park_id
                     WHERE pws.year = :prev_year
@@ -1661,15 +1661,15 @@ class StatsRepository:
                 SELECT
                     cp.park_id,
                     cp.park_name,
-                    cp.uptime_percentage AS current_uptime,
-                    pp.uptime_percentage AS previous_uptime,
-                    (pp.uptime_percentage - cp.uptime_percentage) AS decline_percentage,
-                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
-                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
-                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                    cp.location,
+                    cp.avg_uptime_percentage AS current_uptime,
+                    pp.avg_uptime_percentage AS previous_uptime,
+                    (pp.avg_uptime_percentage - cp.avg_uptime_percentage) AS decline_percentage,
+                    cp.total_downtime_hours AS current_downtime_hours,
+                    pp.total_downtime_hours AS previous_downtime_hours
                 FROM current_period cp
                 JOIN previous_period pp ON cp.park_id = pp.park_id
-                WHERE (pp.uptime_percentage - cp.uptime_percentage) >= 5.0
+                WHERE (pp.avg_uptime_percentage - cp.avg_uptime_percentage) >= 5.0
                 ORDER BY decline_percentage DESC
                 LIMIT :limit
             """)
@@ -1697,10 +1697,10 @@ class StatsRepository:
                 WITH current_period AS (
                     SELECT
                         pms.park_id,
-                        p.park_name,
-                        p.queue_times_slug,
-                        pms.uptime_percentage,
-                        pms.total_downtime_minutes
+                        p.name AS park_name,
+                        p.location,
+                        pms.avg_uptime_percentage,
+                        pms.total_downtime_hours
                     FROM park_monthly_stats pms
                     JOIN parks p ON pms.park_id = p.park_id
                     WHERE pms.year = :current_year
@@ -1711,8 +1711,8 @@ class StatsRepository:
                 previous_period AS (
                     SELECT
                         pms.park_id,
-                        pms.uptime_percentage,
-                        pms.total_downtime_minutes
+                        pms.avg_uptime_percentage,
+                        pms.total_downtime_hours
                     FROM park_monthly_stats pms
                     JOIN parks p ON pms.park_id = p.park_id
                     WHERE pms.year = :prev_year
@@ -1723,15 +1723,15 @@ class StatsRepository:
                 SELECT
                     cp.park_id,
                     cp.park_name,
-                    cp.uptime_percentage AS current_uptime,
-                    pp.uptime_percentage AS previous_uptime,
-                    (pp.uptime_percentage - cp.uptime_percentage) AS decline_percentage,
-                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
-                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
-                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                    cp.location,
+                    cp.avg_uptime_percentage AS current_uptime,
+                    pp.avg_uptime_percentage AS previous_uptime,
+                    (pp.avg_uptime_percentage - cp.avg_uptime_percentage) AS decline_percentage,
+                    cp.total_downtime_hours AS current_downtime_hours,
+                    pp.total_downtime_hours AS previous_downtime_hours
                 FROM current_period cp
                 JOIN previous_period pp ON cp.park_id = pp.park_id
-                WHERE (pp.uptime_percentage - cp.uptime_percentage) >= 5.0
+                WHERE (pp.avg_uptime_percentage - cp.avg_uptime_percentage) >= 5.0
                 ORDER BY decline_percentage DESC
                 LIMIT :limit
             """)
@@ -1778,9 +1778,9 @@ class StatsRepository:
                 WITH current_period AS (
                     SELECT
                         rds.ride_id,
-                        r.ride_name,
-                        p.park_name,
-                        r.queue_times_slug,
+                        r.name AS ride_name,
+                        p.name AS park_name,
+                        r.tier,
                         rds.uptime_percentage,
                         rds.total_downtime_minutes
                     FROM ride_daily_stats rds
@@ -1808,12 +1808,12 @@ class StatsRepository:
                     cp.ride_id,
                     cp.ride_name,
                     cp.park_name,
+                    cp.tier,
                     cp.uptime_percentage AS current_uptime,
                     pp.uptime_percentage AS previous_uptime,
                     (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
-                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
-                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
-                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                    cp.total_downtime_minutes AS current_downtime_minutes,
+                    pp.total_downtime_minutes AS previous_downtime_minutes
                 FROM current_period cp
                 JOIN previous_period pp ON cp.ride_id = pp.ride_id
                 WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
@@ -1842,9 +1842,9 @@ class StatsRepository:
                 WITH current_period AS (
                     SELECT
                         rws.ride_id,
-                        r.ride_name,
-                        p.park_name,
-                        r.queue_times_slug,
+                        r.name AS ride_name,
+                        p.name AS park_name,
+                        r.tier,
                         rws.uptime_percentage,
                         rws.total_downtime_minutes
                     FROM ride_weekly_stats rws
@@ -1874,12 +1874,12 @@ class StatsRepository:
                     cp.ride_id,
                     cp.ride_name,
                     cp.park_name,
+                    cp.tier,
                     cp.uptime_percentage AS current_uptime,
                     pp.uptime_percentage AS previous_uptime,
                     (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
-                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
-                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
-                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                    cp.total_downtime_minutes AS current_downtime_minutes,
+                    pp.total_downtime_minutes AS previous_downtime_minutes
                 FROM current_period cp
                 JOIN previous_period pp ON cp.ride_id = pp.ride_id
                 WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
@@ -1910,9 +1910,9 @@ class StatsRepository:
                 WITH current_period AS (
                     SELECT
                         rms.ride_id,
-                        r.ride_name,
-                        p.park_name,
-                        r.queue_times_slug,
+                        r.name AS ride_name,
+                        p.name AS park_name,
+                        r.tier,
                         rms.uptime_percentage,
                         rms.total_downtime_minutes
                     FROM ride_monthly_stats rms
@@ -1942,12 +1942,12 @@ class StatsRepository:
                     cp.ride_id,
                     cp.ride_name,
                     cp.park_name,
+                    cp.tier,
                     cp.uptime_percentage AS current_uptime,
                     pp.uptime_percentage AS previous_uptime,
                     (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
-                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
-                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
-                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                    cp.total_downtime_minutes AS current_downtime_minutes,
+                    pp.total_downtime_minutes AS previous_downtime_minutes
                 FROM current_period cp
                 JOIN previous_period pp ON cp.ride_id = pp.ride_id
                 WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
@@ -1997,9 +1997,9 @@ class StatsRepository:
                 WITH current_period AS (
                     SELECT
                         rds.ride_id,
-                        r.ride_name,
-                        p.park_name,
-                        r.queue_times_slug,
+                        r.name AS ride_name,
+                        p.name AS park_name,
+                        r.tier,
                         rds.uptime_percentage,
                         rds.total_downtime_minutes
                     FROM ride_daily_stats rds
@@ -2027,12 +2027,12 @@ class StatsRepository:
                     cp.ride_id,
                     cp.ride_name,
                     cp.park_name,
+                    cp.tier,
                     cp.uptime_percentage AS current_uptime,
                     pp.uptime_percentage AS previous_uptime,
                     (pp.uptime_percentage - cp.uptime_percentage) AS decline_percentage,
-                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
-                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
-                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                    cp.total_downtime_minutes AS current_downtime_minutes,
+                    pp.total_downtime_minutes AS previous_downtime_minutes
                 FROM current_period cp
                 JOIN previous_period pp ON cp.ride_id = pp.ride_id
                 WHERE (pp.uptime_percentage - cp.uptime_percentage) >= 5.0
@@ -2061,9 +2061,9 @@ class StatsRepository:
                 WITH current_period AS (
                     SELECT
                         rws.ride_id,
-                        r.ride_name,
-                        p.park_name,
-                        r.queue_times_slug,
+                        r.name AS ride_name,
+                        p.name AS park_name,
+                        r.tier,
                         rws.uptime_percentage,
                         rws.total_downtime_minutes
                     FROM ride_weekly_stats rws
@@ -2093,12 +2093,12 @@ class StatsRepository:
                     cp.ride_id,
                     cp.ride_name,
                     cp.park_name,
+                    cp.tier,
                     cp.uptime_percentage AS current_uptime,
                     pp.uptime_percentage AS previous_uptime,
                     (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
-                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
-                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
-                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                    cp.total_downtime_minutes AS current_downtime_minutes,
+                    pp.total_downtime_minutes AS previous_downtime_minutes
                 FROM current_period cp
                 JOIN previous_period pp ON cp.ride_id = pp.ride_id
                 WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
@@ -2129,9 +2129,9 @@ class StatsRepository:
                 WITH current_period AS (
                     SELECT
                         rms.ride_id,
-                        r.ride_name,
-                        p.park_name,
-                        r.queue_times_slug,
+                        r.name AS ride_name,
+                        p.name AS park_name,
+                        r.tier,
                         rms.uptime_percentage,
                         rms.total_downtime_minutes
                     FROM ride_monthly_stats rms
@@ -2161,12 +2161,12 @@ class StatsRepository:
                     cp.ride_id,
                     cp.ride_name,
                     cp.park_name,
+                    cp.tier,
                     cp.uptime_percentage AS current_uptime,
                     pp.uptime_percentage AS previous_uptime,
                     (pp.uptime_percentage - cp.uptime_percentage) AS decline_percentage,
-                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
-                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
-                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                    cp.total_downtime_minutes AS current_downtime_minutes,
+                    pp.total_downtime_minutes AS previous_downtime_minutes
                 FROM current_period cp
                 JOIN previous_period pp ON cp.ride_id = pp.ride_id
                 WHERE (pp.uptime_percentage - cp.uptime_percentage) >= 5.0

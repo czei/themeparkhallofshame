@@ -1157,24 +1157,24 @@ def trends_test_data(mysql_connection):
     # === CREATE 6 PARKS WITH DIFFERENT TREND PATTERNS ===
     parks_data = [
         # Parks 11-12: Improving (Disney/Universal)
-        (11, 8011, 'Test Park Improving 1', 'Orlando', 'FL', 'US', 'America/New_York', 'Disney', True, False, 'magic-kingdom', True),
-        (12, 8012, 'Test Park Improving 2', 'Orlando', 'FL', 'US', 'America/New_York', 'Universal', False, True, 'universal-studios', True),
+        (11, 8011, 'Test Park Improving 1', 'Orlando', 'FL', 'US', 'America/New_York', 'Disney', True, False, True),
+        (12, 8012, 'Test Park Improving 2', 'Orlando', 'FL', 'US', 'America/New_York', 'Universal', False, True, True),
         # Parks 13-14: Declining (Disney/Universal)
-        (13, 8013, 'Test Park Declining 1', 'Anaheim', 'CA', 'US', 'America/Los_Angeles', 'Disney', True, False, 'disneyland', True),
-        (14, 8014, 'Test Park Declining 2', 'Orlando', 'FL', 'US', 'America/New_York', 'Universal', False, True, 'islands-adventure', True),
+        (13, 8013, 'Test Park Declining 1', 'Anaheim', 'CA', 'US', 'America/Los_Angeles', 'Disney', True, False, True),
+        (14, 8014, 'Test Park Declining 2', 'Orlando', 'FL', 'US', 'America/New_York', 'Universal', False, True, True),
         # Parks 15-16: No significant change (Other parks)
-        (15, 8015, 'Test Park Stable 1', 'Tampa', 'FL', 'US', 'America/New_York', 'SeaWorld', False, False, 'seaworld', True),
-        (16, 8016, 'Test Park Stable 2', 'Tampa', 'FL', 'US', 'America/New_York', 'Busch Gardens', False, False, 'busch-gardens', True),
+        (15, 8015, 'Test Park Stable 1', 'Tampa', 'FL', 'US', 'America/New_York', 'SeaWorld', False, False, True),
+        (16, 8016, 'Test Park Stable 2', 'Tampa', 'FL', 'US', 'America/New_York', 'Busch Gardens', False, False, True),
     ]
 
     for park in parks_data:
         conn.execute(text("""
-            INSERT INTO parks (park_id, queue_times_id, name, city, state_province, country, timezone, operator, is_disney, is_universal, queue_times_slug, is_active)
-            VALUES (:park_id, :qt_id, :name, :city, :state, :country, :tz, :operator, :is_disney, :is_universal, :slug, :is_active)
+            INSERT INTO parks (park_id, queue_times_id, name, city, state_province, country, timezone, operator, is_disney, is_universal, is_active)
+            VALUES (:park_id, :qt_id, :name, :city, :state, :country, :tz, :operator, :is_disney, :is_universal, :is_active)
         """), {
             'park_id': park[0], 'qt_id': park[1], 'name': park[2], 'city': park[3],
             'state': park[4], 'country': park[5], 'tz': park[6], 'operator': park[7],
-            'is_disney': park[8], 'is_universal': park[9], 'slug': park[10], 'is_active': park[11]
+            'is_disney': park[8], 'is_universal': park[9], 'is_active': park[10]
         })
 
     conn.commit()
@@ -1200,70 +1200,70 @@ def trends_test_data(mysql_connection):
 
         # Daily stats
         conn.execute(text("""
-            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_minutes, uptime_percentage)
+            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_hours, avg_uptime_percentage)
             VALUES (:park_id, :stat_date, :downtime, :uptime)
         """), {
             'park_id': park_id,
             'stat_date': today,
-            'downtime': 60,  # 1 hour
+            'downtime': 1.0,  # 1 hour
             'uptime': 90.0
         })
 
         conn.execute(text("""
-            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_minutes, uptime_percentage)
+            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_hours, avg_uptime_percentage)
             VALUES (:park_id, :stat_date, :downtime, :uptime)
         """), {
             'park_id': park_id,
             'stat_date': yesterday,
-            'downtime': 120,  # 2 hours
+            'downtime': 2.0,  # 2 hours
             'uptime': 90.0 - improvement
         })
 
         # Weekly stats
         conn.execute(text("""
-            INSERT INTO park_weekly_stats (park_id, year, week_number, week_start_date, total_downtime_minutes, uptime_percentage)
+            INSERT INTO park_weekly_stats (park_id, year, week_number, week_start_date, total_downtime_hours, avg_uptime_percentage)
             VALUES (:park_id, :year, :week, :week_start, :downtime, :uptime)
         """), {
             'park_id': park_id,
             'year': current_year,
             'week': current_week,
             'week_start': current_week_start,
-            'downtime': 420,  # 7 hours for the week
+            'downtime': 7.0,  # 7 hours for the week
             'uptime': 90.0
         })
 
         conn.execute(text("""
-            INSERT INTO park_weekly_stats (park_id, year, week_number, week_start_date, total_downtime_minutes, uptime_percentage)
+            INSERT INTO park_weekly_stats (park_id, year, week_number, week_start_date, total_downtime_hours, avg_uptime_percentage)
             VALUES (:park_id, :year, :week, :week_start, :downtime, :uptime)
         """), {
             'park_id': park_id,
             'year': prev_week_year,
             'week': prev_week,
             'week_start': prev_week_start,
-            'downtime': 840,
+            'downtime': 14.0,
             'uptime': 90.0 - improvement
         })
 
         # Monthly stats
         conn.execute(text("""
-            INSERT INTO park_monthly_stats (park_id, year, month, total_downtime_minutes, uptime_percentage)
+            INSERT INTO park_monthly_stats (park_id, year, month, total_downtime_hours, avg_uptime_percentage)
             VALUES (:park_id, :year, :month, :downtime, :uptime)
         """), {
             'park_id': park_id,
             'year': current_year,
             'month': current_month,
-            'downtime': 1800,  # 30 hours for the month
+            'downtime': 30.0,  # 30 hours for the month
             'uptime': 90.0
         })
 
         conn.execute(text("""
-            INSERT INTO park_monthly_stats (park_id, year, month, total_downtime_minutes, uptime_percentage)
+            INSERT INTO park_monthly_stats (park_id, year, month, total_downtime_hours, avg_uptime_percentage)
             VALUES (:park_id, :year, :month, :downtime, :uptime)
         """), {
             'park_id': park_id,
             'year': prev_month_year,
             'month': prev_month,
-            'downtime': 3600,
+            'downtime': 60.0,
             'uptime': 90.0 - improvement
         })
 
@@ -1274,70 +1274,70 @@ def trends_test_data(mysql_connection):
 
         # Daily stats
         conn.execute(text("""
-            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_minutes, uptime_percentage)
+            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_hours, avg_uptime_percentage)
             VALUES (:park_id, :stat_date, :downtime, :uptime)
         """), {
             'park_id': park_id,
             'stat_date': today,
-            'downtime': 150,  # 2.5 hours
+            'downtime': 2.5,  # 2.5 hours
             'uptime': 75.0
         })
 
         conn.execute(text("""
-            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_minutes, uptime_percentage)
+            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_hours, avg_uptime_percentage)
             VALUES (:park_id, :stat_date, :downtime, :uptime)
         """), {
             'park_id': park_id,
             'stat_date': yesterday,
-            'downtime': 90,  # 1.5 hours
+            'downtime': 1.5,  # 1.5 hours
             'uptime': 75.0 + decline
         })
 
         # Weekly stats
         conn.execute(text("""
-            INSERT INTO park_weekly_stats (park_id, year, week_number, week_start_date, total_downtime_minutes, uptime_percentage)
+            INSERT INTO park_weekly_stats (park_id, year, week_number, week_start_date, total_downtime_hours, avg_uptime_percentage)
             VALUES (:park_id, :year, :week, :week_start, :downtime, :uptime)
         """), {
             'park_id': park_id,
             'year': current_year,
             'week': current_week,
             'week_start': current_week_start,
-            'downtime': 1050,  # 17.5 hours
+            'downtime': 17.5,  # 17.5 hours
             'uptime': 75.0
         })
 
         conn.execute(text("""
-            INSERT INTO park_weekly_stats (park_id, year, week_number, week_start_date, total_downtime_minutes, uptime_percentage)
+            INSERT INTO park_weekly_stats (park_id, year, week_number, week_start_date, total_downtime_hours, avg_uptime_percentage)
             VALUES (:park_id, :year, :week, :week_start, :downtime, :uptime)
         """), {
             'park_id': park_id,
             'year': prev_week_year,
             'week': prev_week,
             'week_start': prev_week_start,
-            'downtime': 630,
+            'downtime': 10.5,
             'uptime': 75.0 + decline
         })
 
         # Monthly stats
         conn.execute(text("""
-            INSERT INTO park_monthly_stats (park_id, year, month, total_downtime_minutes, uptime_percentage)
+            INSERT INTO park_monthly_stats (park_id, year, month, total_downtime_hours, avg_uptime_percentage)
             VALUES (:park_id, :year, :month, :downtime, :uptime)
         """), {
             'park_id': park_id,
             'year': current_year,
             'month': current_month,
-            'downtime': 4500,  # 75 hours
+            'downtime': 75.0,  # 75 hours
             'uptime': 75.0
         })
 
         conn.execute(text("""
-            INSERT INTO park_monthly_stats (park_id, year, month, total_downtime_minutes, uptime_percentage)
+            INSERT INTO park_monthly_stats (park_id, year, month, total_downtime_hours, avg_uptime_percentage)
             VALUES (:park_id, :year, :month, :downtime, :uptime)
         """), {
             'park_id': park_id,
             'year': prev_month_year,
             'month': prev_month,
-            'downtime': 2700,
+            'downtime': 45.0,
             'uptime': 75.0 + decline
         })
 
@@ -1348,22 +1348,22 @@ def trends_test_data(mysql_connection):
 
         # Daily stats
         conn.execute(text("""
-            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_minutes, uptime_percentage)
+            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_hours, avg_uptime_percentage)
             VALUES (:park_id, :stat_date, :downtime, :uptime)
         """), {
             'park_id': park_id,
             'stat_date': today,
-            'downtime': 120,
+            'downtime': 2.0,
             'uptime': 80.0
         })
 
         conn.execute(text("""
-            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_minutes, uptime_percentage)
+            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_hours, avg_uptime_percentage)
             VALUES (:park_id, :stat_date, :downtime, :uptime)
         """), {
             'park_id': park_id,
             'stat_date': yesterday,
-            'downtime': 108,
+            'downtime': 1.8,
             'uptime': 82.0
         })
 
@@ -1373,15 +1373,14 @@ def trends_test_data(mysql_connection):
     for park_id in range(11, 17):
         for i in range(5):
             conn.execute(text("""
-                INSERT INTO rides (ride_id, queue_times_id, park_id, name, tier, queue_times_slug, is_active)
-                VALUES (:ride_id, :qt_id, :park_id, :name, :tier, :slug, TRUE)
+                INSERT INTO rides (ride_id, queue_times_id, park_id, name, tier, is_active)
+                VALUES (:ride_id, :qt_id, :park_id, :name, :tier, TRUE)
             """), {
                 'ride_id': ride_id,
                 'qt_id': 80000 + ride_id,
                 'park_id': park_id,
                 'name': f'TrendTestRide_{park_id}_{i}',
-                'tier': 2,
-                'slug': f'ride-{ride_id}'
+                'tier': 2
             })
 
             # Add classification
@@ -1442,8 +1441,8 @@ def trends_test_data(mysql_connection):
 
                 # Monthly stats
                 conn.execute(text("""
-                    INSERT INTO ride_monthly_stats (ride_id, year, month, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes, observations)
-                    VALUES (:ride_id, :year, :month, :downtime, :uptime, 30, 75, 40, 1800)
+                    INSERT INTO ride_monthly_stats (ride_id, year, month, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
+                    VALUES (:ride_id, :year, :month, :downtime, :uptime, 30, 75, 40)
                 """), {
                     'ride_id': ride_id,
                     'year': current_year,
@@ -1453,8 +1452,8 @@ def trends_test_data(mysql_connection):
                 })
 
                 conn.execute(text("""
-                    INSERT INTO ride_monthly_stats (ride_id, year, month, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes, observations)
-                    VALUES (:ride_id, :year, :month, :downtime, :uptime, 25, 65, 45, 1800)
+                    INSERT INTO ride_monthly_stats (ride_id, year, month, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
+                    VALUES (:ride_id, :year, :month, :downtime, :uptime, 25, 65, 45)
                 """), {
                     'ride_id': ride_id,
                     'year': prev_month_year,
@@ -1513,8 +1512,8 @@ def trends_test_data(mysql_connection):
 
                 # Monthly stats
                 conn.execute(text("""
-                    INSERT INTO ride_monthly_stats (ride_id, year, month, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes, observations)
-                    VALUES (:ride_id, :year, :month, :downtime, :uptime, 35, 80, 60, 1800)
+                    INSERT INTO ride_monthly_stats (ride_id, year, month, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
+                    VALUES (:ride_id, :year, :month, :downtime, :uptime, 35, 80, 60)
                 """), {
                     'ride_id': ride_id,
                     'year': current_year,
@@ -1524,8 +1523,8 @@ def trends_test_data(mysql_connection):
                 })
 
                 conn.execute(text("""
-                    INSERT INTO ride_monthly_stats (ride_id, year, month, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes, observations)
-                    VALUES (:ride_id, :year, :month, :downtime, :uptime, 30, 70, 45, 1800)
+                    INSERT INTO ride_monthly_stats (ride_id, year, month, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
+                    VALUES (:ride_id, :year, :month, :downtime, :uptime, 30, 70, 45)
                 """), {
                     'ride_id': ride_id,
                     'year': prev_month_year,

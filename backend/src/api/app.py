@@ -61,8 +61,9 @@ def create_app() -> Flask:
             "status": "running",
             "endpoints": {
                 "health": "/api/health",
-                "parks": "/api/parks (coming soon)",
-                "rides": "/api/rides (coming soon)"
+                "parks": "/api/parks",
+                "rides": "/api/rides",
+                "trends": "/api/trends"
             }
         })
 

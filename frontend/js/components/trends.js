@@ -307,10 +307,11 @@ class Trends {
      * Format hours into readable string
      */
     formatHours(hours) {
-        if (hours === null || hours === undefined || hours === 0) return '0h 0m';
+        const numHours = Number(hours);
+        if (hours === null || hours === undefined || isNaN(numHours) || numHours === 0) return '0h 0m';
 
-        const wholeHours = Math.floor(hours);
-        const minutes = Math.round((hours - wholeHours) * 60);
+        const wholeHours = Math.floor(numHours);
+        const minutes = Math.round((numHours - wholeHours) * 60);
 
         if (wholeHours === 0) return `${minutes}m`;
         if (minutes === 0) return `${wholeHours}h`;

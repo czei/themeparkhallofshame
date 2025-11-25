@@ -232,10 +232,12 @@ class ParkRankings {
      * Render a single park row
      */
     renderParkRow(park) {
-        const trendClass = this.getTrendClass(park.trend_percentage);
-        const trendIcon = this.getTrendIcon(park.trend_percentage);
-        const trendText = park.trend_percentage !== null && park.trend_percentage !== undefined
-            ? `${park.trend_percentage > 0 ? '+' : ''}${park.trend_percentage.toFixed(1)}%`
+        const trendPct = park.trend_percentage !== null && park.trend_percentage !== undefined
+            ? Number(park.trend_percentage) : null;
+        const trendClass = this.getTrendClass(trendPct);
+        const trendIcon = this.getTrendIcon(trendPct);
+        const trendText = trendPct !== null
+            ? `${trendPct > 0 ? '+' : ''}${trendPct.toFixed(1)}%`
             : 'N/A';
 
         return `
@@ -247,12 +249,12 @@ class ParkRankings {
                 </td>
                 <td class="park-col">
                     <div class="park-name-cell">
-                        <span class="park-name">${this.escapeHtml(park.name || 'Unknown Park')}</span>
+                        <span class="park-name">${this.escapeHtml(park.park_name || park.name || 'Unknown Park')}</span>
                         <div class="park-actions">
                             <button
                                 class="park-details-btn"
                                 data-park-id="${park.park_id}"
-                                data-park-name="${this.escapeHtml(park.name || 'Unknown Park')}"
+                                data-park-name="${this.escapeHtml(park.park_name || park.name || 'Unknown Park')}"
                                 title="View park details"
                             >Details</button>
                             <a
@@ -318,10 +320,11 @@ class ParkRankings {
      * Format hours into readable string
      */
     formatHours(hours) {
-        if (hours === null || hours === undefined || hours === 0) return '0h 0m';
+        const numHours = Number(hours);
+        if (hours === null || hours === undefined || isNaN(numHours) || numHours === 0) return '0h 0m';
 
-        const wholeHours = Math.floor(hours);
-        const minutes = Math.round((hours - wholeHours) * 60);
+        const wholeHours = Math.floor(numHours);
+        const minutes = Math.round((numHours - wholeHours) * 60);
 
         if (wholeHours === 0) return `${minutes}m`;
         if (minutes === 0) return `${wholeHours}h`;

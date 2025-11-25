@@ -119,10 +119,11 @@ class WaitTimes {
      * Format hours into readable string
      */
     formatHours(hours) {
-        if (hours === null || hours === undefined || hours === 0) return '0h 0m';
+        const numHours = Number(hours);
+        if (hours === null || hours === undefined || isNaN(numHours) || numHours === 0) return '0h 0m';
 
-        const wholeHours = Math.floor(hours);
-        const minutes = Math.round((hours - wholeHours) * 60);
+        const wholeHours = Math.floor(numHours);
+        const minutes = Math.round((numHours - wholeHours) * 60);
 
         if (wholeHours === 0) return `${minutes}m`;
         if (minutes === 0) return `${wholeHours}h`;
@@ -274,10 +275,12 @@ class WaitTimes {
      * Render a single wait time row
      */
     renderWaitTimeRow(ride) {
-        const trendClass = this.getTrendClass(ride.trend_percentage);
-        const trendIcon = this.getTrendIcon(ride.trend_percentage);
-        const trendText = ride.trend_percentage !== null && ride.trend_percentage !== undefined
-            ? `${ride.trend_percentage > 0 ? '+' : ''}${ride.trend_percentage.toFixed(1)}%`
+        const trendPct = ride.trend_percentage !== null && ride.trend_percentage !== undefined
+            ? Number(ride.trend_percentage) : null;
+        const trendClass = this.getTrendClass(trendPct);
+        const trendIcon = this.getTrendIcon(trendPct);
+        const trendText = trendPct !== null
+            ? `${trendPct > 0 ? '+' : ''}${trendPct.toFixed(1)}%`
             : 'N/A';
 
         const statusBadge = this.getStatusBadge(ride.current_is_open);

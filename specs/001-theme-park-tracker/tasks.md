@@ -325,25 +325,6 @@ Based on plan.md project structure:
 
 ---
 
-## Phase 11b: Scheduled Jobs & Automation (Production Only)
-
-**Purpose**: Implement cron jobs for data collection and aggregation on AWS Linux production server
-
-**⚠️ NOTE**: Skip macOS automation entirely. These tasks are for production (systemd/cron) only.
-
-- [ ] T115 Create backend/scripts/collect.py CLI entry point for data collection (calls data_collection_service.py)
-- [ ] T116 Add error handling and logging to collect.py (log to CloudWatch with structured JSON)
-- [ ] T117 Add error handling and logging to aggregate_daily.py
-- [ ] T118 Add error handling and logging to cleanup_raw_data.py
-- [ ] T119 Create deployment/systemd/collector.service systemd service definition for data collector
-- [ ] T120 Create deployment/systemd/api.service systemd service definition for Flask API
-- [ ] T121 Create crontab configuration in deployment/scripts/setup-cron.sh (*/10 collect.py, 10 0 aggregate_daily.py with flock)
-- [ ] T122 Add CloudWatch "dead man's switch" monitoring alarm for collection failures (alert if no collection in 15 minutes)
-
-**Soft Launch Period**: After enabling scheduled jobs, collect data for 1-2 weeks before exposing frontend publicly to validate data quality
-
----
-
 ## Phase 12: Frontend Polish & Integration
 
 **Purpose**: Complete frontend implementation with navigation and design
@@ -376,6 +357,27 @@ Based on plan.md project structure:
 - [ ] T141 Configure CloudWatch monitoring with migration triggers (CPU >60%, traffic >1000 req/day)
 - [ ] T142 Set up Let's Encrypt SSL certificate for api.themeparkwaits.com
 - [ ] T143 Test production deployment end-to-end (API health, data collection, frontend)
+
+---
+
+## Phase 11b: Scheduled Jobs & Automation (Production Only)
+
+**Purpose**: Implement cron jobs for data collection and aggregation on AWS Linux production server
+
+**⚠️ DEPENDS ON**: Phase 13 (Deployment) must be complete before starting this phase.
+
+**⚠️ NOTE**: Skip macOS automation entirely. These tasks are for production (systemd/cron) only.
+
+- [ ] T115 Create backend/scripts/collect.py CLI entry point for data collection (calls data_collection_service.py)
+- [ ] T116 Add error handling and logging to collect.py (log to CloudWatch with structured JSON)
+- [ ] T117 Add error handling and logging to aggregate_daily.py
+- [ ] T118 Add error handling and logging to cleanup_raw_data.py
+- [ ] T119 Create deployment/systemd/collector.service systemd service definition for data collector
+- [ ] T120 Create deployment/systemd/api.service systemd service definition for Flask API
+- [ ] T121 Create crontab configuration in deployment/scripts/setup-cron.sh (*/10 collect.py, 10 0 aggregate_daily.py with flock)
+- [ ] T122 Add CloudWatch "dead man's switch" monitoring alarm for collection failures (alert if no collection in 15 minutes)
+
+**Soft Launch Period**: After enabling scheduled jobs, collect data for 1-2 weeks before exposing frontend publicly to validate data quality
 
 ---
 
@@ -421,7 +423,7 @@ Based on plan.md project structure:
 
 ## Dependencies & Execution Order
 
-### Phase Dependencies
+### Phase Dependencies (in document order)
 
 - **Setup (Phase 1)**: No dependencies - can start immediately
 - **Foundational (Phase 2)**: Depends on Setup completion - BLOCKS all user stories
@@ -429,13 +431,13 @@ Based on plan.md project structure:
   - User stories can then proceed in parallel (if staffed)
   - Or sequentially in priority order (P1 → P2 → P3 → P4 → P5 → P6 → P7 → P8)
 - **Local Script Validation (Phase 11a)**: Depends on User Stories - validates scripts work before deployment
-- **Frontend Polish (Phase 12)**: Depends on at least US1, US2, US3 being complete
+- **Frontend Polish (Phase 12)**: Depends on at least US1, US2, US3 being complete (can run parallel with 11a)
 - **Deployment (Phase 13)**: Depends on Phase 11a validation passing - sets up production infrastructure
-- **Scheduled Jobs (Phase 11b)**: Depends on Phase 13 deployment - runs directly on production
+- **Scheduled Jobs (Phase 11b)**: Depends on Phase 13 deployment - runs directly on production (listed after Phase 13 in document)
 - **Testing (Phase 14)**: Can start after Foundational, expand as user stories complete
 - **Polish (Phase 15)**: Depends on Phase 11b running successfully in production
 
-### Recommended Execution Order (Hybrid Approach)
+### Document Order = Execution Order
 
 **Post-User-Stories execution order**:
 

@@ -41,7 +41,7 @@ class AboutModal {
 
         // Create modal element
         const modalHTML = `
-            <div id="about-modal" class="modal-overlay">
+            <div id="about-modal" class="modal-overlay active">
                 <div class="modal-content about-modal">
                     <div class="modal-header">
                         <h2>About Theme Park Hall of Shame</h2>

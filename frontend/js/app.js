@@ -9,7 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Tab switching logic
-    const navTabs = document.querySelectorAll('.nav-tab');
+    const navItems = document.querySelectorAll('.nav-item');
     const appContainer = document.getElementById('app-container');
     let currentComponent = null;
 
@@ -26,15 +26,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    navTabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            // Remove active class from all tabs
-            navTabs.forEach(t => t.classList.remove('active'));
-            // Add active class to clicked tab
-            tab.classList.add('active');
+    navItems.forEach(item => {
+        item.addEventListener('click', () => {
+            // Remove active class from all nav items
+            navItems.forEach(i => i.classList.remove('active'));
+            // Add active class to clicked item
+            item.classList.add('active');
 
             // Load appropriate view
-            const view = tab.dataset.view;
+            const view = item.dataset.view;
             loadView(view);
         });
     });
@@ -43,9 +43,9 @@ document.addEventListener('DOMContentLoaded', () => {
      * Initialize global filter toggle
      */
     function initGlobalFilter() {
-        const globalFilterBtns = document.querySelectorAll('.global-filter-btn');
+        const filterBtns = document.querySelectorAll('.filter-btn');
 
-        globalFilterBtns.forEach(btn => {
+        filterBtns.forEach(btn => {
             btn.addEventListener('click', () => {
                 const newFilter = btn.dataset.filter;
 
@@ -72,8 +72,8 @@ document.addEventListener('DOMContentLoaded', () => {
      * Update global filter UI to reflect current state
      */
     function updateGlobalFilterUI() {
-        const globalFilterBtns = document.querySelectorAll('.global-filter-btn');
-        globalFilterBtns.forEach(btn => {
+        const filterBtns = document.querySelectorAll('.filter-btn');
+        filterBtns.forEach(btn => {
             if (btn.dataset.filter === globalState.filter) {
                 btn.classList.add('active');
             } else {

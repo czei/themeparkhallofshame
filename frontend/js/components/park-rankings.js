@@ -282,11 +282,11 @@ class ParkRankings {
                 </td>
                 <td class="uptime-col">
                     <div class="uptime-display">
-                        <span class="uptime-percentage">${(park.uptime_percentage || 0).toFixed(1)}%</span>
+                        <span class="uptime-percentage">${Number(park.uptime_percentage || 0).toFixed(1)}%</span>
                         <div class="uptime-bar">
                             <div
                                 class="uptime-fill"
-                                style="width: ${Math.min(park.uptime_percentage || 0, 100)}%"
+                                style="width: ${Math.min(Number(park.uptime_percentage) || 0, 100)}%"
                             ></div>
                         </div>
                     </div>

@@ -69,7 +69,7 @@ class ParkDetailsModal {
 
         // Create modal element
         const modalHTML = `
-            <div id="park-details-modal" class="modal-overlay">
+            <div id="park-details-modal" class="modal-overlay active">
                 <div class="modal-content park-details-modal">
                     <div class="modal-header">
                         <h2>${this.escapeHtml(this.state.parkName || 'Park Details')}</h2>

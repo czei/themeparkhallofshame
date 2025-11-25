@@ -3,53 +3,161 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Theme Park Hall of Shame - Downtime Tracker</title>
+    <title>Theme Park Hall of Shame</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
-    <header>
-        <h1>Theme Park Hall of Shame</h1>
-        <p class="tagline">Tracking attraction reliability across North American theme parks</p>
-    </header>
+    <!-- Geometric Top Bar -->
+    <div class="geometric-bar"></div>
 
-    <nav id="main-nav">
-        <div class="nav-tabs">
-            <button class="nav-tab active" data-view="park-rankings">Park Rankings</button>
-            <button class="nav-tab" data-view="ride-performance">Ride Performance</button>
-            <button class="nav-tab" data-view="wait-times">Wait Times</button>
-            <button class="nav-tab" data-view="trends">Trends</button>
-        </div>
-        <div class="global-filter">
-            <label>Filter:</label>
-            <div class="button-group">
-                <button class="global-filter-btn active" data-filter="all-parks">All Parks</button>
-                <button class="global-filter-btn" data-filter="disney-universal">Disney & Universal</button>
+    <!-- Sponsorship Section -->
+    <div class="sponsor-section">
+        <!-- Base color blocks -->
+        <div class="geo-base-1"></div>
+        <div class="geo-base-2"></div>
+        <div class="geo-base-3"></div>
+
+        <!-- Overlapping rectangles - collage style -->
+        <div class="geo-rect-coral-1"></div>
+        <div class="geo-rect-coral-2"></div>
+        <div class="geo-rect-teal-1"></div>
+        <div class="geo-rect-teal-2"></div>
+        <div class="geo-rect-gold-1"></div>
+        <div class="geo-rect-gold-2"></div>
+        <div class="geo-rect-pink-1"></div>
+        <div class="geo-rect-pink-2"></div>
+
+        <!-- Small accent squares -->
+        <div class="geo-square-1"></div>
+        <div class="geo-square-2"></div>
+        <div class="geo-square-3"></div>
+
+        <!-- Vertical bars -->
+        <div class="geo-bar-1"></div>
+        <div class="geo-bar-2"></div>
+
+        <div class="sponsor-content-expanded">
+            <div class="sponsor-led-display">
+                <img src="http://themeparkwaits.com/cdn/shop/files/disney-furniture-brick-square-small3.gif?v=1738711333&width=600"
+                     alt="ThemeParkWaits LED Display"
+                     class="led-gif">
+            </div>
+            <div class="sponsor-text-content">
+                <div class="sponsor-tagline">Powered by the same live data you love</div>
+                <div class="sponsor-brand">
+                    <a href="http://www.themeparkwaits.com" target="_blank">ThemeParkWaits.com</a>
+                </div>
+                <div class="sponsor-description">
+                    Track your favorite parks in real-time with our scrolling LED display
+                </div>
             </div>
         </div>
-        <a href="#" id="about-link">About This Project</a>
-    </nav>
+    </div>
 
-    <main id="app-container">
-        <!-- Dynamic content will be loaded here -->
-        <div id="loading">Loading...</div>
-    </main>
+    <!-- Header -->
+    <div class="header-section">
+        <div class="established">Est. 2025</div>
+        <h1>
+            <div class="title-line-1">THEME PARK</div>
+            <div class="title-line-2">HALL OF SHAME</div>
+        </h1>
+        <div class="subtitle">
+            Tracking operational performance across major theme parks
+        </div>
+        <a href="#" class="about-link" id="about-link">About This Project</a>
+    </div>
 
-    <footer>
-        <p class="attribution">
-            Data powered by <a href="https://queue-times.com" target="_blank" rel="noopener">Queue-Times.com</a>
-        </p>
-        <p class="last-update">Last updated: <span id="last-update-time">--</span></p>
-    </footer>
+    <!-- Navigation -->
+    <div class="nav-container">
+        <div class="nav-grid">
+            <button class="nav-item active" data-view="park-rankings"><span>Parks</span></button>
+            <button class="nav-item" data-view="ride-performance"><span>Downtime</span></button>
+            <button class="nav-item" data-view="wait-times"><span>Wait Times</span></button>
+            <button class="nav-item" data-view="trends"><span>Trends</span></button>
+        </div>
+    </div>
+
+    <!-- Park Filter -->
+    <div class="park-filter">
+        <div class="filter-label">Show Parks:</div>
+        <div class="filter-toggle">
+            <button class="filter-btn active" data-filter="all-parks">All Parks</button>
+            <button class="filter-btn" data-filter="disney-universal">Disney & Universal</button>
+        </div>
+    </div>
+
+    <!-- Live Status -->
+    <div class="live-status">
+        <div class="live-indicator"></div>
+        <span>Live Data</span>
+        <span class="last-update">Last updated: <span id="last-update-time">--</span></span>
+    </div>
+
+    <!-- Content -->
+    <div class="content-wrapper">
+        <!-- Dynamic content container -->
+        <main id="app-container">
+            <div id="loading" class="loading-indicator">Loading...</div>
+        </main>
+    </div>
+
+    <!-- About Modal -->
+    <div class="modal-overlay" id="about-modal">
+        <div class="modal-content">
+            <div class="modal-geo-1"></div>
+            <div class="modal-geo-2"></div>
+            <div class="modal-geo-3"></div>
+
+            <div class="modal-inner">
+                <button class="modal-close" id="modal-close">&times;</button>
+
+                <div class="modal-subtitle">Our Mission</div>
+                <h2 class="modal-title">About This Project</h2>
+
+                <div class="modal-body" id="about-modal-body">
+                    <!-- Content will be loaded dynamically -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Park Details Modal -->
+    <div class="modal-overlay" id="park-details-modal">
+        <div class="modal-content modal-large">
+            <div class="modal-geo-1"></div>
+            <div class="modal-geo-2"></div>
+            <div class="modal-geo-3"></div>
+
+            <div class="modal-inner">
+                <button class="modal-close" id="park-modal-close">&times;</button>
+                <div id="park-details-content">
+                    <!-- Content will be loaded dynamically -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+        <div class="geometric-bar" style="height: 8px; margin-bottom: 20px;"></div>
+        <div class="footer-text">
+            © 2025 Theme Park Hall of Shame · A ThemeParkWaits.com Service
+        </div>
+        <div class="footer-text" style="margin-top: 15px; font-size: 0.75rem;">
+            Data provided by <a href="https://queue-times.com" target="_blank" class="footer-link">Queue-Times.com</a>
+        </div>
+    </div>
 
     <!-- Scripts -->
-    <script src="js/config.js"></script>
-    <script src="js/api-client.js"></script>
-    <script src="js/components/park-rankings.js"></script>
-    <script src="js/components/ride-performance.js"></script>
-    <script src="js/components/wait-times.js"></script>
-    <script src="js/components/trends.js"></script>
-    <script src="js/components/about-modal.js"></script>
-    <script src="js/components/park-details-modal.js"></script>
-    <script src="js/app.js"></script>
+    <script src="js/config.js?v=2"></script>
+    <script src="js/api-client.js?v=2"></script>
+    <script src="js/components/park-rankings.js?v=2"></script>
+    <script src="js/components/ride-performance.js?v=2"></script>
+    <script src="js/components/wait-times.js?v=2"></script>
+    <script src="js/components/trends.js?v=2"></script>
+    <script src="js/components/about-modal.js?v=3"></script>
+    <script src="js/components/park-details-modal.js?v=3"></script>
+    <script src="js/app.js?v=2"></script>
 </body>
 </html>

@@ -331,14 +331,24 @@ class TestDataSeeder:
         # Problem park (50-70% uptime)
         self.edge_case_parks["Six Flags St. Louis"] = "problem"
 
-        # Improving parks (+5 to +15%)
+        # Improving parks (+5 to +15% uptime increase)
         self.edge_case_parks["Cedar Point"] = "improving"
         self.edge_case_parks["Magic Kingdom"] = "improving"
         self.edge_case_parks["Knott's Berry Farm"] = "improving"
+        self.edge_case_parks["Disneyland"] = "improving"
+        self.edge_case_parks["Universal Studios Florida"] = "improving"
+        self.edge_case_parks["Islands of Adventure"] = "improving"
+        self.edge_case_parks["SeaWorld Orlando"] = "improving"
+        self.edge_case_parks["Busch Gardens Tampa Bay"] = "improving"
 
-        # Declining parks (-5 to -15%)
+        # Declining parks (-5 to -15% uptime decrease)
         self.edge_case_parks["Six Flags America"] = "declining"
         self.edge_case_parks["Michigan's Adventure"] = "declining"
+        self.edge_case_parks["Six Flags Over Georgia"] = "declining"
+        self.edge_case_parks["Valleyfair"] = "declining"
+        self.edge_case_parks["Dorney Park"] = "declining"
+        self.edge_case_parks["Adventureland"] = "declining"
+        self.edge_case_parks["Worlds of Fun"] = "declining"
 
         # Assign some individual ride edge cases
         ride_items = list(self.ride_ids.items())
@@ -403,13 +413,15 @@ class TestDataSeeder:
         elif park_edge == "problem":
             base_uptime = random.uniform(50.0, 70.0)
         elif park_edge == "improving":
-            # Uptime improves over time
-            base_uptime = 85.0 + (day_offset * 0.5)  # Gets better as days progress
-            base_uptime = min(base_uptime, 98.0)
+            # Uptime improves over time: higher now (day_offset=0), lower in the past
+            # Factor of 1.2 gives ~8.4% change per week (7 days)
+            base_uptime = 95.0 - (day_offset * 1.2)  # Gets worse as we go back in time
+            base_uptime = max(base_uptime, 65.0)
         elif park_edge == "declining":
-            # Uptime worsens over time
-            base_uptime = 95.0 - (day_offset * 0.5)  # Gets worse as days progress
-            base_uptime = max(base_uptime, 70.0)
+            # Uptime worsens over time: lower now (day_offset=0), higher in the past
+            # Factor of 1.2 gives ~8.4% change per week (7 days)
+            base_uptime = 75.0 + (day_offset * 1.2)  # Gets better as we go back in time
+            base_uptime = min(base_uptime, 95.0)
 
         # Adjust for ride edge cases
         if ride_edge == "disaster":

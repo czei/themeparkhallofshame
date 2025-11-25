@@ -362,6 +362,16 @@ class ParkRankings {
     }
 
     /**
+     * Update period from global period selector (called by app.js)
+     */
+    updatePeriod(newPeriod) {
+        if (newPeriod !== this.state.period) {
+            this.state.period = newPeriod;
+            this.fetchRankings();
+        }
+    }
+
+    /**
      * Attach event listeners to controls
      */
     attachEventListeners() {

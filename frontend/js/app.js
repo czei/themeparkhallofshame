@@ -148,6 +148,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'park-rankings':
                     if (typeof ParkRankings !== 'undefined') {
                         currentComponent = new ParkRankings(apiClient, 'view-container', globalState.filter);
+                        // Sync the period before fetching data
+                        currentComponent.state.period = globalState.period;
                         await currentComponent.init();
                     } else {
                         throw new Error('ParkRankings component not loaded');
@@ -157,6 +159,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'ride-performance':
                     if (typeof RidePerformance !== 'undefined') {
                         currentComponent = new RidePerformance(apiClient, 'view-container', globalState.filter);
+                        // Sync the period before fetching data
+                        currentComponent.state.period = globalState.period;
                         await currentComponent.init();
                     } else {
                         throw new Error('RidePerformance component not loaded');
@@ -166,6 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'wait-times':
                     if (typeof WaitTimes !== 'undefined') {
                         currentComponent = new WaitTimes(apiClient, 'view-container', globalState.filter);
+                        // WaitTimes uses 'mode' not 'period', but sync anyway
                         await currentComponent.init();
                     } else {
                         throw new Error('WaitTimes component not loaded');
@@ -175,6 +180,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'trends':
                     if (typeof Trends !== 'undefined') {
                         currentComponent = new Trends(apiClient, 'view-container', globalState.filter);
+                        // Sync the period before fetching data
+                        currentComponent.state.period = globalState.period;
                         await currentComponent.init();
                     } else {
                         throw new Error('Trends component not loaded');

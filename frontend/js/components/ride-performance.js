@@ -411,6 +411,16 @@ class RidePerformance {
     }
 
     /**
+     * Update period from global period selector (called by app.js)
+     */
+    updatePeriod(newPeriod) {
+        if (newPeriod !== this.state.period) {
+            this.state.period = newPeriod;
+            this.fetchRidePerformance();
+        }
+    }
+
+    /**
      * Attach event listeners to controls
      */
     attachEventListeners() {

@@ -219,7 +219,7 @@ Based on plan.md project structure:
 
 ---
 
-## Phase 7: User Story 5 - Filter by Park Type (Priority: P5)
+## Phase 7: User Story 5 - Filter by Park Type (Priority: P5) ✅ COMPLETE
 
 **Goal**: Users can filter park and ride views by "Disney & Universal" or "All Parks"
 
@@ -227,13 +227,13 @@ Based on plan.md project structure:
 
 ### Implementation for User Story 5
 
-- [ ] T086 [US5] Verify filter parameter implemented in GET /api/parks/downtime (already added in T051)
-- [ ] T087 [US5] Add filter parameter to GET /api/rides/downtime endpoint
-- [ ] T088 [US5] Add filter parameter to GET /api/rides/waittimes endpoint
-- [ ] T089 [US5] Update all frontend components to pass filter parameter to API calls
-- [ ] T090 [US5] Implement global filter toggle in frontend/js/app.js that updates all views
+- [x] T086 [US5] Verify filter parameter implemented in GET /api/parks/downtime (already added in T051)
+- [x] T087 [US5] Add filter parameter to GET /api/rides/downtime endpoint
+- [x] T088 [US5] Add filter parameter to GET /api/rides/waittimes endpoint
+- [x] T089 [US5] Update all frontend components to pass filter parameter to API calls
+- [x] T090 [US5] Implement global filter toggle in frontend/js/app.js that updates all views
 
-**Checkpoint**: Filtering works across all views
+**Checkpoint**: Filtering works across all views ✅
 
 ---
 

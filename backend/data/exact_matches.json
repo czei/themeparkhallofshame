@@ -13,7 +13,7 @@
       "2": 2,
       "3": 1
     },
-    "last_updated": "2025-11-24T16:38:32.987940"
+    "last_updated": "2025-11-24T19:48:17.551379"
   },
   "classifications": {
     "480:1174": {
@@ -203,6 +203,79 @@
         "https://wikipedia.org/Space_Mountain"
       ],
       "cached_at": "2025-11-24T16:38:32.987937"
+    },
+    "2140:2143": {
+      "tier": 1,
+      "confidence": 0.95,
+      "reasoning": "Major roller coaster with high capacity",
+      "research_sources": [
+        "https://rcdb.com/test"
+      ],
+      "cached_at": "2025-11-24T17:39:49.559906"
+    },
+    "2142:2145": {
+      "tier": 3,
+      "confidence": 0.9,
+      "reasoning": "Tier 3 classification",
+      "research_sources": [],
+      "cached_at": "2025-11-24T17:39:49.572264"
+    },
+    "2145:2146": {
+      "tier": 1,
+      "confidence": 0.95,
+      "reasoning": "Iconic indoor roller coaster with high capacity and long wait times",
+      "research_sources": [
+        "https://rcdb.com/123",
+        "https://wikipedia.org/Space_Mountain"
+      ],
+      "cached_at": "2025-11-24T17:39:49.711527"
+    },
+    "11:101": {
+      "tier": 1,
+      "confidence": 0.95,
+      "reasoning": "Major roller coaster with high capacity",
+      "research_sources": [
+        "https://rcdb.com/test"
+      ],
+      "cached_at": "2025-11-24T19:48:17.532342"
+    },
+    "13:103": {
+      "tier": 3,
+      "confidence": 0.9,
+      "reasoning": "Tier 3 classification",
+      "research_sources": [],
+      "cached_at": "2025-11-24T19:48:17.540762"
+    },
+    "16:1000": {
+      "tier": 1,
+      "confidence": 0.95,
+      "reasoning": "Iconic indoor roller coaster with high capacity and long wait times",
+      "research_sources": [
+        "https://rcdb.com/123",
+        "https://wikipedia.org/Space_Mountain"
+      ],
+      "cached_at": "2025-11-24T19:48:17.551373"
+    },
+    "14:1": {
+      "tier": 1,
+      "confidence": 0.9,
+      "reasoning": "Classified as Tier 1",
+      "research_sources": [],
+      "cached_at": "2025-11-24T19:48:17.543809"
+    },
+    "14:2": {
+      "tier": 2,
+      "confidence": 0.9,
+      "reasoning": "Classified as Tier 2",
+      "research_sources": [],
+      "cached_at": "2025-11-24T19:48:17.545090"
+    },
+    "14:3": {
+      "tier": 3,
+      "confidence": 0.9,
+      "reasoning": "Classified as Tier 3",
+      "research_sources": [],
+      "cached_at": "2025-11-24T19:48:17.546347"
     }
   }
 }

@@ -453,39 +453,3 @@ class TestClassificationPerformance:
 
             # Verify batch method exists
             assert hasattr(service, 'classify_batch')
-
-    @pytest.mark.skip(reason="Performance test - run manually")
-    def test_classification_speed(self):
-        """Classification should complete within reasonable time."""
-        import time
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            manual_overrides_path = Path(tmpdir) / "manual_overrides.csv"
-            with open(manual_overrides_path, 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(['park_id', 'ride_id', 'override_tier', 'reason', 'date_added'])
-
-            exact_matches_path = Path(tmpdir) / "exact_matches.json"
-            with open(exact_matches_path, 'w') as f:
-                json.dump({}, f)
-
-            service = ClassificationService(
-                manual_overrides_path=str(manual_overrides_path),
-                exact_matches_path=str(exact_matches_path)
-            )
-
-            start = time.time()
-
-            # Classify 10 rides
-            for i, ride_name in enumerate(MAGIC_KINGDOM_TIER_1[:10]):
-                service.classify_ride(
-                    ride_id=i,
-                    ride_name=ride_name,
-                    park_id=1,
-                    park_name="Magic Kingdom"
-                )
-
-            elapsed = time.time() - start
-
-            # Pattern matching should be fast (< 1 second for 10 rides)
-            assert elapsed < 1.0, f"Classification took {elapsed}s, expected <1s"

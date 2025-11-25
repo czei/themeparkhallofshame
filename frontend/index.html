@@ -13,10 +13,19 @@
     </header>
 
     <nav id="main-nav">
-        <button class="nav-tab active" data-view="park-rankings">Park Rankings</button>
-        <button class="nav-tab" data-view="ride-performance">Ride Performance</button>
-        <button class="nav-tab" data-view="wait-times">Wait Times</button>
-        <button class="nav-tab" data-view="trends">Trends</button>
+        <div class="nav-tabs">
+            <button class="nav-tab active" data-view="park-rankings">Park Rankings</button>
+            <button class="nav-tab" data-view="ride-performance">Ride Performance</button>
+            <button class="nav-tab" data-view="wait-times">Wait Times</button>
+            <button class="nav-tab" data-view="trends">Trends</button>
+        </div>
+        <div class="global-filter">
+            <label>Filter:</label>
+            <div class="button-group">
+                <button class="global-filter-btn active" data-filter="all-parks">All Parks</button>
+                <button class="global-filter-btn" data-filter="disney-universal">Disney & Universal</button>
+            </div>
+        </div>
         <a href="#" id="about-link">About This Project</a>
     </nav>
 

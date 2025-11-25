@@ -26,6 +26,26 @@ from database.repositories.ride_repository import RideRepository
 from sqlalchemy import text
 
 
+@pytest.fixture(scope="module", autouse=True)
+def cleanup_before_classification_tests(mysql_engine):
+    """Clean up all test data once at start of this test module."""
+    from sqlalchemy import text
+    with mysql_engine.begin() as conn:
+        conn.execute(text("DELETE FROM ride_status_snapshots"))
+        conn.execute(text("DELETE FROM ride_status_changes"))
+        conn.execute(text("DELETE FROM park_activity_snapshots"))
+        conn.execute(text("DELETE FROM ride_daily_stats"))
+        conn.execute(text("DELETE FROM ride_weekly_stats"))
+        conn.execute(text("DELETE FROM ride_monthly_stats"))
+        conn.execute(text("DELETE FROM park_daily_stats"))
+        conn.execute(text("DELETE FROM park_weekly_stats"))
+        conn.execute(text("DELETE FROM park_monthly_stats"))
+        conn.execute(text("DELETE FROM ride_classifications"))
+        conn.execute(text("DELETE FROM rides"))
+        conn.execute(text("DELETE FROM parks"))
+    yield
+
+
 class TestClassificationDatabasePersistence:
     """Test classification data is correctly saved to database."""
 

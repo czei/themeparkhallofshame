@@ -11,9 +11,10 @@ DB_NAME="themepark_test"
 DB_USER="themepark_test"
 DB_PASSWORD="test_password"
 
-# Create database and user
+# Drop and recreate database (ensures clean state), create user
 mysql -u root -p${DB_ROOT_PASSWORD} <<SQL
-CREATE DATABASE IF NOT EXISTS ${DB_NAME};
+DROP DATABASE IF EXISTS ${DB_NAME};
+CREATE DATABASE ${DB_NAME};
 CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
 GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';
 FLUSH PRIVILEGES;

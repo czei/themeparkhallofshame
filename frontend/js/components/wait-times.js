@@ -4,12 +4,12 @@
  */
 
 class WaitTimes {
-    constructor(apiClient, containerId) {
+    constructor(apiClient, containerId, initialFilter = 'all-parks') {
         this.apiClient = apiClient;
         this.container = document.getElementById(containerId);
         this.state = {
             mode: 'live',
-            filter: 'all-parks',
+            filter: initialFilter,
             limit: 100,
             loading: false,
             error: null,
@@ -101,7 +101,7 @@ class WaitTimes {
     }
 
     /**
-     * Render mode and filter controls
+     * Render mode controls
      */
     renderControls() {
         return `
@@ -121,20 +121,6 @@ class WaitTimes {
                             class="mode-btn ${this.state.mode === 'peak-times' ? 'active' : ''}"
                             data-mode="peak-times"
                         >Peak Times</button>
-                    </div>
-                </div>
-
-                <div class="control-group">
-                    <label>Filter:</label>
-                    <div class="button-group">
-                        <button
-                            class="filter-btn ${this.state.filter === 'all-parks' ? 'active' : ''}"
-                            data-filter="all-parks"
-                        >All Parks</button>
-                        <button
-                            class="filter-btn ${this.state.filter === 'disney-universal' ? 'active' : ''}"
-                            data-filter="disney-universal"
-                        >Disney & Universal</button>
                     </div>
                 </div>
             </div>
@@ -384,6 +370,16 @@ class WaitTimes {
     }
 
     /**
+     * Update filter from global filter (called by app.js)
+     */
+    updateFilter(newFilter) {
+        if (newFilter !== this.state.filter) {
+            this.state.filter = newFilter;
+            this.fetchWaitTimes();
+        }
+    }
+
+    /**
      * Attach event listeners to controls
      */
     attachEventListeners() {
@@ -394,18 +390,6 @@ class WaitTimes {
                 const mode = btn.dataset.mode;
                 if (mode !== this.state.mode) {
                     this.state.mode = mode;
-                    this.fetchWaitTimes();
-                }
-            });
-        });
-
-        // Filter buttons
-        const filterBtns = this.container.querySelectorAll('.filter-btn');
-        filterBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const filter = btn.dataset.filter;
-                if (filter !== this.state.filter) {
-                    this.state.filter = filter;
                     this.fetchWaitTimes();
                 }
             });

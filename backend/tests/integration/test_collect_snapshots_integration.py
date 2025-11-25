@@ -110,11 +110,11 @@ def sample_api_response_empty():
 # FIXTURES - Database Setup
 # ============================================================================
 
-@pytest.fixture(scope="module", autouse=True)
-def cleanup_before_collect_snapshots_tests(mysql_engine):
-    """Clean up all test data once at start of this test module."""
+@pytest.fixture(scope="function", autouse=True)
+def cleanup_before_each_collect_snapshots_test(mysql_engine):
+    """Clean up all test data before each test (tests commit data, so can't rely on rollback)."""
     from sqlalchemy import text
-    with mysql_engine.connect() as conn:
+    with mysql_engine.begin() as conn:
         conn.execute(text("DELETE FROM ride_status_snapshots"))
         conn.execute(text("DELETE FROM ride_status_changes"))
         conn.execute(text("DELETE FROM park_activity_snapshots"))
@@ -127,7 +127,7 @@ def cleanup_before_collect_snapshots_tests(mysql_engine):
         conn.execute(text("DELETE FROM ride_classifications"))
         conn.execute(text("DELETE FROM rides"))
         conn.execute(text("DELETE FROM parks"))
-        conn.commit()
+        # Auto-commits on exit from begin() context
     yield
 
 

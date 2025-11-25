@@ -4,12 +4,12 @@
  */
 
 class ParkRankings {
-    constructor(apiClient, containerId) {
+    constructor(apiClient, containerId, initialFilter = 'all-parks') {
         this.apiClient = apiClient;
         this.container = document.getElementById(containerId);
         this.state = {
             period: 'today',
-            filter: 'all-parks',
+            filter: initialFilter,
             limit: 50,
             weighted: false,
             loading: false,
@@ -92,7 +92,7 @@ class ParkRankings {
     }
 
     /**
-     * Render period and filter controls
+     * Render period controls
      */
     renderControls() {
         return `
@@ -112,20 +112,6 @@ class ParkRankings {
                             class="period-btn ${this.state.period === '30days' ? 'active' : ''}"
                             data-period="30days"
                         >30 Days</button>
-                    </div>
-                </div>
-
-                <div class="control-group">
-                    <label>Filter:</label>
-                    <div class="button-group">
-                        <button
-                            class="filter-btn ${this.state.filter === 'all-parks' ? 'active' : ''}"
-                            data-filter="all-parks"
-                        >All Parks</button>
-                        <button
-                            class="filter-btn ${this.state.filter === 'disney-universal' ? 'active' : ''}"
-                            data-filter="disney-universal"
-                        >Disney & Universal</button>
                     </div>
                 </div>
 
@@ -354,6 +340,16 @@ class ParkRankings {
     }
 
     /**
+     * Update filter from global filter (called by app.js)
+     */
+    updateFilter(newFilter) {
+        if (newFilter !== this.state.filter) {
+            this.state.filter = newFilter;
+            this.fetchRankings();
+        }
+    }
+
+    /**
      * Attach event listeners to controls
      */
     attachEventListeners() {
@@ -364,18 +360,6 @@ class ParkRankings {
                 const period = btn.dataset.period;
                 if (period !== this.state.period) {
                     this.state.period = period;
-                    this.fetchRankings();
-                }
-            });
-        });
-
-        // Filter buttons
-        const filterBtns = this.container.querySelectorAll('.filter-btn');
-        filterBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const filter = btn.dataset.filter;
-                if (filter !== this.state.filter) {
-                    this.state.filter = filter;
                     this.fetchRankings();
                 }
             });

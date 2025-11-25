@@ -16,6 +16,11 @@ class ParkRankings {
             error: null,
             data: null
         };
+        // Initialize park details modal
+        this.parkDetailsModal = null;
+        if (window.ParkDetailsModal) {
+            this.parkDetailsModal = new window.ParkDetailsModal(apiClient);
+        }
     }
 
     /**
@@ -248,15 +253,26 @@ class ParkRankings {
                     </span>
                 </td>
                 <td class="park-col">
-                    <a
-                        href="${park.queue_times_url}"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="park-link"
-                    >
-                        ${this.escapeHtml(park.name || 'Unknown Park')}
-                        <span class="external-icon">↗</span>
-                    </a>
+                    <div class="park-name-cell">
+                        <span class="park-name">${this.escapeHtml(park.name || 'Unknown Park')}</span>
+                        <div class="park-actions">
+                            <button
+                                class="park-details-btn"
+                                data-park-id="${park.park_id}"
+                                data-park-name="${this.escapeHtml(park.name || 'Unknown Park')}"
+                                title="View park details"
+                            >Details</button>
+                            <a
+                                href="${park.queue_times_url}"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="park-external-link"
+                                title="View on Queue-Times.com"
+                            >
+                                <span class="external-icon">↗</span>
+                            </a>
+                        </div>
+                    </div>
                 </td>
                 <td class="location-col">${this.escapeHtml(park.location || 'Unknown')}</td>
                 <td class="downtime-col">
@@ -373,6 +389,18 @@ class ParkRankings {
                 this.fetchRankings();
             });
         }
+
+        // Park details buttons
+        const detailsBtns = this.container.querySelectorAll('.park-details-btn');
+        detailsBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const parkId = parseInt(btn.dataset.parkId);
+                const parkName = btn.dataset.parkName;
+                if (this.parkDetailsModal && parkId) {
+                    this.parkDetailsModal.open(parkId, parkName);
+                }
+            });
+        });
 
         // Retry button (if error state)
         const retryBtn = this.container.querySelector('.retry-btn');

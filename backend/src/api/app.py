@@ -11,6 +11,7 @@ from utils.logger import logger
 from api.routes.health import health_bp
 from api.routes.parks import parks_bp
 from api.routes.rides import rides_bp
+from api.routes.trends import trends_bp
 from api.middleware.error_handler import register_error_handlers
 
 
@@ -42,6 +43,7 @@ def create_app() -> Flask:
     app.register_blueprint(health_bp, url_prefix='/api')
     app.register_blueprint(parks_bp, url_prefix='/api')
     app.register_blueprint(rides_bp, url_prefix='/api')
+    app.register_blueprint(trends_bp, url_prefix='/api')
 
     # Register error handlers
     register_error_handlers(app)

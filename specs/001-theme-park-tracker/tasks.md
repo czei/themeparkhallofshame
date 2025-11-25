@@ -284,15 +284,15 @@ Based on plan.md project structure:
 
 ### Implementation for User Story 8
 
-- [ ] T104 [US8] Implement GET /api/trends endpoint in backend/src/api/routes/trends.py (FR-046, FR-047, FR-054)
-- [ ] T105 [US8] Implement query logic for parks-improving category using data-model.md Query 8 (park_daily_stats, park_weekly_stats, park_monthly_stats tables)
-- [ ] T106 [US8] Implement query logic for parks-declining category using data-model.md Query 9
-- [ ] T107 [US8] Implement query logic for rides-improving category using data-model.md Query 10 (ride_daily_stats, ride_weekly_stats, ride_monthly_stats tables)
-- [ ] T108 [US8] Implement query logic for rides-declining category using data-model.md Query 11
-- [ ] T109 [US8] Implement period comparison logic (today vs yesterday, 7days vs previous 7days, 30days vs previous 30days) (FR-047)
-- [ ] T110 [US8] Implement ≥5% threshold filtering for uptime percentage changes (FR-048)
-- [ ] T111 [US8] Implement sorting by improvement percentage (FR-049) and decline percentage (FR-050)
-- [ ] T112 [US8] Add park filter application to trends endpoint (Disney & Universal / All Parks) (FR-053)
+- [x] T104 [US8] Implement GET /api/trends endpoint in backend/src/api/routes/trends.py (FR-046, FR-047, FR-054)
+- [x] T105 [US8] Implement query logic for parks-improving category using data-model.md Query 8 (park_daily_stats, park_weekly_stats, park_monthly_stats tables)
+- [x] T106 [US8] Implement query logic for parks-declining category using data-model.md Query 9
+- [x] T107 [US8] Implement query logic for rides-improving category using data-model.md Query 10 (ride_daily_stats, ride_weekly_stats, ride_monthly_stats tables)
+- [x] T108 [US8] Implement query logic for rides-declining category using data-model.md Query 11
+- [x] T109 [US8] Implement period comparison logic (today vs yesterday, 7days vs previous 7days, 30days vs previous 30days) (FR-047)
+- [x] T110 [US8] Implement ≥5% threshold filtering for uptime percentage changes (FR-048)
+- [x] T111 [US8] Implement sorting by improvement percentage (FR-049) and decline percentage (FR-050)
+- [x] T112 [US8] Add park filter application to trends endpoint (Disney & Universal / All Parks) (FR-053)
 - [ ] T113 [US8] Create frontend/js/components/trends.js to fetch and render all four trend tables
 - [ ] T114 [US8] Implement trend table display with uptime percentage comparisons showing previous period %, current period %, and change % (FR-051, FR-052)
 

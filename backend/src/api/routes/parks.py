@@ -139,7 +139,7 @@ def get_park_details(park_id: int):
             stats_repo = StatsRepository(conn)
 
             # Get park basic info
-            park = park_repo.get_park_by_id(park_id)
+            park = park_repo.get_by_id(park_id)
             if not park:
                 return jsonify({
                     "success": False,
@@ -162,12 +162,12 @@ def get_park_details(park_id: int):
             response = {
                 "success": True,
                 "park": {
-                    "park_id": park['park_id'],
-                    "name": park['name'],
-                    "location": f"{park['city']}, {park['state_province']}",
-                    "operator": park['operator'],
-                    "timezone": park['timezone'],
-                    "queue_times_url": f"https://queue-times.com/parks/{park_id}"
+                    "park_id": park.park_id,
+                    "name": park.name,
+                    "location": park.location,
+                    "operator": park.operator,
+                    "timezone": park.timezone,
+                    "queue_times_url": park.queue_times_url
                 },
                 "tier_distribution": tier_distribution,
                 "operating_sessions": operating_sessions,

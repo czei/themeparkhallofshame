@@ -645,3 +645,506 @@ footer a:hover {
         padding: 0.25rem 0.5rem;
     }
 }
+
+/* Park Details Modal */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1rem;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 12px;
+    max-width: 800px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+    padding: 1.5rem 2rem;
+    border-bottom: 1px solid #e0e0e0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    background: white;
+    z-index: 10;
+}
+
+.modal-header h2 {
+    margin: 0;
+    color: #2c3e50;
+    font-size: 1.75rem;
+}
+
+.modal-close-btn {
+    background: none;
+    border: none;
+    font-size: 2rem;
+    color: #7f8c8d;
+    cursor: pointer;
+    padding: 0;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.modal-close-btn:hover {
+    background-color: #f5f5f5;
+    color: #2c3e50;
+}
+
+.modal-body {
+    padding: 2rem;
+}
+
+/* Park Details Content */
+.park-details-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.park-info-section h3,
+.current-status-section h3,
+.tier-distribution-section h3,
+.operating-sessions-section h3 {
+    color: #2c3e50;
+    margin-bottom: 1rem;
+    font-size: 1.25rem;
+}
+
+.section-description {
+    color: #7f8c8d;
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+}
+
+/* Park Info Grid */
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+}
+
+.info-item {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.info-label {
+    font-weight: 600;
+    color: #555;
+}
+
+.info-value {
+    color: #333;
+}
+
+.external-link {
+    color: #3498db;
+    text-decoration: none;
+}
+
+.external-link:hover {
+    text-decoration: underline;
+}
+
+/* Current Status Grid */
+.status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+}
+
+.status-card {
+    background: #f8f9fa;
+    padding: 1rem;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    border-left: 4px solid #3498db;
+}
+
+.status-card.status-running {
+    border-left-color: #27ae60;
+    background: #f0f9f4;
+}
+
+.status-card.status-down {
+    border-left-color: #e74c3c;
+    background: #fef5f5;
+}
+
+.status-label {
+    font-size: 0.85rem;
+    color: #7f8c8d;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #2c3e50;
+}
+
+/* Tier Distribution */
+.tier-breakdown {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.tier-item {
+    padding: 1rem;
+    border-radius: 8px;
+    background: #f8f9fa;
+}
+
+.tier-item.tier-1 {
+    border-left: 4px solid #e74c3c;
+}
+
+.tier-item.tier-2 {
+    border-left: 4px solid #f39c12;
+}
+
+.tier-item.tier-3 {
+    border-left: 4px solid #27ae60;
+}
+
+.tier-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.tier-badge {
+    font-weight: 600;
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+.tier-item.tier-1 .tier-badge {
+    background: #e74c3c;
+    color: white;
+}
+
+.tier-item.tier-2 .tier-badge {
+    background: #f39c12;
+    color: white;
+}
+
+.tier-item.tier-3 .tier-badge {
+    background: #27ae60;
+    color: white;
+}
+
+.tier-count {
+    font-weight: 600;
+    color: #2c3e50;
+}
+
+.tier-description {
+    font-size: 0.9rem;
+    color: #7f8c8d;
+    margin-bottom: 0.75rem;
+}
+
+.tier-bar {
+    width: 100%;
+    height: 8px;
+    background: #e0e0e0;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.tier-fill {
+    height: 100%;
+    background: #3498db;
+    transition: width 0.3s;
+}
+
+.tier-item.tier-1 .tier-fill {
+    background: #e74c3c;
+}
+
+.tier-item.tier-2 .tier-fill {
+    background: #f39c12;
+}
+
+.tier-item.tier-3 .tier-fill {
+    background: #27ae60;
+}
+
+/* Operating Sessions */
+.sessions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.session-item {
+    background: #f8f9fa;
+    padding: 1rem;
+    border-radius: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+
+.session-date {
+    font-weight: 600;
+    color: #2c3e50;
+    min-width: 100px;
+}
+
+.session-times {
+    flex: 1;
+    color: #555;
+}
+
+.session-duration {
+    color: #7f8c8d;
+    font-size: 0.9rem;
+}
+
+.empty-message {
+    color: #7f8c8d;
+    font-style: italic;
+}
+
+/* Park Name Cell with Details Button */
+.park-name-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.park-name {
+    font-weight: 500;
+    color: #2c3e50;
+}
+
+.park-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.park-details-btn {
+    background-color: #3498db;
+    color: white;
+    border: none;
+    padding: 0.35rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: background-color 0.2s;
+}
+
+.park-details-btn:hover {
+    background-color: #2980b9;
+}
+
+.park-external-link {
+    color: #7f8c8d;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    transition: color 0.2s;
+}
+
+.park-external-link:hover {
+    color: #3498db;
+}
+
+/* About Modal Specific Styles */
+.about-modal {
+    max-width: 900px;
+}
+
+.about-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.about-section {
+    border-bottom: 1px solid #e0e0e0;
+    padding-bottom: 1.5rem;
+}
+
+.about-section:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.about-section h3 {
+    color: #2c3e50;
+    margin-bottom: 1rem;
+    font-size: 1.4rem;
+}
+
+.about-section h4 {
+    color: #34495e;
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+    font-size: 1.1rem;
+}
+
+.about-section p {
+    color: #555;
+    line-height: 1.8;
+    margin-bottom: 1rem;
+}
+
+.about-section ul {
+    margin-left: 2rem;
+    margin-bottom: 1rem;
+}
+
+.about-section li {
+    color: #555;
+    line-height: 1.8;
+    margin-bottom: 0.5rem;
+}
+
+.about-section strong {
+    color: #2c3e50;
+    font-weight: 600;
+}
+
+.feature-description {
+    background: #f8f9fa;
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    border-left: 4px solid #3498db;
+}
+
+.feature-description h4 {
+    margin-top: 0;
+    color: #2c3e50;
+}
+
+.feature-description p {
+    margin-bottom: 0;
+}
+
+/* Tier explanation section */
+.tier-explanation {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.tier-item-explanation {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem;
+    background: #f8f9fa;
+    border-radius: 6px;
+}
+
+.tier-badge-example {
+    font-weight: 600;
+    padding: 0.35rem 0.85rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: white;
+    min-width: 70px;
+    text-align: center;
+}
+
+.tier-1-badge {
+    background: #e74c3c;
+}
+
+.tier-2-badge {
+    background: #f39c12;
+}
+
+.tier-3-badge {
+    background: #27ae60;
+}
+
+.tier-text {
+    color: #555;
+    flex: 1;
+}
+
+.tier-note {
+    font-size: 0.9rem;
+    color: #7f8c8d;
+    font-style: italic;
+}
+
+/* Disclaimer section */
+.disclaimer {
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 8px;
+    padding: 1.5rem;
+}
+
+.disclaimer h3 {
+    color: #856404;
+}
+
+.disclaimer p {
+    color: #856404;
+    margin-bottom: 0.75rem;
+}
+
+.disclaimer p:last-child {
+    margin-bottom: 0;
+}
+
+/* Footer */
+.about-footer {
+    text-align: center;
+    font-size: 1.1rem;
+    color: #7f8c8d;
+    font-style: italic;
+    margin-top: 1rem;
+}
+
+/* Responsive adjustments for About modal */
+@media (max-width: 768px) {
+    .about-modal {
+        max-width: 100%;
+    }
+
+    .tier-item-explanation {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .tier-badge-example {
+        min-width: auto;
+    }
+}

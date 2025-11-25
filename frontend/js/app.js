@@ -16,6 +16,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize global filter UI
     initGlobalFilter();
 
+    // Initialize About modal
+    const aboutModal = new AboutModal();
+    const aboutLink = document.getElementById('about-link');
+    if (aboutLink) {
+        aboutLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            aboutModal.open();
+        });
+    }
+
     navTabs.forEach(tab => {
         tab.addEventListener('click', () => {
             // Remove active class from all tabs

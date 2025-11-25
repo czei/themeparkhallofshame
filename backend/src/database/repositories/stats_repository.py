@@ -1339,3 +1339,847 @@ class StatsRepository:
         })
 
         return [dict(row._mapping) for row in result.fetchall()]
+
+    # ========================================
+    # Trend Analysis Methods (User Story 8)
+    # ========================================
+
+    def get_parks_improving(
+        self,
+        period: str = '7days',
+        park_filter: str = 'all-parks',
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get parks showing ≥5% uptime improvement (Query 8).
+
+        Args:
+            period: 'today', '7days', or '30days'
+            park_filter: 'disney-universal' or 'all-parks'
+            limit: Maximum number of results
+
+        Returns:
+            List of parks with improvement metrics
+        """
+        from datetime import datetime, timedelta
+
+        today = datetime.now().date()
+
+        if period == 'today':
+            # Daily comparison: today vs yesterday
+            current_date = today
+            previous_date = today - timedelta(days=1)
+
+            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
+
+            query = text(f"""
+                WITH current_period AS (
+                    SELECT
+                        pds.park_id,
+                        p.park_name,
+                        p.queue_times_slug,
+                        pds.uptime_percentage,
+                        pds.total_downtime_minutes
+                    FROM park_daily_stats pds
+                    JOIN parks p ON pds.park_id = p.park_id
+                    WHERE pds.stat_date = :current_date
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                ),
+                previous_period AS (
+                    SELECT
+                        pds.park_id,
+                        pds.uptime_percentage,
+                        pds.total_downtime_minutes
+                    FROM park_daily_stats pds
+                    JOIN parks p ON pds.park_id = p.park_id
+                    WHERE pds.stat_date = :previous_date
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                )
+                SELECT
+                    cp.park_id,
+                    cp.park_name,
+                    cp.uptime_percentage AS current_uptime,
+                    pp.uptime_percentage AS previous_uptime,
+                    (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
+                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
+                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
+                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                FROM current_period cp
+                JOIN previous_period pp ON cp.park_id = pp.park_id
+                WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
+                ORDER BY improvement_percentage DESC
+                LIMIT :limit
+            """)
+
+            result = self.conn.execute(query, {
+                "current_date": current_date,
+                "previous_date": previous_date,
+                "limit": limit
+            })
+
+        elif period == '7days':
+            # Weekly comparison: current week vs previous week
+            current_week = today.isocalendar()[1]
+            current_year = today.year
+
+            prev_week_date = today - timedelta(weeks=1)
+            prev_week = prev_week_date.isocalendar()[1]
+            prev_year = prev_week_date.year
+
+            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
+
+            query = text(f"""
+                WITH current_period AS (
+                    SELECT
+                        pws.park_id,
+                        p.park_name,
+                        p.queue_times_slug,
+                        pws.uptime_percentage,
+                        pws.total_downtime_minutes
+                    FROM park_weekly_stats pws
+                    JOIN parks p ON pws.park_id = p.park_id
+                    WHERE pws.year = :current_year
+                        AND pws.week_number = :current_week
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                ),
+                previous_period AS (
+                    SELECT
+                        pws.park_id,
+                        pws.uptime_percentage,
+                        pws.total_downtime_minutes
+                    FROM park_weekly_stats pws
+                    JOIN parks p ON pws.park_id = p.park_id
+                    WHERE pws.year = :prev_year
+                        AND pws.week_number = :prev_week
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                )
+                SELECT
+                    cp.park_id,
+                    cp.park_name,
+                    cp.uptime_percentage AS current_uptime,
+                    pp.uptime_percentage AS previous_uptime,
+                    (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
+                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
+                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
+                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                FROM current_period cp
+                JOIN previous_period pp ON cp.park_id = pp.park_id
+                WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
+                ORDER BY improvement_percentage DESC
+                LIMIT :limit
+            """)
+
+            result = self.conn.execute(query, {
+                "current_year": current_year,
+                "current_week": current_week,
+                "prev_year": prev_year,
+                "prev_week": prev_week,
+                "limit": limit
+            })
+
+        elif period == '30days':
+            # Monthly comparison: current month vs previous month
+            current_month = today.month
+            current_year = today.year
+
+            prev_month_date = today - timedelta(days=30)
+            prev_month = prev_month_date.month
+            prev_year = prev_month_date.year
+
+            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
+
+            query = text(f"""
+                WITH current_period AS (
+                    SELECT
+                        pms.park_id,
+                        p.park_name,
+                        p.queue_times_slug,
+                        pms.uptime_percentage,
+                        pms.total_downtime_minutes
+                    FROM park_monthly_stats pms
+                    JOIN parks p ON pms.park_id = p.park_id
+                    WHERE pms.year = :current_year
+                        AND pms.month = :current_month
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                ),
+                previous_period AS (
+                    SELECT
+                        pms.park_id,
+                        pms.uptime_percentage,
+                        pms.total_downtime_minutes
+                    FROM park_monthly_stats pms
+                    JOIN parks p ON pms.park_id = p.park_id
+                    WHERE pms.year = :prev_year
+                        AND pms.month = :prev_month
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                )
+                SELECT
+                    cp.park_id,
+                    cp.park_name,
+                    cp.uptime_percentage AS current_uptime,
+                    pp.uptime_percentage AS previous_uptime,
+                    (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
+                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
+                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
+                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                FROM current_period cp
+                JOIN previous_period pp ON cp.park_id = pp.park_id
+                WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
+                ORDER BY improvement_percentage DESC
+                LIMIT :limit
+            """)
+
+            result = self.conn.execute(query, {
+                "current_year": current_year,
+                "current_month": current_month,
+                "prev_year": prev_year,
+                "prev_month": prev_month,
+                "limit": limit
+            })
+
+        return [dict(row._mapping) for row in result.fetchall()]
+
+    def get_parks_declining(
+        self,
+        period: str = '7days',
+        park_filter: str = 'all-parks',
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get parks showing ≥5% uptime decline (Query 9).
+
+        Args:
+            period: 'today', '7days', or '30days'
+            park_filter: 'disney-universal' or 'all-parks'
+            limit: Maximum number of results
+
+        Returns:
+            List of parks with decline metrics
+        """
+        from datetime import datetime, timedelta
+
+        today = datetime.now().date()
+
+        if period == 'today':
+            # Daily comparison: today vs yesterday
+            current_date = today
+            previous_date = today - timedelta(days=1)
+
+            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
+
+            query = text(f"""
+                WITH current_period AS (
+                    SELECT
+                        pds.park_id,
+                        p.park_name,
+                        p.queue_times_slug,
+                        pds.uptime_percentage,
+                        pds.total_downtime_minutes
+                    FROM park_daily_stats pds
+                    JOIN parks p ON pds.park_id = p.park_id
+                    WHERE pds.stat_date = :current_date
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                ),
+                previous_period AS (
+                    SELECT
+                        pds.park_id,
+                        pds.uptime_percentage,
+                        pds.total_downtime_minutes
+                    FROM park_daily_stats pds
+                    JOIN parks p ON pds.park_id = p.park_id
+                    WHERE pds.stat_date = :previous_date
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                )
+                SELECT
+                    cp.park_id,
+                    cp.park_name,
+                    cp.uptime_percentage AS current_uptime,
+                    pp.uptime_percentage AS previous_uptime,
+                    (pp.uptime_percentage - cp.uptime_percentage) AS decline_percentage,
+                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
+                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
+                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                FROM current_period cp
+                JOIN previous_period pp ON cp.park_id = pp.park_id
+                WHERE (pp.uptime_percentage - cp.uptime_percentage) >= 5.0
+                ORDER BY decline_percentage DESC
+                LIMIT :limit
+            """)
+
+            result = self.conn.execute(query, {
+                "current_date": current_date,
+                "previous_date": previous_date,
+                "limit": limit
+            })
+
+        elif period == '7days':
+            # Weekly comparison: current week vs previous week
+            current_week = today.isocalendar()[1]
+            current_year = today.year
+
+            prev_week_date = today - timedelta(weeks=1)
+            prev_week = prev_week_date.isocalendar()[1]
+            prev_year = prev_week_date.year
+
+            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
+
+            query = text(f"""
+                WITH current_period AS (
+                    SELECT
+                        pws.park_id,
+                        p.park_name,
+                        p.queue_times_slug,
+                        pws.uptime_percentage,
+                        pws.total_downtime_minutes
+                    FROM park_weekly_stats pws
+                    JOIN parks p ON pws.park_id = p.park_id
+                    WHERE pws.year = :current_year
+                        AND pws.week_number = :current_week
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                ),
+                previous_period AS (
+                    SELECT
+                        pws.park_id,
+                        pws.uptime_percentage,
+                        pws.total_downtime_minutes
+                    FROM park_weekly_stats pws
+                    JOIN parks p ON pws.park_id = p.park_id
+                    WHERE pws.year = :prev_year
+                        AND pws.week_number = :prev_week
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                )
+                SELECT
+                    cp.park_id,
+                    cp.park_name,
+                    cp.uptime_percentage AS current_uptime,
+                    pp.uptime_percentage AS previous_uptime,
+                    (pp.uptime_percentage - cp.uptime_percentage) AS decline_percentage,
+                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
+                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
+                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                FROM current_period cp
+                JOIN previous_period pp ON cp.park_id = pp.park_id
+                WHERE (pp.uptime_percentage - cp.uptime_percentage) >= 5.0
+                ORDER BY decline_percentage DESC
+                LIMIT :limit
+            """)
+
+            result = self.conn.execute(query, {
+                "current_year": current_year,
+                "current_week": current_week,
+                "prev_year": prev_year,
+                "prev_week": prev_week,
+                "limit": limit
+            })
+
+        elif period == '30days':
+            # Monthly comparison: current month vs previous month
+            current_month = today.month
+            current_year = today.year
+
+            prev_month_date = today - timedelta(days=30)
+            prev_month = prev_month_date.month
+            prev_year = prev_month_date.year
+
+            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
+
+            query = text(f"""
+                WITH current_period AS (
+                    SELECT
+                        pms.park_id,
+                        p.park_name,
+                        p.queue_times_slug,
+                        pms.uptime_percentage,
+                        pms.total_downtime_minutes
+                    FROM park_monthly_stats pms
+                    JOIN parks p ON pms.park_id = p.park_id
+                    WHERE pms.year = :current_year
+                        AND pms.month = :current_month
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                ),
+                previous_period AS (
+                    SELECT
+                        pms.park_id,
+                        pms.uptime_percentage,
+                        pms.total_downtime_minutes
+                    FROM park_monthly_stats pms
+                    JOIN parks p ON pms.park_id = p.park_id
+                    WHERE pms.year = :prev_year
+                        AND pms.month = :prev_month
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                )
+                SELECT
+                    cp.park_id,
+                    cp.park_name,
+                    cp.uptime_percentage AS current_uptime,
+                    pp.uptime_percentage AS previous_uptime,
+                    (pp.uptime_percentage - cp.uptime_percentage) AS decline_percentage,
+                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
+                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
+                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                FROM current_period cp
+                JOIN previous_period pp ON cp.park_id = pp.park_id
+                WHERE (pp.uptime_percentage - cp.uptime_percentage) >= 5.0
+                ORDER BY decline_percentage DESC
+                LIMIT :limit
+            """)
+
+            result = self.conn.execute(query, {
+                "current_year": current_year,
+                "current_month": current_month,
+                "prev_year": prev_year,
+                "prev_month": prev_month,
+                "limit": limit
+            })
+
+        return [dict(row._mapping) for row in result.fetchall()]
+
+    def get_rides_improving(
+        self,
+        period: str = '7days',
+        park_filter: str = 'all-parks',
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get rides showing ≥5% uptime improvement (Query 10).
+
+        Args:
+            period: 'today', '7days', or '30days'
+            park_filter: 'disney-universal' or 'all-parks'
+            limit: Maximum number of results
+
+        Returns:
+            List of rides with improvement metrics
+        """
+        from datetime import datetime, timedelta
+
+        today = datetime.now().date()
+
+        if period == 'today':
+            # Daily comparison: today vs yesterday
+            current_date = today
+            previous_date = today - timedelta(days=1)
+
+            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
+
+            query = text(f"""
+                WITH current_period AS (
+                    SELECT
+                        rds.ride_id,
+                        r.ride_name,
+                        p.park_name,
+                        r.queue_times_slug,
+                        rds.uptime_percentage,
+                        rds.total_downtime_minutes
+                    FROM ride_daily_stats rds
+                    JOIN rides r ON rds.ride_id = r.ride_id
+                    JOIN parks p ON r.park_id = p.park_id
+                    WHERE rds.stat_date = :current_date
+                        AND r.is_active = TRUE
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                ),
+                previous_period AS (
+                    SELECT
+                        rds.ride_id,
+                        rds.uptime_percentage,
+                        rds.total_downtime_minutes
+                    FROM ride_daily_stats rds
+                    JOIN rides r ON rds.ride_id = r.ride_id
+                    JOIN parks p ON r.park_id = p.park_id
+                    WHERE rds.stat_date = :previous_date
+                        AND r.is_active = TRUE
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                )
+                SELECT
+                    cp.ride_id,
+                    cp.ride_name,
+                    cp.park_name,
+                    cp.uptime_percentage AS current_uptime,
+                    pp.uptime_percentage AS previous_uptime,
+                    (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
+                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
+                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
+                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                FROM current_period cp
+                JOIN previous_period pp ON cp.ride_id = pp.ride_id
+                WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
+                ORDER BY improvement_percentage DESC
+                LIMIT :limit
+            """)
+
+            result = self.conn.execute(query, {
+                "current_date": current_date,
+                "previous_date": previous_date,
+                "limit": limit
+            })
+
+        elif period == '7days':
+            # Weekly comparison: current week vs previous week
+            current_week = today.isocalendar()[1]
+            current_year = today.year
+
+            prev_week_date = today - timedelta(weeks=1)
+            prev_week = prev_week_date.isocalendar()[1]
+            prev_year = prev_week_date.year
+
+            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
+
+            query = text(f"""
+                WITH current_period AS (
+                    SELECT
+                        rws.ride_id,
+                        r.ride_name,
+                        p.park_name,
+                        r.queue_times_slug,
+                        rws.uptime_percentage,
+                        rws.total_downtime_minutes
+                    FROM ride_weekly_stats rws
+                    JOIN rides r ON rws.ride_id = r.ride_id
+                    JOIN parks p ON r.park_id = p.park_id
+                    WHERE rws.year = :current_year
+                        AND rws.week_number = :current_week
+                        AND r.is_active = TRUE
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                ),
+                previous_period AS (
+                    SELECT
+                        rws.ride_id,
+                        rws.uptime_percentage,
+                        rws.total_downtime_minutes
+                    FROM ride_weekly_stats rws
+                    JOIN rides r ON rws.ride_id = r.ride_id
+                    JOIN parks p ON r.park_id = p.park_id
+                    WHERE rws.year = :prev_year
+                        AND rws.week_number = :prev_week
+                        AND r.is_active = TRUE
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                )
+                SELECT
+                    cp.ride_id,
+                    cp.ride_name,
+                    cp.park_name,
+                    cp.uptime_percentage AS current_uptime,
+                    pp.uptime_percentage AS previous_uptime,
+                    (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
+                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
+                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
+                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                FROM current_period cp
+                JOIN previous_period pp ON cp.ride_id = pp.ride_id
+                WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
+                ORDER BY improvement_percentage DESC
+                LIMIT :limit
+            """)
+
+            result = self.conn.execute(query, {
+                "current_year": current_year,
+                "current_week": current_week,
+                "prev_year": prev_year,
+                "prev_week": prev_week,
+                "limit": limit
+            })
+
+        elif period == '30days':
+            # Monthly comparison: current month vs previous month
+            current_month = today.month
+            current_year = today.year
+
+            prev_month_date = today - timedelta(days=30)
+            prev_month = prev_month_date.month
+            prev_year = prev_month_date.year
+
+            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
+
+            query = text(f"""
+                WITH current_period AS (
+                    SELECT
+                        rms.ride_id,
+                        r.ride_name,
+                        p.park_name,
+                        r.queue_times_slug,
+                        rms.uptime_percentage,
+                        rms.total_downtime_minutes
+                    FROM ride_monthly_stats rms
+                    JOIN rides r ON rms.ride_id = r.ride_id
+                    JOIN parks p ON r.park_id = p.park_id
+                    WHERE rms.year = :current_year
+                        AND rms.month = :current_month
+                        AND r.is_active = TRUE
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                ),
+                previous_period AS (
+                    SELECT
+                        rms.ride_id,
+                        rms.uptime_percentage,
+                        rms.total_downtime_minutes
+                    FROM ride_monthly_stats rms
+                    JOIN rides r ON rms.ride_id = r.ride_id
+                    JOIN parks p ON r.park_id = p.park_id
+                    WHERE rms.year = :prev_year
+                        AND rms.month = :prev_month
+                        AND r.is_active = TRUE
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                )
+                SELECT
+                    cp.ride_id,
+                    cp.ride_name,
+                    cp.park_name,
+                    cp.uptime_percentage AS current_uptime,
+                    pp.uptime_percentage AS previous_uptime,
+                    (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
+                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
+                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
+                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                FROM current_period cp
+                JOIN previous_period pp ON cp.ride_id = pp.ride_id
+                WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
+                ORDER BY improvement_percentage DESC
+                LIMIT :limit
+            """)
+
+            result = self.conn.execute(query, {
+                "current_year": current_year,
+                "current_month": current_month,
+                "prev_year": prev_year,
+                "prev_month": prev_month,
+                "limit": limit
+            })
+
+        return [dict(row._mapping) for row in result.fetchall()]
+
+    def get_rides_declining(
+        self,
+        period: str = '7days',
+        park_filter: str = 'all-parks',
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get rides showing ≥5% uptime decline (Query 11).
+
+        Args:
+            period: 'today', '7days', or '30days'
+            park_filter: 'disney-universal' or 'all-parks'
+            limit: Maximum number of results
+
+        Returns:
+            List of rides with decline metrics
+        """
+        from datetime import datetime, timedelta
+
+        today = datetime.now().date()
+
+        if period == 'today':
+            # Daily comparison: today vs yesterday
+            current_date = today
+            previous_date = today - timedelta(days=1)
+
+            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
+
+            query = text(f"""
+                WITH current_period AS (
+                    SELECT
+                        rds.ride_id,
+                        r.ride_name,
+                        p.park_name,
+                        r.queue_times_slug,
+                        rds.uptime_percentage,
+                        rds.total_downtime_minutes
+                    FROM ride_daily_stats rds
+                    JOIN rides r ON rds.ride_id = r.ride_id
+                    JOIN parks p ON r.park_id = p.park_id
+                    WHERE rds.stat_date = :current_date
+                        AND r.is_active = TRUE
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                ),
+                previous_period AS (
+                    SELECT
+                        rds.ride_id,
+                        rds.uptime_percentage,
+                        rds.total_downtime_minutes
+                    FROM ride_daily_stats rds
+                    JOIN rides r ON rds.ride_id = r.ride_id
+                    JOIN parks p ON r.park_id = p.park_id
+                    WHERE rds.stat_date = :previous_date
+                        AND r.is_active = TRUE
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                )
+                SELECT
+                    cp.ride_id,
+                    cp.ride_name,
+                    cp.park_name,
+                    cp.uptime_percentage AS current_uptime,
+                    pp.uptime_percentage AS previous_uptime,
+                    (pp.uptime_percentage - cp.uptime_percentage) AS decline_percentage,
+                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
+                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
+                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                FROM current_period cp
+                JOIN previous_period pp ON cp.ride_id = pp.ride_id
+                WHERE (pp.uptime_percentage - cp.uptime_percentage) >= 5.0
+                ORDER BY decline_percentage DESC
+                LIMIT :limit
+            """)
+
+            result = self.conn.execute(query, {
+                "current_date": current_date,
+                "previous_date": previous_date,
+                "limit": limit
+            })
+
+        elif period == '7days':
+            # Weekly comparison: current week vs previous week
+            current_week = today.isocalendar()[1]
+            current_year = today.year
+
+            prev_week_date = today - timedelta(weeks=1)
+            prev_week = prev_week_date.isocalendar()[1]
+            prev_year = prev_week_date.year
+
+            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
+
+            query = text(f"""
+                WITH current_period AS (
+                    SELECT
+                        rws.ride_id,
+                        r.ride_name,
+                        p.park_name,
+                        r.queue_times_slug,
+                        rws.uptime_percentage,
+                        rws.total_downtime_minutes
+                    FROM ride_weekly_stats rws
+                    JOIN rides r ON rws.ride_id = r.ride_id
+                    JOIN parks p ON r.park_id = p.park_id
+                    WHERE rws.year = :current_year
+                        AND rws.week_number = :current_week
+                        AND r.is_active = TRUE
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                ),
+                previous_period AS (
+                    SELECT
+                        rws.ride_id,
+                        rws.uptime_percentage,
+                        rws.total_downtime_minutes
+                    FROM ride_weekly_stats rws
+                    JOIN rides r ON rws.ride_id = r.ride_id
+                    JOIN parks p ON r.park_id = p.park_id
+                    WHERE rws.year = :prev_year
+                        AND rws.week_number = :prev_week
+                        AND r.is_active = TRUE
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                )
+                SELECT
+                    cp.ride_id,
+                    cp.ride_name,
+                    cp.park_name,
+                    cp.uptime_percentage AS current_uptime,
+                    pp.uptime_percentage AS previous_uptime,
+                    (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
+                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
+                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
+                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                FROM current_period cp
+                JOIN previous_period pp ON cp.ride_id = pp.ride_id
+                WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
+                ORDER BY improvement_percentage DESC
+                LIMIT :limit
+            """)
+
+            result = self.conn.execute(query, {
+                "current_year": current_year,
+                "current_week": current_week,
+                "prev_year": prev_year,
+                "prev_week": prev_week,
+                "limit": limit
+            })
+
+        elif period == '30days':
+            # Monthly comparison: current month vs previous month
+            current_month = today.month
+            current_year = today.year
+
+            prev_month_date = today - timedelta(days=30)
+            prev_month = prev_month_date.month
+            prev_year = prev_month_date.year
+
+            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
+
+            query = text(f"""
+                WITH current_period AS (
+                    SELECT
+                        rms.ride_id,
+                        r.ride_name,
+                        p.park_name,
+                        r.queue_times_slug,
+                        rms.uptime_percentage,
+                        rms.total_downtime_minutes
+                    FROM ride_monthly_stats rms
+                    JOIN rides r ON rms.ride_id = r.ride_id
+                    JOIN parks p ON r.park_id = p.park_id
+                    WHERE rms.year = :current_year
+                        AND rms.month = :current_month
+                        AND r.is_active = TRUE
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                ),
+                previous_period AS (
+                    SELECT
+                        rms.ride_id,
+                        rms.uptime_percentage,
+                        rms.total_downtime_minutes
+                    FROM ride_monthly_stats rms
+                    JOIN rides r ON rms.ride_id = r.ride_id
+                    JOIN parks p ON r.park_id = p.park_id
+                    WHERE rms.year = :prev_year
+                        AND rms.month = :prev_month
+                        AND r.is_active = TRUE
+                        AND p.is_active = TRUE
+                        {filter_clause}
+                )
+                SELECT
+                    cp.ride_id,
+                    cp.ride_name,
+                    cp.park_name,
+                    cp.uptime_percentage AS current_uptime,
+                    pp.uptime_percentage AS previous_uptime,
+                    (pp.uptime_percentage - cp.uptime_percentage) AS decline_percentage,
+                    cp.total_downtime_minutes / 60.0 AS current_downtime_hours,
+                    pp.total_downtime_minutes / 60.0 AS previous_downtime_hours,
+                    CONCAT('https://queue-times.com/parks/', cp.queue_times_slug) AS queue_times_url
+                FROM current_period cp
+                JOIN previous_period pp ON cp.ride_id = pp.ride_id
+                WHERE (pp.uptime_percentage - cp.uptime_percentage) >= 5.0
+                ORDER BY decline_percentage DESC
+                LIMIT :limit
+            """)
+
+            result = self.conn.execute(query, {
+                "current_year": current_year,
+                "current_month": current_month,
+                "prev_year": prev_year,
+                "prev_month": prev_month,
+                "limit": limit
+            })
+
+        return [dict(row._mapping) for row in result.fetchall()]

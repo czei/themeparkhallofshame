@@ -898,6 +898,63 @@ def test_rides_waittimes_disney_universal_filter(client, comprehensive_test_data
 
 
 # ============================================================================
+# TEST: Park Details Endpoint
+# ============================================================================
+
+def test_park_details_success(client, comprehensive_test_data):
+    """
+    Test GET /api/parks/{parkId}/details returns park information.
+
+    Validates:
+    - Park basic information
+    - Tier distribution (count of Tier 1/2/3 rides)
+    - Current status (rides open/closed)
+    - Operating sessions (if available)
+    """
+    # Get Magic Kingdom (park_id is assigned by comprehensive_test_data fixture)
+    # We'll use park_id=1 which should be the first park created
+    response = client.get('/api/parks/1/details')
+
+    assert response.status_code == 200
+    data = response.get_json()
+
+    assert data['success'] is True
+
+    # Verify park information
+    assert 'park' in data
+    park = data['park']
+    assert 'park_id' in park
+    assert 'name' in park
+    assert 'location' in park
+    assert 'queue_times_url' in park
+
+    # Verify tier distribution
+    assert 'tier_distribution' in data
+    tier_dist = data['tier_distribution']
+    assert 'tier_1_count' in tier_dist or 'total_rides' in tier_dist
+
+    # Verify current status
+    assert 'current_status' in data
+    status = data['current_status']
+    assert 'total_rides' in status
+
+    # Verify operating sessions (may be empty if no data)
+    assert 'operating_sessions' in data
+
+    print(f"\n✓ Verified park details for park_id={park['park_id']}")
+
+
+def test_park_details_not_found(client, comprehensive_test_data):
+    """Test that requesting details for non-existent park returns 404."""
+    response = client.get('/api/parks/99999/details')
+
+    assert response.status_code == 404
+    data = response.get_json()
+    assert data['success'] is False
+    assert 'error' in data
+
+
+# ============================================================================
 # TEST: Error Cases and Edge Conditions
 # ============================================================================
 
@@ -1061,3 +1118,709 @@ def test_comprehensive_suite_summary(comprehensive_test_data):
 
     print(summary)
     assert True  # Always pass - this is just a summary
+
+
+# ============================================================================
+# FIXTURES - Trends Test Data with >5% Changes
+# ============================================================================
+
+@pytest.fixture
+def trends_test_data(mysql_connection):
+    """
+    Create test dataset specifically for trends testing with >5% uptime changes.
+
+    Creates:
+    - 6 parks with varying uptime trends
+    - 30 rides with varying uptime trends
+    - Parks 11-12: Improving >5%
+    - Parks 13-14: Declining >5%
+    - Parks 15-16: No significant change (<5%)
+    - Similar pattern for rides
+    """
+    conn = mysql_connection
+
+    # Clean up any existing trends test data (queue_times_id 8000+)
+    conn.execute(text("DELETE FROM ride_status_snapshots WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 80000)"))
+    conn.execute(text("DELETE FROM ride_status_changes WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 80000)"))
+    conn.execute(text("DELETE FROM ride_daily_stats WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 80000)"))
+    conn.execute(text("DELETE FROM ride_weekly_stats WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 80000)"))
+    conn.execute(text("DELETE FROM ride_monthly_stats WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 80000)"))
+    conn.execute(text("DELETE FROM park_activity_snapshots WHERE park_id IN (SELECT park_id FROM parks WHERE queue_times_id >= 8000)"))
+    conn.execute(text("DELETE FROM park_daily_stats WHERE park_id IN (SELECT park_id FROM parks WHERE queue_times_id >= 8000)"))
+    conn.execute(text("DELETE FROM park_weekly_stats WHERE park_id IN (SELECT park_id FROM parks WHERE queue_times_id >= 8000)"))
+    conn.execute(text("DELETE FROM park_monthly_stats WHERE park_id IN (SELECT park_id FROM parks WHERE queue_times_id >= 8000)"))
+    conn.execute(text("DELETE FROM ride_classifications WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 80000)"))
+    conn.execute(text("DELETE FROM rides WHERE queue_times_id >= 80000"))
+    conn.execute(text("DELETE FROM parks WHERE queue_times_id >= 8000"))
+    conn.commit()
+
+    # === CREATE 6 PARKS WITH DIFFERENT TREND PATTERNS ===
+    parks_data = [
+        # Parks 11-12: Improving (Disney/Universal)
+        (11, 8011, 'Test Park Improving 1', 'Orlando', 'FL', 'US', 'America/New_York', 'Disney', True, False, 'magic-kingdom', True),
+        (12, 8012, 'Test Park Improving 2', 'Orlando', 'FL', 'US', 'America/New_York', 'Universal', False, True, 'universal-studios', True),
+        # Parks 13-14: Declining (Disney/Universal)
+        (13, 8013, 'Test Park Declining 1', 'Anaheim', 'CA', 'US', 'America/Los_Angeles', 'Disney', True, False, 'disneyland', True),
+        (14, 8014, 'Test Park Declining 2', 'Orlando', 'FL', 'US', 'America/New_York', 'Universal', False, True, 'islands-adventure', True),
+        # Parks 15-16: No significant change (Other parks)
+        (15, 8015, 'Test Park Stable 1', 'Tampa', 'FL', 'US', 'America/New_York', 'SeaWorld', False, False, 'seaworld', True),
+        (16, 8016, 'Test Park Stable 2', 'Tampa', 'FL', 'US', 'America/New_York', 'Busch Gardens', False, False, 'busch-gardens', True),
+    ]
+
+    for park in parks_data:
+        conn.execute(text("""
+            INSERT INTO parks (park_id, queue_times_id, name, city, state_province, country, timezone, operator, is_disney, is_universal, queue_times_slug, is_active)
+            VALUES (:park_id, :qt_id, :name, :city, :state, :country, :tz, :operator, :is_disney, :is_universal, :slug, :is_active)
+        """), {
+            'park_id': park[0], 'qt_id': park[1], 'name': park[2], 'city': park[3],
+            'state': park[4], 'country': park[5], 'tz': park[6], 'operator': park[7],
+            'is_disney': park[8], 'is_universal': park[9], 'slug': park[10], 'is_active': park[11]
+        })
+
+    conn.commit()
+
+    # === CREATE PARK STATS WITH >5% CHANGES ===
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    current_year = datetime.now().year
+    current_week = datetime.now().isocalendar()[1]
+    prev_week_date = datetime.now() - timedelta(weeks=1)
+    prev_week = prev_week_date.isocalendar()[1]
+    prev_week_year = prev_week_date.year
+    current_week_start = date.fromisocalendar(current_year, current_week, 1)
+    prev_week_start = date.fromisocalendar(prev_week_year, prev_week, 1)
+    current_month = datetime.now().month
+    prev_month = current_month - 1 if current_month > 1 else 12
+    prev_month_year = current_year if current_month > 1 else current_year - 1
+
+    # Park 11-12: IMPROVING by >5% (previous uptime was lower)
+    # Park 11: 90% today vs 80% yesterday = +10% improvement
+    for park_id in [11, 12]:
+        improvement = 10.0 if park_id == 11 else 8.0
+
+        # Daily stats
+        conn.execute(text("""
+            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_minutes, uptime_percentage)
+            VALUES (:park_id, :stat_date, :downtime, :uptime)
+        """), {
+            'park_id': park_id,
+            'stat_date': today,
+            'downtime': 60,  # 1 hour
+            'uptime': 90.0
+        })
+
+        conn.execute(text("""
+            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_minutes, uptime_percentage)
+            VALUES (:park_id, :stat_date, :downtime, :uptime)
+        """), {
+            'park_id': park_id,
+            'stat_date': yesterday,
+            'downtime': 120,  # 2 hours
+            'uptime': 90.0 - improvement
+        })
+
+        # Weekly stats
+        conn.execute(text("""
+            INSERT INTO park_weekly_stats (park_id, year, week_number, week_start_date, total_downtime_minutes, uptime_percentage)
+            VALUES (:park_id, :year, :week, :week_start, :downtime, :uptime)
+        """), {
+            'park_id': park_id,
+            'year': current_year,
+            'week': current_week,
+            'week_start': current_week_start,
+            'downtime': 420,  # 7 hours for the week
+            'uptime': 90.0
+        })
+
+        conn.execute(text("""
+            INSERT INTO park_weekly_stats (park_id, year, week_number, week_start_date, total_downtime_minutes, uptime_percentage)
+            VALUES (:park_id, :year, :week, :week_start, :downtime, :uptime)
+        """), {
+            'park_id': park_id,
+            'year': prev_week_year,
+            'week': prev_week,
+            'week_start': prev_week_start,
+            'downtime': 840,
+            'uptime': 90.0 - improvement
+        })
+
+        # Monthly stats
+        conn.execute(text("""
+            INSERT INTO park_monthly_stats (park_id, year, month, total_downtime_minutes, uptime_percentage)
+            VALUES (:park_id, :year, :month, :downtime, :uptime)
+        """), {
+            'park_id': park_id,
+            'year': current_year,
+            'month': current_month,
+            'downtime': 1800,  # 30 hours for the month
+            'uptime': 90.0
+        })
+
+        conn.execute(text("""
+            INSERT INTO park_monthly_stats (park_id, year, month, total_downtime_minutes, uptime_percentage)
+            VALUES (:park_id, :year, :month, :downtime, :uptime)
+        """), {
+            'park_id': park_id,
+            'year': prev_month_year,
+            'month': prev_month,
+            'downtime': 3600,
+            'uptime': 90.0 - improvement
+        })
+
+    # Park 13-14: DECLINING by >5% (previous uptime was higher)
+    # Park 13: 75% today vs 85% yesterday = -10% decline
+    for park_id in [13, 14]:
+        decline = 10.0 if park_id == 13 else 7.0
+
+        # Daily stats
+        conn.execute(text("""
+            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_minutes, uptime_percentage)
+            VALUES (:park_id, :stat_date, :downtime, :uptime)
+        """), {
+            'park_id': park_id,
+            'stat_date': today,
+            'downtime': 150,  # 2.5 hours
+            'uptime': 75.0
+        })
+
+        conn.execute(text("""
+            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_minutes, uptime_percentage)
+            VALUES (:park_id, :stat_date, :downtime, :uptime)
+        """), {
+            'park_id': park_id,
+            'stat_date': yesterday,
+            'downtime': 90,  # 1.5 hours
+            'uptime': 75.0 + decline
+        })
+
+        # Weekly stats
+        conn.execute(text("""
+            INSERT INTO park_weekly_stats (park_id, year, week_number, week_start_date, total_downtime_minutes, uptime_percentage)
+            VALUES (:park_id, :year, :week, :week_start, :downtime, :uptime)
+        """), {
+            'park_id': park_id,
+            'year': current_year,
+            'week': current_week,
+            'week_start': current_week_start,
+            'downtime': 1050,  # 17.5 hours
+            'uptime': 75.0
+        })
+
+        conn.execute(text("""
+            INSERT INTO park_weekly_stats (park_id, year, week_number, week_start_date, total_downtime_minutes, uptime_percentage)
+            VALUES (:park_id, :year, :week, :week_start, :downtime, :uptime)
+        """), {
+            'park_id': park_id,
+            'year': prev_week_year,
+            'week': prev_week,
+            'week_start': prev_week_start,
+            'downtime': 630,
+            'uptime': 75.0 + decline
+        })
+
+        # Monthly stats
+        conn.execute(text("""
+            INSERT INTO park_monthly_stats (park_id, year, month, total_downtime_minutes, uptime_percentage)
+            VALUES (:park_id, :year, :month, :downtime, :uptime)
+        """), {
+            'park_id': park_id,
+            'year': current_year,
+            'month': current_month,
+            'downtime': 4500,  # 75 hours
+            'uptime': 75.0
+        })
+
+        conn.execute(text("""
+            INSERT INTO park_monthly_stats (park_id, year, month, total_downtime_minutes, uptime_percentage)
+            VALUES (:park_id, :year, :month, :downtime, :uptime)
+        """), {
+            'park_id': park_id,
+            'year': prev_month_year,
+            'month': prev_month,
+            'downtime': 2700,
+            'uptime': 75.0 + decline
+        })
+
+    # Park 15-16: STABLE - changes <5% (should NOT appear in trends)
+    # Park 15: 80% today vs 82% yesterday = -2% decline (below threshold)
+    for park_id in [15, 16]:
+        small_change = 2.0
+
+        # Daily stats
+        conn.execute(text("""
+            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_minutes, uptime_percentage)
+            VALUES (:park_id, :stat_date, :downtime, :uptime)
+        """), {
+            'park_id': park_id,
+            'stat_date': today,
+            'downtime': 120,
+            'uptime': 80.0
+        })
+
+        conn.execute(text("""
+            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_minutes, uptime_percentage)
+            VALUES (:park_id, :stat_date, :downtime, :uptime)
+        """), {
+            'park_id': park_id,
+            'stat_date': yesterday,
+            'downtime': 108,
+            'uptime': 82.0
+        })
+
+    # === CREATE RIDES WITH TREND PATTERNS ===
+    # 5 rides per park = 30 rides total
+    ride_id = 201
+    for park_id in range(11, 17):
+        for i in range(5):
+            conn.execute(text("""
+                INSERT INTO rides (ride_id, queue_times_id, park_id, name, tier, queue_times_slug, is_active)
+                VALUES (:ride_id, :qt_id, :park_id, :name, :tier, :slug, TRUE)
+            """), {
+                'ride_id': ride_id,
+                'qt_id': 80000 + ride_id,
+                'park_id': park_id,
+                'name': f'TrendTestRide_{park_id}_{i}',
+                'tier': 2,
+                'slug': f'ride-{ride_id}'
+            })
+
+            # Add classification
+            conn.execute(text("""
+                INSERT INTO ride_classifications (ride_id, tier, tier_weight, classification_method, confidence_score)
+                VALUES (:ride_id, 2, 2, 'manual_override', 1.0)
+            """), {
+                'ride_id': ride_id
+            })
+
+            # Rides in improving parks (11-12): rides also improving
+            if park_id in [11, 12]:
+                # Daily: 95% today vs 85% yesterday = +10% improvement
+                conn.execute(text("""
+                    INSERT INTO ride_daily_stats (ride_id, stat_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
+                    VALUES (:ride_id, :stat_date, :downtime, :uptime, 30, 60, 2)
+                """), {
+                    'ride_id': ride_id,
+                    'stat_date': today,
+                    'downtime': 30,
+                    'uptime': 95.0
+                })
+
+                conn.execute(text("""
+                    INSERT INTO ride_daily_stats (ride_id, stat_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
+                    VALUES (:ride_id, :stat_date, :downtime, :uptime, 25, 50, 3)
+                """), {
+                    'ride_id': ride_id,
+                    'stat_date': yesterday,
+                    'downtime': 90,
+                    'uptime': 85.0
+                })
+
+                # Weekly stats
+                conn.execute(text("""
+                    INSERT INTO ride_weekly_stats (ride_id, year, week_number, week_start_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
+                    VALUES (:ride_id, :year, :week, :week_start, :downtime, :uptime, 30, 70, 10)
+                """), {
+                    'ride_id': ride_id,
+                    'year': current_year,
+                    'week': current_week,
+                    'week_start': current_week_start,
+                    'downtime': 210,
+                    'uptime': 95.0
+                })
+
+                conn.execute(text("""
+                    INSERT INTO ride_weekly_stats (ride_id, year, week_number, week_start_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
+                    VALUES (:ride_id, :year, :week, :week_start, :downtime, :uptime, 25, 60, 12)
+                """), {
+                    'ride_id': ride_id,
+                    'year': prev_week_year,
+                    'week': prev_week,
+                    'week_start': prev_week_start,
+                    'downtime': 630,
+                    'uptime': 85.0
+                })
+
+                # Monthly stats
+                conn.execute(text("""
+                    INSERT INTO ride_monthly_stats (ride_id, year, month, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes, observations)
+                    VALUES (:ride_id, :year, :month, :downtime, :uptime, 30, 75, 40, 1800)
+                """), {
+                    'ride_id': ride_id,
+                    'year': current_year,
+                    'month': current_month,
+                    'downtime': 900,
+                    'uptime': 95.0
+                })
+
+                conn.execute(text("""
+                    INSERT INTO ride_monthly_stats (ride_id, year, month, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes, observations)
+                    VALUES (:ride_id, :year, :month, :downtime, :uptime, 25, 65, 45, 1800)
+                """), {
+                    'ride_id': ride_id,
+                    'year': prev_month_year,
+                    'month': prev_month,
+                    'downtime': 2700,
+                    'uptime': 85.0
+                })
+
+            # Rides in declining parks (13-14): rides also declining
+            elif park_id in [13, 14]:
+                # Daily: 70% today vs 85% yesterday = -15% decline
+                conn.execute(text("""
+                    INSERT INTO ride_daily_stats (ride_id, stat_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
+                    VALUES (:ride_id, :stat_date, :downtime, :uptime, 35, 70, 5)
+                """), {
+                    'ride_id': ride_id,
+                    'stat_date': today,
+                    'downtime': 180,
+                    'uptime': 70.0
+                })
+
+                conn.execute(text("""
+                    INSERT INTO ride_daily_stats (ride_id, stat_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
+                    VALUES (:ride_id, :stat_date, :downtime, :uptime, 30, 60, 2)
+                """), {
+                    'ride_id': ride_id,
+                    'stat_date': yesterday,
+                    'downtime': 90,
+                    'uptime': 85.0
+                })
+
+                # Weekly stats
+                conn.execute(text("""
+                    INSERT INTO ride_weekly_stats (ride_id, year, week_number, week_start_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
+                    VALUES (:ride_id, :year, :week, :week_start, :downtime, :uptime, 35, 75, 20)
+                """), {
+                    'ride_id': ride_id,
+                    'year': current_year,
+                    'week': current_week,
+                    'week_start': current_week_start,
+                    'downtime': 1260,
+                    'uptime': 70.0
+                })
+
+                conn.execute(text("""
+                    INSERT INTO ride_weekly_stats (ride_id, year, week_number, week_start_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
+                    VALUES (:ride_id, :year, :week, :week_start, :downtime, :uptime, 30, 65, 12)
+                """), {
+                    'ride_id': ride_id,
+                    'year': prev_week_year,
+                    'week': prev_week,
+                    'week_start': prev_week_start,
+                    'downtime': 630,
+                    'uptime': 85.0
+                })
+
+                # Monthly stats
+                conn.execute(text("""
+                    INSERT INTO ride_monthly_stats (ride_id, year, month, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes, observations)
+                    VALUES (:ride_id, :year, :month, :downtime, :uptime, 35, 80, 60, 1800)
+                """), {
+                    'ride_id': ride_id,
+                    'year': current_year,
+                    'month': current_month,
+                    'downtime': 5400,
+                    'uptime': 70.0
+                })
+
+                conn.execute(text("""
+                    INSERT INTO ride_monthly_stats (ride_id, year, month, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes, observations)
+                    VALUES (:ride_id, :year, :month, :downtime, :uptime, 30, 70, 45, 1800)
+                """), {
+                    'ride_id': ride_id,
+                    'year': prev_month_year,
+                    'month': prev_month,
+                    'downtime': 2700,
+                    'uptime': 85.0
+                })
+
+            # Rides in stable parks (15-16): small changes <5%
+            else:
+                # Daily: 80% today vs 82% yesterday = -2% (below threshold)
+                conn.execute(text("""
+                    INSERT INTO ride_daily_stats (ride_id, stat_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
+                    VALUES (:ride_id, :stat_date, :downtime, :uptime, 30, 60, 2)
+                """), {
+                    'ride_id': ride_id,
+                    'stat_date': today,
+                    'downtime': 120,
+                    'uptime': 80.0
+                })
+
+                conn.execute(text("""
+                    INSERT INTO ride_daily_stats (ride_id, stat_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
+                    VALUES (:ride_id, :stat_date, :downtime, :uptime, 30, 60, 2)
+                """), {
+                    'ride_id': ride_id,
+                    'stat_date': yesterday,
+                    'downtime': 108,
+                    'uptime': 82.0
+                })
+
+            ride_id += 1
+
+    conn.commit()
+
+    return {
+        'improving_parks': [11, 12],
+        'declining_parks': [13, 14],
+        'stable_parks': [15, 16],
+        'total_parks': 6,
+        'disney_universal_count': 4,
+        'total_rides': 30
+    }
+
+
+# ============================================================================
+# TEST: GET /api/trends - Parks Improving
+# ============================================================================
+
+def test_trends_parks_improving_today(client, trends_test_data):
+    """
+    Test GET /api/trends?category=parks-improving&period=today.
+
+    Validates:
+    - Only parks with ≥5% uptime improvement are returned
+    - Parks 11-12 should appear (10% and 8% improvement)
+    - Parks 15-16 should NOT appear (2% change < 5% threshold)
+    - Sorted by improvement percentage descending
+    """
+    response = client.get('/api/trends?category=parks-improving&period=today&filter=all-parks&limit=50')
+
+    assert response.status_code == 200
+    data = response.get_json()
+
+    assert data['success'] is True
+    assert data['period'] == 'today'
+    assert data['category'] == 'parks-improving'
+    assert data['filter'] == 'all-parks'
+    assert 'parks' in data
+    assert 'comparison' in data
+
+    # Should return 2 parks (11 and 12)
+    assert len(data['parks']) == 2
+
+    # Verify improvement percentages
+    park_ids = [p['park_id'] for p in data['parks']]
+    assert 11 in park_ids
+    assert 12 in park_ids
+
+    # Verify sorting (highest improvement first)
+    improvements = [float(p['improvement_percentage']) for p in data['parks']]
+    assert improvements[0] >= improvements[1]
+    assert all(imp >= 5.0 for imp in improvements)
+
+    # Verify response structure
+    for park in data['parks']:
+        assert 'park_id' in park
+        assert 'park_name' in park
+        assert 'current_uptime' in park
+        assert 'previous_uptime' in park
+        assert 'improvement_percentage' in park
+        assert 'current_downtime_hours' in park
+        assert 'previous_downtime_hours' in park
+        assert 'queue_times_url' in park
+
+    print(f"\n✓ Verified {len(data['parks'])} improving parks with ≥5% threshold")
+
+
+def test_trends_parks_improving_disney_universal_filter(client, trends_test_data):
+    """
+    Test Disney & Universal filter for parks-improving.
+
+    Should return 2 parks (11 and 12 are both Disney/Universal).
+    """
+    response = client.get('/api/trends?category=parks-improving&period=today&filter=disney-universal&limit=50')
+
+    assert response.status_code == 200
+    data = response.get_json()
+
+    assert data['success'] is True
+    assert data['filter'] == 'disney-universal'
+
+    # Both improving parks (11 and 12) are Disney/Universal
+    assert len(data['parks']) == 2
+
+
+def test_trends_parks_declining_today(client, trends_test_data):
+    """
+    Test GET /api/trends?category=parks-declining&period=today.
+
+    Validates:
+    - Only parks with ≥5% uptime decline are returned
+    - Parks 13-14 should appear (10% and 7% decline)
+    - Sorted by decline percentage descending
+    """
+    response = client.get('/api/trends?category=parks-declining&period=today&filter=all-parks&limit=50')
+
+    assert response.status_code == 200
+    data = response.get_json()
+
+    assert data['success'] is True
+    assert data['category'] == 'parks-declining'
+    assert 'parks' in data
+
+    # Should return 2 parks (13 and 14)
+    assert len(data['parks']) == 2
+
+    park_ids = [p['park_id'] for p in data['parks']]
+    assert 13 in park_ids
+    assert 14 in park_ids
+
+    # Verify all have ≥5% decline
+    declines = [float(p['decline_percentage']) for p in data['parks']]
+    assert all(dec >= 5.0 for dec in declines)
+
+    # Verify sorting (highest decline first)
+    assert declines[0] >= declines[1]
+
+    print(f"\n✓ Verified {len(data['parks'])} declining parks with ≥5% threshold")
+
+
+# ============================================================================
+# TEST: GET /api/trends - Rides Improving/Declining
+# ============================================================================
+
+def test_trends_rides_improving_today(client, trends_test_data):
+    """
+    Test GET /api/trends?category=rides-improving&period=today.
+
+    Validates:
+    - Only rides with ≥5% uptime improvement are returned
+    - Rides from parks 11-12 should appear (10 rides total)
+    - Sorted by improvement percentage descending
+    """
+    response = client.get('/api/trends?category=rides-improving&period=today&filter=all-parks&limit=50')
+
+    assert response.status_code == 200
+    data = response.get_json()
+
+    assert data['success'] is True
+    assert data['category'] == 'rides-improving'
+    assert 'rides' in data
+
+    # Should return 10 rides (5 rides from park 11 + 5 from park 12)
+    assert len(data['rides']) == 10
+
+    # Verify all have ≥5% improvement
+    improvements = [float(r['improvement_percentage']) for r in data['rides']]
+    assert all(imp >= 5.0 for imp in improvements)
+
+    # Verify response structure
+    for ride in data['rides']:
+        assert 'ride_id' in ride
+        assert 'ride_name' in ride
+        assert 'park_name' in ride
+        assert 'current_uptime' in ride
+        assert 'previous_uptime' in ride
+        assert 'improvement_percentage' in ride
+        assert 'queue_times_url' in ride
+
+    print(f"\n✓ Verified {len(data['rides'])} improving rides")
+
+
+def test_trends_rides_declining_today(client, trends_test_data):
+    """
+    Test GET /api/trends?category=rides-declining&period=today.
+
+    Validates:
+    - Only rides with ≥5% uptime decline are returned
+    - Rides from parks 13-14 should appear (10 rides total)
+    """
+    response = client.get('/api/trends?category=rides-declining&period=today&filter=all-parks&limit=50')
+
+    assert response.status_code == 200
+    data = response.get_json()
+
+    assert data['success'] is True
+    assert data['category'] == 'rides-declining'
+    assert 'rides' in data
+
+    # Should return 10 rides (5 from park 13 + 5 from park 14)
+    assert len(data['rides']) == 10
+
+    # Verify all have ≥5% decline
+    declines = [float(r['decline_percentage']) for r in data['rides']]
+    assert all(dec >= 5.0 for dec in declines)
+
+    print(f"\n✓ Verified {len(data['rides'])} declining rides")
+
+
+def test_trends_rides_7days_period(client, trends_test_data):
+    """
+    Test trends with period=7days.
+
+    Validates weekly aggregation works correctly.
+    """
+    response = client.get('/api/trends?category=rides-improving&period=7days&filter=all-parks&limit=50')
+
+    assert response.status_code == 200
+    data = response.get_json()
+
+    assert data['success'] is True
+    assert data['period'] == '7days'
+
+    # Should still return 10 improving rides
+    assert len(data['rides']) == 10
+
+
+# ============================================================================
+# TEST: GET /api/trends - Error Cases
+# ============================================================================
+
+def test_trends_missing_category_parameter(client, trends_test_data):
+    """Test that missing category parameter returns 400 error."""
+    response = client.get('/api/trends?period=today')
+
+    assert response.status_code == 400
+    data = response.get_json()
+    assert data['success'] is False
+    assert 'category' in data['error'].lower()
+
+
+def test_trends_invalid_category(client, trends_test_data):
+    """Test that invalid category parameter returns 400 error."""
+    response = client.get('/api/trends?category=invalid&period=today')
+
+    assert response.status_code == 400
+    data = response.get_json()
+    assert data['success'] is False
+
+
+def test_trends_invalid_period(client, trends_test_data):
+    """Test that invalid period parameter returns 400 error."""
+    response = client.get('/api/trends?category=parks-improving&period=invalid')
+
+    assert response.status_code == 400
+    data = response.get_json()
+    assert data['success'] is False
+
+
+def test_trends_invalid_filter(client, trends_test_data):
+    """Test that invalid filter parameter returns 400 error."""
+    response = client.get('/api/trends?category=parks-improving&period=today&filter=invalid')
+
+    assert response.status_code == 400
+    data = response.get_json()
+    assert data['success'] is False
+
+
+def test_trends_limit_out_of_range(client, trends_test_data):
+    """Test that limit parameter outside valid range returns 400 error."""
+    response = client.get('/api/trends?category=parks-improving&period=today&limit=999')
+
+    assert response.status_code == 400
+    data = response.get_json()
+    assert data['success'] is False
+    assert 'limit' in data['error'].lower()
+
+
+def test_trends_includes_attribution(client, trends_test_data):
+    """Verify trends endpoint includes Queue-Times.com attribution."""
+    response = client.get('/api/trends?category=parks-improving&period=today')
+
+    assert response.status_code == 200
+    data = response.get_json()
+
+    assert 'attribution' in data
+    assert 'queue-times.com' in data['attribution'].lower()

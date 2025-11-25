@@ -5,7 +5,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Global application state
     const globalState = {
-        filter: 'all-parks'  // Global filter: 'all-parks' or 'disney-universal'
+        filter: 'all-parks',  // Global filter: 'all-parks' or 'disney-universal'
+        period: 'today'       // Time period: 'today', '7days', '30days'
     };
 
     // Tab switching logic
@@ -15,6 +16,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize global filter UI
     initGlobalFilter();
+
+    // Initialize time period selector
+    initTimePeriodSelector();
 
     // Initialize About modal
     const aboutModal = new AboutModal();
@@ -75,6 +79,57 @@ document.addEventListener('DOMContentLoaded', () => {
         const filterBtns = document.querySelectorAll('.filter-btn');
         filterBtns.forEach(btn => {
             if (btn.dataset.filter === globalState.filter) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+    }
+
+    /**
+     * Initialize time period selector
+     */
+    function initTimePeriodSelector() {
+        const timeBtns = document.querySelectorAll('.time-btn');
+
+        timeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const newPeriod = btn.dataset.period;
+
+                if (newPeriod !== globalState.period) {
+                    // Update global state
+                    globalState.period = newPeriod;
+
+                    // Update UI
+                    updateTimePeriodUI();
+
+                    // Update current component if it exists and has updatePeriod method
+                    if (currentComponent && typeof currentComponent.updatePeriod === 'function') {
+                        currentComponent.updatePeriod(globalState.period);
+                    } else if (currentComponent && currentComponent.state) {
+                        // Fallback: directly update state and refetch
+                        currentComponent.state.period = globalState.period;
+                        if (typeof currentComponent.fetchRankings === 'function') {
+                            currentComponent.fetchRankings();
+                        } else if (typeof currentComponent.fetchData === 'function') {
+                            currentComponent.fetchData();
+                        }
+                    }
+                }
+            });
+        });
+
+        // Set initial UI state
+        updateTimePeriodUI();
+    }
+
+    /**
+     * Update time period UI to reflect current state
+     */
+    function updateTimePeriodUI() {
+        const timeBtns = document.querySelectorAll('.time-btn');
+        timeBtns.forEach(btn => {
+            if (btn.dataset.period === globalState.period) {
                 btn.classList.add('active');
             } else {
                 btn.classList.remove('active');

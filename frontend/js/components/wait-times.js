@@ -13,7 +13,8 @@ class WaitTimes {
             limit: 100,
             loading: false,
             error: null,
-            data: null
+            data: null,
+            aggregateStats: null
         };
     }
 
@@ -22,7 +23,28 @@ class WaitTimes {
      */
     async init() {
         this.render();
-        await this.fetchWaitTimes();
+        await Promise.all([
+            this.fetchWaitTimes(),
+            this.fetchAggregateStats()
+        ]);
+    }
+
+    /**
+     * Fetch aggregate stats from parks/downtime endpoint
+     */
+    async fetchAggregateStats() {
+        try {
+            const response = await this.apiClient.get('/parks/downtime', {
+                period: 'today',
+                filter: this.state.filter,
+                limit: 1
+            });
+            if (response.success && response.aggregate_stats) {
+                this.setState({ aggregateStats: response.aggregate_stats });
+            }
+        } catch (error) {
+            console.error('Failed to fetch aggregate stats:', error);
+        }
     }
 
     /**
@@ -66,6 +88,48 @@ class WaitTimes {
     }
 
     /**
+     * Render aggregate statistics
+     */
+    renderAggregateStats() {
+        if (!this.state.aggregateStats) {
+            return '<div class="stats-grid"></div>';
+        }
+
+        const stats = this.state.aggregateStats;
+
+        return `
+            <div class="stats-grid">
+                <div class="stat-block">
+                    <div class="stat-label">Parks Tracked</div>
+                    <div class="stat-value">${stats.total_parks_tracked || 0}</div>
+                </div>
+                <div class="stat-block">
+                    <div class="stat-label">Peak Downtime</div>
+                    <div class="stat-value">${this.formatHours(stats.peak_downtime_hours || 0)}</div>
+                </div>
+                <div class="stat-block">
+                    <div class="stat-label">Currently Down</div>
+                    <div class="stat-value">${stats.currently_down_rides || 0}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Format hours into readable string
+     */
+    formatHours(hours) {
+        if (hours === null || hours === undefined || hours === 0) return '0h 0m';
+
+        const wholeHours = Math.floor(hours);
+        const minutes = Math.round((hours - wholeHours) * 60);
+
+        if (wholeHours === 0) return `${minutes}m`;
+        if (minutes === 0) return `${wholeHours}h`;
+        return `${wholeHours}h ${minutes}m`;
+    }
+
+    /**
      * Render the component
      */
     render() {
@@ -73,14 +137,13 @@ class WaitTimes {
 
         this.container.innerHTML = `
             <div class="wait-times-view">
-                <div class="view-header">
-                    <h2>Wait Times</h2>
-                    <p class="view-description">
-                        ${this.getModeDescription()}
-                    </p>
+                ${this.renderAggregateStats()}
+
+                <div class="section-header">
+                    <div class="section-marker" style="background: var(--gold);"></div>
+                    <h2 class="section-title">Longest Wait Times</h2>
                 </div>
 
-                ${this.renderControls()}
                 ${this.renderContent()}
             </div>
         `;

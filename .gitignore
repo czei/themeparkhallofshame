@@ -70,3 +70,4 @@ htmlcov/
 # MySQL
 *.sql~
 *.sql.bak
+.playwright-mcp/

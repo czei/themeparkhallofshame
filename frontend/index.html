@@ -78,19 +78,25 @@
         </div>
     </div>
 
-    <!-- Park Filter -->
-    <div class="park-filter">
-        <div class="filter-label">Show Parks:</div>
-        <div class="filter-toggle">
-            <button class="filter-btn active" data-filter="all-parks">All Parks</button>
-            <button class="filter-btn" data-filter="disney-universal">Disney & Universal</button>
+    <!-- Combined Filters Row -->
+    <div class="filters-row">
+        <div class="park-filter">
+            <div class="filter-label">Show Parks:</div>
+            <div class="filter-toggle">
+                <button class="filter-btn active" data-filter="all-parks">All Parks</button>
+                <button class="filter-btn" data-filter="disney-universal">Disney & Universal</button>
+            </div>
+        </div>
+
+        <div class="time-selector">
+            <button class="time-btn active" data-period="today">Today</button>
+            <button class="time-btn" data-period="7days">7 Days</button>
+            <button class="time-btn" data-period="30days">30 Days</button>
         </div>
     </div>
 
-    <!-- Live Status -->
+    <!-- Last Update -->
     <div class="live-status">
-        <div class="live-indicator"></div>
-        <span>Live Data</span>
         <span class="last-update">Last updated: <span id="last-update-time">--</span></span>
     </div>
 
@@ -150,14 +156,14 @@
     </div>
 
     <!-- Scripts -->
-    <script src="js/config.js?v=2"></script>
-    <script src="js/api-client.js?v=2"></script>
-    <script src="js/components/park-rankings.js?v=2"></script>
-    <script src="js/components/ride-performance.js?v=2"></script>
-    <script src="js/components/wait-times.js?v=2"></script>
-    <script src="js/components/trends.js?v=2"></script>
+    <script src="js/config.js?v=3"></script>
+    <script src="js/api-client.js?v=3"></script>
+    <script src="js/components/park-rankings.js?v=4"></script>
+    <script src="js/components/ride-performance.js?v=4"></script>
+    <script src="js/components/wait-times.js?v=5"></script>
+    <script src="js/components/trends.js?v=5"></script>
     <script src="js/components/about-modal.js?v=3"></script>
     <script src="js/components/park-details-modal.js?v=3"></script>
-    <script src="js/app.js?v=2"></script>
+    <script src="js/app.js?v=4"></script>
 </body>
 </html>

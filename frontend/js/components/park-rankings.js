@@ -80,15 +80,13 @@ class ParkRankings {
 
         this.container.innerHTML = `
             <div class="park-rankings-view">
-                <div class="view-header">
-                    <h2>Park Downtime Rankings</h2>
-                    <p class="view-description">
-                        Compare theme park reliability based on ride downtime. Lower downtime = better reliability.
-                    </p>
+                ${this.renderAggregateStats()}
+
+                <div class="section-header">
+                    <div class="section-marker"></div>
+                    <h2 class="section-title">Parks with Most Downtime</h2>
                 </div>
 
-                ${this.renderControls()}
-                ${this.renderAggregateStats()}
                 ${this.renderContent()}
             </div>
         `;
@@ -139,31 +137,25 @@ class ParkRankings {
      */
     renderAggregateStats() {
         if (!this.state.data || !this.state.data.aggregate_stats) {
-            return '<div class="aggregate-stats"></div>';
+            return '<div class="stats-grid"></div>';
         }
 
         const stats = this.state.data.aggregate_stats;
 
         return `
-            <div class="aggregate-stats">
-                <div class="stat-card">
-                    <span class="stat-label">Total Parks Tracked</span>
-                    <span class="stat-value">${stats.total_parks_tracked || 0}</span>
+            <div class="stats-grid">
+                <div class="stat-block">
+                    <div class="stat-label">Parks Tracked</div>
+                    <div class="stat-value">${stats.total_parks_tracked || 0}</div>
                 </div>
-                <div class="stat-card">
-                    <span class="stat-label">Peak Downtime Today</span>
-                    <span class="stat-value">${this.formatHours(stats.peak_downtime_hours || 0)}</span>
+                <div class="stat-block">
+                    <div class="stat-label">Peak Downtime</div>
+                    <div class="stat-value">${this.formatHours(stats.peak_downtime_hours || 0)}</div>
                 </div>
-                <div class="stat-card">
-                    <span class="stat-label">Currently Down</span>
-                    <span class="stat-value">${stats.currently_down_rides || 0} rides</span>
+                <div class="stat-block">
+                    <div class="stat-label">Currently Down</div>
+                    <div class="stat-value">${stats.currently_down_rides || 0}</div>
                 </div>
-                ${stats.avg_uptime_percentage !== undefined ? `
-                <div class="stat-card">
-                    <span class="stat-label">Average Uptime</span>
-                    <span class="stat-value">${stats.avg_uptime_percentage.toFixed(1)}%</span>
-                </div>
-                ` : ''}
             </div>
         `;
     }
@@ -214,7 +206,8 @@ class ParkRankings {
         }
 
         return `
-            <div class="rankings-table-container">
+            <div class="data-container">
+                <div class="table-header">Weekly Performance Rankings</div>
                 <table class="rankings-table">
                     <thead>
                         <tr>

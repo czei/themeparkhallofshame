@@ -13,7 +13,8 @@ class RidePerformance {
             limit: 100,
             loading: false,
             error: null,
-            data: null
+            data: null,
+            aggregateStats: null
         };
     }
 
@@ -22,7 +23,28 @@ class RidePerformance {
      */
     async init() {
         this.render();
-        await this.fetchRidePerformance();
+        await Promise.all([
+            this.fetchRidePerformance(),
+            this.fetchAggregateStats()
+        ]);
+    }
+
+    /**
+     * Fetch aggregate stats from parks/downtime endpoint
+     */
+    async fetchAggregateStats() {
+        try {
+            const response = await this.apiClient.get('/parks/downtime', {
+                period: 'today',
+                filter: this.state.filter,
+                limit: 1
+            });
+            if (response.success && response.aggregate_stats) {
+                this.setState({ aggregateStats: response.aggregate_stats });
+            }
+        } catch (error) {
+            console.error('Failed to fetch aggregate stats:', error);
+        }
     }
 
     /**
@@ -66,6 +88,34 @@ class RidePerformance {
     }
 
     /**
+     * Render aggregate statistics
+     */
+    renderAggregateStats() {
+        if (!this.state.aggregateStats) {
+            return '<div class="stats-grid"></div>';
+        }
+
+        const stats = this.state.aggregateStats;
+
+        return `
+            <div class="stats-grid">
+                <div class="stat-block">
+                    <div class="stat-label">Parks Tracked</div>
+                    <div class="stat-value">${stats.total_parks_tracked || 0}</div>
+                </div>
+                <div class="stat-block">
+                    <div class="stat-label">Peak Downtime</div>
+                    <div class="stat-value">${this.formatHours(stats.peak_downtime_hours || 0)}</div>
+                </div>
+                <div class="stat-block">
+                    <div class="stat-label">Currently Down</div>
+                    <div class="stat-value">${stats.currently_down_rides || 0}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
      * Render the component
      */
     render() {
@@ -73,14 +123,13 @@ class RidePerformance {
 
         this.container.innerHTML = `
             <div class="ride-performance-view">
-                <div class="view-header">
-                    <h2>Ride Performance Rankings</h2>
-                    <p class="view-description">
-                        Individual rides ranked by downtime hours. Status badges show current operational state.
-                    </p>
+                ${this.renderAggregateStats()}
+
+                <div class="section-header">
+                    <div class="section-marker" style="background: var(--turquoise);"></div>
+                    <h2 class="section-title">Individual Ride Performance</h2>
                 </div>
 
-                ${this.renderControls()}
                 ${this.renderContent()}
             </div>
         `;
@@ -161,7 +210,8 @@ class RidePerformance {
         }
 
         return `
-            <div class="rankings-table-container">
+            <div class="data-container">
+                <div class="table-header">Highest Downtime Attractions</div>
                 <table class="rankings-table ride-table">
                     <thead>
                         <tr>

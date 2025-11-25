@@ -32,10 +32,6 @@ def get_trends():
         JSON response with trend data for the specified category
     """
     try:
-        # Get database connection
-        conn = get_db_connection()
-        stats_repo = StatsRepository(conn)
-
         # Parse query parameters
         period = request.args.get('period', '7days')
         category = request.args.get('category')
@@ -81,31 +77,35 @@ def get_trends():
         # Calculate period dates
         period_info = _calculate_period_dates(period)
 
-        # Get trends based on category
-        if category == 'parks-improving':
-            results = stats_repo.get_parks_improving(
-                period=period,
-                park_filter=park_filter,
-                limit=limit
-            )
-        elif category == 'parks-declining':
-            results = stats_repo.get_parks_declining(
-                period=period,
-                park_filter=park_filter,
-                limit=limit
-            )
-        elif category == 'rides-improving':
-            results = stats_repo.get_rides_improving(
-                period=period,
-                park_filter=park_filter,
-                limit=limit
-            )
-        elif category == 'rides-declining':
-            results = stats_repo.get_rides_declining(
-                period=period,
-                park_filter=park_filter,
-                limit=limit
-            )
+        # Get database connection using context manager
+        with get_db_connection() as conn:
+            stats_repo = StatsRepository(conn)
+
+            # Get trends based on category
+            if category == 'parks-improving':
+                results = stats_repo.get_parks_improving(
+                    period=period,
+                    park_filter=park_filter,
+                    limit=limit
+                )
+            elif category == 'parks-declining':
+                results = stats_repo.get_parks_declining(
+                    period=period,
+                    park_filter=park_filter,
+                    limit=limit
+                )
+            elif category == 'rides-improving':
+                results = stats_repo.get_rides_improving(
+                    period=period,
+                    park_filter=park_filter,
+                    limit=limit
+                )
+            elif category == 'rides-declining':
+                results = stats_repo.get_rides_declining(
+                    period=period,
+                    park_filter=park_filter,
+                    limit=limit
+                )
 
         # Build response
         response = {

@@ -158,7 +158,7 @@ class DailyAggregator:
                         self._aggregate_ride(conn, ride)
                         self.stats['rides_processed'] += 1
                     except Exception as e:
-                        logger.error(f"Error aggregating ride {ride['name']}: {e}")
+                        logger.error(f"Error aggregating ride {ride.name}: {e}")
                         self.stats['errors'] += 1
 
                 logger.info(f"  ✓ Aggregated {self.stats['rides_processed']} rides")
@@ -167,16 +167,16 @@ class DailyAggregator:
             logger.error(f"Failed to aggregate rides: {e}")
             raise
 
-    def _aggregate_ride(self, conn, ride: Dict):
+    def _aggregate_ride(self, conn, ride):
         """
         Aggregate statistics for a single ride.
 
         Args:
             conn: Database connection
-            ride: Ride record
+            ride: Ride model object
         """
-        ride_id = ride['ride_id']
-        park_id = ride['park_id']
+        ride_id = ride.ride_id
+        park_id = ride.park_id
 
         # Calculate ride statistics for the day
         # This is a simplified version - full implementation would:
@@ -217,7 +217,7 @@ class DailyAggregator:
                 MAX(CASE WHEN wait_time IS NOT NULL AND computed_is_open THEN wait_time END) as max_wait_time,
                 MAX(CASE WHEN wait_time IS NOT NULL THEN wait_time END) as peak_wait_time,
                 (SELECT COUNT(*) FROM ride_status_changes WHERE ride_id = :ride_id AND DATE(changed_at) = :stat_date) as status_changes,
-                (SELECT MAX(downtime_duration_minutes) FROM ride_status_changes WHERE ride_id = :ride_id AND DATE(changed_at) = :stat_date) as longest_downtime,
+                (SELECT MAX(duration_in_previous_status) FROM ride_status_changes WHERE ride_id = :ride_id AND DATE(changed_at) = :stat_date AND new_status = 1) as longest_downtime,
                 NOW()
             FROM ride_status_snapshots
             WHERE ride_id = :ride_id
@@ -255,7 +255,7 @@ class DailyAggregator:
                         self._aggregate_park(conn, park)
                         self.stats['parks_processed'] += 1
                     except Exception as e:
-                        logger.error(f"Error aggregating park {park['name']}: {e}")
+                        logger.error(f"Error aggregating park {park.name}: {e}")
                         self.stats['errors'] += 1
 
                 logger.info(f"  ✓ Aggregated {self.stats['parks_processed']} parks")
@@ -264,17 +264,30 @@ class DailyAggregator:
             logger.error(f"Failed to aggregate parks: {e}")
             raise
 
-    def _aggregate_park(self, conn, park: Dict):
+    def _aggregate_park(self, conn, park):
         """
         Aggregate statistics for a single park.
 
         Args:
             conn: Database connection
-            park: Park record
+            park: Park model object
         """
-        park_id = park['park_id']
+        park_id = park.park_id
 
         # Calculate park-wide statistics by rolling up ride statistics
+        # First check if park has any ride stats for this date
+        check_result = conn.execute(text("""
+            SELECT COUNT(*) as ride_count
+            FROM ride_daily_stats rds
+            JOIN rides r ON rds.ride_id = r.ride_id
+            WHERE r.park_id = :park_id AND rds.stat_date = :stat_date
+        """), {'park_id': park_id, 'stat_date': self.target_date})
+
+        row = check_result.fetchone()
+        if row is None or row[0] == 0:
+            # No ride data for this park on this date, skip aggregation
+            return
+
         result = conn.execute(text("""
             INSERT INTO park_daily_stats (
                 park_id,
@@ -292,12 +305,12 @@ class DailyAggregator:
                 :park_id,
                 :stat_date,
                 COUNT(*) as total_rides,
-                ROUND(AVG(uptime_percentage), 2) as avg_uptime,
-                ROUND(SUM(downtime_minutes) / 60.0, 2) as total_downtime_hours,
-                SUM(CASE WHEN downtime_minutes > 0 THEN 1 ELSE 0 END) as rides_with_downtime,
-                ROUND(AVG(avg_wait_time), 2) as avg_wait_time,
-                MAX(peak_wait_time) as peak_wait_time,
-                AVG(operating_hours_minutes) as operating_hours_minutes,
+                COALESCE(ROUND(AVG(uptime_percentage), 2), 0) as avg_uptime,
+                COALESCE(ROUND(SUM(downtime_minutes) / 60.0, 2), 0) as total_downtime_hours,
+                COALESCE(SUM(CASE WHEN downtime_minutes > 0 THEN 1 ELSE 0 END), 0) as rides_with_downtime,
+                COALESCE(ROUND(AVG(avg_wait_time), 2), 0) as avg_wait_time,
+                COALESCE(MAX(peak_wait_time), 0) as peak_wait_time,
+                COALESCE(AVG(operating_hours_minutes), 0) as operating_hours_minutes,
                 NOW()
             FROM ride_daily_stats rds
             JOIN rides r ON rds.ride_id = r.ride_id

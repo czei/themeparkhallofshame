@@ -867,6 +867,36 @@ def test_rides_waittimes_peak_times_mode(client, comprehensive_test_data):
         assert current_peak >= next_peak
 
 
+def test_rides_waittimes_disney_universal_filter(client, comprehensive_test_data):
+    """
+    Test GET /api/rides/waittimes with disney-universal filter.
+
+    Validates that only rides from Disney and Universal parks are returned.
+    Should return 80 rides (8 parks * 10 rides each).
+    """
+    response = client.get('/api/rides/waittimes?mode=live&filter=disney-universal&limit=100')
+
+    assert response.status_code == 200
+    data = response.get_json()
+
+    assert data['success'] is True
+    assert data['filter'] == 'disney-universal'
+
+    # 5 Disney parks + 3 Universal parks = 8 parks * 10 rides = 80 rides
+    assert len(data['data']) == 80
+
+    # Verify all rides belong to Disney or Universal parks
+    disney_universal_parks = {
+        'Magic Kingdom', 'EPCOT', 'Hollywood Studios', 'Animal Kingdom', 'Disneyland',
+        'Universal Studios Florida', 'Islands of Adventure', 'Universal Studios Hollywood'
+    }
+    for ride in data['data']:
+        park_name = ride['park_name']
+        assert park_name in disney_universal_parks, f"Park {park_name} should be Disney or Universal"
+
+    print(f"\n✓ Verified {len(data['data'])} Disney/Universal rides with live wait times")
+
+
 # ============================================================================
 # TEST: Error Cases and Edge Conditions
 # ============================================================================

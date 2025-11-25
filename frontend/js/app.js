@@ -118,12 +118,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     break;
 
                 case 'trends':
-                    appContainer.innerHTML = `
-                        <div class="placeholder-view">
-                            <h2>Trends</h2>
-                            <p>Coming soon! This will show downtime trends over time.</p>
-                        </div>
-                    `;
+                    if (typeof Trends !== 'undefined') {
+                        currentComponent = new Trends(apiClient, 'view-container', globalState.filter);
+                        await currentComponent.init();
+                    } else {
+                        throw new Error('Trends component not loaded');
+                    }
                     break;
 
                 default:

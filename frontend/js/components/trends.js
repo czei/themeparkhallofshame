@@ -174,7 +174,8 @@ class Trends {
      * Render a trend section with header and table
      */
     renderTrendSection(title, markerColor, data, type, isImproving) {
-        const tableHeader = isImproving ? 'Uptime Improvement Rankings' : 'Uptime Decline Rankings';
+        const baseTitle = isImproving ? 'Uptime Improvement Rankings' : 'Uptime Decline Rankings';
+        const tableHeader = this.getPeriodTitle(baseTitle);
 
         return `
             <div class="section-header">
@@ -301,6 +302,18 @@ class Trends {
                 </td>
             </tr>
         `;
+    }
+
+    /**
+     * Get table header title based on current period
+     */
+    getPeriodTitle(baseTitle) {
+        const periodLabels = {
+            'today': "Today's",
+            '7days': '7 Day',
+            '30days': '30 Day'
+        };
+        return `${periodLabels[this.state.period] || ''} ${baseTitle}`;
     }
 
     /**

@@ -1340,6 +1340,186 @@ class StatsRepository:
 
         return [dict(row._mapping) for row in result.fetchall()]
 
+    def get_wait_times_by_period(
+        self,
+        period: str = 'today',
+        filter_disney_universal: bool = False,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get wait times for a specified period (today, 7days, 30days).
+
+        Args:
+            period: Time period - 'today', '7days', or '30days'
+            filter_disney_universal: If True, only include Disney & Universal parks
+            limit: Maximum number of rides to return
+
+        Returns:
+            List of rides sorted by longest average wait times descending
+        """
+        from datetime import datetime, timedelta
+
+        filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+
+        if period == 'today':
+            # Query today's average wait times from ride_daily_stats
+            query = text(f"""
+                SELECT
+                    r.ride_id,
+                    r.name AS ride_name,
+                    r.tier,
+                    p.park_id,
+                    p.name AS park_name,
+                    CONCAT(p.city, ', ', p.state_province) AS location,
+                    rds.avg_wait_time AS avg_wait_minutes,
+                    rds.peak_wait_time AS peak_wait_minutes,
+                    -- Get current status from latest snapshot
+                    (
+                        SELECT computed_is_open
+                        FROM ride_status_snapshots
+                        WHERE ride_id = r.ride_id
+                        ORDER BY recorded_at DESC
+                        LIMIT 1
+                    ) AS current_is_open,
+                    -- Trend: compare to yesterday
+                    CASE
+                        WHEN prev_day.avg_wait_time > 0 THEN
+                            ((rds.avg_wait_time - prev_day.avg_wait_time) / prev_day.avg_wait_time) * 100
+                        ELSE NULL
+                    END AS trend_percentage
+                FROM ride_daily_stats rds
+                JOIN rides r ON rds.ride_id = r.ride_id
+                JOIN parks p ON r.park_id = p.park_id
+                LEFT JOIN ride_daily_stats prev_day ON rds.ride_id = prev_day.ride_id
+                    AND prev_day.stat_date = DATE_SUB(:stat_date, INTERVAL 1 DAY)
+                WHERE rds.stat_date = :stat_date
+                    AND rds.avg_wait_time > 0
+                    AND r.is_active = TRUE
+                    AND p.is_active = TRUE
+                    {filter_clause}
+                ORDER BY rds.avg_wait_time DESC
+                LIMIT :limit
+            """)
+            params = {
+                "stat_date": datetime.now().date(),
+                "limit": limit
+            }
+
+        elif period == '7days':
+            # Query 7-day average from ride_weekly_stats
+            current_date = datetime.now()
+            year = current_date.year
+            week_number = current_date.isocalendar()[1]
+            prev_week_date = current_date - timedelta(weeks=1)
+            prev_year = prev_week_date.year
+            prev_week_num = prev_week_date.isocalendar()[1]
+
+            query = text(f"""
+                SELECT
+                    r.ride_id,
+                    r.name AS ride_name,
+                    r.tier,
+                    p.park_id,
+                    p.name AS park_name,
+                    CONCAT(p.city, ', ', p.state_province) AS location,
+                    rws.avg_wait_time AS avg_wait_minutes,
+                    rws.peak_wait_time AS peak_wait_minutes,
+                    -- Get current status
+                    (
+                        SELECT computed_is_open
+                        FROM ride_status_snapshots
+                        WHERE ride_id = r.ride_id
+                        ORDER BY recorded_at DESC
+                        LIMIT 1
+                    ) AS current_is_open,
+                    -- Trend: compare to previous week's average
+                    CASE
+                        WHEN prev_week.avg_wait_time > 0 THEN
+                            ((rws.avg_wait_time - prev_week.avg_wait_time) / prev_week.avg_wait_time) * 100
+                        ELSE NULL
+                    END AS trend_percentage
+                FROM ride_weekly_stats rws
+                JOIN rides r ON rws.ride_id = r.ride_id
+                JOIN parks p ON r.park_id = p.park_id
+                LEFT JOIN ride_weekly_stats prev_week ON rws.ride_id = prev_week.ride_id
+                    AND prev_week.year = :prev_year
+                    AND prev_week.week_number = :prev_week
+                WHERE rws.year = :year
+                    AND rws.week_number = :week_number
+                    AND rws.avg_wait_time > 0
+                    AND r.is_active = TRUE
+                    AND p.is_active = TRUE
+                    {filter_clause}
+                ORDER BY rws.avg_wait_time DESC
+                LIMIT :limit
+            """)
+            params = {
+                "year": year,
+                "week_number": week_number,
+                "prev_year": prev_year,
+                "prev_week": prev_week_num,
+                "limit": limit
+            }
+
+        else:  # 30days
+            # Query 30-day average from ride_monthly_stats
+            current_date = datetime.now()
+            year = current_date.year
+            month = current_date.month
+            prev_month_date = current_date.replace(day=1) - timedelta(days=1)
+            prev_year = prev_month_date.year
+            prev_month = prev_month_date.month
+
+            query = text(f"""
+                SELECT
+                    r.ride_id,
+                    r.name AS ride_name,
+                    r.tier,
+                    p.park_id,
+                    p.name AS park_name,
+                    CONCAT(p.city, ', ', p.state_province) AS location,
+                    rms.avg_wait_time AS avg_wait_minutes,
+                    rms.peak_wait_time AS peak_wait_minutes,
+                    -- Get current status
+                    (
+                        SELECT computed_is_open
+                        FROM ride_status_snapshots
+                        WHERE ride_id = r.ride_id
+                        ORDER BY recorded_at DESC
+                        LIMIT 1
+                    ) AS current_is_open,
+                    -- Trend: compare to previous month's average
+                    CASE
+                        WHEN prev_month.avg_wait_time > 0 THEN
+                            ((rms.avg_wait_time - prev_month.avg_wait_time) / prev_month.avg_wait_time) * 100
+                        ELSE NULL
+                    END AS trend_percentage
+                FROM ride_monthly_stats rms
+                JOIN rides r ON rms.ride_id = r.ride_id
+                JOIN parks p ON r.park_id = p.park_id
+                LEFT JOIN ride_monthly_stats prev_month ON rms.ride_id = prev_month.ride_id
+                    AND prev_month.year = :prev_year
+                    AND prev_month.month = :prev_month
+                WHERE rms.year = :year
+                    AND rms.month = :month
+                    AND rms.avg_wait_time > 0
+                    AND r.is_active = TRUE
+                    AND p.is_active = TRUE
+                    {filter_clause}
+                ORDER BY rms.avg_wait_time DESC
+                LIMIT :limit
+            """)
+            params = {
+                "year": year,
+                "month": month,
+                "prev_year": prev_year,
+                "prev_month": prev_month,
+                "limit": limit
+            }
+
+        result = self.conn.execute(query, params)
+        return [dict(row._mapping) for row in result.fetchall()]
+
     # ========================================
     # Trend Analysis Methods (User Story 8)
     # ========================================

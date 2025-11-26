@@ -1,6 +1,6 @@
 /**
  * Theme Park Hall of Shame - Wait Times Component
- * Displays current wait times with multiple display modes (Live, 7-Day Average, Peak Times)
+ * Displays wait times sorted by longest average waits for the selected time period
  */
 
 class WaitTimes {
@@ -8,7 +8,7 @@ class WaitTimes {
         this.apiClient = apiClient;
         this.container = document.getElementById(containerId);
         this.state = {
-            mode: 'live',
+            period: 'today',
             filter: initialFilter,
             limit: 100,
             loading: false,
@@ -55,7 +55,7 @@ class WaitTimes {
 
         try {
             const params = {
-                mode: this.state.mode,
+                period: this.state.period,
                 filter: this.state.filter,
                 limit: this.state.limit
             };
@@ -153,42 +153,15 @@ class WaitTimes {
     }
 
     /**
-     * Get mode description text
+     * Get table header title based on current period
      */
-    getModeDescription() {
-        const descriptions = {
-            'live': 'Current live wait times sorted by longest waits. Updates every 10 minutes.',
-            '7day-average': 'Average wait times over the past 7 days sorted by longest averages.',
-            'peak-times': 'Peak wait times from the past 7 days sorted by highest recorded waits.'
+    getPeriodTitle(baseTitle) {
+        const periodLabels = {
+            'today': "Today's",
+            '7days': '7 Day',
+            '30days': '30 Day'
         };
-        return descriptions[this.state.mode] || '';
-    }
-
-    /**
-     * Render mode controls
-     */
-    renderControls() {
-        return `
-            <div class="rankings-controls">
-                <div class="control-group">
-                    <label>Display Mode:</label>
-                    <div class="button-group">
-                        <button
-                            class="mode-btn ${this.state.mode === 'live' ? 'active' : ''}"
-                            data-mode="live"
-                        >Live</button>
-                        <button
-                            class="mode-btn ${this.state.mode === '7day-average' ? 'active' : ''}"
-                            data-mode="7day-average"
-                        >7 Day Average</button>
-                        <button
-                            class="mode-btn ${this.state.mode === 'peak-times' ? 'active' : ''}"
-                            data-mode="peak-times"
-                        >Peak Times</button>
-                    </div>
-                </div>
-            </div>
-        `;
+        return `${periodLabels[this.state.period] || ''} ${baseTitle}`;
     }
 
     /**
@@ -237,7 +210,8 @@ class WaitTimes {
         }
 
         return `
-            <div class="rankings-table-container">
+            <div class="data-container">
+                <div class="table-header">${this.getPeriodTitle('Wait Time Rankings')}</div>
                 <table class="rankings-table wait-times-table">
                     <thead>
                         <tr>
@@ -245,8 +219,8 @@ class WaitTimes {
                             <th class="ride-col">Ride</th>
                             <th class="tier-col">Tier</th>
                             <th class="park-col">Park</th>
-                            <th class="wait-col">${this.getWaitColumnHeader()}</th>
-                            ${this.state.mode !== 'live' ? '<th class="avg-col">7-Day Avg</th>' : ''}
+                            <th class="wait-col">Avg Wait</th>
+                            <th class="wait-col">Peak Wait</th>
                             <th class="status-col">Status</th>
                             <th class="trend-col">Trend</th>
                         </tr>
@@ -257,18 +231,6 @@ class WaitTimes {
                 </table>
             </div>
         `;
-    }
-
-    /**
-     * Get wait column header based on mode
-     */
-    getWaitColumnHeader() {
-        const headers = {
-            'live': 'Current Wait',
-            '7day-average': '7-Day Average',
-            'peak-times': 'Peak Wait'
-        };
-        return headers[this.state.mode] || 'Wait Time';
     }
 
     /**
@@ -285,16 +247,6 @@ class WaitTimes {
 
         const statusBadge = this.getStatusBadge(ride.current_is_open);
         const tierBadge = this.getTierBadge(ride.tier);
-
-        // Determine wait time value based on mode
-        let waitTimeValue = 0;
-        if (this.state.mode === 'live') {
-            waitTimeValue = ride.current_wait_minutes || 0;
-        } else if (this.state.mode === '7day-average') {
-            waitTimeValue = ride.avg_wait_7days || 0;
-        } else {  // peak-times
-            waitTimeValue = ride.peak_wait_7days || 0;
-        }
 
         return `
             <tr class="wait-time-row ${ride.rank <= 5 ? 'top-five' : ''}">
@@ -322,13 +274,11 @@ class WaitTimes {
                     </div>
                 </td>
                 <td class="wait-col">
-                    <span class="wait-value">${this.formatWaitTime(waitTimeValue)}</span>
+                    <span class="wait-value">${this.formatWaitTime(ride.avg_wait_minutes || 0)}</span>
                 </td>
-                ${this.state.mode !== 'live' ? `
-                    <td class="avg-col">
-                        <span class="wait-value">${this.formatWaitTime(ride.avg_wait_7days || 0)}</span>
-                    </td>
-                ` : ''}
+                <td class="wait-col">
+                    <span class="wait-value">${this.formatWaitTime(ride.peak_wait_minutes || 0)}</span>
+                </td>
                 <td class="status-col">
                     ${statusBadge}
                 </td>
@@ -446,21 +396,19 @@ class WaitTimes {
     }
 
     /**
+     * Update period from global period selector (called by app.js)
+     */
+    updatePeriod(newPeriod) {
+        if (newPeriod !== this.state.period) {
+            this.state.period = newPeriod;
+            this.fetchWaitTimes();
+        }
+    }
+
+    /**
      * Attach event listeners to controls
      */
     attachEventListeners() {
-        // Mode buttons
-        const modeBtns = this.container.querySelectorAll('.mode-btn');
-        modeBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const mode = btn.dataset.mode;
-                if (mode !== this.state.mode) {
-                    this.state.mode = mode;
-                    this.fetchWaitTimes();
-                }
-            });
-        });
-
         // Retry button (if error state)
         const retryBtn = this.container.querySelector('.retry-btn');
         if (retryBtn) {

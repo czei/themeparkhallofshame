@@ -211,7 +211,7 @@ class RidePerformance {
 
         return `
             <div class="data-container">
-                <div class="table-header">Highest Downtime Attractions</div>
+                <div class="table-header">${this.getPeriodTitle('Downtime Rankings')}</div>
                 <table class="rankings-table ride-table">
                     <thead>
                         <tr>
@@ -299,6 +299,18 @@ class RidePerformance {
                 </td>
             </tr>
         `;
+    }
+
+    /**
+     * Get table header title based on current period
+     */
+    getPeriodTitle(baseTitle) {
+        const periodLabels = {
+            'today': "Today's",
+            '7days': '7 Day',
+            '30days': '30 Day'
+        };
+        return `${periodLabels[this.state.period] || ''} ${baseTitle}`;
     }
 
     /**

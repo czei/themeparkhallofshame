@@ -481,6 +481,102 @@ body {
 }
 
 /* ============================================
+   DATA SOURCE ATTRIBUTION
+   ============================================ */
+.data-source-callout {
+    max-width: 1200px;
+    margin: 15px auto;
+    padding: 0 20px;
+}
+
+.data-source-content {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 12px 20px;
+    background: linear-gradient(135deg, var(--deep-teal) 0%, #1a5a5a 100%);
+    border-left: 4px solid var(--gold);
+    color: white;
+}
+
+.data-source-badge {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    background: var(--gold);
+    color: var(--charcoal);
+    padding: 4px 8px;
+    white-space: nowrap;
+}
+
+.data-source-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+}
+
+.data-source-main {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.data-source-main a {
+    color: var(--gold);
+    text-decoration: none;
+}
+
+.data-source-main a:hover {
+    text-decoration: underline;
+}
+
+.data-source-sub {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.75rem;
+    opacity: 0.85;
+}
+
+.data-source-link {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: white;
+    text-decoration: none;
+    padding: 8px 14px;
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+
+.data-source-link:hover {
+    background: rgba(255, 255, 255, 0.25);
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.data-source-link .external-arrow {
+    font-size: 1rem;
+}
+
+@media (max-width: 768px) {
+    .data-source-content {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .data-source-link {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* ============================================
    MAIN CONTENT WRAPPER
    ============================================ */
 .content-wrapper,

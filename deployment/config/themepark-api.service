@@ -1,0 +1,37 @@
+[Unit]
+Description=Theme Park Hall of Shame API
+Documentation=https://github.com/YOUR_REPO/ThemeParkHallOfShame
+After=network.target mariadb.service
+
+[Service]
+Type=exec
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/opt/themeparkhallofshame/backend/src
+Environment="PATH=/opt/themeparkhallofshame/venv/bin:/usr/local/bin:/usr/bin"
+EnvironmentFile=/opt/themeparkhallofshame/backend/.env
+ExecStart=/opt/themeparkhallofshame/venv/bin/gunicorn \
+    --bind 127.0.0.1:5001 \
+    --workers 2 \
+    --timeout 120 \
+    --access-logfile /opt/themeparkhallofshame/logs/access.log \
+    --error-logfile /opt/themeparkhallofshame/logs/error.log \
+    --capture-output \
+    wsgi:application
+
+# Restart on failure
+Restart=on-failure
+RestartSec=5
+
+# Resource limits (co-located server safeguard)
+CPUQuota=30%
+MemoryMax=512M
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/themeparkhallofshame/logs
+
+[Install]
+WantedBy=multi-user.target

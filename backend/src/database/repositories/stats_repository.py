@@ -1588,7 +1588,7 @@ class StatsRepository:
                     pp.total_downtime_hours AS previous_downtime_hours
                 FROM current_period cp
                 JOIN previous_period pp ON cp.park_id = pp.park_id
-                WHERE (cp.avg_uptime_percentage - pp.avg_uptime_percentage) >= 5.0
+                WHERE (cp.avg_uptime_percentage - pp.avg_uptime_percentage) >= :threshold
                 ORDER BY improvement_percentage DESC
                 LIMIT :limit
             """)
@@ -1596,6 +1596,7 @@ class StatsRepository:
             result = self.conn.execute(query, {
                 "current_date": current_date,
                 "previous_date": previous_date,
+                "threshold": 2.0,  # Lower threshold for daily comparisons
                 "limit": limit
             })
 
@@ -1789,7 +1790,7 @@ class StatsRepository:
                     pp.total_downtime_hours AS previous_downtime_hours
                 FROM current_period cp
                 JOIN previous_period pp ON cp.park_id = pp.park_id
-                WHERE (pp.avg_uptime_percentage - cp.avg_uptime_percentage) >= 5.0
+                WHERE (pp.avg_uptime_percentage - cp.avg_uptime_percentage) >= :threshold
                 ORDER BY decline_percentage DESC
                 LIMIT :limit
             """)
@@ -1797,6 +1798,7 @@ class StatsRepository:
             result = self.conn.execute(query, {
                 "current_date": current_date,
                 "previous_date": previous_date,
+                "threshold": 2.0,  # Lower threshold for daily comparisons
                 "limit": limit
             })
 
@@ -1996,7 +1998,7 @@ class StatsRepository:
                     pp.downtime_minutes AS previous_downtime_minutes
                 FROM current_period cp
                 JOIN previous_period pp ON cp.ride_id = pp.ride_id
-                WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
+                WHERE (cp.uptime_percentage - pp.uptime_percentage) >= :threshold
                 ORDER BY improvement_percentage DESC
                 LIMIT :limit
             """)
@@ -2004,6 +2006,7 @@ class StatsRepository:
             result = self.conn.execute(query, {
                 "current_date": current_date,
                 "previous_date": previous_date,
+                "threshold": 2.0,  # Lower threshold for daily comparisons
                 "limit": limit
             })
 
@@ -2215,7 +2218,7 @@ class StatsRepository:
                     pp.downtime_minutes AS previous_downtime_minutes
                 FROM current_period cp
                 JOIN previous_period pp ON cp.ride_id = pp.ride_id
-                WHERE (pp.uptime_percentage - cp.uptime_percentage) >= 5.0
+                WHERE (pp.uptime_percentage - cp.uptime_percentage) >= :threshold
                 ORDER BY decline_percentage DESC
                 LIMIT :limit
             """)
@@ -2223,6 +2226,7 @@ class StatsRepository:
             result = self.conn.execute(query, {
                 "current_date": current_date,
                 "previous_date": previous_date,
+                "threshold": 2.0,  # Lower threshold for daily comparisons
                 "limit": limit
             })
 

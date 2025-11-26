@@ -171,7 +171,7 @@ class Trends {
                     <button class="entity-btn ${this.state.entityType === 'rides' ? 'active' : ''}"
                             data-entity="rides">Rides</button>
                 </div>
-                <h2 class="section-title">${this.getPeriodTitle('Performance Trends')}</h2>
+                <h2 class="section-title">${this.getPeriodTitle('Uptime Trends')}</h2>
             </div>
             ${this.state.entityType === 'parks'
                 ? this.renderParksTrends()
@@ -204,11 +204,21 @@ class Trends {
      */
     renderTrendTable(data, type, isImproving, tableTitle) {
         if (!data || data.length === 0) {
+            // Show time-aware message for "today" period
+            let emptyMessage = 'No significant trends found for the selected period';
+            if (this.state.period === 'today') {
+                const hour = new Date().getHours();
+                if (hour < 12) {
+                    emptyMessage = "Today's data is still being collected. Check back later or try 7 Days view.";
+                } else {
+                    emptyMessage = 'No significant changes detected today (requires 2%+ uptime change)';
+                }
+            }
             return `
                 <div class="data-container">
                     <div class="table-header">${tableTitle}</div>
                     <div class="empty-state">
-                        <p>No significant trends found for the selected period</p>
+                        <p>${emptyMessage}</p>
                     </div>
                 </div>
             `;
@@ -223,7 +233,7 @@ class Trends {
                             <tr>
                                 <th class="park-col">Park</th>
                                 <th class="location-col">Location</th>
-                                <th class="uptime-col">Current</th>
+                                <th class="uptime-col">Uptime</th>
                                 <th class="uptime-col">Previous</th>
                                 <th class="change-col">Change</th>
                             </tr>
@@ -243,7 +253,7 @@ class Trends {
                             <tr>
                                 <th class="ride-col">Ride</th>
                                 <th class="park-col">Park</th>
-                                <th class="uptime-col">Current</th>
+                                <th class="uptime-col">Uptime</th>
                                 <th class="uptime-col">Previous</th>
                                 <th class="change-col">Change</th>
                             </tr>

@@ -10,6 +10,7 @@ class Trends {
         this.state = {
             period: '7days',
             filter: initialFilter,
+            entityType: 'parks',  // 'parks' or 'rides'
             limit: 20,
             loading: false,
             error: null,
@@ -140,7 +141,7 @@ class Trends {
     }
 
     /**
-     * Render main content (loading, error, or all trends tables)
+     * Render main content (loading, error, or toggle + trends tables)
      */
     renderContent() {
         if (this.state.loading) {
@@ -161,39 +162,51 @@ class Trends {
             `;
         }
 
-        // Render all 4 trend tables
+        // Render toggle + selected entity type trends
         return `
-            ${this.renderTrendSection('Parks - Most Improved', 'var(--turquoise)', this.state.parksImproving?.parks, 'parks', true)}
-            ${this.renderTrendSection('Parks - Declining Performance', 'var(--coral)', this.state.parksDeclining?.parks, 'parks', false)}
-            ${this.renderTrendSection('Rides - Most Improved', 'var(--gold)', this.state.ridesImproving?.rides, 'rides', true)}
-            ${this.renderTrendSection('Rides - Declining Performance', 'var(--pink)', this.state.ridesDeclining?.rides, 'rides', false)}
+            <div class="section-header">
+                <div class="entity-toggle">
+                    <button class="entity-btn ${this.state.entityType === 'parks' ? 'active' : ''}"
+                            data-entity="parks">Parks</button>
+                    <button class="entity-btn ${this.state.entityType === 'rides' ? 'active' : ''}"
+                            data-entity="rides">Rides</button>
+                </div>
+                <h2 class="section-title">${this.getPeriodTitle('Performance Trends')}</h2>
+            </div>
+            ${this.state.entityType === 'parks'
+                ? this.renderParksTrends()
+                : this.renderRidesTrends()}
         `;
     }
 
     /**
-     * Render a trend section with header and table
+     * Render parks trends (improving + declining)
      */
-    renderTrendSection(title, markerColor, data, type, isImproving) {
-        const baseTitle = isImproving ? 'Uptime Improvement Rankings' : 'Uptime Decline Rankings';
-        const tableHeader = this.getPeriodTitle(baseTitle);
-
+    renderParksTrends() {
         return `
-            <div class="section-header">
-                <div class="section-marker" style="background: ${markerColor};"></div>
-                <h2 class="section-title">${title}</h2>
-            </div>
-            ${this.renderTrendTable(data, type, isImproving, tableHeader)}
+            ${this.renderTrendTable(this.state.parksImproving?.parks, 'parks', true, 'Most Improved')}
+            ${this.renderTrendTable(this.state.parksDeclining?.parks, 'parks', false, 'Declining Performance')}
+        `;
+    }
+
+    /**
+     * Render rides trends (improving + declining)
+     */
+    renderRidesTrends() {
+        return `
+            ${this.renderTrendTable(this.state.ridesImproving?.rides, 'rides', true, 'Most Improved')}
+            ${this.renderTrendTable(this.state.ridesDeclining?.rides, 'rides', false, 'Declining Performance')}
         `;
     }
 
     /**
      * Render a trend table (parks or rides)
      */
-    renderTrendTable(data, type, isImproving, tableHeaderText) {
+    renderTrendTable(data, type, isImproving, tableTitle) {
         if (!data || data.length === 0) {
             return `
                 <div class="data-container">
-                    <div class="table-header">${tableHeaderText}</div>
+                    <div class="table-header">${tableTitle}</div>
                     <div class="empty-state">
                         <p>No significant trends found for the selected period</p>
                     </div>
@@ -204,7 +217,7 @@ class Trends {
         if (type === 'parks') {
             return `
                 <div class="data-container">
-                    <div class="table-header">${tableHeaderText}</div>
+                    <div class="table-header">${tableTitle}</div>
                     <table class="rankings-table trends-table">
                         <thead>
                             <tr>
@@ -224,7 +237,7 @@ class Trends {
         } else {
             return `
                 <div class="data-container">
-                    <div class="table-header">${tableHeaderText}</div>
+                    <div class="table-header">${tableTitle}</div>
                     <table class="rankings-table trends-table">
                         <thead>
                             <tr>
@@ -389,6 +402,17 @@ class Trends {
      * Attach event listeners to controls
      */
     attachEventListeners() {
+        // Entity toggle buttons
+        const entityBtns = this.container.querySelectorAll('.entity-btn');
+        entityBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const newEntityType = btn.dataset.entity;
+                if (newEntityType !== this.state.entityType) {
+                    this.setState({ entityType: newEntityType });
+                }
+            });
+        });
+
         // Retry button (if error state)
         const retryBtn = this.container.querySelector('.retry-btn');
         if (retryBtn) {

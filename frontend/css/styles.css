@@ -276,7 +276,7 @@ body {
 
 .nav-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 4px;
     background: var(--charcoal);
     padding: 4px;
@@ -592,6 +592,42 @@ main {
 }
 
 /* ============================================
+   ENTITY TOGGLE (PARKS/RIDES)
+   ============================================ */
+.entity-toggle {
+    display: flex;
+    gap: 0;
+    margin-right: 20px;
+}
+
+.entity-btn {
+    padding: 10px 20px;
+    border: 3px solid var(--charcoal);
+    background: var(--warm-white);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: var(--charcoal);
+}
+
+.entity-btn:first-child {
+    border-right: none;
+}
+
+.entity-btn:hover {
+    background: var(--light-gray);
+}
+
+.entity-btn.active {
+    background: var(--charcoal);
+    color: var(--warm-white);
+}
+
+/* ============================================
    DATA TABLES
    ============================================ */
 .data-container {
@@ -716,15 +752,45 @@ td {
 
 /* Top rows highlighting */
 .park-row.top-three,
-.ride-row.top-five,
-.top-five {
+.ride-row.top-three,
+.top-three {
     background-color: rgba(255, 182, 39, 0.1);
 }
 
 .park-row.top-three:hover,
-.ride-row.top-five:hover,
-.top-five:hover {
+.ride-row.top-three:hover,
+.top-three:hover {
     background-color: rgba(255, 182, 39, 0.15);
+}
+
+/* Ride name cell - matches park-name-cell structure */
+.ride-name-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.ride-name-cell .ride-name {
+    font-weight: 700;
+    color: var(--charcoal);
+}
+
+.ride-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.ride-external-link {
+    color: var(--deep-teal);
+    text-decoration: none;
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
+}
+
+.ride-external-link:hover {
+    opacity: 1;
+    color: var(--coral);
 }
 
 /* ============================================

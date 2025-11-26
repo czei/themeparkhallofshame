@@ -1,21 +1,29 @@
 /**
- * Theme Park Hall of Shame - Ride Performance Component
- * Displays individual ride downtime rankings with status badges and tier indicators
+ * Theme Park Hall of Shame - Downtime Component
+ * Combined view showing both park and ride downtime rankings
  */
 
-class RidePerformance {
+class Downtime {
     constructor(apiClient, containerId, initialFilter = 'all-parks') {
         this.apiClient = apiClient;
         this.container = document.getElementById(containerId);
         this.state = {
-            period: '7days',
+            period: 'today',
             filter: initialFilter,
-            limit: 100,
+            entityType: 'parks',  // 'parks' or 'rides'
+            parkLimit: 50,
+            rideLimit: 100,
             loading: false,
             error: null,
-            data: null,
+            parkData: null,
+            rideData: null,
             aggregateStats: null
         };
+        // Initialize park details modal
+        this.parkDetailsModal = null;
+        if (window.ParkDetailsModal) {
+            this.parkDetailsModal = new window.ParkDetailsModal(apiClient);
+        }
     }
 
     /**
@@ -23,54 +31,50 @@ class RidePerformance {
      */
     async init() {
         this.render();
-        await Promise.all([
-            this.fetchRidePerformance(),
-            this.fetchAggregateStats()
-        ]);
+        await this.fetchAllData();
     }
 
     /**
-     * Fetch aggregate stats from parks/downtime endpoint
+     * Fetch both park and ride downtime data in parallel
      */
-    async fetchAggregateStats() {
-        try {
-            const response = await this.apiClient.get('/parks/downtime', {
-                period: 'today',
-                filter: this.state.filter,
-                limit: 1
-            });
-            if (response.success && response.aggregate_stats) {
-                this.setState({ aggregateStats: response.aggregate_stats });
-            }
-        } catch (error) {
-            console.error('Failed to fetch aggregate stats:', error);
-        }
-    }
-
-    /**
-     * Fetch ride performance rankings from API
-     */
-    async fetchRidePerformance() {
+    async fetchAllData() {
         this.setState({ loading: true, error: null });
 
         try {
-            const params = {
+            const parkParams = {
                 period: this.state.period,
                 filter: this.state.filter,
-                limit: this.state.limit
+                limit: this.state.parkLimit
             };
 
-            const response = await this.apiClient.get('/rides/downtime', params);
+            const rideParams = {
+                period: this.state.period,
+                filter: this.state.filter,
+                limit: this.state.rideLimit
+            };
 
-            if (response.success) {
-                this.setState({
-                    data: response,
-                    loading: false
-                });
-                this.updateLastUpdateTime();
-            } else {
-                throw new Error(response.error || 'Failed to fetch ride performance');
+            const [parkResponse, rideResponse] = await Promise.all([
+                this.apiClient.get('/parks/downtime', parkParams),
+                this.apiClient.get('/rides/downtime', rideParams)
+            ]);
+
+            const newState = { loading: false };
+
+            if (parkResponse.success) {
+                newState.parkData = parkResponse;
+                // Get aggregate stats from park response
+                if (parkResponse.aggregate_stats) {
+                    newState.aggregateStats = parkResponse.aggregate_stats;
+                }
             }
+
+            if (rideResponse.success) {
+                newState.rideData = rideResponse;
+            }
+
+            this.setState(newState);
+            this.updateLastUpdateTime();
+
         } catch (error) {
             this.setState({
                 error: error.message,
@@ -85,6 +89,18 @@ class RidePerformance {
     setState(newState) {
         this.state = { ...this.state, ...newState };
         this.render();
+    }
+
+    /**
+     * Get table header title based on current period
+     */
+    getPeriodTitle(baseTitle) {
+        const periodLabels = {
+            'today': "Today's",
+            '7days': '7 Day',
+            '30days': '30 Day'
+        };
+        return `${periodLabels[this.state.period] || ''} ${baseTitle}`;
     }
 
     /**
@@ -122,14 +138,8 @@ class RidePerformance {
         if (!this.container) return;
 
         this.container.innerHTML = `
-            <div class="ride-performance-view">
+            <div class="downtime-view">
                 ${this.renderAggregateStats()}
-
-                <div class="section-header">
-                    <div class="section-marker" style="background: var(--turquoise);"></div>
-                    <h2 class="section-title">Individual Ride Performance</h2>
-                </div>
-
                 ${this.renderContent()}
             </div>
         `;
@@ -138,41 +148,14 @@ class RidePerformance {
     }
 
     /**
-     * Render period controls
-     */
-    renderControls() {
-        return `
-            <div class="rankings-controls">
-                <div class="control-group">
-                    <label>Time Period:</label>
-                    <div class="button-group">
-                        <button
-                            class="period-btn ${this.state.period === 'today' ? 'active' : ''}"
-                            data-period="today"
-                        >Today</button>
-                        <button
-                            class="period-btn ${this.state.period === '7days' ? 'active' : ''}"
-                            data-period="7days"
-                        >7 Days</button>
-                        <button
-                            class="period-btn ${this.state.period === '30days' ? 'active' : ''}"
-                            data-period="30days"
-                        >30 Days</button>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-
-    /**
-     * Render main content (loading, error, or rankings table)
+     * Render main content (loading, error, or toggle + single table)
      */
     renderContent() {
         if (this.state.loading) {
             return `
                 <div class="loading-state">
                     <div class="spinner"></div>
-                    <p>Loading ride performance...</p>
+                    <p>Loading downtime data...</p>
                 </div>
             `;
         }
@@ -180,38 +163,148 @@ class RidePerformance {
         if (this.state.error) {
             return `
                 <div class="error-state">
-                    <p class="error-message">⚠️ ${this.state.error}</p>
+                    <p class="error-message">${this.state.error}</p>
                     <button class="retry-btn">Retry</button>
                 </div>
             `;
         }
 
-        if (this.state.data && this.state.data.data) {
-            return this.renderRideTable(this.state.data.data);
-        }
-
         return `
-            <div class="empty-state">
-                <p>No ride performance data available</p>
+            <div class="section-header">
+                <div class="entity-toggle">
+                    <button class="entity-btn ${this.state.entityType === 'parks' ? 'active' : ''}"
+                            data-entity="parks">Parks</button>
+                    <button class="entity-btn ${this.state.entityType === 'rides' ? 'active' : ''}"
+                            data-entity="rides">Rides</button>
+                </div>
+                <h2 class="section-title">${this.getPeriodTitle('Downtime Rankings')}</h2>
             </div>
+            ${this.state.entityType === 'parks'
+                ? this.renderParkTable()
+                : this.renderRideTable()}
         `;
     }
 
     /**
-     * Render ride performance table
+     * Render park rankings table
      */
-    renderRideTable(rides) {
-        if (!rides || rides.length === 0) {
+    renderParkTable() {
+        const parks = this.state.parkData?.data;
+
+        if (!parks || parks.length === 0) {
             return `
                 <div class="empty-state">
-                    <p>No rides found for the selected filters</p>
+                    <p>No park data available</p>
                 </div>
             `;
         }
 
         return `
             <div class="data-container">
-                <div class="table-header">${this.getPeriodTitle('Downtime Rankings')}</div>
+                <table class="rankings-table">
+                    <thead>
+                        <tr>
+                            <th class="rank-col">Rank</th>
+                            <th class="park-col">Park</th>
+                            <th class="location-col">Location</th>
+                            <th class="downtime-col">Downtime</th>
+                            <th class="uptime-col">Uptime %</th>
+                            <th class="affected-col">Affected Rides</th>
+                            <th class="trend-col">Trend</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${parks.map(park => this.renderParkRow(park)).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    /**
+     * Render a single park row
+     */
+    renderParkRow(park) {
+        const trendPct = park.trend_percentage !== null && park.trend_percentage !== undefined
+            ? Number(park.trend_percentage) : null;
+        const trendClass = this.getTrendClass(trendPct);
+        const trendIcon = this.getTrendIcon(trendPct);
+        const trendText = trendPct !== null
+            ? `${trendPct > 0 ? '+' : ''}${trendPct.toFixed(1)}%`
+            : 'N/A';
+
+        return `
+            <tr class="park-row ${park.rank <= 3 ? 'top-three' : ''}">
+                <td class="rank-col">
+                    <span class="rank-badge ${park.rank === 1 ? 'rank-1' : park.rank === 2 ? 'rank-2' : park.rank === 3 ? 'rank-3' : ''}">
+                        ${park.rank}
+                    </span>
+                </td>
+                <td class="park-col">
+                    <div class="park-name-cell">
+                        <span class="park-name">${this.escapeHtml(park.park_name || park.name || 'Unknown Park')}</span>
+                        <div class="park-actions">
+                            <button
+                                class="park-details-btn"
+                                data-park-id="${park.park_id}"
+                                data-park-name="${this.escapeHtml(park.park_name || park.name || 'Unknown Park')}"
+                                title="View park details"
+                            >Details</button>
+                            <a
+                                href="${park.queue_times_url}"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="park-external-link"
+                                title="View on Queue-Times.com"
+                            >
+                                <span class="external-icon">↗</span>
+                            </a>
+                        </div>
+                    </div>
+                </td>
+                <td class="location-col">${this.escapeHtml(park.location || 'Unknown')}</td>
+                <td class="downtime-col">
+                    <span class="downtime-value">
+                        ${this.formatHours(park.total_downtime_hours || 0)}
+                    </span>
+                </td>
+                <td class="uptime-col">
+                    <div class="uptime-display">
+                        <span class="uptime-percentage">${Number(park.uptime_percentage || 0).toFixed(1)}%</span>
+                        <div class="uptime-bar">
+                            <div
+                                class="uptime-fill"
+                                style="width: ${Math.min(Number(park.uptime_percentage) || 0, 100)}%"
+                            ></div>
+                        </div>
+                    </div>
+                </td>
+                <td class="affected-col">${park.affected_rides_count || 0}</td>
+                <td class="trend-col">
+                    <span class="trend-indicator ${trendClass}">
+                        ${trendIcon} ${trendText}
+                    </span>
+                </td>
+            </tr>
+        `;
+    }
+
+    /**
+     * Render ride performance table
+     */
+    renderRideTable() {
+        const rides = this.state.rideData?.data;
+
+        if (!rides || rides.length === 0) {
+            return `
+                <div class="empty-state">
+                    <p>No ride data available</p>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="data-container">
                 <table class="rankings-table ride-table">
                     <thead>
                         <tr>
@@ -249,20 +342,27 @@ class RidePerformance {
         const tierBadge = this.getTierBadge(ride.tier);
 
         return `
-            <tr class="ride-row ${ride.rank <= 5 ? 'top-five' : ''}">
+            <tr class="ride-row ${ride.rank <= 3 ? 'top-three' : ''}">
                 <td class="rank-col">
-                    <span class="rank-number">${ride.rank}</span>
+                    <span class="rank-badge ${ride.rank === 1 ? 'rank-1' : ride.rank === 2 ? 'rank-2' : ride.rank === 3 ? 'rank-3' : ''}">
+                        ${ride.rank}
+                    </span>
                 </td>
                 <td class="ride-col">
-                    <a
-                        href="${ride.queue_times_url}"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="ride-link"
-                    >
-                        ${this.escapeHtml(ride.ride_name || 'Unknown Ride')}
-                        <span class="external-icon">↗</span>
-                    </a>
+                    <div class="ride-name-cell">
+                        <span class="ride-name">${this.escapeHtml(ride.ride_name || 'Unknown Ride')}</span>
+                        <div class="ride-actions">
+                            <a
+                                href="${ride.queue_times_url}"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="ride-external-link"
+                                title="View on Queue-Times.com"
+                            >
+                                <span class="external-icon">↗</span>
+                            </a>
+                        </div>
+                    </div>
                 </td>
                 <td class="tier-col">
                     ${tierBadge}
@@ -299,18 +399,6 @@ class RidePerformance {
                 </td>
             </tr>
         `;
-    }
-
-    /**
-     * Get table header title based on current period
-     */
-    getPeriodTitle(baseTitle) {
-        const periodLabels = {
-            'today': "Today's",
-            '7days': '7 Day',
-            '30days': '30 Day'
-        };
-        return `${periodLabels[this.state.period] || ''} ${baseTitle}`;
     }
 
     /**
@@ -362,8 +450,8 @@ class RidePerformance {
      */
     getTrendClass(trendPercentage) {
         if (trendPercentage === null || trendPercentage === undefined) return 'trend-neutral';
-        if (trendPercentage > 0) return 'trend-worse';
-        if (trendPercentage < 0) return 'trend-better';
+        if (trendPercentage > 0) return 'trend-worse';  // Downtime increased (bad)
+        if (trendPercentage < 0) return 'trend-better';  // Downtime decreased (good)
         return 'trend-neutral';
     }
 
@@ -372,8 +460,8 @@ class RidePerformance {
      */
     getTrendIcon(trendPercentage) {
         if (trendPercentage === null || trendPercentage === undefined) return '—';
-        if (trendPercentage > 0) return '↑';
-        if (trendPercentage < 0) return '↓';
+        if (trendPercentage > 0) return '↑';  // Downtime increased (bad)
+        if (trendPercentage < 0) return '↓';  // Downtime decreased (good)
         return '→';
     }
 
@@ -418,7 +506,7 @@ class RidePerformance {
     updateFilter(newFilter) {
         if (newFilter !== this.state.filter) {
             this.state.filter = newFilter;
-            this.fetchRidePerformance();
+            this.fetchAllData();
         }
     }
 
@@ -428,7 +516,7 @@ class RidePerformance {
     updatePeriod(newPeriod) {
         if (newPeriod !== this.state.period) {
             this.state.period = newPeriod;
-            this.fetchRidePerformance();
+            this.fetchAllData();
         }
     }
 
@@ -436,14 +524,25 @@ class RidePerformance {
      * Attach event listeners to controls
      */
     attachEventListeners() {
-        // Period buttons
-        const periodBtns = this.container.querySelectorAll('.period-btn');
-        periodBtns.forEach(btn => {
+        // Entity toggle buttons
+        const entityBtns = this.container.querySelectorAll('.entity-btn');
+        entityBtns.forEach(btn => {
             btn.addEventListener('click', () => {
-                const period = btn.dataset.period;
-                if (period !== this.state.period) {
-                    this.state.period = period;
-                    this.fetchRidePerformance();
+                const newEntityType = btn.dataset.entity;
+                if (newEntityType !== this.state.entityType) {
+                    this.setState({ entityType: newEntityType });
+                }
+            });
+        });
+
+        // Park details buttons
+        const detailsBtns = this.container.querySelectorAll('.park-details-btn');
+        detailsBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const parkId = parseInt(btn.dataset.parkId);
+                const parkName = btn.dataset.parkName;
+                if (this.parkDetailsModal && parkId) {
+                    this.parkDetailsModal.open(parkId, parkName);
                 }
             });
         });
@@ -452,11 +551,11 @@ class RidePerformance {
         const retryBtn = this.container.querySelector('.retry-btn');
         if (retryBtn) {
             retryBtn.addEventListener('click', () => {
-                this.fetchRidePerformance();
+                this.fetchAllData();
             });
         }
     }
 }
 
 // Initialize when view is loaded
-window.RidePerformance = RidePerformance;
+window.Downtime = Downtime;

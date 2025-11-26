@@ -145,32 +145,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             switch(viewName) {
-                case 'park-rankings':
-                    if (typeof ParkRankings !== 'undefined') {
-                        currentComponent = new ParkRankings(apiClient, 'view-container', globalState.filter);
+                case 'downtime':
+                    if (typeof Downtime !== 'undefined') {
+                        currentComponent = new Downtime(apiClient, 'view-container', globalState.filter);
                         // Sync the period before fetching data
                         currentComponent.state.period = globalState.period;
                         await currentComponent.init();
                     } else {
-                        throw new Error('ParkRankings component not loaded');
-                    }
-                    break;
-
-                case 'ride-performance':
-                    if (typeof RidePerformance !== 'undefined') {
-                        currentComponent = new RidePerformance(apiClient, 'view-container', globalState.filter);
-                        // Sync the period before fetching data
-                        currentComponent.state.period = globalState.period;
-                        await currentComponent.init();
-                    } else {
-                        throw new Error('RidePerformance component not loaded');
+                        throw new Error('Downtime component not loaded');
                     }
                     break;
 
                 case 'wait-times':
                     if (typeof WaitTimes !== 'undefined') {
                         currentComponent = new WaitTimes(apiClient, 'view-container', globalState.filter);
-                        // WaitTimes uses 'mode' not 'period', but sync anyway
+                        // Sync the period before fetching data
+                        currentComponent.state.period = globalState.period;
                         await currentComponent.init();
                     } else {
                         throw new Error('WaitTimes component not loaded');
@@ -205,6 +195,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Load default view (Park Rankings)
-    loadView('park-rankings');
+    // Load default view (Downtime)
+    loadView('downtime');
 });

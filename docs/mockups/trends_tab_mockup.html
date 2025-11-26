@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Theme Park Hall of Shame - Trends</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=Space+Grotesk:wght@400;600;700&display=swap');
+        
+        :root {
+            --coral: #FF6B5A;
+            --coral-light: #FF8B7A;
+            --turquoise: #00B8C5;
+            --turquoise-dark: #007B8A;
+            --gold: #FFB627;
+            --gold-light: #FFD052;
+            --soft-pink: #FF9BAA;
+            --deep-teal: #007B8A;
+            --warm-white: #FFF8F0;
+            --charcoal: #2A2A2A;
+            --light-gray: #F5F5F5;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--warm-white);
+            color: var(--charcoal);
+            line-height: 1.5;
+        }
+
+        /* Geometric Top Bar */
+        .geometric-bar {
+            height: 12px;
+            background: linear-gradient(
+                to right,
+                var(--coral) 0%,
+                var(--coral) 25%,
+                var(--turquoise) 25%,
+                var(--turquoise) 50%,
+                var(--gold) 50%,
+                var(--gold) 75%,
+                var(--soft-pink) 75%,
+                var(--soft-pink) 100%
+            );
+        }
+
+        /* Header Section - Compact for chart view */
+        .header-section {
+            background: var(--warm-white);
+            padding: 30px 20px 20px;
+            text-align: center;
+            position: relative;
+        }
+
+        .header-section::before {
+            content: '';
+            position: absolute;
+            top: 10px;
+            right: 8%;
+            width: 80px;
+            height: 80px;
+            background: var(--coral);
+            opacity: 0.12;
+            clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+        }
+
+        .header-section::after {
+            content: '';
+            position: absolute;
+            bottom: 10px;
+            left: 5%;
+            width: 60px;
+            height: 60px;
+            background: var(--turquoise);
+            opacity: 0.12;
+            border-radius: 50%;
+        }
+
+        h1 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 2.5rem;
+            font-weight: 800;
+            letter-spacing: -1px;
+            line-height: 0.95;
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .title-line-1 { color: var(--coral); }
+        .title-line-2 { color: var(--deep-teal); }
+
+        .subtitle {
+            font-size: 0.85rem;
+            font-weight: 400;
+            color: var(--charcoal);
+            opacity: 0.7;
+        }
+
+        /* Navigation */
+        .nav-container {
+            max-width: 1200px;
+            margin: 25px auto;
+            padding: 0 20px;
+        }
+
+        .nav-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
+            background: var(--charcoal);
+            padding: 4px;
+        }
+
+        .nav-item {
+            background: var(--warm-white);
+            padding: 16px;
+            text-align: center;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.85rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: none;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .nav-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            transition: left 0.3s ease;
+        }
+
+        .nav-item:nth-child(1)::before { background: var(--coral); }
+        .nav-item:nth-child(2)::before { background: var(--turquoise); }
+        .nav-item:nth-child(3)::before { background: var(--gold); }
+
+        .nav-item:hover::before { left: 0; }
+        .nav-item:hover { color: white; }
+        .nav-item.active { color: white; }
+
+        .nav-item.active:nth-child(1) { background: var(--coral); }
+        .nav-item.active:nth-child(2) { background: var(--turquoise); }
+        .nav-item.active:nth-child(3) { background: var(--gold); }
+
+        .nav-item span { position: relative; z-index: 1; }
+
+        /* Controls Row */
+        .controls-row {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .control-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            color: var(--charcoal);
+            opacity: 0.6;
+        }
+
+        .toggle-group {
+            display: flex;
+            background: white;
+            border: 2px solid var(--charcoal);
+        }
+
+        .toggle-btn {
+            padding: 10px 20px;
+            background: white;
+            border: none;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: var(--charcoal);
+        }
+
+        .toggle-btn:not(:last-child) {
+            border-right: 1px solid var(--light-gray);
+        }
+
+        .toggle-btn:hover {
+            background: var(--light-gray);
+        }
+
+        .toggle-btn.active {
+            background: var(--charcoal);
+            color: white;
+        }
+
+        .toggle-btn.active-coral { background: var(--coral); color: white; }
+        .toggle-btn.active-turquoise { background: var(--turquoise); color: white; }
+        .toggle-btn.active-gold { background: var(--gold); color: var(--charcoal); }
+
+        /* Time Period with colored accents */
+        .time-selector {
+            display: flex;
+            background: white;
+            border: 2px solid var(--charcoal);
+        }
+
+        .time-btn {
+            padding: 10px 24px;
+            background: white;
+            border: none;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: var(--charcoal);
+            position: relative;
+        }
+
+        .time-btn::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .time-btn:nth-child(1)::after { background: var(--coral); }
+        .time-btn:nth-child(2)::after { background: var(--turquoise); }
+        .time-btn:nth-child(3)::after { background: var(--gold); }
+
+        .time-btn:hover::after { opacity: 0.5; }
+        .time-btn.active { background: var(--charcoal); color: white; }
+        .time-btn.active::after { opacity: 1; }
+
+        /* Chart Container */
+        .chart-section {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        .chart-container {
+            background: white;
+            border: 3px solid var(--charcoal);
+            margin-bottom: 30px;
+        }
+
+        .chart-header {
+            padding: 20px 25px;
+            background: var(--charcoal);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .chart-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .chart-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .chart-select {
+            padding: 8px 30px 8px 12px;
+            background: white;
+            border: none;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%232A2A2A' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+        }
+
+        .chart-canvas-wrapper {
+            padding: 30px;
+            position: relative;
+        }
+
+        .chart-canvas-wrapper canvas {
+            max-height: 400px;
+        }
+
+        /* Legend/Data Table */
+        .legend-table {
+            border-top: 2px solid var(--light-gray);
+        }
+
+        .legend-header {
+            display: grid;
+            grid-template-columns: 30px 2fr 1fr 1fr 1fr 1fr;
+            padding: 12px 25px;
+            background: var(--light-gray);
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--charcoal);
+        }
+
+        .legend-row {
+            display: grid;
+            grid-template-columns: 30px 2fr 1fr 1fr 1fr 1fr;
+            padding: 15px 25px;
+            border-bottom: 1px solid var(--light-gray);
+            align-items: center;
+            transition: background 0.2s ease;
+        }
+
+        .legend-row:hover {
+            background: rgba(255, 107, 90, 0.05);
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 2px;
+        }
+
+        .legend-name {
+            font-weight: 600;
+            color: var(--deep-teal);
+        }
+
+        .legend-value {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+        }
+
+        .legend-trend {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            font-size: 0.85rem;
+        }
+
+        .trend-up { color: var(--coral); }
+        .trend-down { color: var(--turquoise); }
+        .trend-neutral { color: var(--gold); }
+
+        /* Sparkline in legend */
+        .mini-spark {
+            height: 24px;
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+        }
+
+        .spark-bar {
+            width: 4px;
+            background: var(--light-gray);
+            border-radius: 1px;
+            transition: background 0.2s ease;
+        }
+
+        .legend-row:hover .spark-bar {
+            background: var(--turquoise);
+            opacity: 0.6;
+        }
+
+        /* Secondary Chart - Stacked Breakdown */
+        .breakdown-section {
+            margin-top: 40px;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .section-marker {
+            width: 6px;
+            height: 40px;
+            background: var(--turquoise);
+        }
+
+        .section-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--charcoal);
+            text-transform: uppercase;
+            letter-spacing: -0.5px;
+        }
+
+        /* Heatmap Preview */
+        .heatmap-container {
+            background: white;
+            border: 3px solid var(--charcoal);
+            margin-top: 40px;
+        }
+
+        .heatmap-header {
+            padding: 20px 25px;
+            background: var(--deep-teal);
+            color: white;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .heatmap-grid {
+            padding: 25px;
+        }
+
+        .heatmap-labels {
+            display: grid;
+            grid-template-columns: 60px repeat(7, 1fr);
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
+        .heatmap-day-label {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            text-align: center;
+            color: var(--charcoal);
+            opacity: 0.6;
+        }
+
+        .heatmap-row {
+            display: grid;
+            grid-template-columns: 60px repeat(7, 1fr);
+            gap: 4px;
+            margin-bottom: 4px;
+        }
+
+        .heatmap-hour-label {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.65rem;
+            font-weight: 600;
+            color: var(--charcoal);
+            opacity: 0.6;
+            display: flex;
+            align-items: center;
+        }
+
+        .heatmap-cell {
+            aspect-ratio: 1;
+            border-radius: 2px;
+            min-height: 24px;
+            transition: transform 0.2s ease;
+        }
+
+        .heatmap-cell:hover {
+            transform: scale(1.1);
+            z-index: 10;
+        }
+
+        /* Heatmap intensity colors using theme */
+        .heat-0 { background: var(--light-gray); }
+        .heat-1 { background: #FFE4B5; }
+        .heat-2 { background: var(--gold-light); }
+        .heat-3 { background: var(--gold); }
+        .heat-4 { background: var(--soft-pink); }
+        .heat-5 { background: var(--coral-light); }
+        .heat-6 { background: var(--coral); }
+
+        .heatmap-legend {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid var(--light-gray);
+        }
+
+        .heatmap-legend-label {
+            font-size: 0.65rem;
+            font-weight: 600;
+            color: var(--charcoal);
+            opacity: 0.6;
+        }
+
+        .heatmap-legend-scale {
+            display: flex;
+            gap: 3px;
+        }
+
+        .heatmap-legend-cell {
+            width: 20px;
+            height: 12px;
+            border-radius: 1px;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: 60px;
+            padding: 30px 20px;
+            background: var(--charcoal);
+            color: var(--warm-white);
+            text-align: center;
+        }
+
+        .footer-text {
+            font-size: 0.8rem;
+            opacity: 0.8;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            h1 { font-size: 1.8rem; }
+            
+            .nav-grid { grid-template-columns: 1fr; }
+            
+            .controls-row {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .control-group {
+                justify-content: space-between;
+            }
+
+            .legend-header,
+            .legend-row {
+                grid-template-columns: 20px 1.5fr 1fr 1fr;
+            }
+
+            .legend-header > *:nth-child(5),
+            .legend-header > *:nth-child(6),
+            .legend-row > *:nth-child(5),
+            .legend-row > *:nth-child(6) {
+                display: none;
+            }
+
+            .chart-header {
+                flex-direction: column;
+                gap: 15px;
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Geometric Top Bar -->
+    <div class="geometric-bar"></div>
+
+    <!-- Header -->
+    <div class="header-section">
+        <h1>
+            <span class="title-line-1">THEME PARK</span>
+            <span class="title-line-2">HALL OF SHAME</span>
+        </h1>
+        <div class="subtitle">Tracking operational performance across major theme parks</div>
+    </div>
+
+    <!-- Navigation -->
+    <div class="nav-container">
+        <div class="nav-grid">
+            <button class="nav-item"><span>Downtime</span></button>
+            <button class="nav-item"><span>Wait Times</span></button>
+            <button class="nav-item active"><span>Trends</span></button>
+        </div>
+    </div>
+
+    <!-- Controls Row -->
+    <div class="controls-row">
+        <div class="control-group">
+            <span class="control-label">Show Parks:</span>
+            <div class="toggle-group">
+                <button class="toggle-btn">All Parks</button>
+                <button class="toggle-btn active-coral">Disney & Universal</button>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <span class="control-label">Metric:</span>
+            <div class="toggle-group">
+                <button class="toggle-btn active">Downtime</button>
+                <button class="toggle-btn">Wait Times</button>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <div class="time-selector">
+                <button class="time-btn">Today</button>
+                <button class="time-btn active">7 Days</button>
+                <button class="time-btn">30 Days</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Chart Section -->
+    <div class="chart-section">
+        <div class="chart-container">
+            <div class="chart-header">
+                <div class="chart-title">Downtime Trends — Last 7 Days</div>
+                <div class="chart-controls">
+                    <select class="chart-select" id="chartType">
+                        <option value="line">Line Chart</option>
+                        <option value="bar">Bar Chart</option>
+                        <option value="area">Area Chart</option>
+                    </select>
+                    <select class="chart-select" id="parkFilter">
+                        <option value="top5">Top 5 Parks</option>
+                        <option value="top10">Top 10 Parks</option>
+                        <option value="disney">Disney Parks Only</option>
+                        <option value="universal">Universal Only</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="chart-canvas-wrapper">
+                <canvas id="mainChart"></canvas>
+            </div>
+
+            <!-- Legend Table -->
+            <div class="legend-table">
+                <div class="legend-header">
+                    <div></div>
+                    <div>Park</div>
+                    <div>Total</div>
+                    <div>Avg/Day</div>
+                    <div>7-Day Shape</div>
+                    <div>Trend</div>
+                </div>
+                <div class="legend-row">
+                    <div class="legend-color" style="background: #FF6B5A;"></div>
+                    <div class="legend-name">Universal's Volcano Bay</div>
+                    <div class="legend-value">17h 3m</div>
+                    <div class="legend-value">2h 26m</div>
+                    <div class="mini-spark">
+                        <div class="spark-bar" style="height: 40%;"></div>
+                        <div class="spark-bar" style="height: 60%;"></div>
+                        <div class="spark-bar" style="height: 45%;"></div>
+                        <div class="spark-bar" style="height: 80%;"></div>
+                        <div class="spark-bar" style="height: 100%;"></div>
+                        <div class="spark-bar" style="height: 70%;"></div>
+                        <div class="spark-bar" style="height: 85%;"></div>
+                    </div>
+                    <div class="legend-trend trend-up">↑ +6.7%</div>
+                </div>
+                <div class="legend-row">
+                    <div class="legend-color" style="background: #00B8C5;"></div>
+                    <div class="legend-name">Walt Disney Studios Park</div>
+                    <div class="legend-value">17h 2m</div>
+                    <div class="legend-value">2h 25m</div>
+                    <div class="mini-spark">
+                        <div class="spark-bar" style="height: 30%;"></div>
+                        <div class="spark-bar" style="height: 50%;"></div>
+                        <div class="spark-bar" style="height: 65%;"></div>
+                        <div class="spark-bar" style="height: 55%;"></div>
+                        <div class="spark-bar" style="height: 90%;"></div>
+                        <div class="spark-bar" style="height: 100%;"></div>
+                        <div class="spark-bar" style="height: 95%;"></div>
+                    </div>
+                    <div class="legend-trend trend-up">↑ +9.9%</div>
+                </div>
+                <div class="legend-row">
+                    <div class="legend-color" style="background: #FFB627;"></div>
+                    <div class="legend-name">Disney's Hollywood Studios</div>
+                    <div class="legend-value">14h 45m</div>
+                    <div class="legend-value">2h 6m</div>
+                    <div class="mini-spark">
+                        <div class="spark-bar" style="height: 70%;"></div>
+                        <div class="spark-bar" style="height: 85%;"></div>
+                        <div class="spark-bar" style="height: 100%;"></div>
+                        <div class="spark-bar" style="height: 60%;"></div>
+                        <div class="spark-bar" style="height: 45%;"></div>
+                        <div class="spark-bar" style="height: 50%;"></div>
+                        <div class="spark-bar" style="height: 40%;"></div>
+                    </div>
+                    <div class="legend-trend trend-down">↓ -12.3%</div>
+                </div>
+                <div class="legend-row">
+                    <div class="legend-color" style="background: #FF9BAA;"></div>
+                    <div class="legend-name">Magic Kingdom</div>
+                    <div class="legend-value">12h 18m</div>
+                    <div class="legend-value">1h 45m</div>
+                    <div class="mini-spark">
+                        <div class="spark-bar" style="height: 55%;"></div>
+                        <div class="spark-bar" style="height: 60%;"></div>
+                        <div class="spark-bar" style="height: 58%;"></div>
+                        <div class="spark-bar" style="height: 62%;"></div>
+                        <div class="spark-bar" style="height: 55%;"></div>
+                        <div class="spark-bar" style="height: 60%;"></div>
+                        <div class="spark-bar" style="height: 57%;"></div>
+                    </div>
+                    <div class="legend-trend trend-neutral">→ +0.2%</div>
+                </div>
+                <div class="legend-row">
+                    <div class="legend-color" style="background: #007B8A;"></div>
+                    <div class="legend-name">Universal Studios Florida</div>
+                    <div class="legend-value">11h 52m</div>
+                    <div class="legend-value">1h 41m</div>
+                    <div class="mini-spark">
+                        <div class="spark-bar" style="height: 90%;"></div>
+                        <div class="spark-bar" style="height: 75%;"></div>
+                        <div class="spark-bar" style="height: 60%;"></div>
+                        <div class="spark-bar" style="height: 50%;"></div>
+                        <div class="spark-bar" style="height: 55%;"></div>
+                        <div class="spark-bar" style="height: 45%;"></div>
+                        <div class="spark-bar" style="height: 40%;"></div>
+                    </div>
+                    <div class="legend-trend trend-down">↓ -18.5%</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Heatmap Section -->
+        <div class="breakdown-section">
+            <div class="section-header">
+                <div class="section-marker"></div>
+                <div class="section-title">Weekly Pattern — Universal's Volcano Bay</div>
+            </div>
+
+            <div class="heatmap-container">
+                <div class="heatmap-header">Downtime by Day & Hour</div>
+                <div class="heatmap-grid">
+                    <div class="heatmap-labels">
+                        <div></div>
+                        <div class="heatmap-day-label">Mon</div>
+                        <div class="heatmap-day-label">Tue</div>
+                        <div class="heatmap-day-label">Wed</div>
+                        <div class="heatmap-day-label">Thu</div>
+                        <div class="heatmap-day-label">Fri</div>
+                        <div class="heatmap-day-label">Sat</div>
+                        <div class="heatmap-day-label">Sun</div>
+                    </div>
+                    
+                    <div class="heatmap-row">
+                        <div class="heatmap-hour-label">9 AM</div>
+                        <div class="heatmap-cell heat-2"></div>
+                        <div class="heatmap-cell heat-1"></div>
+                        <div class="heatmap-cell heat-3"></div>
+                        <div class="heatmap-cell heat-1"></div>
+                        <div class="heatmap-cell heat-4"></div>
+                        <div class="heatmap-cell heat-5"></div>
+                        <div class="heatmap-cell heat-4"></div>
+                    </div>
+                    <div class="heatmap-row">
+                        <div class="heatmap-hour-label">10 AM</div>
+                        <div class="heatmap-cell heat-1"></div>
+                        <div class="heatmap-cell heat-0"></div>
+                        <div class="heatmap-cell heat-2"></div>
+                        <div class="heatmap-cell heat-1"></div>
+                        <div class="heatmap-cell heat-3"></div>
+                        <div class="heatmap-cell heat-4"></div>
+                        <div class="heatmap-cell heat-3"></div>
+                    </div>
+                    <div class="heatmap-row">
+                        <div class="heatmap-hour-label">11 AM</div>
+                        <div class="heatmap-cell heat-0"></div>
+                        <div class="heatmap-cell heat-1"></div>
+                        <div class="heatmap-cell heat-1"></div>
+                        <div class="heatmap-cell heat-0"></div>
+                        <div class="heatmap-cell heat-2"></div>
+                        <div class="heatmap-cell heat-3"></div>
+                        <div class="heatmap-cell heat-2"></div>
+                    </div>
+                    <div class="heatmap-row">
+                        <div class="heatmap-hour-label">12 PM</div>
+                        <div class="heatmap-cell heat-1"></div>
+                        <div class="heatmap-cell heat-2"></div>
+                        <div class="heatmap-cell heat-2"></div>
+                        <div class="heatmap-cell heat-1"></div>
+                        <div class="heatmap-cell heat-3"></div>
+                        <div class="heatmap-cell heat-5"></div>
+                        <div class="heatmap-cell heat-4"></div>
+                    </div>
+                    <div class="heatmap-row">
+                        <div class="heatmap-hour-label">1 PM</div>
+                        <div class="heatmap-cell heat-2"></div>
+                        <div class="heatmap-cell heat-3"></div>
+                        <div class="heatmap-cell heat-4"></div>
+                        <div class="heatmap-cell heat-2"></div>
+                        <div class="heatmap-cell heat-4"></div>
+                        <div class="heatmap-cell heat-6"></div>
+                        <div class="heatmap-cell heat-5"></div>
+                    </div>
+                    <div class="heatmap-row">
+                        <div class="heatmap-hour-label">2 PM</div>
+                        <div class="heatmap-cell heat-3"></div>
+                        <div class="heatmap-cell heat-4"></div>
+                        <div class="heatmap-cell heat-5"></div>
+                        <div class="heatmap-cell heat-3"></div>
+                        <div class="heatmap-cell heat-5"></div>
+                        <div class="heatmap-cell heat-6"></div>
+                        <div class="heatmap-cell heat-6"></div>
+                    </div>
+                    <div class="heatmap-row">
+                        <div class="heatmap-hour-label">3 PM</div>
+                        <div class="heatmap-cell heat-2"></div>
+                        <div class="heatmap-cell heat-3"></div>
+                        <div class="heatmap-cell heat-4"></div>
+                        <div class="heatmap-cell heat-2"></div>
+                        <div class="heatmap-cell heat-4"></div>
+                        <div class="heatmap-cell heat-5"></div>
+                        <div class="heatmap-cell heat-5"></div>
+                    </div>
+                    <div class="heatmap-row">
+                        <div class="heatmap-hour-label">4 PM</div>
+                        <div class="heatmap-cell heat-1"></div>
+                        <div class="heatmap-cell heat-2"></div>
+                        <div class="heatmap-cell heat-3"></div>
+                        <div class="heatmap-cell heat-1"></div>
+                        <div class="heatmap-cell heat-3"></div>
+                        <div class="heatmap-cell heat-4"></div>
+                        <div class="heatmap-cell heat-4"></div>
+                    </div>
+                    <div class="heatmap-row">
+                        <div class="heatmap-hour-label">5 PM</div>
+                        <div class="heatmap-cell heat-1"></div>
+                        <div class="heatmap-cell heat-1"></div>
+                        <div class="heatmap-cell heat-2"></div>
+                        <div class="heatmap-cell heat-1"></div>
+                        <div class="heatmap-cell heat-2"></div>
+                        <div class="heatmap-cell heat-3"></div>
+                        <div class="heatmap-cell heat-3"></div>
+                    </div>
+
+                    <div class="heatmap-legend">
+                        <span class="heatmap-legend-label">Less</span>
+                        <div class="heatmap-legend-scale">
+                            <div class="heatmap-legend-cell heat-0"></div>
+                            <div class="heatmap-legend-cell heat-1"></div>
+                            <div class="heatmap-legend-cell heat-2"></div>
+                            <div class="heatmap-legend-cell heat-3"></div>
+                            <div class="heatmap-legend-cell heat-4"></div>
+                            <div class="heatmap-legend-cell heat-5"></div>
+                            <div class="heatmap-legend-cell heat-6"></div>
+                        </div>
+                        <span class="heatmap-legend-label">More Downtime</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+        <div class="geometric-bar" style="height: 6px; margin-bottom: 15px;"></div>
+        <div class="footer-text">
+            © 2025 Theme Park Hall of Shame · Data from queue-times.com
+        </div>
+    </div>
+
+    <script>
+        // Chart.js configuration
+        const ctx = document.getElementById('mainChart').getContext('2d');
+        
+        // Theme colors
+        const colors = {
+            coral: '#FF6B5A',
+            turquoise: '#00B8C5',
+            gold: '#FFB627',
+            softPink: '#FF9BAA',
+            deepTeal: '#007B8A'
+        };
+
+        // Sample data - 7 days
+        const labels = ['Nov 19', 'Nov 20', 'Nov 21', 'Nov 22', 'Nov 23', 'Nov 24', 'Nov 25'];
+        
+        const data = {
+            labels: labels,
+            datasets: [
+                {
+                    label: "Universal's Volcano Bay",
+                    data: [1.8, 2.2, 1.9, 2.8, 3.2, 2.6, 2.8],
+                    borderColor: colors.coral,
+                    backgroundColor: colors.coral + '20',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 4,
+                    pointBackgroundColor: colors.coral,
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2
+                },
+                {
+                    label: 'Walt Disney Studios Park',
+                    data: [1.5, 2.0, 2.4, 2.2, 3.0, 3.2, 3.0],
+                    borderColor: colors.turquoise,
+                    backgroundColor: colors.turquoise + '20',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 4,
+                    pointBackgroundColor: colors.turquoise,
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2
+                },
+                {
+                    label: "Disney's Hollywood Studios",
+                    data: [2.8, 3.0, 3.2, 2.2, 1.8, 1.9, 1.6],
+                    borderColor: colors.gold,
+                    backgroundColor: colors.gold + '20',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 4,
+                    pointBackgroundColor: colors.gold,
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2
+                },
+                {
+                    label: 'Magic Kingdom',
+                    data: [1.7, 1.8, 1.75, 1.82, 1.7, 1.8, 1.72],
+                    borderColor: colors.softPink,
+                    backgroundColor: colors.softPink + '20',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 4,
+                    pointBackgroundColor: colors.softPink,
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2
+                },
+                {
+                    label: 'Universal Studios Florida',
+                    data: [2.5, 2.2, 1.8, 1.6, 1.7, 1.5, 1.4],
+                    borderColor: colors.deepTeal,
+                    backgroundColor: colors.deepTeal + '20',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 4,
+                    pointBackgroundColor: colors.deepTeal,
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2
+                }
+            ]
+        };
+
+        const config = {
+            type: 'line',
+            data: data,
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                aspectRatio: 2.5,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        display: false // Using custom legend table instead
+                    },
+                    tooltip: {
+                        backgroundColor: '#2A2A2A',
+                        titleFont: {
+                            family: "'Space Grotesk', sans-serif",
+                            size: 13,
+                            weight: 700
+                        },
+                        bodyFont: {
+                            family: "'Inter', sans-serif",
+                            size: 12
+                        },
+                        padding: 12,
+                        cornerRadius: 2,
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.parsed.y.toFixed(1) + 'h';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            color: '#F5F5F5',
+                            lineWidth: 1
+                        },
+                        ticks: {
+                            font: {
+                                family: "'Space Grotesk', sans-serif",
+                                size: 11,
+                                weight: 600
+                            },
+                            color: '#2A2A2A'
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            color: '#F5F5F5',
+                            lineWidth: 1
+                        },
+                        ticks: {
+                            font: {
+                                family: "'Space Grotesk', sans-serif",
+                                size: 11,
+                                weight: 600
+                            },
+                            color: '#2A2A2A',
+                            callback: function(value) {
+                                return value + 'h';
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Downtime (hours)',
+                            font: {
+                                family: "'Space Grotesk', sans-serif",
+                                size: 12,
+                                weight: 700
+                            },
+                            color: '#2A2A2A'
+                        }
+                    }
+                }
+            }
+        };
+
+        const mainChart = new Chart(ctx, config);
+
+        // Chart type switcher
+        document.getElementById('chartType').addEventListener('change', function(e) {
+            const type = e.target.value;
+            if (type === 'area') {
+                mainChart.config.type = 'line';
+                mainChart.data.datasets.forEach(ds => {
+                    ds.fill = true;
+                });
+            } else if (type === 'bar') {
+                mainChart.config.type = 'bar';
+                mainChart.data.datasets.forEach(ds => {
+                    ds.fill = false;
+                });
+            } else {
+                mainChart.config.type = 'line';
+                mainChart.data.datasets.forEach(ds => {
+                    ds.fill = false;
+                });
+            }
+            mainChart.update();
+        });
+
+        // Navigation
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', function() {
+                document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+                this.classList.add('active');
+            });
+        });
+
+        // Toggle buttons
+        document.querySelectorAll('.toggle-group').forEach(group => {
+            group.querySelectorAll('.toggle-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    group.querySelectorAll('.toggle-btn').forEach(b => {
+                        b.classList.remove('active', 'active-coral', 'active-turquoise', 'active-gold');
+                    });
+                    this.classList.add('active');
+                });
+            });
+        });
+
+        // Time selector
+        document.querySelectorAll('.time-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+            });
+        });
+    </script>
+</body>
+</html>

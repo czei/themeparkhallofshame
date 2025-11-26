@@ -54,8 +54,8 @@ export TEST_DB_NAME=themepark_test
 export TEST_DB_USER=themepark_test
 export TEST_DB_PASSWORD=test_password
 
-# OpenAI API key for AI classification tests
-export OPENAI_API_KEY=REDACTED_OPENAI_KEY
+# OpenAI API key for AI classification tests (use from environment or .env)
+export OPENAI_API_KEY="${OPENAI_API_KEY:-your-openai-api-key-here}"
 
 print_success "Environment variables configured"
 echo "  TEST_DB_HOST: $TEST_DB_HOST"

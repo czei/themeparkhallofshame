@@ -63,8 +63,8 @@ export TEST_DB_NAME=themepark_test
 export TEST_DB_USER=themepark_test
 export TEST_DB_PASSWORD=test_password
 
-# OpenAI API key for AI classification tests
-export OPENAI_API_KEY=REDACTED_OPENAI_KEY
+# OpenAI API key for AI classification tests (get from .env or environment)
+export OPENAI_API_KEY=your-openai-api-key-here
 ```
 
 ### Run All Tests

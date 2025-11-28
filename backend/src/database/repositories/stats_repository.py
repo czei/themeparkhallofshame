@@ -1364,7 +1364,8 @@ class StatsRepository:
         filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
 
         if period == 'today':
-            # Query today's average wait times from ride_daily_stats
+            # Query today's average wait times from LIVE snapshots (not ride_daily_stats)
+            # This provides real-time data that updates every 10 minutes
             query = text(f"""
                 SELECT
                     r.ride_id,
@@ -1373,8 +1374,8 @@ class StatsRepository:
                     p.park_id,
                     p.name AS park_name,
                     CONCAT(p.city, ', ', p.state_province) AS location,
-                    rds.avg_wait_time AS avg_wait_minutes,
-                    rds.peak_wait_time AS peak_wait_minutes,
+                    ROUND(AVG(rss.wait_time), 0) AS avg_wait_minutes,
+                    MAX(rss.wait_time) AS peak_wait_minutes,
                     -- Get current status from latest snapshot
                     (
                         SELECT computed_is_open
@@ -1383,27 +1384,29 @@ class StatsRepository:
                         ORDER BY recorded_at DESC
                         LIMIT 1
                     ) AS current_is_open,
-                    -- Trend: compare to yesterday
+                    -- Trend: compare to yesterday's daily stats
                     CASE
                         WHEN prev_day.avg_wait_time > 0 THEN
-                            ((rds.avg_wait_time - prev_day.avg_wait_time) / prev_day.avg_wait_time) * 100
+                            ((AVG(rss.wait_time) - prev_day.avg_wait_time) / prev_day.avg_wait_time) * 100
                         ELSE NULL
                     END AS trend_percentage
-                FROM ride_daily_stats rds
-                JOIN rides r ON rds.ride_id = r.ride_id
+                FROM ride_status_snapshots rss
+                JOIN rides r ON rss.ride_id = r.ride_id
                 JOIN parks p ON r.park_id = p.park_id
-                LEFT JOIN ride_daily_stats prev_day ON rds.ride_id = prev_day.ride_id
-                    AND prev_day.stat_date = DATE_SUB(:stat_date, INTERVAL 1 DAY)
-                WHERE rds.stat_date = :stat_date
-                    AND rds.avg_wait_time > 0
+                LEFT JOIN ride_daily_stats prev_day ON r.ride_id = prev_day.ride_id
+                    AND prev_day.stat_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+                WHERE DATE(rss.recorded_at) = CURDATE()
+                    AND rss.wait_time > 0
+                    AND rss.computed_is_open = TRUE
                     AND r.is_active = TRUE
                     AND p.is_active = TRUE
                     {filter_clause}
-                ORDER BY rds.avg_wait_time DESC
+                GROUP BY r.ride_id, r.name, r.tier, p.park_id, p.name, p.city, p.state_province, prev_day.avg_wait_time
+                HAVING AVG(rss.wait_time) > 0
+                ORDER BY avg_wait_minutes DESC
                 LIMIT :limit
             """)
             params = {
-                "stat_date": datetime.now().date(),
                 "limit": limit
             }
 
@@ -1516,6 +1519,130 @@ class StatsRepository:
                 "month": month,
                 "prev_year": prev_year,
                 "prev_month": prev_month,
+                "limit": limit
+            }
+
+        result = self.conn.execute(query, params)
+        return [dict(row._mapping) for row in result.fetchall()]
+
+    def get_park_wait_times_by_period(
+        self,
+        period: str = 'today',
+        filter_disney_universal: bool = False,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get park-level wait times aggregated from ride data for a specified period.
+
+        Args:
+            period: Time period - 'today', '7days', or '30days'
+            filter_disney_universal: If True, only include Disney & Universal parks
+            limit: Maximum number of parks to return
+
+        Returns:
+            List of parks sorted by longest average wait times descending
+        """
+        from datetime import datetime, timedelta
+
+        filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+
+        if period == 'today':
+            # Query today's average wait times from LIVE snapshots aggregated by park
+            query = text(f"""
+                SELECT
+                    p.park_id,
+                    p.name AS park_name,
+                    CONCAT(p.city, ', ', p.state_province) AS location,
+                    ROUND(AVG(rss.wait_time), 0) AS avg_wait_minutes,
+                    MAX(rss.wait_time) AS peak_wait_minutes,
+                    COUNT(DISTINCT r.ride_id) AS rides_reporting,
+                    -- Trend: compare to yesterday's park daily stats
+                    CASE
+                        WHEN prev_day.avg_wait_time > 0 THEN
+                            ((AVG(rss.wait_time) - prev_day.avg_wait_time) / prev_day.avg_wait_time) * 100
+                        ELSE NULL
+                    END AS trend_percentage
+                FROM ride_status_snapshots rss
+                JOIN rides r ON rss.ride_id = r.ride_id
+                JOIN parks p ON r.park_id = p.park_id
+                LEFT JOIN park_daily_stats prev_day ON p.park_id = prev_day.park_id
+                    AND prev_day.stat_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+                WHERE DATE(rss.recorded_at) = CURDATE()
+                    AND rss.wait_time > 0
+                    AND rss.computed_is_open = TRUE
+                    AND r.is_active = TRUE
+                    AND p.is_active = TRUE
+                    {filter_clause}
+                GROUP BY p.park_id, p.name, p.city, p.state_province, prev_day.avg_wait_time
+                HAVING AVG(rss.wait_time) > 0
+                ORDER BY avg_wait_minutes DESC
+                LIMIT :limit
+            """)
+            params = {"limit": limit}
+
+        elif period == '7days':
+            # Query 7-day average aggregated by park from daily stats
+            end_date = date.today()
+            start_date = end_date - timedelta(days=6)
+
+            query = text(f"""
+                SELECT
+                    p.park_id,
+                    p.name AS park_name,
+                    CONCAT(p.city, ', ', p.state_province) AS location,
+                    ROUND(AVG(rds.avg_wait_time), 0) AS avg_wait_minutes,
+                    MAX(rds.peak_wait_time) AS peak_wait_minutes,
+                    COUNT(DISTINCT r.ride_id) AS rides_reporting,
+                    NULL AS trend_percentage
+                FROM ride_daily_stats rds
+                JOIN rides r ON rds.ride_id = r.ride_id
+                JOIN parks p ON r.park_id = p.park_id
+                WHERE rds.stat_date BETWEEN :start_date AND :end_date
+                    AND rds.avg_wait_time > 0
+                    AND r.is_active = TRUE
+                    AND p.is_active = TRUE
+                    {filter_clause}
+                GROUP BY p.park_id, p.name, p.city, p.state_province
+                HAVING AVG(rds.avg_wait_time) > 0
+                ORDER BY avg_wait_minutes DESC
+                LIMIT :limit
+            """)
+            params = {
+                "start_date": start_date,
+                "end_date": end_date,
+                "limit": limit
+            }
+
+        else:  # 30days
+            # Query 30-day average aggregated by park from daily stats
+            end_date = date.today()
+            start_date = end_date - timedelta(days=29)
+
+            query = text(f"""
+                SELECT
+                    p.park_id,
+                    p.name AS park_name,
+                    CONCAT(p.city, ', ', p.state_province) AS location,
+                    ROUND(AVG(rds.avg_wait_time), 0) AS avg_wait_minutes,
+                    MAX(rds.peak_wait_time) AS peak_wait_minutes,
+                    COUNT(DISTINCT r.ride_id) AS rides_reporting,
+                    NULL AS trend_percentage
+                FROM ride_daily_stats rds
+                JOIN rides r ON rds.ride_id = r.ride_id
+                JOIN parks p ON r.park_id = p.park_id
+                WHERE rds.stat_date BETWEEN :start_date AND :end_date
+                    AND rds.avg_wait_time > 0
+                    AND r.is_active = TRUE
+                    AND p.is_active = TRUE
+                    {filter_clause}
+                GROUP BY p.park_id, p.name, p.city, p.state_province
+                HAVING AVG(rds.avg_wait_time) > 0
+                ORDER BY avg_wait_minutes DESC
+                LIMIT :limit
+            """)
+            params = {
+                "start_date": start_date,
+                "end_date": end_date,
                 "limit": limit
             }
 

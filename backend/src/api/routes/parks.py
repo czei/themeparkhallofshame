@@ -121,6 +121,83 @@ def get_park_downtime_rankings():
         }), 500
 
 
+@parks_bp.route('/parks/waittimes', methods=['GET'])
+def get_park_wait_times():
+    """
+    Get park-level wait time rankings for specified time period.
+
+    Query Parameters:
+        period (str): Time period - 'today', '7days', '30days' (default: 'today')
+        filter (str): Park filter - 'disney-universal', 'all-parks' (default: 'all-parks')
+        limit (int): Maximum results (default: 50, max: 100)
+
+    Returns:
+        JSON response with park wait time rankings
+
+    Performance: <100ms for all periods
+    """
+    # Parse query parameters
+    period = request.args.get('period', 'today')
+    filter_type = request.args.get('filter', 'all-parks')
+    limit = min(int(request.args.get('limit', 50)), 100)
+
+    # Validate period
+    if period not in ['today', '7days', '30days']:
+        return jsonify({
+            "success": False,
+            "error": "Invalid period. Must be 'today', '7days', or '30days'"
+        }), 400
+
+    # Validate filter
+    if filter_type not in ['disney-universal', 'all-parks']:
+        return jsonify({
+            "success": False,
+            "error": "Invalid filter. Must be 'disney-universal' or 'all-parks'"
+        }), 400
+
+    try:
+        with get_db_connection() as conn:
+            stats_repo = StatsRepository(conn)
+
+            # Get park wait time rankings
+            wait_times = stats_repo.get_park_wait_times_by_period(
+                period=period,
+                filter_disney_universal=(filter_type == 'disney-universal'),
+                limit=limit
+            )
+
+            # Add Queue-Times.com URLs and rank to wait times
+            wait_times_with_urls = []
+            for rank_idx, park in enumerate(wait_times, start=1):
+                park_dict = dict(park)
+                park_dict['rank'] = rank_idx
+                park_dict['queue_times_url'] = f"https://queue-times.com/parks/{park_dict['park_id']}"
+                wait_times_with_urls.append(park_dict)
+
+            # Build response
+            response = {
+                "success": True,
+                "period": period,
+                "filter": filter_type,
+                "data": wait_times_with_urls,
+                "attribution": {
+                    "data_source": "Queue-Times.com",
+                    "url": "https://queue-times.com"
+                }
+            }
+
+            logger.info(f"Park wait times requested: period={period}, filter={filter_type}, results={len(wait_times_with_urls)}")
+
+            return jsonify(response), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching park wait times: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "Internal server error"
+        }), 500
+
+
 @parks_bp.route('/parks/<int:park_id>/details', methods=['GET'])
 def get_park_details(park_id: int):
     """

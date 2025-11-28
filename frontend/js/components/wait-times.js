@@ -1,6 +1,7 @@
 /**
  * Theme Park Hall of Shame - Wait Times Component
  * Displays wait times sorted by longest average waits for the selected time period
+ * Supports both park-level and ride-level views
  */
 
 class WaitTimes {
@@ -10,10 +11,13 @@ class WaitTimes {
         this.state = {
             period: 'today',
             filter: initialFilter,
-            limit: 100,
+            entityType: 'rides',  // 'parks' or 'rides'
+            parkLimit: 50,
+            rideLimit: 100,
             loading: false,
             error: null,
-            data: null,
+            parkData: null,
+            rideData: null,
             aggregateStats: null
         };
     }
@@ -23,54 +27,55 @@ class WaitTimes {
      */
     async init() {
         this.render();
-        await Promise.all([
-            this.fetchWaitTimes(),
-            this.fetchAggregateStats()
-        ]);
+        await this.fetchAllData();
     }
 
     /**
-     * Fetch aggregate stats from parks/downtime endpoint
+     * Fetch both park and ride wait time data in parallel
      */
-    async fetchAggregateStats() {
-        try {
-            const response = await this.apiClient.get('/parks/downtime', {
-                period: 'today',
-                filter: this.state.filter,
-                limit: 1
-            });
-            if (response.success && response.aggregate_stats) {
-                this.setState({ aggregateStats: response.aggregate_stats });
-            }
-        } catch (error) {
-            console.error('Failed to fetch aggregate stats:', error);
-        }
-    }
-
-    /**
-     * Fetch wait times from API
-     */
-    async fetchWaitTimes() {
+    async fetchAllData() {
         this.setState({ loading: true, error: null });
 
         try {
-            const params = {
+            const parkParams = {
                 period: this.state.period,
                 filter: this.state.filter,
-                limit: this.state.limit
+                limit: this.state.parkLimit
             };
 
-            const response = await this.apiClient.get('/rides/waittimes', params);
+            const rideParams = {
+                period: this.state.period,
+                filter: this.state.filter,
+                limit: this.state.rideLimit
+            };
 
-            if (response.success) {
-                this.setState({
-                    data: response,
-                    loading: false
-                });
-                this.updateLastUpdateTime();
-            } else {
-                throw new Error(response.error || 'Failed to fetch wait times');
+            const [parkResponse, rideResponse, aggregateResponse] = await Promise.all([
+                this.apiClient.get('/parks/waittimes', parkParams),
+                this.apiClient.get('/rides/waittimes', rideParams),
+                this.apiClient.get('/parks/downtime', {
+                    period: 'today',
+                    filter: this.state.filter,
+                    limit: 1
+                })
+            ]);
+
+            const newState = { loading: false };
+
+            if (parkResponse.success) {
+                newState.parkData = parkResponse;
             }
+
+            if (rideResponse.success) {
+                newState.rideData = rideResponse;
+            }
+
+            if (aggregateResponse.success && aggregateResponse.aggregate_stats) {
+                newState.aggregateStats = aggregateResponse.aggregate_stats;
+            }
+
+            this.setState(newState);
+            this.updateLastUpdateTime();
+
         } catch (error) {
             this.setState({
                 error: error.message,
@@ -139,12 +144,6 @@ class WaitTimes {
         this.container.innerHTML = `
             <div class="wait-times-view">
                 ${this.renderAggregateStats()}
-
-                <div class="section-header">
-                    <div class="section-marker" style="background: var(--gold);"></div>
-                    <h2 class="section-title">Longest Wait Times</h2>
-                </div>
-
                 ${this.renderContent()}
             </div>
         `;
@@ -180,38 +179,127 @@ class WaitTimes {
         if (this.state.error) {
             return `
                 <div class="error-state">
-                    <p class="error-message">⚠️ ${this.state.error}</p>
+                    <p class="error-message">${this.state.error}</p>
                     <button class="retry-btn">Retry</button>
                 </div>
             `;
         }
 
-        if (this.state.data && this.state.data.data) {
-            return this.renderWaitTimesTable(this.state.data.data);
-        }
-
         return `
-            <div class="empty-state">
-                <p>No wait time data available</p>
+            <div class="section-header">
+                <div class="entity-toggle">
+                    <button class="entity-btn ${this.state.entityType === 'parks' ? 'active' : ''}"
+                            data-entity="parks">Parks</button>
+                    <button class="entity-btn ${this.state.entityType === 'rides' ? 'active' : ''}"
+                            data-entity="rides">Rides</button>
+                </div>
+                <h2 class="section-title">${this.getPeriodTitle('Wait Time Rankings')}</h2>
             </div>
+            ${this.state.entityType === 'parks'
+                ? this.renderParkTable()
+                : this.renderRideTable()}
         `;
     }
 
     /**
-     * Render wait times table
+     * Render park wait times table
      */
-    renderWaitTimesTable(rides) {
-        if (!rides || rides.length === 0) {
+    renderParkTable() {
+        const parks = this.state.parkData?.data;
+
+        if (!parks || parks.length === 0) {
             return `
                 <div class="empty-state">
-                    <p>No rides found for the selected filters</p>
+                    <p>No park wait time data available</p>
+                    <p class="empty-state-hint">Parks with wait time data will appear here.</p>
                 </div>
             `;
         }
 
         return `
             <div class="data-container">
-                <div class="table-header">${this.getPeriodTitle('Wait Time Rankings')}</div>
+                <table class="rankings-table wait-times-table">
+                    <thead>
+                        <tr>
+                            <th class="rank-col">Rank</th>
+                            <th class="park-col">Park</th>
+                            <th class="location-col">Location</th>
+                            <th class="wait-col">Avg Wait</th>
+                            <th class="wait-col">Peak Wait</th>
+                            <th class="rides-col">Rides</th>
+                            <th class="trend-col">Trend</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${parks.map(park => this.renderParkRow(park)).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    /**
+     * Render a single park wait time row
+     */
+    renderParkRow(park) {
+        const trendPct = park.trend_percentage !== null && park.trend_percentage !== undefined
+            ? Number(park.trend_percentage) : null;
+        const trendClass = this.getTrendClass(trendPct);
+        const trendIcon = this.getTrendIcon(trendPct);
+        const trendText = trendPct !== null
+            ? `${trendPct > 0 ? '+' : ''}${trendPct.toFixed(1)}%`
+            : 'N/A';
+
+        return `
+            <tr class="park-row ${park.rank <= 5 ? 'top-five' : ''}">
+                <td class="rank-col">
+                    <span class="rank-number">${park.rank}</span>
+                </td>
+                <td class="park-col">
+                    <a
+                        href="${park.queue_times_url}"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="park-link"
+                    >
+                        ${this.escapeHtml(park.park_name || 'Unknown Park')}
+                        <span class="external-icon">↗</span>
+                    </a>
+                </td>
+                <td class="location-col">${this.escapeHtml(park.location || '')}</td>
+                <td class="wait-col">
+                    <span class="wait-value">${this.formatWaitTime(park.avg_wait_minutes || 0)}</span>
+                </td>
+                <td class="wait-col">
+                    <span class="wait-value">${this.formatWaitTime(park.peak_wait_minutes || 0)}</span>
+                </td>
+                <td class="rides-col">${park.rides_reporting || 0}</td>
+                <td class="trend-col">
+                    <span class="trend-indicator ${trendClass}">
+                        ${trendIcon} ${trendText}
+                    </span>
+                </td>
+            </tr>
+        `;
+    }
+
+    /**
+     * Render ride wait times table
+     */
+    renderRideTable() {
+        const rides = this.state.rideData?.data;
+
+        if (!rides || rides.length === 0) {
+            return `
+                <div class="empty-state">
+                    <p>No ride wait time data available</p>
+                    <p class="empty-state-hint">Rides with wait time data will appear here.</p>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="data-container">
                 <table class="rankings-table wait-times-table">
                     <thead>
                         <tr>
@@ -226,7 +314,7 @@ class WaitTimes {
                         </tr>
                     </thead>
                     <tbody>
-                        ${rides.map(ride => this.renderWaitTimeRow(ride)).join('')}
+                        ${rides.map(ride => this.renderRideRow(ride)).join('')}
                     </tbody>
                 </table>
             </div>
@@ -234,9 +322,9 @@ class WaitTimes {
     }
 
     /**
-     * Render a single wait time row
+     * Render a single ride wait time row
      */
-    renderWaitTimeRow(ride) {
+    renderRideRow(ride) {
         const trendPct = ride.trend_percentage !== null && ride.trend_percentage !== undefined
             ? Number(ride.trend_percentage) : null;
         const trendClass = this.getTrendClass(trendPct);
@@ -391,7 +479,7 @@ class WaitTimes {
     updateFilter(newFilter) {
         if (newFilter !== this.state.filter) {
             this.state.filter = newFilter;
-            this.fetchWaitTimes();
+            this.fetchAllData();
         }
     }
 
@@ -401,7 +489,7 @@ class WaitTimes {
     updatePeriod(newPeriod) {
         if (newPeriod !== this.state.period) {
             this.state.period = newPeriod;
-            this.fetchWaitTimes();
+            this.fetchAllData();
         }
     }
 
@@ -409,11 +497,22 @@ class WaitTimes {
      * Attach event listeners to controls
      */
     attachEventListeners() {
+        // Entity toggle buttons
+        const entityBtns = this.container.querySelectorAll('.entity-btn');
+        entityBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const newEntityType = btn.dataset.entity;
+                if (newEntityType !== this.state.entityType) {
+                    this.setState({ entityType: newEntityType });
+                }
+            });
+        });
+
         // Retry button (if error state)
         const retryBtn = this.container.querySelector('.retry-btn');
         if (retryBtn) {
             retryBtn.addEventListener('click', () => {
-                this.fetchWaitTimes();
+                this.fetchAllData();
             });
         }
     }

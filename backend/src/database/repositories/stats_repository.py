@@ -2496,3 +2496,169 @@ class StatsRepository:
             })
 
         return [dict(row._mapping) for row in result.fetchall()]
+
+    # Live Downtime Rankings (for "Today" period - computed from snapshots)
+
+    def get_park_live_downtime_rankings(
+        self,
+        filter_disney_universal: bool = False,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get park downtime rankings calculated live from today's snapshots.
+
+        This method computes downtime in real-time from ride_status_snapshots,
+        providing up-to-the-minute accuracy for the "Today" period.
+
+        Args:
+            filter_disney_universal: If True, only include Disney & Universal parks
+            limit: Maximum number of parks to return
+
+        Returns:
+            List of parks ranked by total downtime hours (descending)
+        """
+        filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+
+        query = text(f"""
+            SELECT
+                p.park_id,
+                p.name AS park_name,
+                CONCAT(p.city, ', ', p.state_province) AS location,
+
+                -- Calculate total downtime hours from today's snapshots
+                -- Each snapshot interval is ~10 minutes
+                -- Downtime = snapshots where ride is down while park is open
+                ROUND(
+                    SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = FALSE THEN 10 ELSE 0 END) / 60.0,
+                    2
+                ) AS total_downtime_hours,
+
+                -- Count of rides that had any downtime today
+                COUNT(DISTINCT CASE
+                    WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = FALSE
+                    THEN r.ride_id
+                END) AS affected_rides_count,
+
+                -- Calculate uptime percentage (only during park operating hours)
+                ROUND(
+                    100.0 * SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = TRUE THEN 1 ELSE 0 END) /
+                    NULLIF(SUM(CASE WHEN pas.park_appears_open = TRUE THEN 1 ELSE 0 END), 0),
+                    2
+                ) AS uptime_percentage,
+
+                -- Trend: compare to yesterday's aggregated stats
+                CASE
+                    WHEN prev_day.total_downtime_hours > 0 THEN
+                        ROUND(
+                            ((SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = FALSE THEN 10 ELSE 0 END) / 60.0
+                              - prev_day.total_downtime_hours) / prev_day.total_downtime_hours) * 100,
+                            2
+                        )
+                    ELSE NULL
+                END AS trend_percentage
+
+            FROM parks p
+            INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
+            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
+                AND pas.recorded_at = rss.recorded_at
+            LEFT JOIN park_daily_stats prev_day ON p.park_id = prev_day.park_id
+                AND prev_day.stat_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+            WHERE DATE(rss.recorded_at) = CURDATE()
+                AND p.is_active = TRUE
+                {filter_clause}
+            GROUP BY p.park_id, p.name, p.city, p.state_province, prev_day.total_downtime_hours
+            HAVING total_downtime_hours > 0  -- Hall of Shame: only parks with actual downtime
+            ORDER BY total_downtime_hours DESC
+            LIMIT :limit
+        """)
+
+        result = self.conn.execute(query, {"limit": limit})
+        return [dict(row._mapping) for row in result.fetchall()]
+
+    def get_ride_live_downtime_rankings(
+        self,
+        filter_disney_universal: bool = False,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get ride downtime rankings calculated live from today's snapshots.
+
+        This method computes downtime in real-time from ride_status_snapshots,
+        providing up-to-the-minute accuracy for the "Today" period.
+
+        Args:
+            filter_disney_universal: If True, only include Disney & Universal parks
+            limit: Maximum number of rides to return
+
+        Returns:
+            List of rides ranked by downtime hours (descending) with current status
+        """
+        filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+
+        query = text(f"""
+            SELECT
+                r.ride_id,
+                r.name AS ride_name,
+                r.tier,
+                p.park_id,
+                p.name AS park_name,
+                CONCAT(p.city, ', ', p.state_province) AS location,
+
+                -- Calculate downtime hours from today's snapshots
+                -- Each snapshot interval is ~10 minutes
+                ROUND(
+                    SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = FALSE THEN 10 ELSE 0 END) / 60.0,
+                    2
+                ) AS downtime_hours,
+
+                -- Calculate uptime percentage (only during park operating hours)
+                ROUND(
+                    100.0 * SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = TRUE THEN 1 ELSE 0 END) /
+                    NULLIF(SUM(CASE WHEN pas.park_appears_open = TRUE THEN 1 ELSE 0 END), 0),
+                    2
+                ) AS uptime_percentage,
+
+                -- Wait time stats from today's snapshots
+                ROUND(AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END), 2) AS avg_wait_time,
+                MAX(rss.wait_time) AS peak_wait_time,
+
+                -- Get current status from most recent snapshot
+                (
+                    SELECT computed_is_open
+                    FROM ride_status_snapshots
+                    WHERE ride_id = r.ride_id
+                    ORDER BY recorded_at DESC
+                    LIMIT 1
+                ) AS current_is_open,
+
+                -- Trend: compare to yesterday's aggregated stats
+                CASE
+                    WHEN prev_day.downtime_minutes > 0 THEN
+                        ROUND(
+                            ((SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = FALSE THEN 10 ELSE 0 END)
+                              - prev_day.downtime_minutes) / prev_day.downtime_minutes) * 100,
+                            2
+                        )
+                    ELSE NULL
+                END AS trend_percentage
+
+            FROM rides r
+            INNER JOIN parks p ON r.park_id = p.park_id
+            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
+                AND pas.recorded_at = rss.recorded_at
+            LEFT JOIN ride_daily_stats prev_day ON r.ride_id = prev_day.ride_id
+                AND prev_day.stat_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+            WHERE DATE(rss.recorded_at) = CURDATE()
+                AND r.is_active = TRUE
+                AND p.is_active = TRUE
+                {filter_clause}
+            GROUP BY r.ride_id, r.name, r.tier, p.park_id, p.name, p.city, p.state_province, prev_day.downtime_minutes
+            HAVING downtime_hours > 0  -- Hall of Shame: only rides with actual downtime
+            ORDER BY downtime_hours DESC
+            LIMIT :limit
+        """)
+
+        result = self.conn.execute(query, {"limit": limit})
+        return [dict(row._mapping) for row in result.fetchall()]

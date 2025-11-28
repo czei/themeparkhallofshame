@@ -56,8 +56,8 @@ def get_ride_downtime_rankings():
 
             # Get ride rankings based on period
             if period == 'today':
-                rankings = stats_repo.get_ride_daily_rankings(
-                    stat_date=get_today_pacific(),  # Pacific Time for US parks
+                # Use LIVE snapshot data for "today" - computed up to the minute
+                rankings = stats_repo.get_ride_live_downtime_rankings(
                     filter_disney_universal=(filter_type == 'disney-universal'),
                     limit=limit
                 )

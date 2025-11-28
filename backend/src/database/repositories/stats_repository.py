@@ -2613,6 +2613,7 @@ class StatsRepository:
         query = text(f"""
             SELECT
                 p.park_id,
+                p.queue_times_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
 

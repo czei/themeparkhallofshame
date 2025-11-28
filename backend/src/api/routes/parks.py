@@ -91,7 +91,7 @@ def get_park_downtime_rankings():
             for rank_idx, park in enumerate(rankings, start=1):
                 park_dict = dict(park)
                 park_dict['rank'] = rank_idx
-                park_dict['queue_times_url'] = f"https://queue-times.com/parks/{park_dict['park_id']}"
+                park_dict['queue_times_url'] = f"https://queue-times.com/parks/{park_dict['queue_times_id']}"
                 rankings_with_urls.append(park_dict)
 
             # Build response
@@ -170,7 +170,7 @@ def get_park_wait_times():
             for rank_idx, park in enumerate(wait_times, start=1):
                 park_dict = dict(park)
                 park_dict['rank'] = rank_idx
-                park_dict['queue_times_url'] = f"https://queue-times.com/parks/{park_dict['park_id']}"
+                park_dict['queue_times_url'] = f"https://queue-times.com/parks/{park_dict['queue_times_id']}"
                 wait_times_with_urls.append(park_dict)
 
             # Build response

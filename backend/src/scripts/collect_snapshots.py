@@ -14,7 +14,7 @@ Cron example (every 10 minutes):
 
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
 # Add src to path
@@ -119,6 +119,24 @@ class SnapshotCollector:
 
             # Filter out Single Rider lines - they don't represent actual ride status
             rides_data = [r for r in rides_data if 'single rider' not in r.get('name', '').lower()]
+
+            # Filter out stale data - Queue-Times API caches old wait times for hours after parks close
+            # If last_updated > 30 min ago, treat the ride as closed
+            STALE_THRESHOLD_MINUTES = 30
+            now = datetime.now(timezone.utc)
+            for ride in rides_data:
+                last_updated_str = ride.get('last_updated')
+                if last_updated_str:
+                    try:
+                        # Parse ISO timestamp: "2025-11-28T05:56:23.000Z"
+                        last_updated = datetime.fromisoformat(last_updated_str.replace('Z', '+00:00'))
+                        age_minutes = (now - last_updated).total_seconds() / 60
+                        if age_minutes > STALE_THRESHOLD_MINUTES:
+                            # Data is stale - treat ride as closed
+                            ride['wait_time'] = 0
+                            ride['is_open'] = False
+                    except (ValueError, TypeError):
+                        pass  # If parsing fails, use data as-is
 
             if not rides_data:
                 logger.warning(f"  No ride data returned for {park_name}")

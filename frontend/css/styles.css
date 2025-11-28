@@ -1326,13 +1326,14 @@ footer,
     opacity: 0.8;
 }
 
-footer a {
-    color: var(--coral);
+footer a,
+.footer a {
+    color: var(--warm-white);
     text-decoration: none;
-    font-weight: 700;
 }
 
-footer a:hover {
+footer a:hover,
+.footer a:hover {
     text-decoration: underline;
 }
 

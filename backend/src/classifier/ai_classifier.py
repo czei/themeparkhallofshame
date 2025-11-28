@@ -163,7 +163,7 @@ In addition to tier, classify the attraction into ONE of these categories:
             client = OpenAI(api_key=api_key)
 
             response = client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o-mini",  # Much cheaper than gpt-4 (~100x), sufficient for classification
                 messages=[
                     {
                         "role": "system",

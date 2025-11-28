@@ -114,7 +114,7 @@ class WaitTimes {
                     <div class="stat-value">${this.formatHours(stats.peak_downtime_hours || 0)}</div>
                 </div>
                 <div class="stat-block">
-                    <div class="stat-label">Rides Currently Down</div>
+                    <div class="stat-label">Rides Down</div>
                     <div class="stat-value">${stats.currently_down_rides || 0}</div>
                 </div>
             </div>

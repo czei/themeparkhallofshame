@@ -126,9 +126,14 @@ class SnapshotCollector:
 
             # Track park activity - calculate statistics
             total_rides = len(rides_data)
+            # Count rides with actual wait times (indicates park is operating)
+            rides_with_wait = sum(1 for r in rides_data if r.get('wait_time', 0) > 0)
+            # Count rides reported as "open" by API (may include closed parks with is_open=True)
             rides_open = sum(1 for r in rides_data if r.get('wait_time', 0) > 0 or r.get('is_open'))
             rides_closed = total_rides - rides_open
-            park_appears_open = rides_open > 0
+            # Park is truly "open" only if at least one ride has wait_time > 0
+            # (When parks close, API often reports is_open=True with wait_time=0)
+            park_appears_open = rides_with_wait > 0
 
             # Calculate wait time statistics for open rides
             open_wait_times = [r.get('wait_time', 0) for r in rides_data

@@ -927,6 +927,11 @@ td {
     color: white;
 }
 
+.status-closed {
+    background: #6B7280;  /* Gray - distinct from Down/Running */
+    color: white;
+}
+
 .status-unknown {
     background: var(--light-gray);
     color: var(--charcoal);

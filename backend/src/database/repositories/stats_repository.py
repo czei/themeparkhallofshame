@@ -1384,6 +1384,14 @@ class StatsRepository:
                         ORDER BY recorded_at DESC
                         LIMIT 1
                     ) AS current_is_open,
+                    -- Get park open/closed status from latest snapshot
+                    (
+                        SELECT park_appears_open
+                        FROM park_activity_snapshots
+                        WHERE park_id = p.park_id
+                        ORDER BY recorded_at DESC
+                        LIMIT 1
+                    ) AS park_is_open,
                     -- Trend: compare to yesterday's daily stats
                     CASE
                         WHEN prev_day.avg_wait_time > 0 THEN
@@ -1437,6 +1445,14 @@ class StatsRepository:
                         ORDER BY recorded_at DESC
                         LIMIT 1
                     ) AS current_is_open,
+                    -- Get park open/closed status from latest snapshot
+                    (
+                        SELECT park_appears_open
+                        FROM park_activity_snapshots
+                        WHERE park_id = p.park_id
+                        ORDER BY recorded_at DESC
+                        LIMIT 1
+                    ) AS park_is_open,
                     -- Trend: compare to previous week's average
                     CASE
                         WHEN prev_week.avg_wait_time > 0 THEN
@@ -1493,6 +1509,14 @@ class StatsRepository:
                         ORDER BY recorded_at DESC
                         LIMIT 1
                     ) AS current_is_open,
+                    -- Get park open/closed status from latest snapshot
+                    (
+                        SELECT park_appears_open
+                        FROM park_activity_snapshots
+                        WHERE park_id = p.park_id
+                        ORDER BY recorded_at DESC
+                        LIMIT 1
+                    ) AS park_is_open,
                     -- Trend: compare to previous month's average
                     CASE
                         WHEN prev_month.avg_wait_time > 0 THEN
@@ -2621,6 +2645,15 @@ class StatsRepository:
                     ORDER BY recorded_at DESC
                     LIMIT 1
                 ) AS current_is_open,
+
+                -- Get park open/closed status from latest snapshot
+                (
+                    SELECT park_appears_open
+                    FROM park_activity_snapshots
+                    WHERE park_id = p.park_id
+                    ORDER BY recorded_at DESC
+                    LIMIT 1
+                ) AS park_is_open,
 
                 -- Trend: compare to yesterday's aggregated stats
                 CASE

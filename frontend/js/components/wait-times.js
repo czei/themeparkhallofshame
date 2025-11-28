@@ -362,7 +362,7 @@ class WaitTimes {
             ? `${trendPct > 0 ? '+' : ''}${trendPct.toFixed(1)}%`
             : 'N/A';
 
-        const statusBadge = this.getStatusBadge(ride.current_is_open);
+        const statusBadge = this.getStatusBadge(ride.current_is_open, ride.park_is_open);
         const tierBadge = this.getTierBadge(ride.tier);
 
         return `
@@ -411,7 +411,12 @@ class WaitTimes {
     /**
      * Get status badge HTML
      */
-    getStatusBadge(isOpen) {
+    getStatusBadge(isOpen, parkIsOpen) {
+        // Park closed takes priority - show "Park Closed" instead of misleading "Down"
+        if (parkIsOpen === false || parkIsOpen === 0) {
+            return '<span class="status-badge status-closed">Park Closed</span>';
+        }
+
         if (isOpen === null || isOpen === undefined) {
             return '<span class="status-badge status-unknown">Unknown</span>';
         }

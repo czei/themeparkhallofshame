@@ -19,10 +19,14 @@ except ImportError:
     from utils.logger import logger
 
 
+VALID_CATEGORIES = ['ATTRACTION', 'MEET_AND_GREET', 'SHOW', 'EXPERIENCE']
+
+
 @dataclass
 class AIClassificationResult:
     """Result of AI-based classification."""
     tier: int
+    category: str  # 'ATTRACTION', 'MEET_AND_GREET', 'SHOW', 'EXPERIENCE'
     confidence: float
     reasoning: str
     research_sources: List[str]
@@ -38,7 +42,7 @@ class AIClassifier:
     Confidence scores: 0.50-0.95 (varies based on AI certainty)
     """
 
-    CLASSIFICATION_PROMPT_TEMPLATE = """You are a theme park ride classification expert. Your task is to classify the following ride into one of three tiers based on its significance, capacity, and guest impact:
+    CLASSIFICATION_PROMPT_TEMPLATE = """You are a theme park ride classification expert. Your task is to classify the following ride into one of three tiers AND one of four categories based on its type, significance, capacity, and guest impact:
 
 **Ride Information:**
 - Ride Name: {ride_name}
@@ -52,6 +56,13 @@ class AIClassifier:
 
 - **Tier 3 (Minor Attractions, 1x weight)**: Kiddie rides, carousels, low-capacity flat rides, playground areas, and walk-through attractions. Examples: Dumbo, Prince Charming Regal Carrousel, teacups, character meet areas. These rides almost never have a wait.
 
+**Category Classification:**
+In addition to tier, classify the attraction into ONE of these categories:
+- **ATTRACTION**: Traditional mechanical rides - roller coasters, dark rides, water rides, flat rides, spinning rides, drop towers, simulators. Anything guests physically ride on.
+- **MEET_AND_GREET**: Character encounters - "Meet Mickey Mouse", "Character Spot", "Princess Fairytale Hall", photo opportunities with characters. These open/close based on character schedules, not mechanical issues.
+- **SHOW**: Theater shows, presentations, stage performances, 4D films, sing-alongs, stunt shows, fireworks, parades. Scheduled entertainment with set times.
+- **EXPERIENCE**: Walk-through attractions, exhibits, trails, discovery centers, interactive play areas. Non-ride experiences guests walk through at their own pace.
+
 **Classification Criteria:**
 1. **Capacity & Throughput**: High-capacity rides (1000+ guests/hour) lean toward Tier 1/2
 2. **Thrill Level**: Major coasters and high-thrill experiences typically Tier 1
@@ -61,7 +72,7 @@ class AIClassifier:
 
 **Instructions:**
 1. Research the ride using web search to find:
-   - Ride type (coaster, dark ride, flat ride, etc.)
+   - Ride type (coaster, dark ride, flat ride, show, character meet, etc.)
    - Capacity/throughput data
    - Opening year and construction cost
    - Guest reviews and popularity metrics
@@ -69,16 +80,19 @@ class AIClassifier:
 
 2. Determine the appropriate tier (1, 2, or 3)
 
-3. Provide your confidence score (0.50 to 1.00):
+3. Determine the appropriate category (ATTRACTION, MEET_AND_GREET, SHOW, or EXPERIENCE)
+
+4. Provide your confidence score (0.50 to 1.00):
    - 0.90-1.00: Definitive information available
    - 0.75-0.89: Strong evidence with minor uncertainty
    - 0.60-0.74: Moderate evidence, some assumptions
    - 0.50-0.59: Limited information, best guess
 
-4. Return your response in **EXACT** JSON format:
+5. Return your response in **EXACT** JSON format:
 ```json
 {{
   "tier": 1,
+  "category": "ATTRACTION",
   "confidence": 0.85,
   "reasoning": "Space Mountain is a signature indoor roller coaster at Magic Kingdom, opened in 1975. It's one of the park's most popular E-ticket attractions with capacity of 1800 guests/hour. Consistently maintains 60+ minute wait times.",
   "research_sources": [
@@ -88,7 +102,7 @@ class AIClassifier:
 }}
 ```
 
-**CRITICAL**: Return ONLY valid JSON with these exact fields: tier, confidence, reasoning, research_sources. Do not include any additional text outside the JSON structure.
+**CRITICAL**: Return ONLY valid JSON with these exact fields: tier, category, confidence, reasoning, research_sources. Do not include any additional text outside the JSON structure.
 """
 
     def __init__(self, working_directory: Optional[str] = None):
@@ -229,7 +243,7 @@ class AIClassifier:
             data = json.loads(json_str)
 
             # Validate required fields
-            required = ['tier', 'confidence', 'reasoning', 'research_sources']
+            required = ['tier', 'category', 'confidence', 'reasoning', 'research_sources']
             for field in required:
                 if field not in data:
                     raise ValueError(f"Missing required field: {field}")
@@ -238,12 +252,17 @@ class AIClassifier:
             if data['tier'] not in [1, 2, 3]:
                 raise ValueError(f"Invalid tier value: {data['tier']}")
 
+            # Validate category value
+            if data['category'] not in VALID_CATEGORIES:
+                raise ValueError(f"Invalid category value: {data['category']}. Must be one of: {VALID_CATEGORIES}")
+
             # Validate confidence range
             if not (0.50 <= data['confidence'] <= 1.00):
                 raise ValueError(f"Confidence out of range: {data['confidence']}")
 
             return AIClassificationResult(
                 tier=data['tier'],
+                category=data['category'],
                 confidence=data['confidence'],
                 reasoning=data['reasoning'],
                 research_sources=data['research_sources']

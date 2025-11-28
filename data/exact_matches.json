@@ -1,11 +1,12 @@
 {
   "_meta": {
-    "description": "Cached ride tier classifications from AI agent (Priority 2)",
-    "schema_version": "1.0",
+    "description": "Cached ride tier and category classifications from AI agent (Priority 2)",
+    "schema_version": "2.0",
     "cache_invalidation_rules": [
       "Cached entries are used when confidence_score >= 0.85",
       "Cache is invalidated when schema_version changes",
-      "Entries can be manually removed to force re-classification"
+      "Entries can be manually removed to force re-classification",
+      "v2.0: Added category field (ATTRACTION, MEET_AND_GREET, SHOW, EXPERIENCE)"
     ],
     "cache_key_format": "{park_id}:{ride_id}",
     "tier_weights": {
@@ -13,7 +14,8 @@
       "2": 2,
       "3": 1
     },
-    "last_updated": "2025-11-24T17:28:39.541148"
+    "categories": ["ATTRACTION", "MEET_AND_GREET", "SHOW", "EXPERIENCE"],
+    "last_updated": "2025-11-27T00:00:00.000000"
   },
   "classifications": {
     "1407:1527": {

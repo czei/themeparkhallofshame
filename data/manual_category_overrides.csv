@@ -1,0 +1,12 @@
+# Manual Category Overrides for Ride Classification
+# Format: park_id,ride_id,override_category,reason,date_added
+# Categories: ATTRACTION, MEET_AND_GREET, SHOW, EXPERIENCE
+# This file has HIGHEST priority for category classification (Priority 1)
+#
+# Example entries:
+# 16,1234,MEET_AND_GREET,"Meet Mickey Mouse - Character encounter, not a ride",2025-11-27
+# 16,1235,SHOW,"Frozen Sing-Along Celebration - Theater show with scheduled times",2025-11-27
+# 16,1236,EXPERIENCE,"Discovery Island Trails - Walk-through animal exhibit",2025-11-27
+#
+# Add manual overrides below this line:
+park_id,ride_id,override_category,reason,date_added

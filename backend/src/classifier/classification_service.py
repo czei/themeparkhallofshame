@@ -12,9 +12,13 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 
 from classifier.ai_classifier import AIClassifier, AIClassificationResult, AIClassifierError
+from classifier.pattern_matcher import PatternMatcher
 from utils.logger import logger
 from database.connection import get_db_connection
 from sqlalchemy import text
+
+
+VALID_CATEGORIES = ['ATTRACTION', 'MEET_AND_GREET', 'SHOW', 'EXPERIENCE']
 
 
 @dataclass
@@ -25,6 +29,7 @@ class ClassificationResult:
     park_id: int
     park_name: str
     tier: int
+    category: str  # 'ATTRACTION', 'MEET_AND_GREET', 'SHOW', 'EXPERIENCE'
     tier_weight: int
     classification_method: str  # manual_override, cached_ai, ai_agent
     confidence_score: float
@@ -53,11 +58,12 @@ class ClassificationService:
 
     CACHE_THRESHOLD = 0.85  # Confidence threshold for caching
     REVIEW_THRESHOLD = 0.50  # Confidence threshold for flagging review
-    SCHEMA_VERSION = "1.0"
+    SCHEMA_VERSION = "2.0"  # Bumped for category support
 
     def __init__(
         self,
         manual_overrides_path: str = "data/manual_overrides.csv",
+        category_overrides_path: str = "data/manual_category_overrides.csv",
         exact_matches_path: str = "data/exact_matches.json",
         working_directory: Optional[str] = None
     ):
@@ -65,22 +71,27 @@ class ClassificationService:
         Initialize classification service.
 
         Args:
-            manual_overrides_path: Path to manual overrides CSV
+            manual_overrides_path: Path to manual tier overrides CSV
+            category_overrides_path: Path to manual category overrides CSV
             exact_matches_path: Path to cached classifications JSON
             working_directory: Working directory for AI classifier
         """
         self.manual_overrides_path = manual_overrides_path
+        self.category_overrides_path = category_overrides_path
         self.exact_matches_path = exact_matches_path
         self.working_directory = working_directory or os.getcwd()
 
         self.ai_classifier = AIClassifier(working_directory=self.working_directory)
+        self.pattern_matcher = PatternMatcher()
 
         # Load caches
         self.manual_overrides = self._load_manual_overrides()
+        self.category_overrides = self._load_category_overrides()
         self.exact_matches = self._load_exact_matches()
 
         logger.info("ClassificationService initialized", extra={
             "manual_overrides_count": len(self.manual_overrides),
+            "category_overrides_count": len(self.category_overrides),
             "exact_matches_count": len(self.exact_matches)
         })
 
@@ -121,6 +132,51 @@ class ClassificationService:
 
         except Exception as e:
             logger.error(f"Failed to load manual overrides: {e}")
+
+        return overrides
+
+    def _load_category_overrides(self) -> Dict[Tuple[int, int], Dict[str, Any]]:
+        """
+        Load manual category overrides from CSV.
+
+        Returns:
+            Dictionary mapping (park_id, ride_id) to category override data
+        """
+        overrides = {}
+
+        if not os.path.exists(self.category_overrides_path):
+            logger.warning(f"Category overrides file not found: {self.category_overrides_path}")
+            return overrides
+
+        try:
+            with open(self.category_overrides_path, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # Skip comments and empty lines
+                    if not row.get('park_id') or row['park_id'].startswith('#'):
+                        continue
+
+                    park_id = int(row['park_id'])
+                    ride_id = int(row['ride_id'])
+                    category = row['override_category']
+                    reason = row['reason']
+                    date_added = row.get('date_added', '')
+
+                    # Validate category
+                    if category not in VALID_CATEGORIES:
+                        logger.warning(f"Invalid category '{category}' for ride {ride_id}, skipping")
+                        continue
+
+                    overrides[(park_id, ride_id)] = {
+                        'category': category,
+                        'reason': reason,
+                        'date_added': date_added
+                    }
+
+            logger.info(f"Loaded {len(overrides)} category overrides")
+
+        except Exception as e:
+            logger.error(f"Failed to load category overrides: {e}")
 
         return overrides
 
@@ -186,6 +242,38 @@ class ClassificationService:
         except Exception as e:
             logger.error(f"Failed to save exact matches: {e}")
 
+    def _get_category(self, park_id: int, ride_id: int, ride_name: Optional[str] = None,
+                       ai_category: Optional[str] = None,
+                       cached_category: Optional[str] = None) -> str:
+        """
+        Get category for a ride, checking overrides first.
+
+        Priority:
+        1. Manual category override
+        2. AI/cached category
+        3. Pattern matching (from ride name)
+        4. Default to ATTRACTION
+        """
+        # Check manual category override (highest priority)
+        cat_override = self.category_overrides.get((park_id, ride_id))
+        if cat_override:
+            return cat_override['category']
+
+        # Use AI or cached category
+        if ai_category and ai_category in VALID_CATEGORIES:
+            return ai_category
+        if cached_category and cached_category in VALID_CATEGORIES:
+            return cached_category
+
+        # Try pattern matching on ride name
+        if ride_name:
+            pattern_result = self.pattern_matcher.classify(ride_name)
+            if pattern_result.category in VALID_CATEGORIES:
+                return pattern_result.category
+
+        # Default to ATTRACTION
+        return 'ATTRACTION'
+
     def classify_ride(
         self,
         ride_id: int,
@@ -205,20 +293,22 @@ class ClassificationService:
             park_location: Park location (city, state)
 
         Returns:
-            ClassificationResult
+            ClassificationResult with tier and category
         """
         cache_key = f"{park_id}:{ride_id}"
 
-        # Priority 1: Manual overrides
+        # Priority 1: Manual overrides (for tier)
         override = self.manual_overrides.get((park_id, ride_id))
         if override:
-            logger.info(f"Manual override for {ride_name}: Tier {override['tier']}")
+            category = self._get_category(park_id, ride_id, ride_name=ride_name)
+            logger.info(f"Manual override for {ride_name}: Tier {override['tier']}, Category {category}")
             return ClassificationResult(
                 ride_id=ride_id,
                 ride_name=ride_name,
                 park_id=park_id,
                 park_name=park_name,
                 tier=override['tier'],
+                category=category,
                 tier_weight=self._get_tier_weight(override['tier']),
                 classification_method='manual_override',
                 confidence_score=1.00,
@@ -232,13 +322,15 @@ class ClassificationService:
         # Priority 2: Cached AI classifications
         cached = self.exact_matches.get(cache_key)
         if cached:
-            logger.info(f"Cached classification for {ride_name}: Tier {cached['tier']}")
+            category = self._get_category(park_id, ride_id, ride_name=ride_name, cached_category=cached.get('category'))
+            logger.info(f"Cached classification for {ride_name}: Tier {cached['tier']}, Category {category}")
             return ClassificationResult(
                 ride_id=ride_id,
                 ride_name=ride_name,
                 park_id=park_id,
                 park_name=park_name,
                 tier=cached['tier'],
+                category=category,
                 tier_weight=self._get_tier_weight(cached['tier']),
                 classification_method='cached_ai',
                 confidence_score=cached['confidence'],
@@ -262,12 +354,14 @@ class ClassificationService:
             if ai_result.confidence >= self.CACHE_THRESHOLD:
                 self._cache_ai_result(cache_key, ai_result)
 
+            category = self._get_category(park_id, ride_id, ride_name=ride_name, ai_category=ai_result.category)
             return ClassificationResult(
                 ride_id=ride_id,
                 ride_name=ride_name,
                 park_id=park_id,
                 park_name=park_name,
                 tier=ai_result.tier,
+                category=category,
                 tier_weight=self._get_tier_weight(ai_result.tier),
                 classification_method='ai_agent',
                 confidence_score=ai_result.confidence,
@@ -281,12 +375,14 @@ class ClassificationService:
         except Exception as e:
             logger.error(f"AI classification failed for {ride_name}: {e}")
             # Fall back to Tier 2 default with low confidence
+            category = self._get_category(park_id, ride_id, ride_name=ride_name)
             return ClassificationResult(
                 ride_id=ride_id,
                 ride_name=ride_name,
                 park_id=park_id,
                 park_name=park_name,
                 tier=2,  # Default to Tier 2 (standard)
+                category=category,
                 tier_weight=2,
                 classification_method='ai_agent_failed',
                 confidence_score=0.30,  # Very low confidence
@@ -364,12 +460,14 @@ class ClassificationService:
         for ride in rides:
             # Return placeholder results
             cache_key = f"{ride['park_id']}:{ride['ride_id']}"
+            category = self._get_category(ride['park_id'], ride['ride_id'], ride_name=ride['ride_name'])
             results.append(ClassificationResult(
                 ride_id=ride['ride_id'],
                 ride_name=ride['ride_name'],
                 park_id=ride['park_id'],
                 park_name=ride['park_name'],
                 tier=2,
+                category=category,
                 tier_weight=2,
                 classification_method='ai_agent',
                 confidence_score=0.40,
@@ -400,33 +498,35 @@ class ClassificationService:
 
     def _save_classification_with_connection(self, conn, result: ClassificationResult):
         """Internal method to save classification with a given connection."""
-        # Update ride tier
+        # Update ride tier and category
         update_ride = text("""
             UPDATE rides
-            SET tier = :tier
+            SET tier = :tier, category = :category
             WHERE ride_id = :ride_id
         """)
 
         conn.execute(update_ride, {
             "tier": result.tier,
+            "category": result.category,
             "ride_id": result.ride_id
         })
 
         # Insert/update classification record
         upsert_classification = text("""
             INSERT INTO ride_classifications (
-                ride_id, tier, tier_weight, classification_method,
+                ride_id, tier, tier_weight, category, classification_method,
                 confidence_score, reasoning_text, override_reason,
                 research_sources, cache_key, schema_version
             )
             VALUES (
-                :ride_id, :tier, :tier_weight, :classification_method,
+                :ride_id, :tier, :tier_weight, :category, :classification_method,
                 :confidence_score, :reasoning_text, :override_reason,
                 :research_sources, :cache_key, :schema_version
             )
             ON DUPLICATE KEY UPDATE
                 tier = VALUES(tier),
                 tier_weight = VALUES(tier_weight),
+                category = VALUES(category),
                 classification_method = VALUES(classification_method),
                 confidence_score = VALUES(confidence_score),
                 reasoning_text = VALUES(reasoning_text),
@@ -441,6 +541,7 @@ class ClassificationService:
             "ride_id": result.ride_id,
             "tier": result.tier,
             "tier_weight": result.tier_weight,
+            "category": result.category,
             "classification_method": result.classification_method,
             "confidence_score": result.confidence_score,
             "reasoning_text": result.reasoning_text,
@@ -450,7 +551,7 @@ class ClassificationService:
             "schema_version": self.SCHEMA_VERSION
         })
 
-        logger.info(f"Saved classification for ride {result.ride_id}: Tier {result.tier}")
+        logger.info(f"Saved classification for ride {result.ride_id}: Tier {result.tier}, Category {result.category}")
 
         # Cache high-confidence AI results
         if (result.classification_method == 'ai_agent' and
@@ -459,6 +560,7 @@ class ClassificationService:
 
             self.exact_matches[result.cache_key] = {
                 "tier": result.tier,
+                "category": result.category,
                 "confidence": result.confidence_score,
                 "reasoning": result.reasoning_text,
                 "research_sources": result.research_sources or [],
@@ -470,13 +572,14 @@ class ClassificationService:
         """Cache high-confidence AI classification result."""
         self.exact_matches[cache_key] = {
             "tier": ai_result.tier,
+            "category": ai_result.category,
             "confidence": ai_result.confidence,
             "reasoning": ai_result.reasoning,
             "research_sources": ai_result.research_sources or [],
             "cached_at": datetime.now().isoformat()
         }
         self._save_exact_matches()
-        logger.info(f"Cached AI result for {cache_key}: Tier {ai_result.tier}")
+        logger.info(f"Cached AI result for {cache_key}: Tier {ai_result.tier}, Category {ai_result.category}")
 
     def _get_tier_weight(self, tier: int) -> int:
         """Get weight multiplier for tier."""

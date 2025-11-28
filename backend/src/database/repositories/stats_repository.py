@@ -10,8 +10,10 @@ from sqlalchemy.engine import Connection
 
 try:
     from ...utils.logger import logger
+    from ...utils.timezone import get_today_pacific, get_pacific_day_range_utc
 except ImportError:
     from utils.logger import logger
+    from utils.timezone import get_today_pacific, get_pacific_day_range_utc
 
 
 class StatsRepository:
@@ -2610,6 +2612,9 @@ class StatsRepository:
         """
         filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
 
+        # Get Pacific day bounds in UTC - "today" means Pacific calendar day
+        start_utc, end_utc = get_pacific_day_range_utc(get_today_pacific())
+
         query = text(f"""
             SELECT
                 p.park_id,
@@ -2661,7 +2666,7 @@ class StatsRepository:
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
                 AND pas.recorded_at = rss.recorded_at
-            WHERE DATE(rss.recorded_at) = CURDATE()
+            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND p.is_active = TRUE
                 {filter_clause}
             GROUP BY p.park_id, p.name, p.city, p.state_province
@@ -2670,7 +2675,7 @@ class StatsRepository:
             LIMIT :limit
         """)
 
-        result = self.conn.execute(query, {"limit": limit})
+        result = self.conn.execute(query, {"limit": limit, "start_utc": start_utc, "end_utc": end_utc})
         return [dict(row._mapping) for row in result.fetchall()]
 
     def get_ride_live_downtime_rankings(
@@ -2692,6 +2697,10 @@ class StatsRepository:
             List of rides ranked by downtime hours (descending) with current status
         """
         filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+
+        # Get Pacific day bounds in UTC - "today" means Pacific calendar day
+        today_pacific = get_today_pacific()
+        start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
 
         query = text(f"""
             SELECT
@@ -2760,8 +2769,8 @@ class StatsRepository:
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
                 AND pas.recorded_at = rss.recorded_at
             LEFT JOIN ride_daily_stats prev_day ON r.ride_id = prev_day.ride_id
-                AND prev_day.stat_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
-            WHERE DATE(rss.recorded_at) = CURDATE()
+                AND prev_day.stat_date = :yesterday_pacific
+            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                 AND p.is_active = TRUE
@@ -2772,5 +2781,12 @@ class StatsRepository:
             LIMIT :limit
         """)
 
-        result = self.conn.execute(query, {"limit": limit})
+        from datetime import timedelta
+        yesterday_pacific = today_pacific - timedelta(days=1)
+        result = self.conn.execute(query, {
+            "limit": limit,
+            "start_utc": start_utc,
+            "end_utc": end_utc,
+            "yesterday_pacific": yesterday_pacific
+        })
         return [dict(row._mapping) for row in result.fetchall()]

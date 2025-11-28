@@ -130,10 +130,14 @@ class ParkCollector:
             groups = self.api_client.get_parks()
 
             # Flatten: API returns company groups with nested parks
+            # Preserve company name for Disney/Universal classification
             all_parks = []
             for group in groups:
+                company_name = group.get('name', '')
                 if 'parks' in group:
-                    all_parks.extend(group['parks'])
+                    for park in group['parks']:
+                        park['_company'] = company_name  # Preserve for classification
+                        all_parks.append(park)
                 else:
                     # In case some are individual parks
                     all_parks.append(group)
@@ -212,15 +216,38 @@ class ParkCollector:
             # Check if park already exists
             existing_park = park_repo.get_by_queue_times_id(queue_times_id)
 
-            # Determine operator and flags
+            # Determine operator and flags based on company name from API
             park_name = park_data.get('name', '')
+            company_name = park_data.get('_company', '').lower()
             operator = self._detect_operator(park_name)
-            is_disney = 'disney' in park_name.lower()
-            is_universal = 'universal' in park_name.lower()
+            # Use company name for accurate Disney/Universal classification
+            # "Walt Disney Attractions" includes EPCOT, Animal Kingdom, etc.
+            # "Universal Parks & Resorts" includes Epic Universe, etc.
+            is_disney = 'disney' in company_name
+            is_universal = 'universal' in company_name
 
             # Convert country to ISO 2-letter code (API returns full names)
             country_name = park_data.get('country', '')
             country_code = self._convert_country_to_iso(country_name)
+
+            # Get coordinates from API (may be strings or numbers)
+            latitude = park_data.get('latitude')
+            longitude = park_data.get('longitude')
+
+            # Convert to float if provided as strings
+            try:
+                if latitude is not None:
+                    latitude = float(latitude)
+                if longitude is not None:
+                    longitude = float(longitude)
+            except (ValueError, TypeError):
+                pass  # Keep as-is if conversion fails
+
+            # Fix longitude sign for US parks (Queue-Times API sometimes has wrong sign)
+            # US parks should always have negative longitude (west of prime meridian)
+            if country_code == 'US' and longitude is not None and longitude > 0:
+                logger.warning(f"  Fixing longitude sign for US park: {longitude} -> {-longitude}")
+                longitude = -longitude
 
             park_record = {
                 'queue_times_id': queue_times_id,
@@ -228,8 +255,8 @@ class ParkCollector:
                 'city': park_data.get('city') or 'Unknown',  # API doesn't provide city
                 'state_province': park_data.get('state') or park_data.get('state_province') or '',
                 'country': country_code,
-                'latitude': park_data.get('latitude'),
-                'longitude': park_data.get('longitude'),
+                'latitude': latitude,
+                'longitude': longitude,
                 'timezone': park_data.get('timezone', 'UTC'),
                 'operator': operator,
                 'is_disney': is_disney,

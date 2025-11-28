@@ -1,11 +1,18 @@
 # Deployment Status
 
-**Last Updated**: 2025-11-26 (PST)
-**Status**: DEPLOYED - Awaiting Data
+**Last Updated**: 2025-11-27 (PST)
+**Status**: DEPLOYED - Live with Data
 
 ## Access
 
-- **URL**: https://www.themeparkhallofshame.com
+# =====================================================
+# THE SITE URL IS: http://themeparkhallofshame.com
+# =====================================================
+# DO NOT USE https:// (no SSL cert yet)
+# DO NOT USE www. prefix
+# =====================================================
+
+- **URL**: http://themeparkhallofshame.com
 - **Basic Auth**: `demo` / `5y3j30q4i`
 - **Server**: webperformance.com (35.173.113.141)
 - **SSH**: `ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com`

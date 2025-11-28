@@ -227,6 +227,12 @@ class SnapshotCollector:
                 logger.warning(f"  Ride ID {queue_times_id} not found in database (may need to run collect_parks)")
                 return
 
+            # Skip non-ATTRACTION categories (shows, meet & greets, experiences)
+            # Only track mechanical rides for downtime/wait time statistics
+            if ride.category and ride.category != 'ATTRACTION':
+                logger.debug(f"  Skipping {ride.name} (category: {ride.category})")
+                return
+
             ride_id = ride.ride_id
             self.stats['rides_processed'] += 1
 

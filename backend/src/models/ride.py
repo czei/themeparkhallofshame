@@ -21,6 +21,7 @@ class Ride:
     name: str
     land_area: Optional[str]
     tier: Optional[int]  # 1 (major, 3x weight), 2 (standard, 2x weight), 3 (minor, 1x weight)
+    category: Optional[str]  # 'ATTRACTION', 'MEET_AND_GREET', 'SHOW', 'EXPERIENCE'
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -77,6 +78,7 @@ class Ride:
             "tier": self.tier,
             "tier_weight": self.tier_weight,
             "tier_label": self.tier_label,
+            "category": self.category,
             "is_active": self.is_active,
             "queue_times_url": self.queue_times_url
         }
@@ -99,6 +101,7 @@ class Ride:
             name=row['name'] if isinstance(row, dict) else row.name,
             land_area=row['land_area'] if isinstance(row, dict) else row.land_area,
             tier=row['tier'] if isinstance(row, dict) else row.tier,
+            category=row['category'] if isinstance(row, dict) else getattr(row, 'category', None),
             is_active=row['is_active'] if isinstance(row, dict) else row.is_active,
             created_at=row['created_at'] if isinstance(row, dict) else row.created_at,
             updated_at=row['updated_at'] if isinstance(row, dict) else row.updated_at

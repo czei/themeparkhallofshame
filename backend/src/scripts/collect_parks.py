@@ -412,7 +412,7 @@ class ParkCollector:
                 'name': ride_name,
                 'land_area': ride_data.get('land'),
                 'tier': None,  # Will be populated by separate classification process
-                'is_active': ride_data.get('is_open', True)
+                'is_active': True  # Always track rides; is_open is current status, not tracking flag
             }
 
             if existing_ride:

@@ -1376,6 +1376,11 @@ class StatsRepository:
         filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
 
         if period == 'today':
+            # Get Pacific day bounds in UTC - "today" means Pacific calendar day
+            today_pacific = get_today_pacific()
+            start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
+            yesterday_pacific = today_pacific - timedelta(days=1)
+
             # Query today's average wait times from LIVE snapshots (not ride_daily_stats)
             # This provides real-time data that updates every 10 minutes
             query = text(f"""
@@ -1417,11 +1422,14 @@ class StatsRepository:
                 FROM ride_status_snapshots rss
                 JOIN rides r ON rss.ride_id = r.ride_id
                 JOIN parks p ON r.park_id = p.park_id
+                INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
+                    AND pas.recorded_at = rss.recorded_at
                 LEFT JOIN ride_daily_stats prev_day ON r.ride_id = prev_day.ride_id
-                    AND prev_day.stat_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
-                WHERE DATE(rss.recorded_at) = CURDATE()
+                    AND prev_day.stat_date = :yesterday_pacific
+                WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                     AND rss.wait_time > 0
                     AND rss.computed_is_open = TRUE
+                    AND pas.park_appears_open = TRUE
                     AND r.is_active = TRUE
                     AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                     AND p.is_active = TRUE
@@ -1432,7 +1440,10 @@ class StatsRepository:
                 LIMIT :limit
             """)
             params = {
-                "limit": limit
+                "limit": limit,
+                "start_utc": start_utc,
+                "end_utc": end_utc,
+                "yesterday_pacific": yesterday_pacific
             }
 
         elif period == '7days':
@@ -1598,10 +1609,16 @@ class StatsRepository:
         filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
 
         if period == 'today':
+            # Get Pacific day bounds in UTC - "today" means Pacific calendar day
+            today_pacific = get_today_pacific()
+            start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
+            yesterday_pacific = today_pacific - timedelta(days=1)
+
             # Query today's average wait times from LIVE snapshots aggregated by park
             query = text(f"""
                 SELECT
                     p.park_id,
+                    p.queue_times_id,
                     p.name AS park_name,
                     CONCAT(p.city, ', ', p.state_province) AS location,
                     ROUND(AVG(rss.wait_time), 0) AS avg_wait_minutes,
@@ -1629,21 +1646,29 @@ class StatsRepository:
                 FROM ride_status_snapshots rss
                 JOIN rides r ON rss.ride_id = r.ride_id
                 JOIN parks p ON r.park_id = p.park_id
+                INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
+                    AND pas.recorded_at = rss.recorded_at
                 LEFT JOIN park_daily_stats prev_day ON p.park_id = prev_day.park_id
-                    AND prev_day.stat_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
-                WHERE DATE(rss.recorded_at) = CURDATE()
+                    AND prev_day.stat_date = :yesterday_pacific
+                WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                     AND rss.wait_time > 0
                     AND rss.computed_is_open = TRUE
+                    AND pas.park_appears_open = TRUE
                     AND r.is_active = TRUE
                     AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                     AND p.is_active = TRUE
                     {filter_clause}
-                GROUP BY p.park_id, p.name, p.city, p.state_province, prev_day.avg_wait_time
+                GROUP BY p.park_id, p.queue_times_id, p.name, p.city, p.state_province, prev_day.avg_wait_time
                 HAVING AVG(rss.wait_time) > 0
                 ORDER BY avg_wait_minutes DESC
                 LIMIT :limit
             """)
-            params = {"limit": limit}
+            params = {
+                "limit": limit,
+                "start_utc": start_utc,
+                "end_utc": end_utc,
+                "yesterday_pacific": yesterday_pacific
+            }
 
         elif period == '7days':
             # Query 7-day average aggregated by park from daily stats
@@ -1653,6 +1678,7 @@ class StatsRepository:
             query = text(f"""
                 SELECT
                     p.park_id,
+                    p.queue_times_id,
                     p.name AS park_name,
                     CONCAT(p.city, ', ', p.state_province) AS location,
                     ROUND(AVG(rds.avg_wait_time), 0) AS avg_wait_minutes,
@@ -1681,7 +1707,7 @@ class StatsRepository:
                     AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                     AND p.is_active = TRUE
                     {filter_clause}
-                GROUP BY p.park_id, p.name, p.city, p.state_province
+                GROUP BY p.park_id, p.queue_times_id, p.name, p.city, p.state_province
                 HAVING AVG(rds.avg_wait_time) > 0
                 ORDER BY avg_wait_minutes DESC
                 LIMIT :limit
@@ -1700,6 +1726,7 @@ class StatsRepository:
             query = text(f"""
                 SELECT
                     p.park_id,
+                    p.queue_times_id,
                     p.name AS park_name,
                     CONCAT(p.city, ', ', p.state_province) AS location,
                     ROUND(AVG(rds.avg_wait_time), 0) AS avg_wait_minutes,
@@ -1728,7 +1755,7 @@ class StatsRepository:
                     AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                     AND p.is_active = TRUE
                     {filter_clause}
-                GROUP BY p.park_id, p.name, p.city, p.state_province
+                GROUP BY p.park_id, p.queue_times_id, p.name, p.city, p.state_province
                 HAVING AVG(rds.avg_wait_time) > 0
                 ORDER BY avg_wait_minutes DESC
                 LIMIT :limit

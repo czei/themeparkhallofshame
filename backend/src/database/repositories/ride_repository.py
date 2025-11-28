@@ -46,7 +46,7 @@ class RideRepository:
             Ride object or None if not found
         """
         query = text("""
-            SELECT ride_id, queue_times_id, park_id, name, land_area, tier,
+            SELECT ride_id, queue_times_id, park_id, name, land_area, tier, category,
                    is_active, created_at, updated_at
             FROM rides
             WHERE ride_id = :ride_id
@@ -71,7 +71,7 @@ class RideRepository:
             Ride object or None if not found
         """
         query = text("""
-            SELECT ride_id, queue_times_id, park_id, name, land_area, tier,
+            SELECT ride_id, queue_times_id, park_id, name, land_area, tier, category,
                    is_active, created_at, updated_at
             FROM rides
             WHERE queue_times_id = :queue_times_id
@@ -97,7 +97,7 @@ class RideRepository:
             List of Ride objects
         """
         query = text("""
-            SELECT ride_id, queue_times_id, park_id, name, land_area, tier,
+            SELECT ride_id, queue_times_id, park_id, name, land_area, tier, category,
                    is_active, created_at, updated_at
             FROM rides
             WHERE park_id = :park_id
@@ -116,7 +116,7 @@ class RideRepository:
             List of Ride objects
         """
         query = text("""
-            SELECT ride_id, queue_times_id, park_id, name, land_area, tier,
+            SELECT ride_id, queue_times_id, park_id, name, land_area, tier, category,
                    is_active, created_at, updated_at
             FROM rides
             WHERE is_active = TRUE
@@ -134,7 +134,7 @@ class RideRepository:
             List of Ride objects without tier classification
         """
         query = text("""
-            SELECT r.ride_id, r.queue_times_id, r.park_id, r.name, r.land_area, r.tier,
+            SELECT r.ride_id, r.queue_times_id, r.park_id, r.name, r.land_area, r.tier, r.category,
                    r.is_active, r.created_at, r.updated_at
             FROM rides r
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
@@ -430,6 +430,7 @@ class RideRepository:
             name=row.name,
             land_area=row.land_area,
             tier=row.tier,
+            category=getattr(row, 'category', None),
             is_active=row.is_active,
             created_at=row.created_at,
             updated_at=row.updated_at

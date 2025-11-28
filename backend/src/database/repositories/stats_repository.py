@@ -814,6 +814,7 @@ class StatsRepository:
                         JOIN parks pk ON r.park_id = pk.park_id
                         WHERE r.is_active = TRUE
                             AND r.category = 'ATTRACTION'
+                            -- Currently showing as down
                             AND EXISTS (
                                 SELECT 1 FROM ride_status_snapshots rss
                                 WHERE rss.ride_id = r.ride_id
@@ -824,12 +825,23 @@ class StatsRepository:
                                         WHERE rss2.ride_id = r.ride_id
                                     )
                             )
+                            -- Park is currently operating
                             AND EXISTS (
                                 SELECT 1 FROM ride_status_snapshots rss3
                                 JOIN rides r3 ON rss3.ride_id = r3.ride_id
                                 WHERE r3.park_id = pk.park_id
                                     AND rss3.wait_time > 0
                                     AND rss3.recorded_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+                            )
+                            -- Ride had some uptime today (was running at some point - excludes all-day closures)
+                            AND EXISTS (
+                                SELECT 1 FROM ride_status_snapshots rss4
+                                JOIN park_activity_snapshots pas ON pas.park_id = pk.park_id
+                                    AND pas.recorded_at = rss4.recorded_at
+                                WHERE rss4.ride_id = r.ride_id
+                                    AND rss4.computed_is_open = TRUE
+                                    AND pas.park_appears_open = TRUE
+                                    AND rss4.recorded_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
                             )
                         {disney_filter_pk}
                     ), 0) AS currently_down_rides
@@ -853,6 +865,7 @@ class StatsRepository:
                         JOIN parks pk ON r.park_id = pk.park_id
                         WHERE r.is_active = TRUE
                             AND r.category = 'ATTRACTION'
+                            -- Currently showing as down
                             AND EXISTS (
                                 SELECT 1 FROM ride_status_snapshots rss
                                 WHERE rss.ride_id = r.ride_id
@@ -863,13 +876,23 @@ class StatsRepository:
                                         WHERE rss2.ride_id = r.ride_id
                                     )
                             )
-                            -- Only count if park is currently operating (has recent wait times > 0)
+                            -- Park is currently operating
                             AND EXISTS (
                                 SELECT 1 FROM ride_status_snapshots rss3
                                 JOIN rides r3 ON rss3.ride_id = r3.ride_id
                                 WHERE r3.park_id = pk.park_id
                                     AND rss3.wait_time > 0
                                     AND rss3.recorded_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+                            )
+                            -- Ride had some uptime today (was running at some point - excludes all-day closures)
+                            AND EXISTS (
+                                SELECT 1 FROM ride_status_snapshots rss4
+                                JOIN park_activity_snapshots pas ON pas.park_id = pk.park_id
+                                    AND pas.recorded_at = rss4.recorded_at
+                                WHERE rss4.ride_id = r.ride_id
+                                    AND rss4.computed_is_open = TRUE
+                                    AND pas.park_appears_open = TRUE
+                                    AND rss4.recorded_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
                             )
                         {disney_filter_pk}
                     ), 0) AS currently_down_rides
@@ -893,6 +916,7 @@ class StatsRepository:
                         JOIN parks pk ON r.park_id = pk.park_id
                         WHERE r.is_active = TRUE
                             AND r.category = 'ATTRACTION'
+                            -- Currently showing as down
                             AND EXISTS (
                                 SELECT 1 FROM ride_status_snapshots rss
                                 WHERE rss.ride_id = r.ride_id
@@ -903,13 +927,23 @@ class StatsRepository:
                                         WHERE rss2.ride_id = r.ride_id
                                     )
                             )
-                            -- Only count if park is currently operating (has recent wait times > 0)
+                            -- Park is currently operating
                             AND EXISTS (
                                 SELECT 1 FROM ride_status_snapshots rss3
                                 JOIN rides r3 ON rss3.ride_id = r3.ride_id
                                 WHERE r3.park_id = pk.park_id
                                     AND rss3.wait_time > 0
                                     AND rss3.recorded_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+                            )
+                            -- Ride had some uptime today (was running at some point - excludes all-day closures)
+                            AND EXISTS (
+                                SELECT 1 FROM ride_status_snapshots rss4
+                                JOIN park_activity_snapshots pas ON pas.park_id = pk.park_id
+                                    AND pas.recorded_at = rss4.recorded_at
+                                WHERE rss4.ride_id = r.ride_id
+                                    AND rss4.computed_is_open = TRUE
+                                    AND pas.park_appears_open = TRUE
+                                    AND rss4.recorded_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
                             )
                         {disney_filter_pk}
                     ), 0) AS currently_down_rides

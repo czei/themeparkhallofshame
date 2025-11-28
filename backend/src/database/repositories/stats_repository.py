@@ -2546,28 +2546,18 @@ class StatsRepository:
                     2
                 ) AS uptime_percentage,
 
-                -- Trend: compare to yesterday's aggregated stats
-                CASE
-                    WHEN prev_day.total_downtime_hours > 0 THEN
-                        ROUND(
-                            ((SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = FALSE THEN 10 ELSE 0 END) / 60.0
-                              - prev_day.total_downtime_hours) / prev_day.total_downtime_hours) * 100,
-                            2
-                        )
-                    ELSE NULL
-                END AS trend_percentage
+                -- Trend: NULL for live data (no historical comparison needed for "Today")
+                NULL AS trend_percentage
 
             FROM parks p
             INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
                 AND pas.recorded_at = rss.recorded_at
-            LEFT JOIN park_daily_stats prev_day ON p.park_id = prev_day.park_id
-                AND prev_day.stat_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
             WHERE DATE(rss.recorded_at) = CURDATE()
                 AND p.is_active = TRUE
                 {filter_clause}
-            GROUP BY p.park_id, p.name, p.city, p.state_province, prev_day.total_downtime_hours
+            GROUP BY p.park_id, p.name, p.city, p.state_province
             HAVING total_downtime_hours > 0  -- Hall of Shame: only parks with actual downtime
             ORDER BY total_downtime_hours DESC
             LIMIT :limit

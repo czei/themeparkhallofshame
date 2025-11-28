@@ -575,6 +575,7 @@ class StatsRepository:
                         COUNT(r.ride_id) AS total_rides
                     FROM parks p
                     INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
+                        AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                     LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
                     WHERE p.is_active = TRUE
                         {disney_filter}
@@ -586,6 +587,7 @@ class StatsRepository:
                         SUM(rds.downtime_minutes / 60.0 * IFNULL(rc.tier_weight, 2)) AS total_weighted_downtime_hours
                     FROM parks p
                     INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
+                        AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                     LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
                     INNER JOIN ride_daily_stats rds ON r.ride_id = rds.ride_id
                     WHERE rds.stat_date = :stat_date
@@ -615,6 +617,7 @@ class StatsRepository:
                         SUM(rds2.downtime_minutes / 60.0 * IFNULL(rc2.tier_weight, 2)) AS total_weighted_downtime_hours
                     FROM parks p2
                     INNER JOIN rides r2 ON p2.park_id = r2.park_id AND r2.is_active = TRUE
+                        AND r2.category = 'ATTRACTION'  -- Only include mechanical rides
                     LEFT JOIN ride_classifications rc2 ON r2.ride_id = rc2.ride_id
                     INNER JOIN ride_daily_stats rds2 ON r2.ride_id = rds2.ride_id
                     WHERE rds2.stat_date = DATE_SUB(:stat_date, INTERVAL 1 DAY)
@@ -884,6 +887,7 @@ class StatsRepository:
                 )
             WHERE r.park_id = :park_id
                 AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
         """)
 
         result = self.conn.execute(query, {"park_id": park_id})
@@ -940,6 +944,7 @@ class StatsRepository:
                 AND prev_day.stat_date = DATE_SUB(:stat_date, INTERVAL 1 DAY)
             WHERE rds.stat_date = :stat_date
                 AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                 AND p.is_active = TRUE
                 AND rds.operating_hours_minutes > 0  -- Exclude rides from closed parks
                 AND rds.downtime_minutes > 0  -- Only show rides with actual downtime (Hall of Shame)
@@ -1011,6 +1016,7 @@ class StatsRepository:
             JOIN parks p ON r.park_id = p.park_id
             WHERE rds.stat_date BETWEEN :start_date AND :end_date
                 AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                 AND p.is_active = TRUE
                 AND rds.operating_hours_minutes > 0
                 {disney_filter}
@@ -1082,6 +1088,7 @@ class StatsRepository:
             WHERE rms.year = :year
                 AND rms.month = :month
                 AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                 AND p.is_active = TRUE
                 {:filter_clause}
             ORDER BY rms.downtime_minutes DESC
@@ -1174,6 +1181,7 @@ class StatsRepository:
                 AND rss.computed_is_open = TRUE
                 AND rss.wait_time > 0
                 AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                 AND p.is_active = TRUE
                 {:filter_clause}
             ORDER BY rss.wait_time DESC
@@ -1235,6 +1243,7 @@ class StatsRepository:
                 AND rws.week_number = :week_number
                 AND rws.avg_wait_time > 0
                 AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                 AND p.is_active = TRUE
                 {:filter_clause}
             ORDER BY rws.avg_wait_time DESC
@@ -1313,6 +1322,7 @@ class StatsRepository:
                 AND rws.week_number = :week_number
                 AND rws.peak_wait_time > 0
                 AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                 AND p.is_active = TRUE
                 {:filter_clause}
             ORDER BY rws.peak_wait_time DESC
@@ -1384,13 +1394,17 @@ class StatsRepository:
                         ORDER BY recorded_at DESC
                         LIMIT 1
                     ) AS current_is_open,
-                    -- Get park open/closed status from latest snapshot
+                    -- Park is operating if ANY ride has wait_time > 0 (not just "open" flag)
                     (
-                        SELECT park_appears_open
-                        FROM park_activity_snapshots
-                        WHERE park_id = p.park_id
-                        ORDER BY recorded_at DESC
-                        LIMIT 1
+                        SELECT CASE WHEN MAX(rss2.wait_time) > 0 THEN 1 ELSE 0 END
+                        FROM ride_status_snapshots rss2
+                        JOIN rides r2 ON rss2.ride_id = r2.ride_id
+                        WHERE r2.park_id = p.park_id
+                        AND rss2.recorded_at = (
+                            SELECT MAX(recorded_at)
+                            FROM ride_status_snapshots
+                            WHERE ride_id = rss2.ride_id
+                        )
                     ) AS park_is_open,
                     -- Trend: compare to yesterday's daily stats
                     CASE
@@ -1407,6 +1421,7 @@ class StatsRepository:
                     AND rss.wait_time > 0
                     AND rss.computed_is_open = TRUE
                     AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                     AND p.is_active = TRUE
                     {filter_clause}
                 GROUP BY r.ride_id, r.name, r.tier, p.park_id, p.name, p.city, p.state_province, prev_day.avg_wait_time
@@ -1445,13 +1460,17 @@ class StatsRepository:
                         ORDER BY recorded_at DESC
                         LIMIT 1
                     ) AS current_is_open,
-                    -- Get park open/closed status from latest snapshot
+                    -- Park is operating if ANY ride has wait_time > 0 (not just "open" flag)
                     (
-                        SELECT park_appears_open
-                        FROM park_activity_snapshots
-                        WHERE park_id = p.park_id
-                        ORDER BY recorded_at DESC
-                        LIMIT 1
+                        SELECT CASE WHEN MAX(rss2.wait_time) > 0 THEN 1 ELSE 0 END
+                        FROM ride_status_snapshots rss2
+                        JOIN rides r2 ON rss2.ride_id = r2.ride_id
+                        WHERE r2.park_id = p.park_id
+                        AND rss2.recorded_at = (
+                            SELECT MAX(recorded_at)
+                            FROM ride_status_snapshots
+                            WHERE ride_id = rss2.ride_id
+                        )
                     ) AS park_is_open,
                     -- Trend: compare to previous week's average
                     CASE
@@ -1469,6 +1488,7 @@ class StatsRepository:
                     AND rws.week_number = :week_number
                     AND rws.avg_wait_time > 0
                     AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                     AND p.is_active = TRUE
                     {filter_clause}
                 ORDER BY rws.avg_wait_time DESC
@@ -1509,13 +1529,17 @@ class StatsRepository:
                         ORDER BY recorded_at DESC
                         LIMIT 1
                     ) AS current_is_open,
-                    -- Get park open/closed status from latest snapshot
+                    -- Park is operating if ANY ride has wait_time > 0 (not just "open" flag)
                     (
-                        SELECT park_appears_open
-                        FROM park_activity_snapshots
-                        WHERE park_id = p.park_id
-                        ORDER BY recorded_at DESC
-                        LIMIT 1
+                        SELECT CASE WHEN MAX(rss2.wait_time) > 0 THEN 1 ELSE 0 END
+                        FROM ride_status_snapshots rss2
+                        JOIN rides r2 ON rss2.ride_id = r2.ride_id
+                        WHERE r2.park_id = p.park_id
+                        AND rss2.recorded_at = (
+                            SELECT MAX(recorded_at)
+                            FROM ride_status_snapshots
+                            WHERE ride_id = rss2.ride_id
+                        )
                     ) AS park_is_open,
                     -- Trend: compare to previous month's average
                     CASE
@@ -1523,7 +1547,7 @@ class StatsRepository:
                             ((rms.avg_wait_time - prev_month.avg_wait_time) / prev_month.avg_wait_time) * 100
                         ELSE NULL
                     END AS trend_percentage
-                FROM ride_monthly_stats rms
+                From ride_monthly_stats rms
                 JOIN rides r ON rms.ride_id = r.ride_id
                 JOIN parks p ON r.park_id = p.park_id
                 LEFT JOIN ride_monthly_stats prev_month ON rms.ride_id = prev_month.ride_id
@@ -1533,6 +1557,7 @@ class StatsRepository:
                     AND rms.month = :month
                     AND rms.avg_wait_time > 0
                     AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                     AND p.is_active = TRUE
                     {filter_clause}
                 ORDER BY rms.avg_wait_time DESC
@@ -1585,7 +1610,20 @@ class StatsRepository:
                         WHEN prev_day.avg_wait_time > 0 THEN
                             ((AVG(rss.wait_time) - prev_day.avg_wait_time) / prev_day.avg_wait_time) * 100
                         ELSE NULL
-                    END AS trend_percentage
+                    END AS trend_percentage,
+                    -- Park is operating if ANY ride has wait_time > 0
+                    (
+                        SELECT CASE WHEN MAX(rss2.wait_time) > 0 THEN 1 ELSE 0 END
+                        FROM ride_status_snapshots rss2
+                        JOIN rides r2 ON rss2.ride_id = r2.ride_id
+                        WHERE r2.park_id = p.park_id
+                        AND r2.category = 'ATTRACTION'  -- Only include mechanical rides
+                        AND rss2.recorded_at = (
+                            SELECT MAX(recorded_at)
+                            FROM ride_status_snapshots
+                            WHERE ride_id = rss2.ride_id
+                        )
+                    ) AS park_is_open
                 FROM ride_status_snapshots rss
                 JOIN rides r ON rss.ride_id = r.ride_id
                 JOIN parks p ON r.park_id = p.park_id
@@ -1595,6 +1633,7 @@ class StatsRepository:
                     AND rss.wait_time > 0
                     AND rss.computed_is_open = TRUE
                     AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                     AND p.is_active = TRUE
                     {filter_clause}
                 GROUP BY p.park_id, p.name, p.city, p.state_province, prev_day.avg_wait_time
@@ -1617,13 +1656,27 @@ class StatsRepository:
                     ROUND(AVG(rds.avg_wait_time), 0) AS avg_wait_minutes,
                     MAX(rds.peak_wait_time) AS peak_wait_minutes,
                     COUNT(DISTINCT r.ride_id) AS rides_reporting,
-                    NULL AS trend_percentage
+                    NULL AS trend_percentage,
+                    -- Park is operating if ANY ride has wait_time > 0
+                    (
+                        SELECT CASE WHEN MAX(rss2.wait_time) > 0 THEN 1 ELSE 0 END
+                        FROM ride_status_snapshots rss2
+                        JOIN rides r2 ON rss2.ride_id = r2.ride_id
+                        WHERE r2.park_id = p.park_id
+                        AND r2.category = 'ATTRACTION'  -- Only include mechanical rides
+                        AND rss2.recorded_at = (
+                            SELECT MAX(recorded_at)
+                            FROM ride_status_snapshots
+                            WHERE ride_id = rss2.ride_id
+                        )
+                    ) AS park_is_open
                 FROM ride_daily_stats rds
                 JOIN rides r ON rds.ride_id = r.ride_id
                 JOIN parks p ON r.park_id = p.park_id
                 WHERE rds.stat_date BETWEEN :start_date AND :end_date
                     AND rds.avg_wait_time > 0
                     AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                     AND p.is_active = TRUE
                     {filter_clause}
                 GROUP BY p.park_id, p.name, p.city, p.state_province
@@ -1650,13 +1703,27 @@ class StatsRepository:
                     ROUND(AVG(rds.avg_wait_time), 0) AS avg_wait_minutes,
                     MAX(rds.peak_wait_time) AS peak_wait_minutes,
                     COUNT(DISTINCT r.ride_id) AS rides_reporting,
-                    NULL AS trend_percentage
+                    NULL AS trend_percentage,
+                    -- Park is operating if ANY ride has wait_time > 0
+                    (
+                        SELECT CASE WHEN MAX(rss2.wait_time) > 0 THEN 1 ELSE 0 END
+                        FROM ride_status_snapshots rss2
+                        JOIN rides r2 ON rss2.ride_id = r2.ride_id
+                        WHERE r2.park_id = p.park_id
+                        AND r2.category = 'ATTRACTION'  -- Only include mechanical rides
+                        AND rss2.recorded_at = (
+                            SELECT MAX(recorded_at)
+                            FROM ride_status_snapshots
+                            WHERE ride_id = rss2.ride_id
+                        )
+                    ) AS park_is_open
                 FROM ride_daily_stats rds
                 JOIN rides r ON rds.ride_id = r.ride_id
                 JOIN parks p ON r.park_id = p.park_id
                 WHERE rds.stat_date BETWEEN :start_date AND :end_date
                     AND rds.avg_wait_time > 0
                     AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                     AND p.is_active = TRUE
                     {filter_clause}
                 GROUP BY p.park_id, p.name, p.city, p.state_province
@@ -2571,10 +2638,25 @@ class StatsRepository:
                 ) AS uptime_percentage,
 
                 -- Trend: NULL for live data (no historical comparison needed for "Today")
-                NULL AS trend_percentage
+                NULL AS trend_percentage,
+
+                -- Park is operating if ANY ride has wait_time > 0 (not just "open" flag)
+                (
+                    SELECT CASE WHEN MAX(rss2.wait_time) > 0 THEN 1 ELSE 0 END
+                    FROM ride_status_snapshots rss2
+                    JOIN rides r2 ON rss2.ride_id = r2.ride_id
+                    WHERE r2.park_id = p.park_id
+                    AND r2.category = 'ATTRACTION'  -- Only include mechanical rides
+                    AND rss2.recorded_at = (
+                        SELECT MAX(recorded_at)
+                        FROM ride_status_snapshots
+                        WHERE ride_id = rss2.ride_id
+                    )
+                ) AS park_is_open
 
             FROM parks p
             INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
                 AND pas.recorded_at = rss.recorded_at
@@ -2646,13 +2728,18 @@ class StatsRepository:
                     LIMIT 1
                 ) AS current_is_open,
 
-                -- Get park open/closed status from latest snapshot
+                -- Park is operating if ANY ride has wait_time > 0 (not just "open" flag)
                 (
-                    SELECT park_appears_open
-                    FROM park_activity_snapshots
-                    WHERE park_id = p.park_id
-                    ORDER BY recorded_at DESC
-                    LIMIT 1
+                    SELECT CASE WHEN MAX(rss2.wait_time) > 0 THEN 1 ELSE 0 END
+                    FROM ride_status_snapshots rss2
+                    JOIN rides r2 ON rss2.ride_id = r2.ride_id
+                    WHERE r2.park_id = p.park_id
+                    AND r2.category = 'ATTRACTION'  -- Only include mechanical rides
+                    AND rss2.recorded_at = (
+                        SELECT MAX(recorded_at)
+                        FROM ride_status_snapshots
+                        WHERE ride_id = rss2.ride_id
+                    )
                 ) AS park_is_open,
 
                 -- Trend: compare to yesterday's aggregated stats
@@ -2675,6 +2762,7 @@ class StatsRepository:
                 AND prev_day.stat_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
             WHERE DATE(rss.recorded_at) = CURDATE()
                 AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                 AND p.is_active = TRUE
                 {filter_clause}
             GROUP BY r.ride_id, r.name, r.tier, p.park_id, p.name, p.city, p.state_province, prev_day.downtime_minutes

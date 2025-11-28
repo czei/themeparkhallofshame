@@ -806,11 +806,7 @@ class StatsRepository:
                     COALESCE((
                         SELECT ROUND(MAX(rds.downtime_minutes) / 60.0, 2)
                         FROM ride_daily_stats rds
-                        JOIN rides r ON rds.ride_id = r.ride_id
-                        JOIN parks pk ON r.park_id = pk.park_id
                         WHERE rds.stat_date >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
-                            AND r.category = 'ATTRACTION'
-                        {disney_filter_pk}
                     ), 0) AS peak_downtime_hours,
                     COALESCE((
                         SELECT COUNT(DISTINCT r.ride_id)
@@ -842,11 +838,7 @@ class StatsRepository:
                     COALESCE((
                         SELECT ROUND(MAX(rds.downtime_minutes) / 60.0, 2)
                         FROM ride_daily_stats rds
-                        JOIN rides r ON rds.ride_id = r.ride_id
-                        JOIN parks pk ON r.park_id = pk.park_id
                         WHERE rds.stat_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-                            AND r.category = 'ATTRACTION'
-                        {disney_filter_pk}
                     ), 0) AS peak_downtime_hours,
                     COALESCE((
                         SELECT COUNT(DISTINCT r.ride_id)
@@ -878,11 +870,7 @@ class StatsRepository:
                     COALESCE((
                         SELECT ROUND(MAX(rds.downtime_minutes) / 60.0, 2)
                         FROM ride_daily_stats rds
-                        JOIN rides r ON rds.ride_id = r.ride_id
-                        JOIN parks pk ON r.park_id = pk.park_id
                         WHERE rds.stat_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-                            AND r.category = 'ATTRACTION'
-                        {disney_filter_pk}
                     ), 0) AS peak_downtime_hours,
                     COALESCE((
                         SELECT COUNT(DISTINCT r.ride_id)

@@ -106,7 +106,19 @@ class SnapshotCollector:
 
             # Fetch current wait times from Queue-Times API
             api_response = self.api_client.get_park_wait_times(queue_times_id)
-            rides_data = api_response.get('rides', []) if api_response else []
+
+            # Extract rides from nested lands structure (Disney/Universal parks use this)
+            rides_data = []
+            if api_response:
+                if 'lands' in api_response:
+                    for land in api_response['lands']:
+                        rides_data.extend(land.get('rides', []))
+                # Also check for flat rides array (some parks use this format)
+                if 'rides' in api_response:
+                    rides_data.extend(api_response.get('rides', []))
+
+            # Filter out Single Rider lines - they don't represent actual ride status
+            rides_data = [r for r in rides_data if 'single rider' not in r.get('name', '').lower()]
 
             if not rides_data:
                 logger.warning(f"  No ride data returned for {park_name}")

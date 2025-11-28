@@ -320,8 +320,22 @@ class ParkCollector:
         """
         try:
             result = self.api_client.get_park_wait_times(queue_times_park_id)
-            # Extract rides from the result
-            return result.get('rides', [])
+
+            # Extract rides from nested lands structure (Disney/Universal parks use this)
+            all_rides = []
+            if 'lands' in result:
+                for land in result['lands']:
+                    land_rides = land.get('rides', [])
+                    # Add land name to each ride for context
+                    for ride in land_rides:
+                        ride['land'] = land.get('name', '')
+                    all_rides.extend(land_rides)
+
+            # Also check for flat rides array (some parks use this format)
+            if 'rides' in result:
+                all_rides.extend(result.get('rides', []))
+
+            return all_rides
         except Exception as e:
             logger.error(f"Failed to fetch rides for park {queue_times_park_id}: {e}")
             return []
@@ -337,10 +351,16 @@ class ParkCollector:
             ride_repo: Ride repository instance with database connection
         """
         try:
-            self.stats['rides_processed'] += 1
-
             queue_times_id = ride_data.get('id')
             ride_name = ride_data.get('name', 'Unknown')
+
+            # Skip Single Rider lines - they don't represent actual ride status
+            # Single Rider queues open/close independently and create false downtime
+            if 'single rider' in ride_name.lower():
+                logger.debug(f"    Skipping Single Rider line: {ride_name}")
+                return
+
+            self.stats['rides_processed'] += 1
 
             # Check if ride already exists
             existing_ride = ride_repo.get_by_queue_times_id(queue_times_id)

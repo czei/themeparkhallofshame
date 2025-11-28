@@ -208,6 +208,7 @@ class Downtime {
                         <tr>
                             <th class="rank-col">Rank</th>
                             <th class="park-col">Park</th>
+                            <th class="shame-col" title="Weighted downtime per ride weight point. Higher = worse. Tier 1 rides count 3x, Tier 2 count 2x, Tier 3 count 1x.">Shame Score</th>
                             <th class="location-col">Location</th>
                             <th class="status-col">Status</th>
                             <th class="downtime-col">Downtime</th>
@@ -267,6 +268,9 @@ class Downtime {
                             </a>
                         </div>
                     </div>
+                </td>
+                <td class="shame-col">
+                    <span class="shame-score ${this.getShameClass(park.shame_score)}">${park.shame_score !== null && park.shame_score !== undefined ? Number(park.shame_score).toFixed(2) : 'N/A'}</span>
                 </td>
                 <td class="location-col">${this.escapeHtml(park.location || 'Unknown')}</td>
                 <td class="status-col">
@@ -491,6 +495,22 @@ class Downtime {
         if (trendPercentage > 0) return '↑';  // Downtime increased (bad)
         if (trendPercentage < 0) return '↓';  // Downtime decreased (good)
         return '→';
+    }
+
+    /**
+     * Get CSS class for shame score coloring
+     * Higher scores = more shame = worse
+     */
+    getShameClass(shameScore) {
+        if (shameScore === null || shameScore === undefined) return '';
+        const score = Number(shameScore);
+        if (isNaN(score)) return '';
+
+        // Thresholds for shame levels (these are weighted downtime hours per weight point)
+        if (score >= 1.0) return 'shame-high';      // 1+ hour weighted downtime per point = very bad
+        if (score >= 0.5) return 'shame-medium';    // 0.5-1 hour = concerning
+        if (score >= 0.1) return 'shame-low';       // 0.1-0.5 = minor issues
+        return 'shame-none';                         // < 0.1 = negligible
     }
 
     /**

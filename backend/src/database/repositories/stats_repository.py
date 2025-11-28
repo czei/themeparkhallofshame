@@ -602,6 +602,7 @@ class StatsRepository:
                     p.name AS park_name,
                     CONCAT(p.city, ', ', p.state_province) AS location,
                     wd.total_weighted_downtime_hours AS total_downtime_hours,
+                    ROUND(wd.total_weighted_downtime_hours / pw.total_park_weight, 2) AS shame_score,
                     pds.rides_with_downtime AS affected_rides_count,
                     pds.avg_uptime_percentage AS uptime_percentage,
                     ROUND(
@@ -695,24 +696,56 @@ class StatsRepository:
         start_date = end_date - timedelta(days=6)
 
         # Aggregate from daily stats instead of weekly stats table
+        # Include shame_score calculation using tier weights
         query = text(f"""
+            WITH park_weights AS (
+                -- Calculate total weight for each park based on tier classifications
+                SELECT
+                    p.park_id,
+                    SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
+                FROM parks p
+                INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'
+                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                WHERE p.is_active = TRUE
+                    {disney_filter}
+                GROUP BY p.park_id
+            ),
+            weighted_downtime AS (
+                -- Calculate weighted downtime from ride daily stats
+                SELECT
+                    p.park_id,
+                    SUM(rds.downtime_minutes / 60.0 * COALESCE(rc.tier_weight, 2)) AS total_weighted_downtime_hours
+                FROM parks p
+                INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'
+                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                INNER JOIN ride_daily_stats rds ON r.ride_id = rds.ride_id
+                WHERE rds.stat_date BETWEEN :start_date AND :end_date
+                    AND p.is_active = TRUE
+                    {disney_filter}
+                GROUP BY p.park_id
+            )
             SELECT
                 p.park_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
                 ROUND(SUM(pds.total_downtime_hours), 2) AS total_downtime_hours,
+                ROUND(wd.total_weighted_downtime_hours / pw.total_park_weight, 2) AS shame_score,
                 MAX(pds.rides_with_downtime) AS affected_rides_count,
                 ROUND(AVG(pds.avg_uptime_percentage), 2) AS uptime_percentage,
                 NULL AS trend_percentage
             FROM parks p
             INNER JOIN park_daily_stats pds ON p.park_id = pds.park_id
+            LEFT JOIN park_weights pw ON p.park_id = pw.park_id
+            LEFT JOIN weighted_downtime wd ON p.park_id = wd.park_id
             WHERE pds.stat_date BETWEEN :start_date AND :end_date
                 AND p.is_active = TRUE
                 AND pds.operating_hours_minutes > 0
                 {disney_filter}
-            GROUP BY p.park_id, p.name, p.city, p.state_province
+            GROUP BY p.park_id, p.name, p.city, p.state_province, pw.total_park_weight, wd.total_weighted_downtime_hours
             HAVING SUM(pds.total_downtime_hours) > 0
-            ORDER BY total_downtime_hours DESC
+            ORDER BY shame_score DESC
             LIMIT :limit
         """)
 
@@ -746,22 +779,54 @@ class StatsRepository:
         """
         disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
 
+        # Include shame_score calculation using tier weights from ride_daily_stats
         query = text(f"""
+            WITH park_weights AS (
+                -- Calculate total weight for each park based on tier classifications
+                SELECT
+                    p.park_id,
+                    SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
+                FROM parks p
+                INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'
+                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                WHERE p.is_active = TRUE
+                    {disney_filter}
+                GROUP BY p.park_id
+            ),
+            weighted_downtime AS (
+                -- Calculate weighted downtime from ride daily stats for the month
+                SELECT
+                    p.park_id,
+                    SUM(rds.downtime_minutes / 60.0 * COALESCE(rc.tier_weight, 2)) AS total_weighted_downtime_hours
+                FROM parks p
+                INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'
+                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                INNER JOIN ride_daily_stats rds ON r.ride_id = rds.ride_id
+                WHERE YEAR(rds.stat_date) = :year AND MONTH(rds.stat_date) = :month
+                    AND p.is_active = TRUE
+                    {disney_filter}
+                GROUP BY p.park_id
+            )
             SELECT
                 p.park_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
                 pms.total_downtime_hours,
+                ROUND(wd.total_weighted_downtime_hours / NULLIF(pw.total_park_weight, 0), 2) AS shame_score,
                 pms.rides_with_downtime AS affected_rides_count,
                 pms.avg_uptime_percentage AS uptime_percentage,
                 pms.trend_vs_previous_month AS trend_percentage
             FROM parks p
             INNER JOIN park_monthly_stats pms ON p.park_id = pms.park_id
+            LEFT JOIN park_weights pw ON p.park_id = pw.park_id
+            LEFT JOIN weighted_downtime wd ON p.park_id = wd.park_id
             WHERE pms.year = :year
                 AND pms.month = :month
                 AND p.is_active = TRUE
                 {disney_filter}
-            ORDER BY pms.total_downtime_hours DESC
+            ORDER BY shame_score DESC
             LIMIT :limit
         """)
 
@@ -2784,6 +2849,19 @@ class StatsRepository:
         start_utc, end_utc = get_pacific_day_range_utc(get_today_pacific())
 
         query = text(f"""
+            WITH park_weights AS (
+                -- Calculate total weight for each park based on tier classifications
+                SELECT
+                    p.park_id,
+                    SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
+                FROM parks p
+                INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'
+                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                WHERE p.is_active = TRUE
+                    {filter_clause}
+                GROUP BY p.park_id
+            )
             SELECT
                 p.park_id,
                 p.queue_times_id,
@@ -2797,6 +2875,21 @@ class StatsRepository:
                     SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = FALSE THEN 10 ELSE 0 END) / 60.0,
                     2
                 ) AS total_downtime_hours,
+
+                -- Calculate weighted downtime hours (Tier 1=3x, Tier 2=2x, Tier 3=1x)
+                ROUND(
+                    SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = FALSE
+                        THEN 10 * COALESCE(rc.tier_weight, 2) ELSE 0 END) / 60.0,
+                    2
+                ) AS weighted_downtime_hours,
+
+                -- Shame Score = weighted downtime / total park weight
+                ROUND(
+                    SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = FALSE
+                        THEN 10 * COALESCE(rc.tier_weight, 2) ELSE 0 END) / 60.0
+                    / NULLIF(pw.total_park_weight, 0),
+                    2
+                ) AS shame_score,
 
                 -- Count of rides that had any downtime today
                 COUNT(DISTINCT CASE
@@ -2831,15 +2924,17 @@ class StatsRepository:
             FROM parks p
             INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'  -- Only include mechanical rides
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
                 AND pas.recorded_at = rss.recorded_at
+            INNER JOIN park_weights pw ON p.park_id = pw.park_id
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND p.is_active = TRUE
                 {filter_clause}
-            GROUP BY p.park_id, p.name, p.city, p.state_province
+            GROUP BY p.park_id, p.name, p.city, p.state_province, pw.total_park_weight
             HAVING total_downtime_hours > 0  -- Hall of Shame: only parks with actual downtime
-            ORDER BY total_downtime_hours DESC
+            ORDER BY shame_score DESC
             LIMIT :limit
         """)
 

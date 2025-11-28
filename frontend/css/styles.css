@@ -1053,6 +1053,41 @@ td {
 }
 
 /* ============================================
+   SHAME SCORE
+   ============================================ */
+.shame-col {
+    text-align: center;
+    min-width: 80px;
+}
+
+.shame-score {
+    font-weight: 700;
+    font-size: 1rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+}
+
+.shame-high {
+    background: var(--coral);
+    color: white;
+}
+
+.shame-medium {
+    background: var(--gold);
+    color: var(--charcoal);
+}
+
+.shame-low {
+    background: var(--light-gray);
+    color: var(--charcoal);
+}
+
+.shame-none {
+    background: var(--turquoise);
+    color: white;
+}
+
+/* ============================================
    CONTROLS (period buttons, filters)
    ============================================ */
 .rankings-controls,

@@ -795,6 +795,10 @@ class StatsRepository:
         disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
         disney_filter_pk = disney_filter.replace('p.', 'pk.')
 
+        # Use Pacific day bounds for consistency with ride rankings table
+        today_pacific = get_today_pacific()
+        start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
+
         if period == 'today':
             # Compute from LIVE data - active parks and current snapshots
             query = text(f"""
@@ -834,6 +838,7 @@ class StatsRepository:
                                     AND rss3.recorded_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
                             )
                             -- Ride had some uptime today (was running at some point - excludes all-day closures)
+                            -- Uses Pacific day bounds for consistency with ride rankings table
                             AND EXISTS (
                                 SELECT 1 FROM ride_status_snapshots rss4
                                 JOIN park_activity_snapshots pas ON pas.park_id = pk.park_id
@@ -841,7 +846,8 @@ class StatsRepository:
                                 WHERE rss4.ride_id = r.ride_id
                                     AND rss4.computed_is_open = TRUE
                                     AND pas.park_appears_open = TRUE
-                                    AND rss4.recorded_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                                    AND rss4.recorded_at >= :start_utc
+                                    AND rss4.recorded_at < :end_utc
                             )
                         {disney_filter_pk}
                     ), 0) AS currently_down_rides
@@ -885,6 +891,7 @@ class StatsRepository:
                                     AND rss3.recorded_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
                             )
                             -- Ride had some uptime today (was running at some point - excludes all-day closures)
+                            -- Uses Pacific day bounds for consistency with ride rankings table
                             AND EXISTS (
                                 SELECT 1 FROM ride_status_snapshots rss4
                                 JOIN park_activity_snapshots pas ON pas.park_id = pk.park_id
@@ -892,7 +899,8 @@ class StatsRepository:
                                 WHERE rss4.ride_id = r.ride_id
                                     AND rss4.computed_is_open = TRUE
                                     AND pas.park_appears_open = TRUE
-                                    AND rss4.recorded_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                                    AND rss4.recorded_at >= :start_utc
+                                    AND rss4.recorded_at < :end_utc
                             )
                         {disney_filter_pk}
                     ), 0) AS currently_down_rides
@@ -936,6 +944,7 @@ class StatsRepository:
                                     AND rss3.recorded_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
                             )
                             -- Ride had some uptime today (was running at some point - excludes all-day closures)
+                            -- Uses Pacific day bounds for consistency with ride rankings table
                             AND EXISTS (
                                 SELECT 1 FROM ride_status_snapshots rss4
                                 JOIN park_activity_snapshots pas ON pas.park_id = pk.park_id
@@ -943,13 +952,14 @@ class StatsRepository:
                                 WHERE rss4.ride_id = r.ride_id
                                     AND rss4.computed_is_open = TRUE
                                     AND pas.park_appears_open = TRUE
-                                    AND rss4.recorded_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                                    AND rss4.recorded_at >= :start_utc
+                                    AND rss4.recorded_at < :end_utc
                             )
                         {disney_filter_pk}
                     ), 0) AS currently_down_rides
             """)
 
-        result = self.conn.execute(query)
+        result = self.conn.execute(query, {"start_utc": start_utc, "end_utc": end_utc})
         row = result.fetchone()
         if row:
             return dict(row._mapping)

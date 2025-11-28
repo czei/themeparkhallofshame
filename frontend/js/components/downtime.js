@@ -235,6 +235,9 @@ class Downtime {
             ? `${trendPct > 0 ? '+' : ''}${trendPct.toFixed(1)}%`
             : 'N/A';
 
+        // Park status badge - show "Park Closed" when all rides have wait_time = 0
+        const parkStatusBadge = this.getParkStatusBadge(park.park_is_open);
+
         return `
             <tr class="park-row ${park.rank <= 3 ? 'top-three' : ''}">
                 <td class="rank-col">
@@ -245,6 +248,7 @@ class Downtime {
                 <td class="park-col">
                     <div class="park-name-cell">
                         <span class="park-name">${this.escapeHtml(park.park_name || park.name || 'Unknown Park')}</span>
+                        ${parkStatusBadge}
                         <div class="park-actions">
                             <button
                                 class="park-details-btn"
@@ -423,6 +427,18 @@ class Downtime {
         } else {
             return '<span class="status-badge status-down">Down</span>';
         }
+    }
+
+    /**
+     * Get park status badge HTML (for parks table)
+     */
+    getParkStatusBadge(parkIsOpen) {
+        // Show "Park Closed" when all rides have wait_time = 0
+        if (parkIsOpen === false || parkIsOpen === 0) {
+            return '<span class="status-badge status-closed">Park Closed</span>';
+        }
+        // Don't show any badge when park is operating
+        return '';
     }
 
     /**

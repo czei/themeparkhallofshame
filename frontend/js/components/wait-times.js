@@ -12,6 +12,7 @@ class WaitTimes {
             period: 'today',
             filter: initialFilter,
             entityType: 'rides',  // 'parks' or 'rides'
+            sortBy: 'avg',        // 'avg' or 'max'
             parkLimit: 50,
             rideLimit: 100,
             loading: false,
@@ -216,6 +217,20 @@ class WaitTimes {
             `;
         }
 
+        // Sort parks based on current sort column
+        const sortedParks = [...parks].sort((a, b) => {
+            const aVal = this.state.sortBy === 'avg'
+                ? (a.avg_wait_minutes || 0)
+                : (a.peak_wait_minutes || 0);
+            const bVal = this.state.sortBy === 'avg'
+                ? (b.avg_wait_minutes || 0)
+                : (b.peak_wait_minutes || 0);
+            return bVal - aVal; // Descending
+        });
+
+        // Re-assign ranks after sorting
+        sortedParks.forEach((park, idx) => { park.rank = idx + 1; });
+
         return `
             <div class="data-container">
                 <table class="rankings-table wait-times-table">
@@ -224,14 +239,14 @@ class WaitTimes {
                             <th class="rank-col">Rank</th>
                             <th class="park-col">Park</th>
                             <th class="location-col">Location</th>
-                            <th class="wait-col">Avg Wait</th>
-                            <th class="wait-col">Peak Wait</th>
+                            <th class="wait-col sortable ${this.state.sortBy === 'avg' ? 'sorted' : ''}" data-sort="avg">Avg Today ${this.state.sortBy === 'avg' ? '▼' : ''}</th>
+                            <th class="wait-col sortable ${this.state.sortBy === 'max' ? 'sorted' : ''}" data-sort="max">Max Today ${this.state.sortBy === 'max' ? '▼' : ''}</th>
                             <th class="rides-col">Rides</th>
                             <th class="trend-col">Trend</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${parks.map(park => this.renderParkRow(park)).join('')}
+                        ${sortedParks.map(park => this.renderParkRow(park)).join('')}
                     </tbody>
                 </table>
             </div>
@@ -298,6 +313,20 @@ class WaitTimes {
             `;
         }
 
+        // Sort rides based on current sort column
+        const sortedRides = [...rides].sort((a, b) => {
+            const aVal = this.state.sortBy === 'avg'
+                ? (a.avg_wait_minutes || 0)
+                : (a.peak_wait_minutes || 0);
+            const bVal = this.state.sortBy === 'avg'
+                ? (b.avg_wait_minutes || 0)
+                : (b.peak_wait_minutes || 0);
+            return bVal - aVal; // Descending
+        });
+
+        // Re-assign ranks after sorting
+        sortedRides.forEach((ride, idx) => { ride.rank = idx + 1; });
+
         return `
             <div class="data-container">
                 <table class="rankings-table wait-times-table">
@@ -307,14 +336,14 @@ class WaitTimes {
                             <th class="ride-col">Ride</th>
                             <th class="tier-col">Tier</th>
                             <th class="park-col">Park</th>
-                            <th class="wait-col">Avg Wait</th>
-                            <th class="wait-col">Peak Wait</th>
+                            <th class="wait-col sortable ${this.state.sortBy === 'avg' ? 'sorted' : ''}" data-sort="avg">Avg Today ${this.state.sortBy === 'avg' ? '▼' : ''}</th>
+                            <th class="wait-col sortable ${this.state.sortBy === 'max' ? 'sorted' : ''}" data-sort="max">Max Today ${this.state.sortBy === 'max' ? '▼' : ''}</th>
                             <th class="status-col">Status</th>
                             <th class="trend-col">Trend</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${rides.map(ride => this.renderRideRow(ride)).join('')}
+                        ${sortedRides.map(ride => this.renderRideRow(ride)).join('')}
                     </tbody>
                 </table>
             </div>
@@ -515,6 +544,17 @@ class WaitTimes {
                 this.fetchAllData();
             });
         }
+
+        // Sortable column headers
+        const sortHeaders = this.container.querySelectorAll('.sortable');
+        sortHeaders.forEach(header => {
+            header.addEventListener('click', () => {
+                const sortBy = header.dataset.sort;
+                if (sortBy !== this.state.sortBy) {
+                    this.setState({ sortBy });
+                }
+            });
+        });
     }
 }
 

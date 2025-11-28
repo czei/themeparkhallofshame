@@ -780,6 +780,21 @@ th {
     text-align: left;
 }
 
+/* Sortable column headers */
+th.sortable {
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+th.sortable:hover {
+    background: rgba(255, 215, 0, 0.15);
+}
+
+th.sortable.sorted {
+    color: var(--gold);
+}
+
 tbody tr {
     border-bottom: 1px solid var(--light-gray);
     transition: background 0.2s ease;

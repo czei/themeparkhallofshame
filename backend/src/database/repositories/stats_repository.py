@@ -995,6 +995,8 @@ class StatsRepository:
         query = text(f"""
             SELECT
                 r.ride_id,
+                r.queue_times_id,
+                p.queue_times_id AS park_queue_times_id,
                 r.name AS ride_name,
                 r.tier,
                 p.park_id,
@@ -1022,7 +1024,7 @@ class StatsRepository:
                 AND p.is_active = TRUE
                 AND rds.operating_hours_minutes > 0
                 {disney_filter}
-            GROUP BY r.ride_id, r.name, r.tier, p.park_id, p.name, p.city, p.state_province
+            GROUP BY r.ride_id, r.queue_times_id, p.queue_times_id, r.name, r.tier, p.park_id, p.name, p.city, p.state_province
             HAVING SUM(rds.downtime_minutes) > 0
             ORDER BY downtime_hours DESC
             LIMIT :limit
@@ -1058,6 +1060,8 @@ class StatsRepository:
         query = text("""
             SELECT
                 r.ride_id,
+                r.queue_times_id,
+                p.queue_times_id AS park_queue_times_id,
                 r.name AS ride_name,
                 r.tier,
                 p.park_id,
@@ -1386,6 +1390,8 @@ class StatsRepository:
             query = text(f"""
                 SELECT
                     r.ride_id,
+                    r.queue_times_id,
+                    p.queue_times_id AS park_queue_times_id,
                     r.name AS ride_name,
                     r.tier,
                     p.park_id,
@@ -1434,7 +1440,7 @@ class StatsRepository:
                     AND r.category = 'ATTRACTION'  -- Only include mechanical rides
                     AND p.is_active = TRUE
                     {filter_clause}
-                GROUP BY r.ride_id, r.name, r.tier, p.park_id, p.name, p.city, p.state_province, prev_day.avg_wait_time
+                GROUP BY r.ride_id, r.queue_times_id, p.queue_times_id, r.name, r.tier, p.park_id, p.name, p.city, p.state_province, prev_day.avg_wait_time
                 HAVING AVG(rss.wait_time) > 0
                 ORDER BY avg_wait_minutes DESC
                 LIMIT :limit
@@ -1458,6 +1464,8 @@ class StatsRepository:
             query = text(f"""
                 SELECT
                     r.ride_id,
+                    r.queue_times_id,
+                    p.queue_times_id AS park_queue_times_id,
                     r.name AS ride_name,
                     r.tier,
                     p.park_id,
@@ -1527,6 +1535,8 @@ class StatsRepository:
             query = text(f"""
                 SELECT
                     r.ride_id,
+                    r.queue_times_id,
+                    p.queue_times_id AS park_queue_times_id,
                     r.name AS ride_name,
                     r.tier,
                     p.park_id,
@@ -2732,6 +2742,8 @@ class StatsRepository:
         query = text(f"""
             SELECT
                 r.ride_id,
+                r.queue_times_id,
+                p.queue_times_id AS park_queue_times_id,
                 r.name AS ride_name,
                 r.tier,
                 p.park_id,

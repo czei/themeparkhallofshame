@@ -81,7 +81,11 @@ def get_ride_downtime_rankings():
             for rank_idx, ride in enumerate(rankings, start=1):
                 ride_dict = dict(ride)
                 ride_dict['rank'] = rank_idx
-                ride_dict['queue_times_url'] = f"https://queue-times.com/rides/{ride_dict['ride_id']}"
+                # Generate correct Queue-Times URL: /parks/{park_qt_id}/rides/{ride_qt_id}
+                if 'queue_times_id' in ride_dict and 'park_queue_times_id' in ride_dict:
+                    ride_dict['queue_times_url'] = f"https://queue-times.com/parks/{ride_dict['park_queue_times_id']}/rides/{ride_dict['queue_times_id']}"
+                else:
+                    ride_dict['queue_times_url'] = None
                 rankings_with_urls.append(ride_dict)
 
             # Build response
@@ -158,7 +162,11 @@ def get_ride_wait_times():
             for rank_idx, ride in enumerate(wait_times, start=1):
                 ride_dict = dict(ride)
                 ride_dict['rank'] = rank_idx
-                ride_dict['queue_times_url'] = f"https://queue-times.com/rides/{ride_dict['ride_id']}"
+                # Generate correct Queue-Times URL: /parks/{park_qt_id}/rides/{ride_qt_id}
+                if 'queue_times_id' in ride_dict and 'park_queue_times_id' in ride_dict:
+                    ride_dict['queue_times_url'] = f"https://queue-times.com/parks/{ride_dict['park_queue_times_id']}/rides/{ride_dict['queue_times_id']}"
+                else:
+                    ride_dict['queue_times_url'] = None
                 wait_times_with_urls.append(ride_dict)
 
             # Build response

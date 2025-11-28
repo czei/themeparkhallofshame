@@ -9,7 +9,7 @@ set -euo pipefail
 REMOTE_HOST="ec2-user@webperformance.com"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/michael-2.pem}"
 REMOTE_APP_DIR="/opt/themeparkhallofshame"
-REMOTE_WEB_DIR="/var/www/themeparkhallofshame"
+# Frontend is now served directly from git repo (no separate web dir needed)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -84,7 +84,7 @@ deploy_backend() {
     log "Backend deployed successfully"
 }
 
-# Deploy frontend static files
+# Deploy frontend static files (served directly from git repo)
 deploy_frontend() {
     log "Deploying frontend..."
 
@@ -95,7 +95,7 @@ deploy_frontend() {
         --exclude 'vercel.json' \
         --exclude 'DEPLOYMENT.md' \
         "${PROJECT_ROOT}/frontend/" \
-        "${REMOTE_HOST}:${REMOTE_WEB_DIR}/"
+        "${REMOTE_HOST}:${REMOTE_APP_DIR}/frontend/"
 
     log "Frontend deployed successfully"
 }

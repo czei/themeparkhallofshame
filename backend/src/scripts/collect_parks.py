@@ -26,6 +26,7 @@ sys.path.insert(0, str(backend_src.absolute()))
 from utils.config import FILTER_COUNTRY
 from utils.logger import logger
 from collector.queue_times_client import QueueTimesClient
+from collector.geocoding_client import GeocodingClient
 from database.repositories.park_repository import ParkRepository
 from database.repositories.ride_repository import RideRepository
 from database.connection import get_db_connection
@@ -45,6 +46,7 @@ class ParkCollector:
         """
         self.force = force
         self.api_client = QueueTimesClient()
+        self.geocoder = GeocodingClient()
 
         self.stats = {
             'parks_processed': 0,
@@ -234,6 +236,18 @@ class ParkCollector:
                 'is_universal': is_universal,
                 'is_active': True
             }
+
+            # Geocode if city is Unknown and we have coordinates
+            if park_record['city'] == 'Unknown' and park_record['latitude'] and park_record['longitude']:
+                location = self.geocoder.reverse_geocode(park_record['latitude'], park_record['longitude'])
+                if location:
+                    if location['city']:
+                        park_record['city'] = location['city']
+                    if location['state']:
+                        park_record['state_province'] = location['state']
+                    if location['country']:
+                        park_record['country'] = location['country']
+                    logger.info(f"  Geocoded: {location['city']}, {location['state']}, {location['country']}")
 
             if existing_park:
                 # Update existing park

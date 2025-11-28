@@ -622,6 +622,7 @@ class StatsRepository:
                     GROUP BY p2.park_id
                 ) prev_wd ON p.park_id = prev_wd.park_id
                 WHERE p.is_active = TRUE
+                    AND wd.total_weighted_downtime_hours > 0  -- Only show parks with actual downtime (Hall of Shame)
                 ORDER BY wd.total_weighted_downtime_hours DESC
                 LIMIT :limit
             """)
@@ -647,6 +648,8 @@ class StatsRepository:
                     AND prev.stat_date = DATE_SUB(pds.stat_date, INTERVAL 1 DAY)
                 WHERE pds.stat_date = :stat_date
                     AND p.is_active = TRUE
+                    AND pds.operating_hours_minutes > 0  -- Exclude closed parks
+                    AND pds.total_downtime_hours > 0  -- Only show parks with actual downtime (Hall of Shame)
                     {disney_filter}
                 ORDER BY pds.total_downtime_hours DESC
                 LIMIT :limit
@@ -668,6 +671,7 @@ class StatsRepository:
     ) -> List[Dict[str, Any]]:
         """
         Get park rankings by downtime for a specific week.
+        Aggregates from daily stats instead of relying on weekly_stats table.
 
         Args:
             year: Year
@@ -681,29 +685,35 @@ class StatsRepository:
         """
         disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
 
-        # Query from data-model.md Query 1 (7-day rankings)
+        # Calculate date range for the week (last 7 days including today)
+        end_date = date.today()
+        start_date = end_date - timedelta(days=6)
+
+        # Aggregate from daily stats instead of weekly stats table
         query = text(f"""
             SELECT
                 p.park_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
-                pws.total_downtime_hours,
-                pws.rides_with_downtime AS affected_rides_count,
-                pws.avg_uptime_percentage AS uptime_percentage,
-                pws.trend_vs_previous_week AS trend_percentage
+                ROUND(SUM(pds.total_downtime_hours), 2) AS total_downtime_hours,
+                MAX(pds.rides_with_downtime) AS affected_rides_count,
+                ROUND(AVG(pds.avg_uptime_percentage), 2) AS uptime_percentage,
+                NULL AS trend_percentage
             FROM parks p
-            INNER JOIN park_weekly_stats pws ON p.park_id = pws.park_id
-            WHERE pws.year = :year
-                AND pws.week_number = :week_number
+            INNER JOIN park_daily_stats pds ON p.park_id = pds.park_id
+            WHERE pds.stat_date BETWEEN :start_date AND :end_date
                 AND p.is_active = TRUE
+                AND pds.operating_hours_minutes > 0
                 {disney_filter}
-            ORDER BY pws.total_downtime_hours DESC
+            GROUP BY p.park_id, p.name, p.city, p.state_province
+            HAVING SUM(pds.total_downtime_hours) > 0
+            ORDER BY total_downtime_hours DESC
             LIMIT :limit
         """)
 
         result = self.conn.execute(query, {
-            "year": year,
-            "week_number": week_number,
+            "start_date": start_date,
+            "end_date": end_date,
             "limit": limit
         })
         return [dict(row._mapping) for row in result]
@@ -931,6 +941,8 @@ class StatsRepository:
             WHERE rds.stat_date = :stat_date
                 AND r.is_active = TRUE
                 AND p.is_active = TRUE
+                AND rds.operating_hours_minutes > 0  -- Exclude rides from closed parks
+                AND rds.downtime_minutes > 0  -- Only show rides with actual downtime (Hall of Shame)
                 {:filter_clause}
             ORDER BY rds.downtime_minutes DESC
             LIMIT :limit
@@ -955,6 +967,7 @@ class StatsRepository:
     ) -> List[Dict[str, Any]]:
         """
         Get ride downtime rankings for a specific week.
+        Aggregates from daily stats instead of relying on weekly_stats table.
 
         Args:
             year: Year
@@ -965,7 +978,14 @@ class StatsRepository:
         Returns:
             List of rides ranked by downtime hours with current status
         """
-        query = text("""
+        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+
+        # Calculate date range for the week (last 7 days including today)
+        end_date = date.today()
+        start_date = end_date - timedelta(days=6)
+
+        # Aggregate from daily stats instead of weekly stats table
+        query = text(f"""
             SELECT
                 r.ride_id,
                 r.name AS ride_name,
@@ -973,10 +993,10 @@ class StatsRepository:
                 p.park_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
-                rws.downtime_minutes / 60.0 AS downtime_hours,
-                rws.uptime_percentage,
-                rws.avg_wait_time,
-                rws.peak_wait_time,
+                ROUND(SUM(rds.downtime_minutes) / 60.0, 2) AS downtime_hours,
+                ROUND(AVG(rds.uptime_percentage), 2) AS uptime_percentage,
+                ROUND(AVG(rds.avg_wait_time), 2) AS avg_wait_time,
+                MAX(rds.peak_wait_time) AS peak_wait_time,
                 -- Get current status from most recent snapshot
                 (
                     SELECT computed_is_open
@@ -985,42 +1005,24 @@ class StatsRepository:
                     ORDER BY recorded_at DESC
                     LIMIT 1
                 ) AS current_is_open,
-                -- Trend: compare to previous week
-                CASE
-                    WHEN prev_week.downtime_minutes > 0 THEN
-                        ((rws.downtime_minutes - prev_week.downtime_minutes) / prev_week.downtime_minutes * 1.0) * 100
-                    ELSE NULL
-                END AS trend_percentage
-            FROM ride_weekly_stats rws
-            JOIN rides r ON rws.ride_id = r.ride_id
+                NULL AS trend_percentage
+            FROM ride_daily_stats rds
+            JOIN rides r ON rds.ride_id = r.ride_id
             JOIN parks p ON r.park_id = p.park_id
-            LEFT JOIN ride_weekly_stats prev_week ON rws.ride_id = prev_week.ride_id
-                AND prev_week.year = :prev_year
-                AND prev_week.week_number = :prev_week
-            WHERE rws.year = :year
-                AND rws.week_number = :week_number
+            WHERE rds.stat_date BETWEEN :start_date AND :end_date
                 AND r.is_active = TRUE
                 AND p.is_active = TRUE
-                {:filter_clause}
-            ORDER BY rws.downtime_minutes DESC
+                AND rds.operating_hours_minutes > 0
+                {disney_filter}
+            GROUP BY r.ride_id, r.name, r.tier, p.park_id, p.name, p.city, p.state_province
+            HAVING SUM(rds.downtime_minutes) > 0
+            ORDER BY downtime_hours DESC
             LIMIT :limit
-        """.replace(
-            "{:filter_clause}",
-            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-        ))
-
-        # Calculate previous week
-        from datetime import datetime, timedelta
-        current_date = datetime.strptime(f"{year}-W{week_number:02d}-1", "%Y-W%W-%w")
-        prev_week_date = current_date - timedelta(weeks=1)
-        prev_year = prev_week_date.year
-        prev_week_num = prev_week_date.isocalendar()[1]
+        """)
 
         result = self.conn.execute(query, {
-            "year": year,
-            "week_number": week_number,
-            "prev_year": prev_year,
-            "prev_week": prev_week_num,
+            "start_date": start_date,
+            "end_date": end_date,
             "limit": limit
         })
 

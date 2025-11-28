@@ -9,10 +9,10 @@ Usage:
     python -m scripts.aggregate_daily [--date YYYY-MM-DD]
 
 Options:
-    --date    Specific date to aggregate (default: yesterday)
+    --date    Specific date to aggregate (default: yesterday in Pacific Time)
 
-Cron example (daily at 1 AM):
-    0 1 * * * cd /path/to/backend && python -m scripts.aggregate_daily
+Cron example (daily at 5 AM UTC = 1 AM Pacific, after PT day ends):
+    0 5 * * * cd /path/to/backend && python -m scripts.aggregate_daily
 """
 
 import sys
@@ -26,6 +26,7 @@ backend_src = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_src.absolute()))
 
 from utils.logger import logger
+from utils.timezone import get_today_pacific
 from database.repositories.park_repository import ParkRepository
 from database.repositories.ride_repository import RideRepository
 from database.repositories.aggregation_repository import AggregationLogRepository
@@ -45,7 +46,8 @@ class DailyAggregator:
         Args:
             target_date: Date to aggregate (default: yesterday)
         """
-        self.target_date = target_date or (date.today() - timedelta(days=1))
+        # Use Pacific Time for US parks - aggregates "yesterday" in Pacific timezone
+        self.target_date = target_date or (get_today_pacific() - timedelta(days=1))
 
         self.stats = {
             'parks_processed': 0,
@@ -174,16 +176,33 @@ class DailyAggregator:
         Args:
             conn: Database connection
             ride: Ride model object
+
+        Downtime Calculation Logic:
+        ==========================
+        The "Hall of Shame" tracks unexpected ride failures, NOT scheduled closures.
+        We apply two filters to ensure accurate downtime tracking:
+
+        1. PARK OPERATING FILTER: Only count time when park_appears_open = 1
+           - Prevents closed parks (e.g., water parks in winter) from showing
+             false downtime when the entire park is not operating.
+           - Example: Volcano Bay closed in November → 0 downtime (not "all rides down")
+
+        2. RIDE OPERATED FILTER: Only count downtime if the ride operated at least
+           once during the day (had at least one computed_is_open = 1 snapshot).
+           - Prevents scheduled maintenance from being counted as downtime.
+           - If a ride never opens all day, it's intentionally closed, not "broken."
+           - Example: Knoebels running Christmas event with 2 of 64 rides →
+             only those 2 rides can have downtime; the other 62 are maintenance.
+
+        Scenarios:
+        - Ride never opens (maintenance)     → 0 downtime ✓
+        - Ride runs all day, breaks at 3pm   → counts 3pm-close as downtime ✓
+        - Ride opens late, runs rest of day  → 0 downtime (late start, not breakdown) ✓
+        - Park closed all day                → 0 downtime ✓
+        - Ride breaks down 3 times           → counts all 3 breakdown periods ✓
         """
         ride_id = ride.ride_id
         park_id = ride.park_id
-
-        # Calculate ride statistics for the day
-        # This is a simplified version - full implementation would:
-        # 1. Detect park operating hours from park_activity_snapshots
-        # 2. Calculate uptime/downtime during operating hours only
-        # 3. Calculate wait time statistics
-        # 4. Store in ride_daily_stats table
 
         result = conn.execute(text("""
             INSERT INTO ride_daily_stats (
@@ -204,24 +223,49 @@ class DailyAggregator:
             SELECT
                 :ride_id,
                 :stat_date,
-                COALESCE(SUM(CASE WHEN computed_is_open THEN 10 ELSE 0 END), 0) as uptime_minutes,
-                COALESCE(SUM(CASE WHEN NOT computed_is_open THEN 10 ELSE 0 END), 0) as downtime_minutes,
+
+                -- UPTIME: Minutes the ride was open during park operating hours
+                COALESCE(SUM(CASE WHEN pas.park_appears_open = 1 AND rss.computed_is_open THEN 10 ELSE 0 END), 0) as uptime_minutes,
+
+                -- DOWNTIME: Only count if BOTH conditions are met:
+                --   1. Park was operating (park_appears_open = 1)
+                --   2. Ride operated at least once today (filters out scheduled maintenance)
+                -- This prevents "never opened" rides from counting as downtime.
                 CASE
-                    WHEN SUM(10) > 0 THEN
-                        ROUND(100.0 * SUM(CASE WHEN computed_is_open THEN 10 ELSE 0 END) / SUM(10), 2)
+                    WHEN SUM(CASE WHEN rss.computed_is_open THEN 1 ELSE 0 END) > 0
+                    THEN COALESCE(SUM(CASE WHEN pas.park_appears_open = 1 AND NOT rss.computed_is_open THEN 10 ELSE 0 END), 0)
+                    ELSE 0  -- Ride never opened = scheduled maintenance, not downtime
+                END as downtime_minutes,
+
+                -- UPTIME PERCENTAGE: Based on park operating hours only
+                -- Returns 0 if ride never operated (maintenance) or park was closed
+                CASE
+                    WHEN SUM(CASE WHEN pas.park_appears_open = 1 THEN 10 ELSE 0 END) > 0
+                         AND SUM(CASE WHEN rss.computed_is_open THEN 1 ELSE 0 END) > 0
+                    THEN ROUND(100.0 * SUM(CASE WHEN pas.park_appears_open = 1 AND rss.computed_is_open THEN 10 ELSE 0 END)
+                              / SUM(CASE WHEN pas.park_appears_open = 1 THEN 10 ELSE 0 END), 2)
                     ELSE 0
                 END as uptime_percentage,
-                COALESCE(SUM(10), 0) as operating_hours_minutes,
-                ROUND(AVG(CASE WHEN wait_time IS NOT NULL AND computed_is_open THEN wait_time END), 2) as avg_wait_time,
-                MIN(CASE WHEN wait_time IS NOT NULL AND computed_is_open THEN wait_time END) as min_wait_time,
-                MAX(CASE WHEN wait_time IS NOT NULL AND computed_is_open THEN wait_time END) as max_wait_time,
-                MAX(CASE WHEN wait_time IS NOT NULL THEN wait_time END) as peak_wait_time,
+
+                -- OPERATING HOURS: Time when park was open (regardless of ride status)
+                COALESCE(SUM(CASE WHEN pas.park_appears_open = 1 THEN 10 ELSE 0 END), 0) as operating_hours_minutes,
+
+                -- Wait time statistics (only when ride was actually open)
+                ROUND(AVG(CASE WHEN rss.wait_time IS NOT NULL AND rss.computed_is_open THEN rss.wait_time END), 2) as avg_wait_time,
+                MIN(CASE WHEN rss.wait_time IS NOT NULL AND rss.computed_is_open THEN rss.wait_time END) as min_wait_time,
+                MAX(CASE WHEN rss.wait_time IS NOT NULL AND rss.computed_is_open THEN rss.wait_time END) as max_wait_time,
+                MAX(CASE WHEN rss.wait_time IS NOT NULL THEN rss.wait_time END) as peak_wait_time,
+
+                -- Status changes from ride_status_changes table
                 (SELECT COUNT(*) FROM ride_status_changes WHERE ride_id = :ride_id AND DATE(changed_at) = :stat_date) as status_changes,
                 (SELECT MAX(duration_in_previous_status) FROM ride_status_changes WHERE ride_id = :ride_id AND DATE(changed_at) = :stat_date AND new_status = 1) as longest_downtime,
                 NOW()
-            FROM ride_status_snapshots
-            WHERE ride_id = :ride_id
-              AND DATE(recorded_at) = :stat_date
+            FROM ride_status_snapshots rss
+            JOIN rides r ON rss.ride_id = r.ride_id
+            JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
+                AND pas.recorded_at = rss.recorded_at
+            WHERE rss.ride_id = :ride_id
+              AND DATE(rss.recorded_at) = :stat_date
             ON DUPLICATE KEY UPDATE
                 uptime_minutes = VALUES(uptime_minutes),
                 downtime_minutes = VALUES(downtime_minutes),

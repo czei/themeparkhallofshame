@@ -8,7 +8,7 @@ class Downtime {
         this.apiClient = apiClient;
         this.container = document.getElementById(containerId);
         this.state = {
-            period: 'today',
+            period: '7days',  // Default to 7 days for more meaningful data (especially early in UTC day)
             filter: initialFilter,
             entityType: 'parks',  // 'parks' or 'rides'
             parkLimit: 50,
@@ -193,8 +193,10 @@ class Downtime {
 
         if (!parks || parks.length === 0) {
             return `
-                <div class="empty-state">
-                    <p>No park data available</p>
+                <div class="empty-state hall-of-shame-empty">
+                    <h3>The Hall of Shame is Empty!</h3>
+                    <p>All operational parks ran smoothly during this period.</p>
+                    <p class="empty-state-hint">Check back later or try a different time period.</p>
                 </div>
             `;
         }
@@ -297,8 +299,10 @@ class Downtime {
 
         if (!rides || rides.length === 0) {
             return `
-                <div class="empty-state">
-                    <p>No ride data available</p>
+                <div class="empty-state hall-of-shame-empty">
+                    <h3>The Hall of Shame is Empty!</h3>
+                    <p>All operational rides ran smoothly during this period.</p>
+                    <p class="empty-state-hint">Check back later or try a different time period.</p>
                 </div>
             `;
         }

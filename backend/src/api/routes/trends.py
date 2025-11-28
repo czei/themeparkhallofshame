@@ -10,6 +10,7 @@ from typing import Dict, List, Any, Optional
 from database.connection import get_db_connection
 from database.repositories.stats_repository import StatsRepository
 from utils.logger import logger
+from utils.timezone import get_today_pacific
 
 # Create Blueprint
 trends_bp = Blueprint('trends', __name__)
@@ -155,7 +156,7 @@ def _calculate_period_dates(period: str) -> Dict[str, str]:
     Returns:
         Dict with current_period_label and previous_period_label
     """
-    today = datetime.now().date()
+    today = get_today_pacific()  # Pacific Time for US parks
 
     if period == 'today':
         current_start = today

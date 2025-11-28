@@ -6,10 +6,10 @@ Runs daily aggregation job with retry logic.
 Usage:
     python aggregate_daily.py [--date YYYY-MM-DD] [--timezone TZ] [--dry-run]
 
-Scheduled execution (cron):
-    10 0 * * * /path/to/aggregate_daily.py  # 12:10 AM
-    10 1 * * * /path/to/aggregate_daily.py --retry 1  # 1:10 AM retry
-    10 2 * * * /path/to/aggregate_daily.py --retry 2  # 2:10 AM retry
+Scheduled execution (cron) - Run at 5 AM UTC (1 AM Pacific, after PT day ends):
+    10 5 * * * /path/to/aggregate_daily.py  # 5:10 AM UTC = 1:10 AM Pacific
+    10 6 * * * /path/to/aggregate_daily.py --retry 1  # 6:10 AM UTC retry
+    10 7 * * * /path/to/aggregate_daily.py --retry 2  # 7:10 AM UTC retry
 """
 
 import sys
@@ -24,6 +24,7 @@ sys.path.insert(0, str(backend_src.absolute()))
 from processor.aggregation_service import AggregationService
 from database.connection import get_db_connection
 from utils.logger import logger
+from utils.timezone import get_today_pacific
 
 
 def main():
@@ -60,8 +61,8 @@ def main():
     if args.date:
         aggregation_date = datetime.strptime(args.date, '%Y-%m-%d').date()
     else:
-        # Default to yesterday (since we run at midnight)
-        aggregation_date = date.today() - timedelta(days=1)
+        # Default to yesterday in Pacific Time (US parks day boundary)
+        aggregation_date = get_today_pacific() - timedelta(days=1)
 
     logger.info("=" * 60)
     logger.info("DAILY AGGREGATION SCRIPT")

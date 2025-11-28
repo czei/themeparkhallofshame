@@ -11,6 +11,7 @@ from database.connection import get_db_connection
 from database.repositories.ride_repository import RideRepository
 from database.repositories.stats_repository import StatsRepository
 from utils.logger import logger
+from utils.timezone import get_today_pacific
 
 rides_bp = Blueprint('rides', __name__)
 
@@ -56,7 +57,7 @@ def get_ride_downtime_rankings():
             # Get ride rankings based on period
             if period == 'today':
                 rankings = stats_repo.get_ride_daily_rankings(
-                    stat_date=date.today(),
+                    stat_date=get_today_pacific(),  # Pacific Time for US parks
                     filter_disney_universal=(filter_type == 'disney-universal'),
                     limit=limit
                 )

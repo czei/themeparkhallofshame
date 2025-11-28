@@ -2766,7 +2766,7 @@ class StatsRepository:
                 AND p.is_active = TRUE
                 {filter_clause}
             GROUP BY r.ride_id, r.name, r.tier, p.park_id, p.name, p.city, p.state_province, prev_day.downtime_minutes
-            HAVING downtime_hours > 0  -- Hall of Shame: only rides with actual downtime
+            HAVING downtime_hours > 0 AND uptime_percentage > 0  -- Hall of Shame: rides that were partially open (exclude never-opened)
             ORDER BY downtime_hours DESC
             LIMIT :limit
         """)

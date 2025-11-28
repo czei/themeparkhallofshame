@@ -209,6 +209,7 @@ class Downtime {
                             <th class="rank-col">Rank</th>
                             <th class="park-col">Park</th>
                             <th class="location-col">Location</th>
+                            <th class="status-col">Status</th>
                             <th class="downtime-col">Downtime</th>
                             <th class="uptime-col">Uptime %</th>
                             <th class="affected-col">Affected Rides</th>
@@ -248,7 +249,6 @@ class Downtime {
                 <td class="park-col">
                     <div class="park-name-cell">
                         <span class="park-name">${this.escapeHtml(park.park_name || park.name || 'Unknown Park')}</span>
-                        ${parkStatusBadge}
                         <div class="park-actions">
                             <button
                                 class="park-details-btn"
@@ -269,6 +269,9 @@ class Downtime {
                     </div>
                 </td>
                 <td class="location-col">${this.escapeHtml(park.location || 'Unknown')}</td>
+                <td class="status-col">
+                    ${parkStatusBadge}
+                </td>
                 <td class="downtime-col">
                     <span class="downtime-value">
                         ${this.formatHours(park.total_downtime_hours || 0)}
@@ -433,12 +436,12 @@ class Downtime {
      * Get park status badge HTML (for parks table)
      */
     getParkStatusBadge(parkIsOpen) {
-        // Show "Park Closed" when all rides have wait_time = 0
+        // Show "Closed" when all rides have wait_time = 0
         if (parkIsOpen === false || parkIsOpen === 0) {
-            return '<span class="status-badge status-closed">Park Closed</span>';
+            return '<span class="status-badge status-closed">Closed</span>';
         }
-        // Don't show any badge when park is operating
-        return '';
+        // Show "Open" when park is operating
+        return '<span class="status-badge status-running">Open</span>';
     }
 
     /**

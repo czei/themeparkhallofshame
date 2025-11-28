@@ -824,6 +824,13 @@ class StatsRepository:
                                         WHERE rss2.ride_id = r.ride_id
                                     )
                             )
+                            AND EXISTS (
+                                SELECT 1 FROM ride_status_snapshots rss3
+                                JOIN rides r3 ON rss3.ride_id = r3.ride_id
+                                WHERE r3.park_id = pk.park_id
+                                    AND rss3.wait_time > 0
+                                    AND rss3.recorded_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+                            )
                         {disney_filter_pk}
                     ), 0) AS currently_down_rides
             """)
@@ -856,6 +863,14 @@ class StatsRepository:
                                         WHERE rss2.ride_id = r.ride_id
                                     )
                             )
+                            -- Only count if park is currently operating (has recent wait times > 0)
+                            AND EXISTS (
+                                SELECT 1 FROM ride_status_snapshots rss3
+                                JOIN rides r3 ON rss3.ride_id = r3.ride_id
+                                WHERE r3.park_id = pk.park_id
+                                    AND rss3.wait_time > 0
+                                    AND rss3.recorded_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+                            )
                         {disney_filter_pk}
                     ), 0) AS currently_down_rides
             """)
@@ -887,6 +902,14 @@ class StatsRepository:
                                         FROM ride_status_snapshots rss2
                                         WHERE rss2.ride_id = r.ride_id
                                     )
+                            )
+                            -- Only count if park is currently operating (has recent wait times > 0)
+                            AND EXISTS (
+                                SELECT 1 FROM ride_status_snapshots rss3
+                                JOIN rides r3 ON rss3.ride_id = r3.ride_id
+                                WHERE r3.park_id = pk.park_id
+                                    AND rss3.wait_time > 0
+                                    AND rss3.recorded_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
                             )
                         {disney_filter_pk}
                     ), 0) AS currently_down_rides

@@ -2,10 +2,11 @@
 Theme Park Downtime Tracker - Classification Integration Tests
 
 Tests complete classification workflow including database persistence and retrieval:
-- Saving classifications to both rides.tier and ride_classifications table
+- Saving classifications (tier AND category) to both rides and ride_classifications tables
 - Data consistency between the two tables
 - Integration with weighted downtime calculations
 - UPSERT behavior (INSERT vs UPDATE)
+- Category filtering (ATTRACTION, MEET_AND_GREET, SHOW, EXPERIENCE)
 
 Priority: P1 - Critical for weighted downtime calculations
 """
@@ -66,13 +67,14 @@ class TestClassificationDatabasePersistence:
             exact_matches_path='data/exact_matches.json'
         )
 
-        # Create classification result (Tier 1)
+        # Create classification result (Tier 1, ATTRACTION)
         result = ClassificationResult(
             ride_id=ride_id,
             ride_name="Test Coaster",
             park_id=park_id,
             park_name="Test Park",
             tier=1,
+            category="ATTRACTION",
             tier_weight=3,
             classification_method='ai_agent',
             confidence_score=0.95,
@@ -86,15 +88,16 @@ class TestClassificationDatabasePersistence:
         # Act: Save classification (pass connection for transaction)
         service.save_classification(result, conn=mysql_connection)
 
-        # Assert 1: rides.tier updated
-        ride_query = text("SELECT tier FROM rides WHERE ride_id = :ride_id")
+        # Assert 1: rides.tier and rides.category updated
+        ride_query = text("SELECT tier, category FROM rides WHERE ride_id = :ride_id")
         ride_result = mysql_connection.execute(ride_query, {"ride_id": ride_id}).fetchone()
         assert ride_result is not None
         assert ride_result[0] == 1, "rides.tier should be updated to 1"
+        assert ride_result[1] == "ATTRACTION", "rides.category should be ATTRACTION"
 
         # Assert 2: ride_classifications record created
         classification_query = text("""
-            SELECT tier, tier_weight, classification_method, confidence_score,
+            SELECT tier, tier_weight, category, classification_method, confidence_score,
                    reasoning_text, research_sources, cache_key
             FROM ride_classifications
             WHERE ride_id = :ride_id
@@ -106,11 +109,12 @@ class TestClassificationDatabasePersistence:
         assert classification_result is not None, "ride_classifications record should exist"
         assert classification_result[0] == 1, "tier should be 1"
         assert classification_result[1] == 3, "tier_weight should be 3"
-        assert classification_result[2] == 'ai_agent', "classification_method should be ai_agent"
-        assert float(classification_result[3]) == 0.95, "confidence_score should be 0.95"
-        assert "Major roller coaster" in classification_result[4], "reasoning_text should be saved"
-        assert classification_result[5] is not None, "research_sources should be saved"
-        assert classification_result[6] == f"{park_id}:{ride_id}", "cache_key should match"
+        assert classification_result[2] == "ATTRACTION", "category should be ATTRACTION"
+        assert classification_result[3] == 'ai_agent', "classification_method should be ai_agent"
+        assert float(classification_result[4]) == 0.95, "confidence_score should be 0.95"
+        assert "Major roller coaster" in classification_result[5], "reasoning_text should be saved"
+        assert classification_result[6] is not None, "research_sources should be saved"
+        assert classification_result[7] == f"{park_id}:{ride_id}", "cache_key should match"
 
     def test_save_classification_updates_existing_records(
         self, mysql_connection, sample_park_data, sample_ride_data
@@ -128,13 +132,14 @@ class TestClassificationDatabasePersistence:
             exact_matches_path='data/exact_matches.json'
         )
 
-        # Act 1: Save initial classification (Tier 2)
+        # Act 1: Save initial classification (Tier 2, ATTRACTION)
         result_tier_2 = ClassificationResult(
             ride_id=ride_id,
             ride_name="Test Ride",
             park_id=park_id,
             park_name="Test Park",
             tier=2,
+            category="ATTRACTION",
             tier_weight=2,
             classification_method='ai_agent',
             confidence_score=0.80,
@@ -153,6 +158,7 @@ class TestClassificationDatabasePersistence:
             park_id=park_id,
             park_name="Test Park",
             tier=1,
+            category="ATTRACTION",
             tier_weight=3,
             classification_method='manual_override',
             confidence_score=1.00,
@@ -164,10 +170,11 @@ class TestClassificationDatabasePersistence:
         )
         service.save_classification(result_tier_1, conn=mysql_connection)
 
-        # Assert 1: rides.tier updated to new value
-        ride_query = text("SELECT tier FROM rides WHERE ride_id = :ride_id")
+        # Assert 1: rides.tier and category updated to new value
+        ride_query = text("SELECT tier, category FROM rides WHERE ride_id = :ride_id")
         ride_result = mysql_connection.execute(ride_query, {"ride_id": ride_id}).fetchone()
         assert ride_result[0] == 1, "rides.tier should be updated to 1"
+        assert ride_result[1] == "ATTRACTION", "rides.category should remain ATTRACTION"
 
         # Assert 2: ride_classifications updated (not duplicated)
         count_query = text(
@@ -178,21 +185,22 @@ class TestClassificationDatabasePersistence:
 
         # Assert 3: Classification data updated
         classification_query = text("""
-            SELECT tier, tier_weight, classification_method, confidence_score, reasoning_text
+            SELECT tier, tier_weight, category, classification_method, confidence_score, reasoning_text
             FROM ride_classifications
             WHERE ride_id = :ride_id
         """)
         result = mysql_connection.execute(classification_query, {"ride_id": ride_id}).fetchone()
         assert result[0] == 1, "tier should be updated to 1"
         assert result[1] == 3, "tier_weight should be updated to 3"
-        assert result[2] == 'manual_override', "classification_method should be updated"
-        assert float(result[3]) == 1.00, "confidence_score should be updated to 1.00"
-        assert "Upgraded to signature" in result[4], "reasoning_text should be updated"
+        assert result[2] == "ATTRACTION", "category should be ATTRACTION"
+        assert result[3] == 'manual_override', "classification_method should be updated"
+        assert float(result[4]) == 1.00, "confidence_score should be updated to 1.00"
+        assert "Upgraded to signature" in result[5], "reasoning_text should be updated"
 
     def test_rides_tier_and_classifications_tier_match(
         self, mysql_connection, sample_park_data, sample_ride_data
     ):
-        """The tier value in rides table should always match ride_classifications table."""
+        """The tier and category values in rides table should always match ride_classifications table."""
         from tests.conftest import insert_sample_park, insert_sample_ride
 
         park_id = insert_sample_park(mysql_connection, sample_park_data)
@@ -204,7 +212,7 @@ class TestClassificationDatabasePersistence:
             exact_matches_path='data/exact_matches.json'
         )
 
-        # Test all three tier levels
+        # Test all three tier levels with ATTRACTION category
         for tier, expected_weight in [(1, 3), (2, 2), (3, 1)]:
             result = ClassificationResult(
                 ride_id=ride_id,
@@ -212,6 +220,7 @@ class TestClassificationDatabasePersistence:
                 park_id=park_id,
                 park_name="Test Park",
                 tier=tier,
+                category="ATTRACTION",
                 tier_weight=expected_weight,
                 classification_method='ai_agent',
                 confidence_score=0.90,
@@ -225,7 +234,8 @@ class TestClassificationDatabasePersistence:
 
             # Verify consistency
             consistency_query = text("""
-                SELECT r.tier as rides_tier, rc.tier as classifications_tier, rc.tier_weight
+                SELECT r.tier as rides_tier, rc.tier as classifications_tier, rc.tier_weight,
+                       r.category as rides_category, rc.category as classifications_category
                 FROM rides r
                 JOIN ride_classifications rc ON r.ride_id = rc.ride_id
                 WHERE r.ride_id = :ride_id
@@ -235,6 +245,8 @@ class TestClassificationDatabasePersistence:
             assert row[0] == row[1], f"rides.tier ({row[0]}) should match ride_classifications.tier ({row[1]})"
             assert row[0] == tier, f"Both tiers should be {tier}"
             assert row[2] == expected_weight, f"tier_weight should be {expected_weight} for tier {tier}"
+            assert row[3] == row[4], f"rides.category ({row[3]}) should match ride_classifications.category ({row[4]})"
+            assert row[3] == "ATTRACTION", "Both categories should be ATTRACTION"
 
 
 class TestClassificationIntegrationWithCalculations:
@@ -280,6 +292,7 @@ class TestClassificationIntegrationWithCalculations:
                 park_id=park_id,
                 park_name="Test Park",
                 tier=tier,
+                category="ATTRACTION",
                 tier_weight=tier_weight,
                 classification_method='ai_agent',
                 confidence_score=0.90,
@@ -356,6 +369,7 @@ class TestClassificationIntegrationWithCalculations:
             park_id=park_id,
             park_name="Magic Kingdom",
             tier=1,
+            category="ATTRACTION",
             tier_weight=3,
             classification_method='ai_agent',
             confidence_score=0.95,
@@ -369,7 +383,7 @@ class TestClassificationIntegrationWithCalculations:
 
         # Verify all fields
         query = text("""
-            SELECT tier, tier_weight, classification_method, confidence_score,
+            SELECT tier, tier_weight, category, classification_method, confidence_score,
                    reasoning_text, override_reason, research_sources, cache_key,
                    schema_version, classified_at, updated_at
             FROM ride_classifications
@@ -379,17 +393,18 @@ class TestClassificationIntegrationWithCalculations:
 
         assert row[0] == 1, "tier should be 1"
         assert row[1] == 3, "tier_weight should be 3"
-        assert row[2] == 'ai_agent', "classification_method should be ai_agent"
-        assert float(row[3]) == 0.95, "confidence_score should be 0.95"
-        assert "Iconic indoor roller coaster" in row[4], "reasoning_text should be saved"
-        assert row[5] is None, "override_reason should be NULL for ai_agent"
+        assert row[2] == "ATTRACTION", "category should be ATTRACTION"
+        assert row[3] == 'ai_agent', "classification_method should be ai_agent"
+        assert float(row[4]) == 0.95, "confidence_score should be 0.95"
+        assert "Iconic indoor roller coaster" in row[5], "reasoning_text should be saved"
+        assert row[6] is None, "override_reason should be NULL for ai_agent"
 
         # Parse research_sources JSON
-        research_sources = json.loads(row[6]) if row[6] else []
+        research_sources = json.loads(row[7]) if row[7] else []
         assert len(research_sources) == 2, "Should have 2 research sources"
         assert "rcdb.com" in research_sources[0], "First source should be RCDB"
 
-        assert row[7] == f"{park_id}:{ride_id}", "cache_key should match"
-        assert row[8] == "1.0", "schema_version should be 1.0"
-        assert row[9] is not None, "classified_at timestamp should exist"
-        assert row[10] is not None, "updated_at timestamp should exist"
+        assert row[8] == f"{park_id}:{ride_id}", "cache_key should match"
+        assert row[9] == "2.0", "schema_version should be 2.0"
+        assert row[10] is not None, "classified_at timestamp should exist"
+        assert row[11] is not None, "updated_at timestamp should exist"

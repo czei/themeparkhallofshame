@@ -46,10 +46,11 @@ class RideRepository:
             Ride object or None if not found
         """
         query = text("""
-            SELECT ride_id, queue_times_id, park_id, name, land_area, tier, category,
-                   is_active, created_at, updated_at
-            FROM rides
-            WHERE ride_id = :ride_id
+            SELECT r.ride_id, r.queue_times_id, r.park_id, r.name, r.land_area, r.tier, r.category,
+                   r.is_active, r.created_at, r.updated_at, p.queue_times_id as park_queue_times_id
+            FROM rides r
+            JOIN parks p ON r.park_id = p.park_id
+            WHERE r.ride_id = :ride_id
         """)
 
         result = self.conn.execute(query, {"ride_id": ride_id})
@@ -71,10 +72,11 @@ class RideRepository:
             Ride object or None if not found
         """
         query = text("""
-            SELECT ride_id, queue_times_id, park_id, name, land_area, tier, category,
-                   is_active, created_at, updated_at
-            FROM rides
-            WHERE queue_times_id = :queue_times_id
+            SELECT r.ride_id, r.queue_times_id, r.park_id, r.name, r.land_area, r.tier, r.category,
+                   r.is_active, r.created_at, r.updated_at, p.queue_times_id as park_queue_times_id
+            FROM rides r
+            JOIN parks p ON r.park_id = p.park_id
+            WHERE r.queue_times_id = :queue_times_id
         """)
 
         result = self.conn.execute(query, {"queue_times_id": queue_times_id})
@@ -97,12 +99,13 @@ class RideRepository:
             List of Ride objects
         """
         query = text("""
-            SELECT ride_id, queue_times_id, park_id, name, land_area, tier, category,
-                   is_active, created_at, updated_at
-            FROM rides
-            WHERE park_id = :park_id
-                AND (:active_only = FALSE OR is_active = TRUE)
-            ORDER BY name
+            SELECT r.ride_id, r.queue_times_id, r.park_id, r.name, r.land_area, r.tier, r.category,
+                   r.is_active, r.created_at, r.updated_at, p.queue_times_id as park_queue_times_id
+            FROM rides r
+            JOIN parks p ON r.park_id = p.park_id
+            WHERE r.park_id = :park_id
+                AND (:active_only = FALSE OR r.is_active = TRUE)
+            ORDER BY r.name
         """)
 
         result = self.conn.execute(query, {"park_id": park_id, "active_only": active_only})
@@ -116,11 +119,12 @@ class RideRepository:
             List of Ride objects
         """
         query = text("""
-            SELECT ride_id, queue_times_id, park_id, name, land_area, tier, category,
-                   is_active, created_at, updated_at
-            FROM rides
-            WHERE is_active = TRUE
-            ORDER BY park_id, name
+            SELECT r.ride_id, r.queue_times_id, r.park_id, r.name, r.land_area, r.tier, r.category,
+                   r.is_active, r.created_at, r.updated_at, p.queue_times_id as park_queue_times_id
+            FROM rides r
+            JOIN parks p ON r.park_id = p.park_id
+            WHERE r.is_active = TRUE
+            ORDER BY r.park_id, r.name
         """)
 
         result = self.conn.execute(query)
@@ -135,8 +139,9 @@ class RideRepository:
         """
         query = text("""
             SELECT r.ride_id, r.queue_times_id, r.park_id, r.name, r.land_area, r.tier, r.category,
-                   r.is_active, r.created_at, r.updated_at
+                   r.is_active, r.created_at, r.updated_at, p.queue_times_id as park_queue_times_id
             FROM rides r
+            JOIN parks p ON r.park_id = p.park_id
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             WHERE r.is_active = TRUE
                 AND rc.classification_id IS NULL
@@ -433,5 +438,6 @@ class RideRepository:
             category=getattr(row, 'category', None),
             is_active=row.is_active,
             created_at=row.created_at,
-            updated_at=row.updated_at
+            updated_at=row.updated_at,
+            park_queue_times_id=getattr(row, 'park_queue_times_id', None)
         )

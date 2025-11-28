@@ -25,6 +25,7 @@ class Ride:
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    park_queue_times_id: Optional[int] = None  # From parks table, needed for queue_times_url
 
     @property
     def tier_weight(self) -> int:
@@ -53,14 +54,16 @@ class Ride:
         return tier_labels.get(self.tier, "Unclassified")
 
     @property
-    def queue_times_url(self) -> str:
+    def queue_times_url(self) -> Optional[str]:
         """
         Get Queue-Times.com URL for this ride.
 
         Returns:
-            URL to ride page on Queue-Times.com (FR-036)
+            URL to ride page on Queue-Times.com (FR-036), or None if park_queue_times_id unavailable
         """
-        return f"https://queue-times.com/ride/{self.queue_times_id}"
+        if self.park_queue_times_id:
+            return f"https://queue-times.com/parks/{self.park_queue_times_id}/rides/{self.queue_times_id}"
+        return None
 
     def to_dict(self) -> dict:
         """
@@ -104,5 +107,6 @@ class Ride:
             category=row['category'] if isinstance(row, dict) else getattr(row, 'category', None),
             is_active=row['is_active'] if isinstance(row, dict) else row.is_active,
             created_at=row['created_at'] if isinstance(row, dict) else row.created_at,
-            updated_at=row['updated_at'] if isinstance(row, dict) else row.updated_at
+            updated_at=row['updated_at'] if isinstance(row, dict) else row.updated_at,
+            park_queue_times_id=row.get('park_queue_times_id') if isinstance(row, dict) else getattr(row, 'park_queue_times_id', None)
         )

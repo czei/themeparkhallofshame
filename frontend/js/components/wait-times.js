@@ -19,7 +19,8 @@ class WaitTimes {
             error: null,
             parkData: null,
             rideData: null,
-            aggregateStats: null
+            aggregateStats: null,
+            statusSummary: null
         };
     }
 
@@ -50,14 +51,19 @@ class WaitTimes {
                 limit: this.state.rideLimit
             };
 
-            const [parkResponse, rideResponse, aggregateResponse] = await Promise.all([
+            const statusParams = {
+                filter: this.state.filter
+            };
+
+            const [parkResponse, rideResponse, aggregateResponse, statusResponse] = await Promise.all([
                 this.apiClient.get('/parks/waittimes', parkParams),
                 this.apiClient.get('/rides/waittimes', rideParams),
                 this.apiClient.get('/parks/downtime', {
                     period: 'today',
                     filter: this.state.filter,
                     limit: 1
-                })
+                }),
+                this.apiClient.get('/live/status-summary', statusParams)
             ]);
 
             const newState = { loading: false };
@@ -72,6 +78,10 @@ class WaitTimes {
 
             if (aggregateResponse.success && aggregateResponse.aggregate_stats) {
                 newState.aggregateStats = aggregateResponse.aggregate_stats;
+            }
+
+            if (statusResponse.success) {
+                newState.statusSummary = statusResponse.status_summary;
             }
 
             this.setState(newState);
@@ -94,28 +104,33 @@ class WaitTimes {
     }
 
     /**
-     * Render aggregate statistics
+     * Render aggregate statistics with 5 panels showing ride status breakdown
      */
     renderAggregateStats() {
-        if (!this.state.aggregateStats) {
-            return '<div class="stats-grid"></div>';
-        }
-
-        const stats = this.state.aggregateStats;
+        const stats = this.state.aggregateStats || {};
+        const status = this.state.statusSummary || {};
 
         return `
-            <div class="stats-grid">
-                <div class="stat-block">
+            <div class="stats-grid stats-grid-5">
+                <div class="stat-block stat-parks" title="Number of theme parks being monitored in the current filter">
                     <div class="stat-label">Parks Tracked</div>
                     <div class="stat-value">${stats.total_parks_tracked || 0}</div>
                 </div>
-                <div class="stat-block">
-                    <div class="stat-label">Peak Downtime</div>
-                    <div class="stat-value">${this.formatHours(stats.peak_downtime_hours || 0)}</div>
+                <div class="stat-block stat-operating" title="Rides currently running and accepting guests at open parks">
+                    <div class="stat-label">Rides Operating</div>
+                    <div class="stat-value">${status.OPERATING || 0}</div>
                 </div>
-                <div class="stat-block">
+                <div class="stat-block stat-down" title="Rides experiencing unscheduled breakdowns or technical issues">
                     <div class="stat-label">Rides Down</div>
-                    <div class="stat-value">${stats.currently_down_rides || 0}</div>
+                    <div class="stat-value">${status.DOWN || 0}</div>
+                </div>
+                <div class="stat-block stat-closed" title="Rides on scheduled closure (weather, capacity, seasonal) at open parks">
+                    <div class="stat-label">Rides Closed</div>
+                    <div class="stat-value">${status.CLOSED || 0}</div>
+                </div>
+                <div class="stat-block stat-repairs" title="Rides undergoing extended refurbishment or major maintenance">
+                    <div class="stat-label">Rides Repairs</div>
+                    <div class="stat-value">${status.REFURBISHMENT || 0}</div>
                 </div>
             </div>
         `;

@@ -200,6 +200,15 @@ class DailyAggregator:
         - Ride opens late, runs rest of day  → 0 downtime (late start, not breakdown) ✓
         - Park closed all day                → 0 downtime ✓
         - Ride breaks down 3 times           → counts all 3 breakdown periods ✓
+
+        3. RICH STATUS FILTER (ThemeParks.wiki parks only):
+           With the `status` column populated, we can distinguish:
+           - OPERATING: Ride is running → counts as uptime
+           - DOWN: Unscheduled breakdown → counts as downtime
+           - CLOSED: Scheduled closure → NOT downtime (excluded)
+           - REFURBISHMENT: Extended maintenance → NOT downtime (excluded)
+
+           For parks using Queue-Times (status is NULL), falls back to computed_is_open.
         """
         ride_id = ride.ride_id
         park_id = ride.park_id
@@ -231,9 +240,22 @@ class DailyAggregator:
                 --   1. Park was operating (park_appears_open = 1)
                 --   2. Ride operated at least once today (filters out scheduled maintenance)
                 -- This prevents "never opened" rides from counting as downtime.
+                --
+                -- For ThemeParks.wiki parks (status is NOT NULL):
+                --   Only status='DOWN' counts as downtime (not CLOSED/REFURBISHMENT)
+                -- For Queue-Times parks (status IS NULL):
+                --   Falls back to NOT computed_is_open
                 CASE
                     WHEN SUM(CASE WHEN rss.computed_is_open THEN 1 ELSE 0 END) > 0
-                    THEN COALESCE(SUM(CASE WHEN pas.park_appears_open = 1 AND NOT rss.computed_is_open THEN 10 ELSE 0 END), 0)
+                    THEN COALESCE(SUM(
+                        CASE
+                            WHEN pas.park_appears_open = 1 AND (
+                                (rss.status IS NOT NULL AND rss.status = 'DOWN') OR
+                                (rss.status IS NULL AND NOT rss.computed_is_open)
+                            ) THEN 10
+                            ELSE 0
+                        END
+                    ), 0)
                     ELSE 0  -- Ride never opened = scheduled maintenance, not downtime
                 END as downtime_minutes,
 

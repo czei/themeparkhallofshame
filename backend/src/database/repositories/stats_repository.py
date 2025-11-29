@@ -3055,3 +3055,83 @@ class StatsRepository:
             "yesterday_pacific": yesterday_pacific
         })
         return [dict(row._mapping) for row in result.fetchall()]
+
+    def get_live_status_summary(
+        self,
+        filter_disney_universal: bool = False,
+        park_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Get live status summary counts by status type.
+
+        Uses the most recent snapshot for each ride to count:
+        - OPERATING: Rides currently running
+        - DOWN: Rides experiencing unscheduled breakdowns
+        - CLOSED: Rides on scheduled closure
+        - REFURBISHMENT: Rides on extended maintenance
+
+        For parks without ThemeParks.wiki data (status is NULL),
+        maps computed_is_open to OPERATING/DOWN.
+
+        Args:
+            filter_disney_universal: If True, only include Disney/Universal parks
+            park_id: Optional park ID to filter to a single park
+
+        Returns:
+            Dictionary with status counts and totals
+        """
+        filter_clause = ""
+        params = {}
+
+        if filter_disney_universal:
+            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"
+        if park_id:
+            filter_clause += " AND p.park_id = :park_id"
+            params["park_id"] = park_id
+
+        query = text(f"""
+            WITH latest_snapshots AS (
+                SELECT
+                    rss.ride_id,
+                    rss.status,
+                    rss.computed_is_open,
+                    rss.recorded_at,
+                    ROW_NUMBER() OVER (PARTITION BY rss.ride_id ORDER BY rss.recorded_at DESC) as rn
+                FROM ride_status_snapshots rss
+                JOIN rides r ON rss.ride_id = r.ride_id
+                JOIN parks p ON r.park_id = p.park_id
+                WHERE rss.recorded_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+                    AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'
+                    AND p.is_active = TRUE
+                    {filter_clause}
+            )
+            SELECT
+                -- Map NULL status to OPERATING/DOWN based on computed_is_open
+                COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN')) as status_type,
+                COUNT(*) as count
+            FROM latest_snapshots
+            WHERE rn = 1
+            GROUP BY status_type
+        """)
+
+        result = self.conn.execute(query, params)
+        rows = result.fetchall()
+
+        # Build status summary with defaults
+        summary = {
+            "OPERATING": 0,
+            "DOWN": 0,
+            "CLOSED": 0,
+            "REFURBISHMENT": 0,
+            "total": 0
+        }
+
+        for row in rows:
+            status = row[0]
+            count = row[1]
+            if status in summary:
+                summary[status] = count
+            summary["total"] += count
+
+        return summary

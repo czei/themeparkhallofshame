@@ -48,14 +48,22 @@ class RideStatusSnapshotRepository:
         """
         query = text("""
             INSERT INTO ride_status_snapshots (
-                ride_id, recorded_at, wait_time, is_open, computed_is_open
+                ride_id, recorded_at, wait_time, is_open, computed_is_open, status, last_updated_api
             )
             VALUES (
-                :ride_id, :recorded_at, :wait_time, :is_open, :computed_is_open
+                :ride_id, :recorded_at, :wait_time, :is_open, :computed_is_open, :status, :last_updated_api
             )
         """)
 
         try:
+            # Parse ISO 8601 timestamp if provided as string (e.g., '2024-03-19T03:04:01Z')
+            if 'last_updated_api' in snapshot_data and isinstance(snapshot_data['last_updated_api'], str):
+                ts = snapshot_data['last_updated_api']
+                if ts:
+                    # Remove 'Z' suffix and parse ISO format
+                    ts = ts.replace('Z', '+00:00')
+                    snapshot_data['last_updated_api'] = datetime.fromisoformat(ts).replace(tzinfo=None)
+
             result = self.conn.execute(query, snapshot_data)
             snapshot_id = result.lastrowid
             return snapshot_id
@@ -76,7 +84,7 @@ class RideStatusSnapshotRepository:
         """
         query = text("""
             SELECT snapshot_id, ride_id, recorded_at, wait_time,
-                   is_open, computed_is_open, last_updated_api
+                   is_open, computed_is_open, status, last_updated_api
             FROM ride_status_snapshots
             WHERE ride_id = :ride_id
             ORDER BY recorded_at DESC

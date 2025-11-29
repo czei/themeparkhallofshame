@@ -30,6 +30,7 @@ class Park:
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    themeparks_wiki_id: Optional[str] = None
 
     @property
     def location(self) -> str:
@@ -68,6 +69,7 @@ class Park:
         return {
             "park_id": self.park_id,
             "queue_times_id": self.queue_times_id,
+            "themeparks_wiki_id": self.themeparks_wiki_id,
             "name": self.name,
             "city": self.city,
             "state_province": self.state_province,
@@ -94,6 +96,11 @@ class Park:
         Returns:
             Park instance
         """
+        if isinstance(row, dict):
+            themeparks_wiki_id = row.get('themeparks_wiki_id')
+        else:
+            themeparks_wiki_id = getattr(row, 'themeparks_wiki_id', None)
+
         return cls(
             park_id=row['park_id'] if isinstance(row, dict) else row.park_id,
             queue_times_id=row['queue_times_id'] if isinstance(row, dict) else row.queue_times_id,
@@ -109,5 +116,6 @@ class Park:
             is_universal=row['is_universal'] if isinstance(row, dict) else row.is_universal,
             is_active=row['is_active'] if isinstance(row, dict) else row.is_active,
             created_at=row['created_at'] if isinstance(row, dict) else row.created_at,
-            updated_at=row['updated_at'] if isinstance(row, dict) else row.updated_at
+            updated_at=row['updated_at'] if isinstance(row, dict) else row.updated_at,
+            themeparks_wiki_id=themeparks_wiki_id
         )

@@ -87,6 +87,32 @@ class RideRepository:
 
         return self._row_to_ride(row)
 
+    def get_by_themeparks_wiki_id(self, wiki_id: str) -> Optional[Ride]:
+        """
+        Fetch ride by ThemeParks.wiki entity UUID.
+
+        Args:
+            wiki_id: ThemeParks.wiki entity UUID
+
+        Returns:
+            Ride object or None if not found
+        """
+        query = text("""
+            SELECT r.ride_id, r.queue_times_id, r.park_id, r.name, r.land_area, r.tier, r.category,
+                   r.is_active, r.created_at, r.updated_at, p.queue_times_id as park_queue_times_id
+            FROM rides r
+            JOIN parks p ON r.park_id = p.park_id
+            WHERE r.themeparks_wiki_id = :wiki_id
+        """)
+
+        result = self.conn.execute(query, {"wiki_id": wiki_id})
+        row = result.fetchone()
+
+        if row is None:
+            return None
+
+        return self._row_to_ride(row)
+
     def get_by_park_id(self, park_id: int, active_only: bool = True) -> List[Ride]:
         """
         Fetch all rides for a specific park.

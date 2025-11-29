@@ -1,6 +1,6 @@
 """
 Theme Park Downtime Tracker - Rides API Routes
-Endpoints for ride-level downtime rankings and wait times.
+Endpoints for ride-level downtime rankings, wait times, and live status.
 """
 
 from flask import Blueprint, request, jsonify
@@ -14,6 +14,70 @@ from utils.logger import logger
 from utils.timezone import get_today_pacific
 
 rides_bp = Blueprint('rides', __name__)
+
+
+@rides_bp.route('/live/status-summary', methods=['GET'])
+def get_live_status_summary():
+    """
+    Get live status summary for all rides.
+
+    Returns counts of rides by status:
+    - OPERATING: Rides currently running
+    - DOWN: Rides experiencing unscheduled breakdowns
+    - CLOSED: Rides on scheduled closure
+    - REFURBISHMENT: Rides on extended maintenance
+
+    Query Parameters:
+        filter (str): Park filter - 'disney-universal', 'all-parks' (default: 'all-parks')
+        park_id (int): Optional park ID to filter to a single park
+
+    Returns:
+        JSON response with status counts
+
+    Performance: <50ms
+    """
+    filter_type = request.args.get('filter', 'all-parks')
+    park_id = request.args.get('park_id', type=int)
+
+    # Validate filter
+    if filter_type not in ['disney-universal', 'all-parks']:
+        return jsonify({
+            "success": False,
+            "error": "Invalid filter. Must be 'disney-universal' or 'all-parks'"
+        }), 400
+
+    try:
+        with get_db_connection() as conn:
+            stats_repo = StatsRepository(conn)
+
+            summary = stats_repo.get_live_status_summary(
+                filter_disney_universal=(filter_type == 'disney-universal'),
+                park_id=park_id
+            )
+
+            response = {
+                "success": True,
+                "filter": filter_type,
+                "status_summary": summary,
+                "attribution": {
+                    "data_source": "ThemeParks.wiki",
+                    "url": "https://themeparks.wiki"
+                }
+            }
+
+            if park_id:
+                response["park_id"] = park_id
+
+            logger.info(f"Live status summary requested: filter={filter_type}, park_id={park_id}")
+
+            return jsonify(response), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching live status summary: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "Internal server error"
+        }), 500
 
 
 @rides_bp.route('/rides/downtime', methods=['GET'])

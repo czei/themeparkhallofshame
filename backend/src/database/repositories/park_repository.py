@@ -46,7 +46,7 @@ class ParkRepository:
             Park object or None if not found
         """
         query = text("""
-            SELECT park_id, queue_times_id, name, city, state_province, country,
+            SELECT park_id, queue_times_id, themeparks_wiki_id, name, city, state_province, country,
                    latitude, longitude, timezone, operator, is_disney, is_universal,
                    is_active, created_at, updated_at
             FROM parks
@@ -72,7 +72,7 @@ class ParkRepository:
             Park object or None if not found
         """
         query = text("""
-            SELECT park_id, queue_times_id, name, city, state_province, country,
+            SELECT park_id, queue_times_id, themeparks_wiki_id, name, city, state_province, country,
                    latitude, longitude, timezone, operator, is_disney, is_universal,
                    is_active, created_at, updated_at
             FROM parks
@@ -95,7 +95,7 @@ class ParkRepository:
             List of Park objects
         """
         query = text("""
-            SELECT park_id, queue_times_id, name, city, state_province, country,
+            SELECT park_id, queue_times_id, themeparks_wiki_id, name, city, state_province, country,
                    latitude, longitude, timezone, operator, is_disney, is_universal,
                    is_active, created_at, updated_at
             FROM parks
@@ -114,7 +114,7 @@ class ParkRepository:
             List of Park objects for Disney/Universal parks
         """
         query = text("""
-            SELECT park_id, queue_times_id, name, city, state_province, country,
+            SELECT park_id, queue_times_id, themeparks_wiki_id, name, city, state_province, country,
                    latitude, longitude, timezone, operator, is_disney, is_universal,
                    is_active, created_at, updated_at
             FROM parks
@@ -448,5 +448,6 @@ class ParkRepository:
             is_universal=row.is_universal,
             is_active=row.is_active,
             created_at=row.created_at,
-            updated_at=row.updated_at
+            updated_at=row.updated_at,
+            themeparks_wiki_id=getattr(row, 'themeparks_wiki_id', None)
         )

@@ -267,18 +267,19 @@ class AggregationService:
         """
         Calculate and save daily park statistics.
 
+        Only counts downtime during actual operating hours (when park_appears_open = TRUE).
+        This prevents false downtime readings when rides are simply closed for the night.
+
         Args:
             park_id: Park ID
             stat_date: Local date
             timezone: Park timezone
-            operating_session: Operating session data
+            operating_session: Operating session data (includes session_start_utc, session_end_utc)
         """
-        # Get time boundaries in UTC
-        tz = ZoneInfo(timezone)
-        local_start = datetime.combine(stat_date, datetime.min.time(), tzinfo=tz)
-        local_end = datetime.combine(stat_date, datetime.max.time(), tzinfo=tz)
-        utc_start = local_start.astimezone(ZoneInfo('UTC'))
-        utc_end = local_end.astimezone(ZoneInfo('UTC'))
+        # Use operating session boundaries instead of midnight-midnight
+        # This ensures we only count downtime during actual operating hours
+        utc_start = operating_session['session_start_utc']
+        utc_end = operating_session['session_end_utc']
 
         # Calculate park-wide statistics
         stats_query = text("""
@@ -359,21 +360,23 @@ class AggregationService:
         """
         Calculate and save daily ride statistics for all rides in a park.
 
+        Only counts downtime during actual operating hours (when park_appears_open = TRUE).
+        This prevents false downtime readings when rides are simply closed for the night.
+
         Args:
             park_id: Park ID
             stat_date: Local date
             timezone: Park timezone
-            operating_session: Operating session data
+            operating_session: Operating session data (includes session_start_utc, session_end_utc)
 
         Returns:
             Number of rides processed
         """
-        # Get time boundaries in UTC
-        tz = ZoneInfo(timezone)
-        local_start = datetime.combine(stat_date, datetime.min.time(), tzinfo=tz)
-        local_end = datetime.combine(stat_date, datetime.max.time(), tzinfo=tz)
-        utc_start = local_start.astimezone(ZoneInfo('UTC'))
-        utc_end = local_end.astimezone(ZoneInfo('UTC'))
+        # Use operating session boundaries instead of midnight-midnight
+        # This ensures we only count downtime during actual operating hours
+        utc_start = operating_session['session_start_utc']
+        utc_end = operating_session['session_end_utc']
+        operating_minutes = operating_session['operating_minutes']
 
         # Get all active rides for this park
         rides_query = text("""
@@ -385,8 +388,6 @@ class AggregationService:
 
         result = self.conn.execute(rides_query, {"park_id": park_id})
         ride_ids = [row.ride_id for row in result]
-
-        operating_minutes = operating_session['operating_minutes']
 
         for ride_id in ride_ids:
             # Calculate ride statistics

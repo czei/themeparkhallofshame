@@ -159,8 +159,8 @@ def get_ride_downtime_rankings():
                 "filter": filter_type,
                 "data": rankings_with_urls,
                 "attribution": {
-                    "data_source": "Queue-Times.com",
-                    "url": "https://queue-times.com"
+                    "data_source": "ThemeParks.wiki",
+                    "url": "https://themeparks.wiki"
                 }
             }
 
@@ -240,8 +240,8 @@ def get_ride_wait_times():
                 "filter": filter_type,
                 "data": wait_times_with_urls,
                 "attribution": {
-                    "data_source": "Queue-Times.com",
-                    "url": "https://queue-times.com"
+                    "data_source": "ThemeParks.wiki",
+                    "url": "https://themeparks.wiki"
                 }
             }
 

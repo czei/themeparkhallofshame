@@ -119,7 +119,7 @@ def get_trends():
                 "previous_period": period_info['previous_period_label']
             },
             "count": len(results),
-            "attribution": "Data powered by Queue-Times.com - https://queue-times.com",
+            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }
 

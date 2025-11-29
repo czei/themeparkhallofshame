@@ -104,8 +104,8 @@ def get_park_downtime_rankings():
                 "aggregate_stats": aggregate_stats,
                 "data": rankings_with_urls,
                 "attribution": {
-                    "data_source": "Queue-Times.com",
-                    "url": "https://queue-times.com"
+                    "data_source": "ThemeParks.wiki",
+                    "url": "https://themeparks.wiki"
                 }
             }
 
@@ -181,8 +181,8 @@ def get_park_wait_times():
                 "filter": filter_type,
                 "data": wait_times_with_urls,
                 "attribution": {
-                    "data_source": "Queue-Times.com",
-                    "url": "https://queue-times.com"
+                    "data_source": "ThemeParks.wiki",
+                    "url": "https://themeparks.wiki"
                 }
             }
 
@@ -251,8 +251,8 @@ def get_park_details(park_id: int):
                 "operating_sessions": operating_sessions,
                 "current_status": current_status,
                 "attribution": {
-                    "data_source": "Queue-Times.com",
-                    "url": "https://queue-times.com"
+                    "data_source": "ThemeParks.wiki",
+                    "url": "https://themeparks.wiki"
                 }
             }
 

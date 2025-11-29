@@ -3140,16 +3140,19 @@ class StatsRepository:
         park_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        Get live status summary counts by status type.
+        Get live status summary counts by status type for rides at OPEN parks only.
 
         Uses the most recent snapshot for each ride to count:
         - OPERATING: Rides currently running
         - DOWN: Rides experiencing unscheduled breakdowns
-        - CLOSED: Rides on scheduled closure
+        - CLOSED: Rides on scheduled closure (at open parks)
         - REFURBISHMENT: Rides on extended maintenance
 
         For parks without ThemeParks.wiki data (status is NULL),
         maps computed_is_open to OPERATING/DOWN.
+
+        Only includes rides at parks that are currently operating
+        (park_appears_open = TRUE in latest park_activity_snapshot).
 
         Args:
             filter_disney_universal: If True, only include Disney/Universal parks
@@ -3168,12 +3171,22 @@ class StatsRepository:
             params["park_id"] = park_id
 
         query = text(f"""
-            WITH latest_snapshots AS (
+            WITH latest_park_status AS (
+                -- Get the latest park activity snapshot for each park
+                SELECT
+                    pas.park_id,
+                    pas.park_appears_open,
+                    ROW_NUMBER() OVER (PARTITION BY pas.park_id ORDER BY pas.recorded_at DESC) as rn
+                FROM park_activity_snapshots pas
+                WHERE pas.recorded_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+            ),
+            latest_snapshots AS (
                 SELECT
                     rss.ride_id,
                     rss.status,
                     rss.computed_is_open,
                     rss.recorded_at,
+                    r.park_id,
                     ROW_NUMBER() OVER (PARTITION BY rss.ride_id ORDER BY rss.recorded_at DESC) as rn
                 FROM ride_status_snapshots rss
                 JOIN rides r ON rss.ride_id = r.ride_id
@@ -3186,10 +3199,12 @@ class StatsRepository:
             )
             SELECT
                 -- Map NULL status to OPERATING/DOWN based on computed_is_open
-                COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN')) as status_type,
+                COALESCE(ls.status, IF(ls.computed_is_open, 'OPERATING', 'DOWN')) as status_type,
                 COUNT(*) as count
-            FROM latest_snapshots
-            WHERE rn = 1
+            FROM latest_snapshots ls
+            JOIN latest_park_status lps ON ls.park_id = lps.park_id AND lps.rn = 1
+            WHERE ls.rn = 1
+                AND lps.park_appears_open = TRUE  -- Only count rides at open parks
             GROUP BY status_type
         """)
 

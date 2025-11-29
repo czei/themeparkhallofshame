@@ -127,19 +127,19 @@ class Downtime {
                     <div class="stat-value">${stats.total_parks_tracked || 0}</div>
                 </div>
                 <div class="stat-block stat-operating">
-                    <div class="stat-label">Operating</div>
+                    <div class="stat-label">Rides Operating</div>
                     <div class="stat-value">${status.OPERATING || 0}</div>
                 </div>
                 <div class="stat-block stat-down">
-                    <div class="stat-label">Down</div>
+                    <div class="stat-label">Rides Down</div>
                     <div class="stat-value">${status.DOWN || 0}</div>
                 </div>
                 <div class="stat-block stat-closed">
-                    <div class="stat-label">Closed</div>
+                    <div class="stat-label">Rides Closed</div>
                     <div class="stat-value">${status.CLOSED || 0}</div>
                 </div>
                 <div class="stat-block stat-repairs">
-                    <div class="stat-label">Repairs</div>
+                    <div class="stat-label">Rides Repairs</div>
                     <div class="stat-value">${status.REFURBISHMENT || 0}</div>
                 </div>
             </div>

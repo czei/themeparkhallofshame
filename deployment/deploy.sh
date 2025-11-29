@@ -110,8 +110,8 @@ deploy_migrations() {
         "${PROJECT_ROOT}/backend/src/database/migrations/" \
         "${REMOTE_HOST}:${REMOTE_APP_DIR}/backend/src/database/migrations/"
 
-    # Run migration script
-    remote_exec "cd ${REMOTE_APP_DIR}/deployment && ./scripts/setup-database.sh production"
+    # Run migration script (source .env for DB credentials)
+    remote_exec "cd ${REMOTE_APP_DIR}/backend && source .env && cd ${REMOTE_APP_DIR}/deployment && ./scripts/setup-database.sh production"
 
     log "Migrations completed successfully"
 }

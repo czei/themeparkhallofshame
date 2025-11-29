@@ -29,6 +29,7 @@ class TestRideDataclass:
             name="Space Mountain",
             land_area="Tomorrowland",
             tier=1,
+            category='ATTRACTION',
             is_active=True,
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             updated_at=datetime(2024, 1, 15, 10, 30, 0)
@@ -40,6 +41,7 @@ class TestRideDataclass:
         assert ride.name == "Space Mountain"
         assert ride.land_area == "Tomorrowland"
         assert ride.tier == 1
+        assert ride.category == 'ATTRACTION'
         assert ride.is_active is True
         assert ride.created_at == datetime(2024, 1, 1, 0, 0, 0)
         assert ride.updated_at == datetime(2024, 1, 15, 10, 30, 0)
@@ -53,6 +55,7 @@ class TestRideDataclass:
             name="Unclassified Ride",
             land_area=None,  # Optional
             tier=None,  # Optional (unclassified)
+            category=None,  # Optional
             is_active=True,
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             updated_at=datetime(2024, 1, 1, 0, 0, 0)
@@ -60,6 +63,7 @@ class TestRideDataclass:
 
         assert ride.land_area is None
         assert ride.tier is None
+        assert ride.category is None
 
 
 class TestRideTierProperties:

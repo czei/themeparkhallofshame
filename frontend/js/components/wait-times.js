@@ -236,13 +236,13 @@ class WaitTimes {
                 <table class="rankings-table wait-times-table">
                     <thead>
                         <tr>
-                            <th class="rank-col">Rank</th>
-                            <th class="park-col">Park</th>
-                            <th class="location-col">Location</th>
-                            <th class="wait-col sortable ${this.state.sortBy === 'avg' ? 'sorted' : ''}" data-sort="avg">Avg Today ${this.state.sortBy === 'avg' ? '▼' : ''}</th>
-                            <th class="wait-col sortable ${this.state.sortBy === 'max' ? 'sorted' : ''}" data-sort="max">Max Today ${this.state.sortBy === 'max' ? '▼' : ''}</th>
-                            <th class="rides-col">Rides</th>
-                            <th class="trend-col">Trend</th>
+                            <th class="rank-col" title="Position based on average wait time (higher rank = longer waits)">Rank</th>
+                            <th class="park-col" title="Theme park name">Park</th>
+                            <th class="location-col" title="Geographic location of the park">Location</th>
+                            <th class="wait-col sortable ${this.state.sortBy === 'avg' ? 'sorted' : ''}" data-sort="avg" title="Average wait time across all rides today (click to sort)">Avg Today ${this.state.sortBy === 'avg' ? '▼' : ''}</th>
+                            <th class="wait-col sortable ${this.state.sortBy === 'max' ? 'sorted' : ''}" data-sort="max" title="Longest single ride wait time recorded today (click to sort)">Max Today ${this.state.sortBy === 'max' ? '▼' : ''}</th>
+                            <th class="rides-col" title="Number of rides currently reporting wait times">Rides</th>
+                            <th class="trend-col" title="Change in average wait time compared to previous period. Positive (+) = longer waits">Trend</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -336,14 +336,14 @@ class WaitTimes {
                 <table class="rankings-table wait-times-table">
                     <thead>
                         <tr>
-                            <th class="rank-col">Rank</th>
-                            <th class="ride-col">Ride</th>
-                            <th class="tier-col">Tier</th>
-                            <th class="park-col">Park</th>
-                            <th class="wait-col sortable ${this.state.sortBy === 'avg' ? 'sorted' : ''}" data-sort="avg">Avg Today ${this.state.sortBy === 'avg' ? '▼' : ''}</th>
-                            <th class="wait-col sortable ${this.state.sortBy === 'max' ? 'sorted' : ''}" data-sort="max">Max Today ${this.state.sortBy === 'max' ? '▼' : ''}</th>
-                            <th class="status-col">Status</th>
-                            <th class="trend-col">Trend</th>
+                            <th class="rank-col" title="Position based on wait time (higher rank = longer waits)">Rank</th>
+                            <th class="ride-col" title="Ride or attraction name">Ride</th>
+                            <th class="tier-col" title="Importance tier: Tier 1 = flagship attractions, Tier 2 = major rides, Tier 3 = standard attractions">Tier</th>
+                            <th class="park-col" title="Theme park where the ride is located">Park</th>
+                            <th class="wait-col sortable ${this.state.sortBy === 'avg' ? 'sorted' : ''}" data-sort="avg" title="Average wait time for this ride today (click to sort)">Avg Today ${this.state.sortBy === 'avg' ? '▼' : ''}</th>
+                            <th class="wait-col sortable ${this.state.sortBy === 'max' ? 'sorted' : ''}" data-sort="max" title="Longest wait time recorded for this ride today (click to sort)">Max Today ${this.state.sortBy === 'max' ? '▼' : ''}</th>
+                            <th class="status-col" title="Current operating status: Operating, Down (breakdown), Closed (scheduled), or Refurbishment">Status</th>
+                            <th class="trend-col" title="Change in average wait time compared to previous period. Positive (+) = longer waits">Trend</th>
                         </tr>
                     </thead>
                     <tbody>

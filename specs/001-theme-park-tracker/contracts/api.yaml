@@ -1158,7 +1158,7 @@ components:
             message:
               type: string
               description: Human-readable error message
-              example: Invalid period parameter. Must be one of: today, 7days, 30days
+              example: "Invalid period parameter. Must be one of: today, 7days, 30days"
             details:
               type: object
               nullable: true
@@ -1342,7 +1342,7 @@ components:
                 success: false
                 error:
                   code: INVALID_PARAMETER
-                  message: Invalid period parameter. Must be one of: today, 7days, 30days
+                  message: "Invalid period parameter. Must be one of: today, 7days, 30days"
                   details:
                     parameter: period
                     provided_value: yesterday
@@ -1352,7 +1352,7 @@ components:
                 success: false
                 error:
                   code: INVALID_PARAMETER
-                  message: Invalid filter parameter. Must be one of: disney-universal, all-parks
+                  message: "Invalid filter parameter. Must be one of: disney-universal, all-parks"
                   details:
                     parameter: filter
                     provided_value: six-flags

@@ -393,7 +393,7 @@ Based on plan.md project structure:
 - [ ] T147 [P] Create backend/tests/unit/test_classification.py (test 4-tier classification hierarchy)
 - [ ] T148 [P] Create backend/tests/integration/test_collection_pipeline.py (test API → DB → aggregation flow)
 - [ ] T149 [P] Create backend/tests/integration/test_api_endpoints.py (test all API endpoints with mock data, including /api/trends)
-- [ ] T150 [P] Create backend/tests/contract/test_api_contract.py (validate responses against contracts/api.yaml OpenAPI schema)
+- [x] T150 [P] Create backend/tests/contract/test_api_contract.py (validate responses against contracts/api.yaml OpenAPI schema) - 23 tests
 - [ ] T151 Run pytest with coverage report locally (target >80% code coverage)
 - [ ] T152 Validate API response times meet requirements locally (current status <50ms, aggregates <100ms, trends <100ms, FR-037, FR-038)
 - [ ] T153 Validate data collection cycle completes in <5 minutes for all parks locally (FR-039)

@@ -117,6 +117,41 @@ class AboutModal {
             }
         };
         document.addEventListener('keydown', handleEscape);
+
+        // Tab switching
+        this.attachTabListeners(modal);
+    }
+
+    /**
+     * Attach tab navigation listeners
+     */
+    attachTabListeners(modal) {
+        const tabBtns = modal.querySelectorAll('.about-tab-btn');
+        const tabPanels = modal.querySelectorAll('.about-tab-panel');
+
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const targetTab = btn.dataset.tab;
+
+                // Update button states
+                tabBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+
+                // Update panel visibility
+                tabPanels.forEach(panel => {
+                    panel.classList.remove('active');
+                    if (panel.id === `tab-${targetTab}`) {
+                        panel.classList.add('active');
+                    }
+                });
+
+                // Scroll modal body to top when switching tabs
+                const modalBody = modal.querySelector('.modal-body');
+                if (modalBody) {
+                    modalBody.scrollTop = 0;
+                }
+            });
+        });
     }
 }
 

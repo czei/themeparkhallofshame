@@ -1,152 +1,64 @@
 <div class="about-content">
-    <section class="about-section">
-        <h3>What is This?</h3>
-        <p>
-            <strong>Theme Park Hall of Shame</strong> tracks attraction downtime and reliability
-            across major North American theme parks. Think of it as the "Wall of Shame" for parks
-            with the most unreliable rides.
-        </p>
-        <p>
-            We monitor hundreds of attractions in real-time, tracking when rides go down,
-            how long they stay down, and which parks have the worst reliability records.
-        </p>
-    </section>
+    <!-- Tab Navigation -->
+    <div class="about-tabs">
+        <button class="about-tab-btn active" data-tab="why">Why This Exists</button>
+        <button class="about-tab-btn" data-tab="formula">The Formula</button>
+        <button class="about-tab-btn" data-tab="data">Data Source</button>
+        <button class="about-tab-btn" data-tab="report">Report Problems</button>
+    </div>
 
-    <section class="about-section">
-        <h3>Why Track This?</h3>
-        <p>
-            Theme park tickets are expensive, and nothing ruins a day faster than your favorite
-            attractions being closed. This project aims to:
-        </p>
-        <ul>
-            <li>Help guests plan visits by identifying parks with better reliability</li>
-            <li>Hold parks accountable for maintenance and uptime</li>
-            <li>Provide transparent data on attraction performance</li>
-            <li>Celebrate parks that keep their rides running smoothly</li>
-        </ul>
-    </section>
+    <!-- Why This Exists -->
+    <div class="about-tab-panel active" id="tab-why">
+        <section class="about-section">
+            <h3>Why This Site Exists</h3>
+Let's get this out of the way right up front: the name is pure
+hyperbole. Let's face it: no one is going to look at a website
+called "theme park uptime percentages". I created the site because
+all of the online shit-talking about which theme park company "isn't
+what it used to be", all because a ride had the temerity to go down
+during someone's vacation. I'm an engineer, so hard numbers are the
+most valuable and useful things in the world. If we're going to have a discussion
+about theme park reliability, let's start with real numbers, not someone's
+once a year vacation recolections.</p>
+<p>What you may not realize is there's nothing harder than keeping
+an attraction working through a million visitors a year. Designing and
+maintaining something that has to work millions of time a year with
+zero issues is orders of magnitude more difficult than any ordinary
+engineering challenge. This is absolutely NOT an indictment
+of the men and women who maintain our theme parks. </p> 
 
-    <section class="about-section">
-        <h3>How to Use This App</h3>
+<p>But when I tried and find comparisons between theme parks,
+none existed. There were plenty of sites that would tell you the
+wait times for a particular ride, but nothing comparing parks and
+rides to each other.</p>
+<p>The other big contrevoursy is which parks have the longest
+wait times. "No one goes there anymore, its too crowded".  Again, there
+aren't any hard numbers online comparing each park, so that's the
+second big analysis on this website. </p>
+        </section>
+    </div>
 
-        <div class="feature-description">
-            <h4>Park Rankings</h4>
-            <p>
-                View parks ranked by total downtime. Lower rankings mean better reliability.
-                Filter by time period (Today, 7 Days, 30 Days) and toggle weighted scoring
-                to emphasize major attractions.
-            </p>
-        </div>
+    <!-- The Formula -->
+    <div class="about-tab-panel" id="tab-formula">
+        <section class="about-section">
+            <h3>How Scoring Works</h3>
+            <p>The problem with this little project is fairly judging one park against another is way more difficult than you'd think. </p>
+        </section>
+    </div>
 
-        <div class="feature-description">
-            <h4>Ride Performance</h4>
-            <p>
-                See individual rides ranked by downtime hours. Status badges show which
-                rides are currently running or down. Tier badges indicate attraction importance
-                (Tier 1 = major E-ticket attractions).
-            </p>
-        </div>
+    <!-- Data Source / Queue-Times Relationship -->
+    <div class="about-tab-panel" id="tab-data">
+        <section class="about-section">
+            <h3>Relationship to Queue-Times.com</h3>
+            <p><!-- Your content here --></p>
+        </section>
+    </div>
 
-        <div class="feature-description">
-            <h4>Wait Times</h4>
-            <p>
-                Track current wait times, 7-day averages, and peak wait times. Helps identify
-                the busiest attractions and best times to visit.
-            </p>
-        </div>
-
-        <div class="feature-description">
-            <h4>Park Details</h4>
-            <p>
-                Click "Details" on any park to see tier distribution (how many Tier 1/2/3 rides),
-                current status, and recent operating hours.
-            </p>
-        </div>
-    </section>
-
-    <section class="about-section">
-        <h3>Data Sources</h3>
-        <p>
-            All wait time and attraction status data is powered by
-            <a href="https://queue-times.com" target="_blank" rel="noopener" class="external-link">
-                Queue-Times.com
-            </a>, an excellent service that aggregates real-time theme park data.
-        </p>
-        <p>
-            We collect snapshots every 10 minutes and aggregate the data to calculate:
-        </p>
-        <ul>
-            <li>Total downtime hours per ride and park</li>
-            <li>Uptime percentages</li>
-            <li>Trend analysis (is reliability improving or declining?)</li>
-            <li>Operating hours and park schedules</li>
-        </ul>
-    </section>
-
-    <section class="about-section">
-        <h3>Understanding Ride Tiers</h3>
-        <div class="tier-explanation">
-            <div class="tier-item-explanation tier-1-explanation">
-                <span class="tier-badge-example tier-1-badge">Tier 1</span>
-                <span class="tier-text">Major E-ticket attractions (e.g., Space Mountain, Hagrid's Motorbike)</span>
-            </div>
-            <div class="tier-item-explanation tier-2-explanation">
-                <span class="tier-badge-example tier-2-badge">Tier 2</span>
-                <span class="tier-text">Standard attractions (most rides fall here)</span>
-            </div>
-            <div class="tier-item-explanation tier-3-explanation">
-                <span class="tier-badge-example tier-3-badge">Tier 3</span>
-                <span class="tier-text">Minor attractions (carousels, kiddie rides, shows)</span>
-            </div>
-        </div>
-        <p class="tier-note">
-            Weighted scoring gives more weight to Tier 1 downtime, as these attractions
-            have the biggest impact on guest experience.
-        </p>
-    </section>
-
-    <section class="about-section">
-        <h3>Filters</h3>
-        <p>
-            Use the global filter to view:
-        </p>
-        <ul>
-            <li><strong>All Parks</strong>: Every tracked park in North America</li>
-            <li><strong>Disney & Universal</strong>: Focus on the major resort destinations</li>
-        </ul>
-    </section>
-
-    <section class="about-section">
-        <h3>Technical Details</h3>
-        <p>
-            This project is built with:
-        </p>
-        <ul>
-            <li>Python backend with Flask API</li>
-            <li>MySQL database for historical data</li>
-            <li>Vanilla JavaScript frontend (no frameworks!)</li>
-            <li>Real-time data collection every 10 minutes</li>
-            <li>Automated daily, weekly, and monthly aggregations</li>
-        </ul>
-    </section>
-
-    <section class="about-section disclaimer">
-        <h3>Disclaimer</h3>
-        <p>
-            This is an independent project and is not affiliated with any theme park,
-            park operator, or Queue-Times.com. All data is publicly available and used
-            for informational and entertainment purposes only.
-        </p>
-        <p>
-            Ride closures happen for many valid reasons including weather, maintenance,
-            technical issues, and safety. This tracker simply provides transparency into
-            these patterns.
-        </p>
-    </section>
-
-    <section class="about-section">
-        <p class="about-footer">
-            Made with ☕ by theme park enthusiasts who just want rides to work.
-        </p>
-    </section>
+    <!-- Report Problems -->
+    <div class="about-tab-panel" id="tab-report">
+        <section class="about-section">
+            <h3>Report a Problem</h3>
+            <p><!-- Your content here --></p>
+        </section>
+    </div>
 </div>

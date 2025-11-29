@@ -1344,6 +1344,214 @@ td {
 }
 
 /* ============================================
+   ABOUT MODAL TABS
+   ============================================ */
+.about-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 3px solid var(--charcoal);
+    margin-bottom: 0;
+    background: var(--warm-white);
+    position: sticky;
+    top: 60px;
+    z-index: 5;
+}
+
+.about-tab-btn {
+    flex: 1;
+    padding: 14px 20px;
+    background: transparent;
+    border: none;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--charcoal);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.about-tab-btn:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--deep-teal);
+}
+
+.about-tab-btn.active {
+    color: var(--deep-teal);
+    background: var(--warm-white);
+}
+
+.about-tab-btn.active::after {
+    content: '';
+    position: absolute;
+    bottom: -3px;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--coral);
+}
+
+.about-tab-panel {
+    display: none;
+    padding: 30px;
+    animation: fadeIn 0.2s ease;
+}
+
+.about-tab-panel.active {
+    display: block;
+}
+
+/* About Content Sections */
+.about-section {
+    margin-bottom: 28px;
+}
+
+.about-section:last-child {
+    margin-bottom: 0;
+}
+
+.about-section h3 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--deep-teal);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--coral);
+    display: inline-block;
+}
+
+.about-section p {
+    margin-bottom: 12px;
+    line-height: 1.6;
+    color: var(--charcoal);
+}
+
+.about-section ul {
+    margin: 12px 0;
+    padding-left: 24px;
+}
+
+.about-section li {
+    margin-bottom: 8px;
+    line-height: 1.5;
+    color: var(--charcoal);
+}
+
+.about-section .external-link {
+    color: var(--deep-teal);
+    text-decoration: none;
+    font-weight: 600;
+    border-bottom: 2px solid var(--coral);
+    transition: all 0.2s ease;
+}
+
+.about-section .external-link:hover {
+    color: var(--coral);
+    border-bottom-color: var(--deep-teal);
+}
+
+/* Tier Explanation Styles */
+.tier-explanation {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 16px 0;
+}
+
+.tier-item-explanation {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.tier-badge-example {
+    padding: 4px 12px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    min-width: 60px;
+    text-align: center;
+}
+
+.tier-1-badge {
+    background: var(--coral);
+    color: white;
+}
+
+.tier-2-badge {
+    background: var(--gold);
+    color: var(--charcoal);
+}
+
+.tier-3-badge {
+    background: var(--turquoise);
+    color: white;
+}
+
+.tier-text {
+    color: var(--charcoal);
+    font-size: 0.9rem;
+}
+
+.tier-note,
+.data-note {
+    background: rgba(0, 0, 0, 0.04);
+    padding: 12px 16px;
+    border-left: 4px solid var(--deep-teal);
+    font-size: 0.9rem;
+    margin-top: 16px;
+}
+
+/* Report Link Styling */
+.report-link {
+    text-align: center;
+    margin: 20px 0;
+}
+
+.report-link .external-link {
+    display: inline-block;
+    padding: 12px 24px;
+    background: var(--deep-teal);
+    color: white !important;
+    border: none;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.2s ease;
+}
+
+.report-link .external-link:hover {
+    background: var(--coral);
+    color: white !important;
+}
+
+/* Disclaimer Styling */
+.about-section.disclaimer {
+    background: rgba(0, 0, 0, 0.03);
+    padding: 20px;
+    border-left: 4px solid var(--gold);
+}
+
+.about-section.disclaimer h3 {
+    border-bottom-color: var(--gold);
+}
+
+/* About Footer */
+.about-footer {
+    text-align: center;
+    font-style: italic;
+    color: var(--charcoal);
+    opacity: 0.8;
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+/* ============================================
    FOOTER
    ============================================ */
 footer,
@@ -1507,6 +1715,31 @@ footer a:hover,
     }
 
     .button-group {
+        flex-wrap: wrap;
+    }
+
+    /* About Modal Tabs - Mobile */
+    .about-tabs {
+        flex-wrap: wrap;
+        top: 52px;
+    }
+
+    .about-tab-btn {
+        flex: 1 1 50%;
+        padding: 12px 10px;
+        font-size: 0.75rem;
+        letter-spacing: 0.5px;
+    }
+
+    .about-tab-panel {
+        padding: 20px;
+    }
+
+    .about-section h3 {
+        font-size: 1.1rem;
+    }
+
+    .tier-item-explanation {
         flex-wrap: wrap;
     }
 }

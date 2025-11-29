@@ -78,6 +78,7 @@ class TestRideTierProperties:
             name="Space Mountain",
             land_area="Tomorrowland",
             tier=1,
+            category='ATTRACTION',
             is_active=True,
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             updated_at=datetime(2024, 1, 1, 0, 0, 0)
@@ -94,6 +95,7 @@ class TestRideTierProperties:
             name="Buzz Lightyear",
             land_area="Tomorrowland",
             tier=2,
+            category='ATTRACTION',
             is_active=True,
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             updated_at=datetime(2024, 1, 1, 0, 0, 0)
@@ -110,6 +112,7 @@ class TestRideTierProperties:
             name="Carousel",
             land_area="Fantasyland",
             tier=3,
+            category='ATTRACTION',
             is_active=True,
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             updated_at=datetime(2024, 1, 1, 0, 0, 0)
@@ -126,6 +129,7 @@ class TestRideTierProperties:
             name="New Ride",
             land_area=None,
             tier=None,  # Unclassified
+            category=None,
             is_active=True,
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             updated_at=datetime(2024, 1, 1, 0, 0, 0)
@@ -142,6 +146,7 @@ class TestRideTierProperties:
             name="Space Mountain",
             land_area="Tomorrowland",
             tier=1,
+            category='ATTRACTION',
             is_active=True,
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             updated_at=datetime(2024, 1, 1, 0, 0, 0)
@@ -158,6 +163,7 @@ class TestRideTierProperties:
             name="Buzz Lightyear",
             land_area="Tomorrowland",
             tier=2,
+            category='ATTRACTION',
             is_active=True,
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             updated_at=datetime(2024, 1, 1, 0, 0, 0)
@@ -174,6 +180,7 @@ class TestRideTierProperties:
             name="Carousel",
             land_area="Fantasyland",
             tier=3,
+            category='ATTRACTION',
             is_active=True,
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             updated_at=datetime(2024, 1, 1, 0, 0, 0)
@@ -190,6 +197,7 @@ class TestRideTierProperties:
             name="New Ride",
             land_area=None,
             tier=None,
+            category=None,
             is_active=True,
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             updated_at=datetime(2024, 1, 1, 0, 0, 0)
@@ -198,7 +206,7 @@ class TestRideTierProperties:
         assert ride.tier_label == "Unclassified"
 
     def test_queue_times_url(self):
-        """queue_times_url should return Queue-Times.com URL."""
+        """queue_times_url should return Queue-Times.com URL when park_queue_times_id is set."""
         ride = Ride(
             ride_id=1,
             queue_times_id=1001,
@@ -206,12 +214,14 @@ class TestRideTierProperties:
             name="Space Mountain",
             land_area="Tomorrowland",
             tier=1,
+            category='ATTRACTION',
             is_active=True,
             created_at=datetime(2024, 1, 1, 0, 0, 0),
-            updated_at=datetime(2024, 1, 1, 0, 0, 0)
+            updated_at=datetime(2024, 1, 1, 0, 0, 0),
+            park_queue_times_id=42
         )
 
-        assert ride.queue_times_url == "https://queue-times.com/ride/1001"
+        assert ride.queue_times_url == "https://queue-times.com/parks/42/rides/1001"
 
 
 class TestRideToDict:
@@ -226,9 +236,11 @@ class TestRideToDict:
             name="Space Mountain",
             land_area="Tomorrowland",
             tier=1,
+            category='ATTRACTION',
             is_active=True,
             created_at=datetime(2024, 1, 1, 0, 0, 0),
-            updated_at=datetime(2024, 1, 15, 10, 30, 0)
+            updated_at=datetime(2024, 1, 15, 10, 30, 0),
+            park_queue_times_id=42
         )
 
         result = ride.to_dict()
@@ -242,7 +254,7 @@ class TestRideToDict:
         assert result['tier_weight'] == 3
         assert result['tier_label'] == "Tier 1 (Major)"
         assert result['is_active'] is True
-        assert result['queue_times_url'] == "https://queue-times.com/ride/1001"
+        assert result['queue_times_url'] == "https://queue-times.com/parks/42/rides/1001"
 
     def test_to_dict_excludes_timestamps(self):
         """to_dict() should not include created_at/updated_at."""
@@ -253,6 +265,7 @@ class TestRideToDict:
             name="Space Mountain",
             land_area="Tomorrowland",
             tier=1,
+            category='ATTRACTION',
             is_active=True,
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             updated_at=datetime(2024, 1, 15, 10, 30, 0)
@@ -272,6 +285,7 @@ class TestRideToDict:
             name="New Ride",
             land_area=None,
             tier=None,  # Unclassified
+            category=None,
             is_active=True,
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             updated_at=datetime(2024, 1, 1, 0, 0, 0)
@@ -296,6 +310,7 @@ class TestRideFromRow:
             'name': "Space Mountain",
             'land_area': "Tomorrowland",
             'tier': 1,
+            'category': 'ATTRACTION',
             'is_active': True,
             'created_at': datetime(2024, 1, 1, 0, 0, 0),
             'updated_at': datetime(2024, 1, 15, 10, 30, 0)
@@ -317,6 +332,7 @@ class TestRideFromRow:
                 self.name = "Space Mountain"
                 self.land_area = "Tomorrowland"
                 self.tier = 1
+                self.category = 'ATTRACTION'
                 self.is_active = True
                 self.created_at = datetime(2024, 1, 1, 0, 0, 0)
                 self.updated_at = datetime(2024, 1, 15, 10, 30, 0)
@@ -341,6 +357,7 @@ class TestRideEdgeCases:
             name="Closed Attraction",
             land_area="Adventureland",
             tier=2,
+            category='ATTRACTION',
             is_active=False,  # Inactive
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             updated_at=datetime(2024, 1, 1, 0, 0, 0)
@@ -357,6 +374,7 @@ class TestRideEdgeCases:
             name="Park-Wide Experience",
             land_area=None,  # No specific land
             tier=2,
+            category='ATTRACTION',
             is_active=True,
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             updated_at=datetime(2024, 1, 1, 0, 0, 0)
@@ -370,22 +388,22 @@ class TestRideEdgeCases:
         """Ride should handle all valid tier values (1, 2, 3, None)."""
         tier_1 = Ride(
             ride_id=1, queue_times_id=1001, park_id=101, name="Tier 1 Ride",
-            land_area=None, tier=1, is_active=True,
+            land_area=None, tier=1, category='ATTRACTION', is_active=True,
             created_at=datetime.now(), updated_at=datetime.now()
         )
         tier_2 = Ride(
             ride_id=2, queue_times_id=1002, park_id=101, name="Tier 2 Ride",
-            land_area=None, tier=2, is_active=True,
+            land_area=None, tier=2, category='ATTRACTION', is_active=True,
             created_at=datetime.now(), updated_at=datetime.now()
         )
         tier_3 = Ride(
             ride_id=3, queue_times_id=1003, park_id=101, name="Tier 3 Ride",
-            land_area=None, tier=3, is_active=True,
+            land_area=None, tier=3, category='ATTRACTION', is_active=True,
             created_at=datetime.now(), updated_at=datetime.now()
         )
         unclassified = Ride(
             ride_id=4, queue_times_id=1004, park_id=101, name="Unclassified Ride",
-            land_area=None, tier=None, is_active=True,
+            land_area=None, tier=None, category=None, is_active=True,
             created_at=datetime.now(), updated_at=datetime.now()
         )
 

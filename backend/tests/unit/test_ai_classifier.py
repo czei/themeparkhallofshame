@@ -15,9 +15,16 @@ MCP integration. These will be tested in integration tests.
 Priority: P2 - Important for AI classification system
 """
 
+import os
 import pytest
 import json
 from classifier.ai_classifier import AIClassifier, AIClassificationResult, AIClassifierError
+
+# Skip tests that require real OpenAI API key
+requires_openai_key = pytest.mark.skipif(
+    not os.environ.get('OPENAI_API_KEY'),
+    reason="OPENAI_API_KEY not set - skipping live API test"
+)
 
 
 class TestAIClassifierInit:
@@ -378,6 +385,7 @@ class TestParseAIResponseErrors:
 class TestClassify:
     """Test classify() method - requires MCP integration."""
 
+    @requires_openai_key
     def test_classify_space_mountain_returns_tier_1(self):
         """classify() should successfully classify Space Mountain as Tier 1 using real API."""
         classifier = AIClassifier()

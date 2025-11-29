@@ -11,6 +11,7 @@ Uses Magic Kingdom rides as ground truth for validation.
 Priority: P1 - Critical for weighted downtime calculations
 """
 
+import os
 import pytest
 import sys
 from pathlib import Path
@@ -18,6 +19,12 @@ from unittest.mock import Mock, patch, MagicMock
 import tempfile
 import json
 import csv
+
+# Skip tests that require real OpenAI API key
+requires_openai_key = pytest.mark.skipif(
+    not os.environ.get('OPENAI_API_KEY'),
+    reason="OPENAI_API_KEY not set - skipping live API test"
+)
 
 backend_src = Path(__file__).parent.parent.parent / 'src'
 sys.path.insert(0, str(backend_src.absolute()))
@@ -166,6 +173,7 @@ class TestClassificationService:
             assert result.classification_method == 'manual_override'
             assert result.confidence_score == 1.0
 
+    @requires_openai_key
     def test_exact_match_cache_priority(self):
         """Exact match cache should have second priority."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -211,6 +219,7 @@ class TestClassificationService:
             assert result.classification_method == 'cached_ai'
             assert result.confidence_score == 0.95
 
+    @requires_openai_key
     def test_ai_classification_without_cache(self):
         """AI classifier should be fallback when no other methods match."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -359,6 +368,7 @@ class TestMagicKingdomGroundTruth:
         # This is a known limitation - pattern matching alone isn't perfect
         assert result.tier in [None, 1, 2, 3], f"{ride_name} unexpected tier {result.tier}"
 
+    @requires_openai_key
     def test_full_magic_kingdom_classification(self):
         """Test classification service on ALL 29 Magic Kingdom rides from CSV."""
         with tempfile.TemporaryDirectory() as tmpdir:

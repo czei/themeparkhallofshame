@@ -388,8 +388,8 @@ Based on plan.md project structure:
 **Purpose**: Comprehensive testing across all components (primarily local development)
 
 - [ ] T144 [P] Create backend/tests/unit/test_status_calculator.py (test computed_is_open logic with all edge cases)
-- [ ] T145 [P] Create backend/tests/unit/test_operating_hours.py (test park operating hours detection with timezone handling)
-- [ ] T146 [P] Create backend/tests/unit/test_aggregation.py (test daily/weekly/monthly stat calculations)
+- [x] T145 [P] Create backend/tests/unit/test_operating_hours.py (test park operating hours detection with timezone handling) - 12 tests
+- [x] T146 [P] Create backend/tests/unit/test_aggregation.py (test daily/weekly/monthly stat calculations) - 20 tests
 - [ ] T147 [P] Create backend/tests/unit/test_classification.py (test 4-tier classification hierarchy)
 - [ ] T148 [P] Create backend/tests/integration/test_collection_pipeline.py (test API → DB → aggregation flow)
 - [ ] T149 [P] Create backend/tests/integration/test_api_endpoints.py (test all API endpoints with mock data, including /api/trends)

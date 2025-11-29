@@ -122,23 +122,23 @@ class Downtime {
 
         return `
             <div class="stats-grid stats-grid-5">
-                <div class="stat-block stat-parks">
+                <div class="stat-block stat-parks" title="Number of theme parks being monitored in the current filter">
                     <div class="stat-label">Parks Tracked</div>
                     <div class="stat-value">${stats.total_parks_tracked || 0}</div>
                 </div>
-                <div class="stat-block stat-operating">
+                <div class="stat-block stat-operating" title="Rides currently running and accepting guests at open parks">
                     <div class="stat-label">Rides Operating</div>
                     <div class="stat-value">${status.OPERATING || 0}</div>
                 </div>
-                <div class="stat-block stat-down">
+                <div class="stat-block stat-down" title="Rides experiencing unscheduled breakdowns or technical issues">
                     <div class="stat-label">Rides Down</div>
                     <div class="stat-value">${status.DOWN || 0}</div>
                 </div>
-                <div class="stat-block stat-closed">
+                <div class="stat-block stat-closed" title="Rides on scheduled closure (weather, capacity, seasonal) at open parks">
                     <div class="stat-label">Rides Closed</div>
                     <div class="stat-value">${status.CLOSED || 0}</div>
                 </div>
-                <div class="stat-block stat-repairs">
+                <div class="stat-block stat-repairs" title="Rides undergoing extended refurbishment or major maintenance">
                     <div class="stat-label">Rides Repairs</div>
                     <div class="stat-value">${status.REFURBISHMENT || 0}</div>
                 </div>

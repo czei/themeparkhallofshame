@@ -1546,6 +1546,98 @@ td {
     margin-top: 16px;
 }
 
+/* About Section - Formula & Scoring Styles */
+.about-section h4 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--charcoal);
+    margin-top: 24px;
+    margin-bottom: 12px;
+}
+
+.formula-box {
+    background: linear-gradient(135deg, var(--deep-teal) 0%, var(--turquoise) 100%);
+    color: white;
+    padding: 20px 24px;
+    border-radius: 8px;
+    text-align: center;
+    font-size: 1.1rem;
+    margin: 16px 0;
+    box-shadow: 0 4px 12px rgba(0, 123, 138, 0.3);
+}
+
+.tier-table,
+.score-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 0.9rem;
+}
+
+.tier-table th,
+.tier-table td,
+.score-table th,
+.score-table td {
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.tier-table th,
+.score-table th {
+    background: var(--charcoal);
+    color: white;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+}
+
+.tier-table tbody tr:hover,
+.score-table tbody tr:hover {
+    background: rgba(0, 184, 197, 0.1);
+}
+
+.tier-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 0.85rem;
+}
+
+.tier-badge.tier-1 {
+    background: var(--coral);
+    color: white;
+}
+
+.tier-badge.tier-2 {
+    background: var(--gold);
+    color: var(--charcoal);
+}
+
+.tier-badge.tier-3 {
+    background: var(--turquoise);
+    color: white;
+}
+
+.about-screenshot {
+    max-width: 100%;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    margin: 16px 0;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.about-section ol {
+    margin: 12px 0;
+    padding-left: 24px;
+}
+
 /* Report Link Styling */
 .report-link {
     text-align: center;

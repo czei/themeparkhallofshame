@@ -12,14 +12,14 @@
         <section class="about-section">
             <h3>Why This Site Exists</h3>
             <p>Let's get this out of the way right up front: the name is pure
-hyperbole. Let's face it: no one is going to look at a website
-called "theme park uptime percentages". I created the site because
-all of the online shit-talking about which theme park company "isn't
+hyperbole. The fact is no one is going to look at a website
+called "theme park uptime percentages"; that would be too boring. I created the site because
+all of the complaining that theme parks "aren't
 what it used to be", all because a ride had the temerity to go down
 during someone's vacation. I'm an engineer, so hard numbers are the
 most valuable and useful things in the world. If we're going to have a discussion
 about theme park reliability, let's start with real numbers, not someone's
-once a year vacation recolections.</p>
+once a year vacation anecdote.</p>
 <p>What you may not realize is there's nothing harder than keeping
 an attraction working through a million visitors a year. Designing and
 maintaining something that has to work millions of time a year with
@@ -33,7 +33,7 @@ wait times for a particular ride, but nothing comparing parks and
 rides to each other.</p>
 <p>The other big contrevoursy is which parks have the longest
 wait times. "No one goes there anymore, its too crowded".  Again, there
-aren't any hard numbers online comparing each park, so that's the
+aren't any hard numbers online to easily parks to each other, so that's the
 second big analysis on this website. </p>
         </section>
     </div>
@@ -42,7 +42,103 @@ second big analysis on this website. </p>
     <div class="about-tab-panel" id="tab-formula">
         <section class="about-section">
             <h3>How Scoring Works</h3>
-            <p>The problem with this little project is fairly judging one park against another is way more difficult than you'd think. </p>
+
+            <p>The problem with this little project is fairly judging one park against another is way more
+difficult than you'd think. If you just add up the ride downtime, that penalizes parks with more rides. If you
+just go with uptime percentage, you're penalizing parks that have a bunch of complicated rides instead of
+simple old-fashioned carnival-style rides.</p>
+
+            <h4>The Shame Score</h4>
+            <p>The <strong>Shame Score</strong> is a normalized metric that measures how much a theme park's
+downtime hurts guests, accounting for both the <em>amount</em> of downtime and the <em>importance</em>
+of the rides that went down.</p>
+
+            <div class="formula-box">
+                <strong>Shame Score = Total Weighted Downtime Hours ÷ Total Park Weight</strong>
+            </div>
+
+            <p>Where:</p>
+            <ul>
+                <li><strong>Weighted Downtime</strong> = Each ride's downtime hours × its tier weight</li>
+                <li><strong>Total Park Weight</strong> = Sum of all ride tier weights in the park</li>
+            </ul>
+
+            <h4>Ride Tiers</h4>
+            <p>Every ride is classified into one of three tiers based on guest demand and impact:</p>
+
+            <table class="tier-table">
+                <thead>
+                    <tr>
+                        <th>Tier</th>
+                        <th>Weight</th>
+                        <th>Description</th>
+                        <th>Examples</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><span class="tier-badge tier-1">1</span></td>
+                        <td>3×</td>
+                        <td>Flagship attractions guests plan trips around</td>
+                        <td>Space Mountain, Hagrid's, Velocicoaster</td>
+                    </tr>
+                    <tr>
+                        <td><span class="tier-badge tier-2">2</span></td>
+                        <td>2×</td>
+                        <td>Major rides with consistent demand</td>
+                        <td>Pirates of the Caribbean, Haunted Mansion</td>
+                    </tr>
+                    <tr>
+                        <td><span class="tier-badge tier-3">3</span></td>
+                        <td>1×</td>
+                        <td>Standard attractions, lower guest impact</td>
+                        <td>Carousels, smaller flat rides</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h4>Why This Works</h4>
+            <p><strong>Problem:</strong> Raw downtime hours unfairly penalize larger parks. A park with 50 rides
+will naturally have more total downtime than a park with 20 rides. And 1 hour of downtime on Space Mountain
+hurts more guests than 1 hour on a carousel.</p>
+
+            <p><strong>Solution:</strong> The Shame Score solves both problems:</p>
+            <ol>
+                <li><strong>Normalizes for park size</strong> — Dividing by total park weight means a small park
+and large park with similar reliability get similar scores</li>
+                <li><strong>Weights by guest impact</strong> — Flagship ride downtime counts 3× more than minor
+ride downtime, reflecting actual guest disappointment</li>
+            </ol>
+
+            <h4>Example</h4>
+            <p><strong>Park A</strong> (small park): 1 Tier 1 ride down for 2 hours = 6 weighted hours.
+Total park weight = 15. <strong>Shame Score = 0.40</strong></p>
+            <p><strong>Park B</strong> (large park): 3 Tier 3 rides down for 2 hours each = 6 weighted hours.
+Total park weight = 45. <strong>Shame Score = 0.13</strong></p>
+            <p>Park A has a higher shame score because losing a flagship ride hurts more than losing three
+minor rides, even though total downtime hours were the same.</p>
+
+            <h4>Interpreting Scores</h4>
+            <table class="score-table">
+                <thead>
+                    <tr>
+                        <th>Score Range</th>
+                        <th>Interpretation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>0.00 – 0.10</td><td>Excellent reliability</td></tr>
+                    <tr><td>0.10 – 0.30</td><td>Good performance</td></tr>
+                    <tr><td>0.30 – 0.50</td><td>Average</td></tr>
+                    <tr><td>0.50 – 1.00</td><td>Below average</td></tr>
+                    <tr><td>&gt; 1.00</td><td>Poor reliability</td></tr>
+                </tbody>
+            </table>
+            <p><em>Higher score = More shame = Worse performance</em></p>
+
+            <h4>Screenshot</h4>
+            <p>Here's what the downtime rankings look like:</p>
+            <img src="images/downtime-rankings-example.png" alt="Downtime Rankings Example" class="about-screenshot">
         </section>
     </div>
 

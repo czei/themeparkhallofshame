@@ -883,11 +883,11 @@ class StatsRepository:
                         JOIN parks pk ON r.park_id = pk.park_id
                         WHERE r.is_active = TRUE
                             AND r.category = 'ATTRACTION'
-                            -- Currently showing as down
+                            -- Currently showing as DOWN (not CLOSED or REFURBISHMENT)
                             AND EXISTS (
                                 SELECT 1 FROM ride_status_snapshots rss
                                 WHERE rss.ride_id = r.ride_id
-                                    AND rss.computed_is_open = FALSE
+                                    AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
                                     AND rss.recorded_at = (
                                         SELECT MAX(rss2.recorded_at)
                                         FROM ride_status_snapshots rss2
@@ -909,7 +909,7 @@ class StatsRepository:
                                 JOIN park_activity_snapshots pas ON pas.park_id = pk.park_id
                                     AND pas.recorded_at = rss4.recorded_at
                                 WHERE rss4.ride_id = r.ride_id
-                                    AND rss4.computed_is_open = TRUE
+                                    AND (rss4.status = 'OPERATING' OR (rss4.status IS NULL AND rss4.computed_is_open = TRUE))
                                     AND pas.park_appears_open = TRUE
                                     AND rss4.recorded_at >= :start_utc
                                     AND rss4.recorded_at < :end_utc
@@ -936,11 +936,11 @@ class StatsRepository:
                         JOIN parks pk ON r.park_id = pk.park_id
                         WHERE r.is_active = TRUE
                             AND r.category = 'ATTRACTION'
-                            -- Currently showing as down
+                            -- Currently showing as DOWN (not CLOSED or REFURBISHMENT)
                             AND EXISTS (
                                 SELECT 1 FROM ride_status_snapshots rss
                                 WHERE rss.ride_id = r.ride_id
-                                    AND rss.computed_is_open = FALSE
+                                    AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
                                     AND rss.recorded_at = (
                                         SELECT MAX(rss2.recorded_at)
                                         FROM ride_status_snapshots rss2
@@ -962,7 +962,7 @@ class StatsRepository:
                                 JOIN park_activity_snapshots pas ON pas.park_id = pk.park_id
                                     AND pas.recorded_at = rss4.recorded_at
                                 WHERE rss4.ride_id = r.ride_id
-                                    AND rss4.computed_is_open = TRUE
+                                    AND (rss4.status = 'OPERATING' OR (rss4.status IS NULL AND rss4.computed_is_open = TRUE))
                                     AND pas.park_appears_open = TRUE
                                     AND rss4.recorded_at >= :start_utc
                                     AND rss4.recorded_at < :end_utc
@@ -989,11 +989,11 @@ class StatsRepository:
                         JOIN parks pk ON r.park_id = pk.park_id
                         WHERE r.is_active = TRUE
                             AND r.category = 'ATTRACTION'
-                            -- Currently showing as down
+                            -- Currently showing as DOWN (not CLOSED or REFURBISHMENT)
                             AND EXISTS (
                                 SELECT 1 FROM ride_status_snapshots rss
                                 WHERE rss.ride_id = r.ride_id
-                                    AND rss.computed_is_open = FALSE
+                                    AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
                                     AND rss.recorded_at = (
                                         SELECT MAX(rss2.recorded_at)
                                         FROM ride_status_snapshots rss2
@@ -1015,7 +1015,7 @@ class StatsRepository:
                                 JOIN park_activity_snapshots pas ON pas.park_id = pk.park_id
                                     AND pas.recorded_at = rss4.recorded_at
                                 WHERE rss4.ride_id = r.ride_id
-                                    AND rss4.computed_is_open = TRUE
+                                    AND (rss4.status = 'OPERATING' OR (rss4.status IS NULL AND rss4.computed_is_open = TRUE))
                                     AND pas.park_appears_open = TRUE
                                     AND rss4.recorded_at >= :start_utc
                                     AND rss4.recorded_at < :end_utc
@@ -1073,8 +1073,14 @@ class StatsRepository:
         query = text("""
             SELECT
                 COUNT(DISTINCT r.ride_id) AS total_rides,
-                SUM(CASE WHEN rss.computed_is_open = TRUE THEN 1 ELSE 0 END) AS rides_open,
-                SUM(CASE WHEN rss.computed_is_open = FALSE THEN 1 ELSE 0 END) AS rides_closed,
+                SUM(CASE
+                    WHEN (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = TRUE))
+                    THEN 1 ELSE 0
+                END) AS rides_open,
+                SUM(CASE
+                    WHEN (rss.status IN ('DOWN', 'CLOSED', 'REFURBISHMENT') OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
+                    THEN 1 ELSE 0
+                END) AS rides_closed,
                 MAX(rss.recorded_at) AS last_updated
             FROM rides r
             LEFT JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
@@ -1122,8 +1128,17 @@ class StatsRepository:
                 rds.avg_wait_time,
                 rds.peak_wait_time,
                 -- Get current status from most recent snapshot
+                -- Returns status enum (OPERATING/DOWN/CLOSED/REFURBISHMENT)
                 (
-                    SELECT computed_is_open
+                    SELECT COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN'))
+                    FROM ride_status_snapshots
+                    WHERE ride_id = r.ride_id
+                    ORDER BY recorded_at DESC
+                    LIMIT 1
+                ) AS current_status,
+                -- Boolean for frontend compatibility (TRUE if OPERATING)
+                (
+                    SELECT COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN')) = 'OPERATING'
                     FROM ride_status_snapshots
                     WHERE ride_id = r.ride_id
                     ORDER BY recorded_at DESC
@@ -1203,8 +1218,17 @@ class StatsRepository:
                 ROUND(AVG(rds.avg_wait_time), 2) AS avg_wait_time,
                 MAX(rds.peak_wait_time) AS peak_wait_time,
                 -- Get current status from most recent snapshot
+                -- Returns status enum (OPERATING/DOWN/CLOSED/REFURBISHMENT)
                 (
-                    SELECT computed_is_open
+                    SELECT COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN'))
+                    FROM ride_status_snapshots
+                    WHERE ride_id = r.ride_id
+                    ORDER BY recorded_at DESC
+                    LIMIT 1
+                ) AS current_status,
+                -- Boolean for frontend compatibility (TRUE if OPERATING)
+                (
+                    SELECT COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN')) = 'OPERATING'
                     FROM ride_status_snapshots
                     WHERE ride_id = r.ride_id
                     ORDER BY recorded_at DESC
@@ -1268,8 +1292,17 @@ class StatsRepository:
                 rms.avg_wait_time,
                 rms.peak_wait_time,
                 -- Get current status from most recent snapshot
+                -- Returns status enum (OPERATING/DOWN/CLOSED/REFURBISHMENT)
                 (
-                    SELECT computed_is_open
+                    SELECT COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN'))
+                    FROM ride_status_snapshots
+                    WHERE ride_id = r.ride_id
+                    ORDER BY recorded_at DESC
+                    LIMIT 1
+                ) AS current_status,
+                -- Boolean for frontend compatibility (TRUE if OPERATING)
+                (
+                    SELECT COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN')) = 'OPERATING'
                     FROM ride_status_snapshots
                     WHERE ride_id = r.ride_id
                     ORDER BY recorded_at DESC
@@ -1380,7 +1413,7 @@ class StatsRepository:
                     FROM ride_status_snapshots
                     WHERE ride_id = r.ride_id
                 )
-                AND rss.computed_is_open = TRUE
+                AND (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = TRUE))
                 AND rss.wait_time > 0
                 AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'  -- Only include mechanical rides
@@ -1630,7 +1663,7 @@ class StatsRepository:
                     AND prev_day.stat_date = :yesterday_pacific
                 WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                     AND rss.wait_time > 0
-                    AND rss.computed_is_open = TRUE
+                    AND (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = TRUE))
                     AND pas.park_appears_open = TRUE
                     AND r.is_active = TRUE
                     AND r.category = 'ATTRACTION'  -- Only include mechanical rides
@@ -1858,7 +1891,7 @@ class StatsRepository:
                     AND prev_day.stat_date = :yesterday_pacific
                 WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                     AND rss.wait_time > 0
-                    AND rss.computed_is_open = TRUE
+                    AND (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = TRUE))
                     AND pas.park_appears_open = TRUE
                     AND r.is_active = TRUE
                     AND r.category = 'ATTRACTION'  -- Only include mechanical rides
@@ -2869,37 +2902,56 @@ class StatsRepository:
                 CONCAT(p.city, ', ', p.state_province) AS location,
 
                 -- Calculate total downtime hours from today's snapshots
-                -- Each snapshot interval is ~10 minutes
-                -- Downtime = snapshots where ride is down while park is open
+                -- Each snapshot interval is ~5 minutes
+                -- Only count status='DOWN' as downtime (not CLOSED or REFURBISHMENT)
                 ROUND(
-                    SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = FALSE THEN 10 ELSE 0 END) / 60.0,
+                    SUM(CASE
+                        WHEN pas.park_appears_open = TRUE
+                            AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
+                        THEN 5
+                        ELSE 0
+                    END) / 60.0,
                     2
                 ) AS total_downtime_hours,
 
                 -- Calculate weighted downtime hours (Tier 1=3x, Tier 2=2x, Tier 3=1x)
                 ROUND(
-                    SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = FALSE
-                        THEN 10 * COALESCE(rc.tier_weight, 2) ELSE 0 END) / 60.0,
+                    SUM(CASE
+                        WHEN pas.park_appears_open = TRUE
+                            AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
+                        THEN 5 * COALESCE(rc.tier_weight, 2)
+                        ELSE 0
+                    END) / 60.0,
                     2
                 ) AS weighted_downtime_hours,
 
                 -- Shame Score = weighted downtime / total park weight
                 ROUND(
-                    SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = FALSE
-                        THEN 10 * COALESCE(rc.tier_weight, 2) ELSE 0 END) / 60.0
+                    SUM(CASE
+                        WHEN pas.park_appears_open = TRUE
+                            AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
+                        THEN 5 * COALESCE(rc.tier_weight, 2)
+                        ELSE 0
+                    END) / 60.0
                     / NULLIF(pw.total_park_weight, 0),
                     2
                 ) AS shame_score,
 
                 -- Count of rides that had any downtime today
                 COUNT(DISTINCT CASE
-                    WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = FALSE
+                    WHEN pas.park_appears_open = TRUE
+                        AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
                     THEN r.ride_id
                 END) AS affected_rides_count,
 
                 -- Calculate uptime percentage (only during park operating hours)
                 ROUND(
-                    100.0 * SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = TRUE THEN 1 ELSE 0 END) /
+                    100.0 * SUM(CASE
+                        WHEN pas.park_appears_open = TRUE
+                            AND (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = TRUE))
+                        THEN 1
+                        ELSE 0
+                    END) /
                     NULLIF(SUM(CASE WHEN pas.park_appears_open = TRUE THEN 1 ELSE 0 END), 0),
                     2
                 ) AS uptime_percentage,
@@ -2977,15 +3029,27 @@ class StatsRepository:
                 CONCAT(p.city, ', ', p.state_province) AS location,
 
                 -- Calculate downtime hours from today's snapshots
-                -- Each snapshot interval is ~10 minutes
+                -- Each snapshot interval is ~5 minutes
+                -- Only count status='DOWN' as downtime (not CLOSED or REFURBISHMENT)
+                -- For parks without status data (Queue-Times), fall back to computed_is_open
                 ROUND(
-                    SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = FALSE THEN 10 ELSE 0 END) / 60.0,
+                    SUM(CASE
+                        WHEN pas.park_appears_open = TRUE
+                            AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
+                        THEN 5
+                        ELSE 0
+                    END) / 60.0,
                     2
                 ) AS downtime_hours,
 
                 -- Calculate uptime percentage (only during park operating hours)
                 ROUND(
-                    100.0 * SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = TRUE THEN 1 ELSE 0 END) /
+                    100.0 * SUM(CASE
+                        WHEN pas.park_appears_open = TRUE
+                            AND (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = TRUE))
+                        THEN 1
+                        ELSE 0
+                    END) /
                     NULLIF(SUM(CASE WHEN pas.park_appears_open = TRUE THEN 1 ELSE 0 END), 0),
                     2
                 ) AS uptime_percentage,
@@ -2995,8 +3059,18 @@ class StatsRepository:
                 MAX(rss.wait_time) AS peak_wait_time,
 
                 -- Get current status from most recent snapshot
+                -- Returns status enum (OPERATING/DOWN/CLOSED/REFURBISHMENT)
                 (
-                    SELECT computed_is_open
+                    SELECT COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN'))
+                    FROM ride_status_snapshots
+                    WHERE ride_id = r.ride_id
+                    ORDER BY recorded_at DESC
+                    LIMIT 1
+                ) AS current_status,
+
+                -- Boolean for frontend compatibility (TRUE if OPERATING)
+                (
+                    SELECT COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN')) = 'OPERATING'
                     FROM ride_status_snapshots
                     WHERE ride_id = r.ride_id
                     ORDER BY recorded_at DESC
@@ -3021,8 +3095,12 @@ class StatsRepository:
                 CASE
                     WHEN prev_day.downtime_minutes > 0 THEN
                         ROUND(
-                            ((SUM(CASE WHEN pas.park_appears_open = TRUE AND rss.computed_is_open = FALSE THEN 10 ELSE 0 END)
-                              - prev_day.downtime_minutes) / prev_day.downtime_minutes) * 100,
+                            ((SUM(CASE
+                                WHEN pas.park_appears_open = TRUE
+                                    AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
+                                THEN 5
+                                ELSE 0
+                            END) - prev_day.downtime_minutes) / prev_day.downtime_minutes) * 100,
                             2
                         )
                     ELSE NULL

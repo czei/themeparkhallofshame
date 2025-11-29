@@ -608,6 +608,30 @@ main {
     padding: 3px;
 }
 
+/* 5-column layout for status panels */
+.stats-grid-5 {
+    grid-template-columns: repeat(5, 1fr);
+}
+
+@media (max-width: 768px) {
+    .stats-grid-5 {
+        grid-template-columns: repeat(3, 1fr);
+    }
+    .stats-grid-5 .stat-block:nth-child(4),
+    .stats-grid-5 .stat-block:nth-child(5) {
+        grid-column: span 1;
+    }
+}
+
+@media (max-width: 480px) {
+    .stats-grid-5 {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .stats-grid-5 .stat-block:last-child {
+        grid-column: span 2;
+    }
+}
+
 .stat-block,
 .stat-card {
     background: white;
@@ -616,12 +640,20 @@ main {
     position: relative;
 }
 
+/* Default colors for 3-column grid (legacy) */
 .stat-block:nth-child(1),
 .stat-card:nth-child(1) { border-left: 4px solid var(--coral); }
 .stat-block:nth-child(2),
 .stat-card:nth-child(2) { border-left: 4px solid var(--turquoise); }
 .stat-block:nth-child(3),
 .stat-card:nth-child(3) { border-left: 4px solid var(--gold); }
+
+/* 5-column status panel colors */
+.stat-parks { border-left: 4px solid var(--deep-teal) !important; }
+.stat-operating { border-left: 4px solid var(--turquoise) !important; }
+.stat-down { border-left: 4px solid var(--coral) !important; }
+.stat-closed { border-left: 4px solid var(--charcoal) !important; }
+.stat-repairs { border-left: 4px solid var(--gold) !important; }
 
 .stat-label {
     font-size: 0.65rem;
@@ -640,12 +672,20 @@ main {
     line-height: 1;
 }
 
+/* Default colors for 3-column grid (legacy) */
 .stat-block:nth-child(1) .stat-value,
 .stat-card:nth-child(1) .stat-value { color: var(--coral); }
 .stat-block:nth-child(2) .stat-value,
 .stat-card:nth-child(2) .stat-value { color: var(--turquoise); }
 .stat-block:nth-child(3) .stat-value,
 .stat-card:nth-child(3) .stat-value { color: var(--gold); }
+
+/* 5-column status panel value colors */
+.stat-parks .stat-value { color: var(--deep-teal) !important; }
+.stat-operating .stat-value { color: var(--turquoise) !important; }
+.stat-down .stat-value { color: var(--coral) !important; }
+.stat-closed .stat-value { color: var(--charcoal) !important; }
+.stat-repairs .stat-value { color: var(--gold) !important; }
 
 /* ============================================
    SECTION HEADERS

@@ -17,7 +17,8 @@ class Downtime {
             error: null,
             parkData: null,
             rideData: null,
-            aggregateStats: null
+            aggregateStats: null,
+            statusSummary: null
         };
         // Initialize park details modal
         this.parkDetailsModal = null;
@@ -53,9 +54,14 @@ class Downtime {
                 limit: this.state.rideLimit
             };
 
-            const [parkResponse, rideResponse] = await Promise.all([
+            const statusParams = {
+                filter: this.state.filter
+            };
+
+            const [parkResponse, rideResponse, statusResponse] = await Promise.all([
                 this.apiClient.get('/parks/downtime', parkParams),
-                this.apiClient.get('/rides/downtime', rideParams)
+                this.apiClient.get('/rides/downtime', rideParams),
+                this.apiClient.get('/live/status-summary', statusParams)
             ]);
 
             const newState = { loading: false };
@@ -70,6 +76,10 @@ class Downtime {
 
             if (rideResponse.success) {
                 newState.rideData = rideResponse;
+            }
+
+            if (statusResponse.success) {
+                newState.statusSummary = statusResponse.status_summary;
             }
 
             this.setState(newState);
@@ -104,28 +114,33 @@ class Downtime {
     }
 
     /**
-     * Render aggregate statistics
+     * Render aggregate statistics with 5 panels showing ride status breakdown
      */
     renderAggregateStats() {
-        if (!this.state.aggregateStats) {
-            return '<div class="stats-grid"></div>';
-        }
-
-        const stats = this.state.aggregateStats;
+        const stats = this.state.aggregateStats || {};
+        const status = this.state.statusSummary || {};
 
         return `
-            <div class="stats-grid">
-                <div class="stat-block">
+            <div class="stats-grid stats-grid-5">
+                <div class="stat-block stat-parks">
                     <div class="stat-label">Parks Tracked</div>
                     <div class="stat-value">${stats.total_parks_tracked || 0}</div>
                 </div>
-                <div class="stat-block">
-                    <div class="stat-label">Peak Downtime</div>
-                    <div class="stat-value">${this.formatHours(stats.peak_downtime_hours || 0)}</div>
+                <div class="stat-block stat-operating">
+                    <div class="stat-label">Operating</div>
+                    <div class="stat-value">${status.OPERATING || 0}</div>
                 </div>
-                <div class="stat-block">
-                    <div class="stat-label">Rides Down</div>
-                    <div class="stat-value">${stats.currently_down_rides || 0}</div>
+                <div class="stat-block stat-down">
+                    <div class="stat-label">Down</div>
+                    <div class="stat-value">${status.DOWN || 0}</div>
+                </div>
+                <div class="stat-block stat-closed">
+                    <div class="stat-label">Closed</div>
+                    <div class="stat-value">${status.CLOSED || 0}</div>
+                </div>
+                <div class="stat-block stat-repairs">
+                    <div class="stat-label">Repairs</div>
+                    <div class="stat-value">${status.REFURBISHMENT || 0}</div>
                 </div>
             </div>
         `;

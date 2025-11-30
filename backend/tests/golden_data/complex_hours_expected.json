@@ -1,0 +1,111 @@
+{
+  "metadata": {
+    "scenario": "complex_hours_park",
+    "description": "Complex scenario: rides with independent hours (early entry, extended hours)",
+    "date_range": {"start": "2024-11-18", "end": "2024-11-24"},
+    "park_id": 2,
+    "park_name": "Test Complex Hours Park",
+    "computed_by": "Hand calculation",
+    "last_verified": "2024-11-30",
+    "notes": "This tests park_appears_open logic - downtime only counts when park is open"
+  },
+  "rides": {
+    "201": {
+      "ride_name": "Early Entry Coaster",
+      "tier": 1,
+      "tier_weight": 3,
+      "notes": "Opens 1 hour before park, closes with park",
+      "daily_stats": {
+        "2024-11-18": {
+          "total_snapshots": 300,
+          "park_open_snapshots": 200,
+          "operating_snapshots": 170,
+          "down_snapshots": 30,
+          "closed_snapshots": 0,
+          "refurbishment_snapshots": 0,
+          "downtime_minutes": 150,
+          "downtime_hours": 2.5,
+          "uptime_percentage": 85.0,
+          "weighted_downtime": 7.5,
+          "comment": "30 down snapshots × 5 min = 150 min = 2.5 hours. Only snapshots during park_appears_open count."
+        }
+      },
+      "weekly_totals": {
+        "down_snapshots": 30,
+        "downtime_hours": 2.5,
+        "weighted_downtime": 7.5
+      }
+    },
+    "202": {
+      "ride_name": "Extended Hours Attraction",
+      "tier": 2,
+      "tier_weight": 2,
+      "notes": "Opens with park, stays open 2 hours after park closes",
+      "daily_stats": {
+        "2024-11-18": {
+          "total_snapshots": 320,
+          "park_open_snapshots": 200,
+          "operating_snapshots": 200,
+          "down_snapshots": 0,
+          "closed_snapshots": 0,
+          "refurbishment_snapshots": 0,
+          "downtime_minutes": 0,
+          "downtime_hours": 0.0,
+          "uptime_percentage": 100.0,
+          "weighted_downtime": 0.0,
+          "comment": "Perfect operation during park hours. Extended hours don't count since park_appears_open=FALSE."
+        }
+      },
+      "weekly_totals": {
+        "down_snapshots": 0,
+        "downtime_hours": 0.0,
+        "weighted_downtime": 0.0
+      }
+    },
+    "203": {
+      "ride_name": "Standard Ride",
+      "tier": 2,
+      "tier_weight": 2,
+      "notes": "Opens and closes with park",
+      "daily_stats": {
+        "2024-11-18": {
+          "total_snapshots": 288,
+          "park_open_snapshots": 200,
+          "operating_snapshots": 188,
+          "down_snapshots": 12,
+          "closed_snapshots": 0,
+          "refurbishment_snapshots": 0,
+          "downtime_minutes": 60,
+          "downtime_hours": 1.0,
+          "uptime_percentage": 94.0,
+          "weighted_downtime": 2.0
+        }
+      },
+      "weekly_totals": {
+        "down_snapshots": 12,
+        "downtime_hours": 1.0,
+        "weighted_downtime": 2.0
+      }
+    }
+  },
+  "park_daily_expected": {
+    "2024-11-18": {
+      "total_rides": 3,
+      "rides_with_downtime": 2,
+      "total_downtime_hours": 3.5,
+      "weighted_downtime_hours": 9.5,
+      "total_park_weight": 7,
+      "shame_score": 1.36,
+      "avg_uptime_percentage": 93.0,
+      "calculation": {
+        "formula": "shame_score = (7.5 + 0.0 + 2.0) / (3 + 2 + 2)",
+        "values": "9.5 / 7 = 1.36"
+      }
+    }
+  },
+  "key_validations": {
+    "early_entry_behavior": "Ride 201 had snapshots before park opened (not counted as downtime)",
+    "extended_hours_behavior": "Ride 202 had snapshots after park closed (not counted since park_appears_open=FALSE)",
+    "park_open_is_denominator": "uptime_percentage uses park_open_snapshots as denominator, not total_snapshots"
+  }
+}

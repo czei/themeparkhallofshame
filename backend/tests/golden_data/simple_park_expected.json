@@ -1,0 +1,206 @@
+{
+  "metadata": {
+    "scenario": "simple_park",
+    "description": "Basic scenario: rides only open during park hours",
+    "date_range": {"start": "2024-11-18", "end": "2024-11-24"},
+    "park_id": 1,
+    "park_name": "Test Simple Park",
+    "computed_by": "Hand calculation",
+    "last_verified": "2024-11-30"
+  },
+  "rides": {
+    "101": {
+      "ride_name": "Flagship Coaster",
+      "tier": 1,
+      "tier_weight": 3,
+      "daily_stats": {
+        "2024-11-18": {
+          "total_snapshots": 288,
+          "park_open_snapshots": 200,
+          "operating_snapshots": 180,
+          "down_snapshots": 20,
+          "closed_snapshots": 0,
+          "refurbishment_snapshots": 0,
+          "downtime_minutes": 100,
+          "downtime_hours": 1.67,
+          "uptime_percentage": 90.0,
+          "weighted_downtime": 5.0
+        },
+        "2024-11-19": {
+          "total_snapshots": 288,
+          "park_open_snapshots": 200,
+          "operating_snapshots": 200,
+          "down_snapshots": 0,
+          "closed_snapshots": 0,
+          "refurbishment_snapshots": 0,
+          "downtime_minutes": 0,
+          "downtime_hours": 0.0,
+          "uptime_percentage": 100.0,
+          "weighted_downtime": 0.0
+        },
+        "2024-11-20": {
+          "total_snapshots": 288,
+          "park_open_snapshots": 200,
+          "operating_snapshots": 188,
+          "down_snapshots": 12,
+          "closed_snapshots": 0,
+          "refurbishment_snapshots": 0,
+          "downtime_minutes": 60,
+          "downtime_hours": 1.0,
+          "uptime_percentage": 94.0,
+          "weighted_downtime": 3.0
+        }
+      },
+      "weekly_totals": {
+        "total_snapshots": 864,
+        "park_open_snapshots": 600,
+        "operating_snapshots": 568,
+        "down_snapshots": 32,
+        "downtime_hours": 2.67,
+        "weighted_downtime": 8.0
+      }
+    },
+    "102": {
+      "ride_name": "Standard Dark Ride",
+      "tier": 2,
+      "tier_weight": 2,
+      "daily_stats": {
+        "2024-11-18": {
+          "total_snapshots": 288,
+          "park_open_snapshots": 200,
+          "operating_snapshots": 194,
+          "down_snapshots": 6,
+          "closed_snapshots": 0,
+          "refurbishment_snapshots": 0,
+          "downtime_minutes": 30,
+          "downtime_hours": 0.5,
+          "uptime_percentage": 97.0,
+          "weighted_downtime": 1.0
+        },
+        "2024-11-19": {
+          "total_snapshots": 288,
+          "park_open_snapshots": 200,
+          "operating_snapshots": 200,
+          "down_snapshots": 0,
+          "closed_snapshots": 0,
+          "refurbishment_snapshots": 0,
+          "downtime_minutes": 0,
+          "downtime_hours": 0.0,
+          "uptime_percentage": 100.0,
+          "weighted_downtime": 0.0
+        },
+        "2024-11-20": {
+          "total_snapshots": 288,
+          "park_open_snapshots": 200,
+          "operating_snapshots": 200,
+          "down_snapshots": 0,
+          "closed_snapshots": 0,
+          "refurbishment_snapshots": 0,
+          "downtime_minutes": 0,
+          "downtime_hours": 0.0,
+          "uptime_percentage": 100.0,
+          "weighted_downtime": 0.0
+        }
+      },
+      "weekly_totals": {
+        "total_snapshots": 864,
+        "park_open_snapshots": 600,
+        "operating_snapshots": 594,
+        "down_snapshots": 6,
+        "downtime_hours": 0.5,
+        "weighted_downtime": 1.0
+      }
+    },
+    "103": {
+      "ride_name": "Kiddie Spinner",
+      "tier": 3,
+      "tier_weight": 1,
+      "daily_stats": {
+        "2024-11-18": {
+          "total_snapshots": 288,
+          "park_open_snapshots": 200,
+          "operating_snapshots": 176,
+          "down_snapshots": 24,
+          "closed_snapshots": 0,
+          "refurbishment_snapshots": 0,
+          "downtime_minutes": 120,
+          "downtime_hours": 2.0,
+          "uptime_percentage": 88.0,
+          "weighted_downtime": 2.0
+        },
+        "2024-11-19": {
+          "total_snapshots": 288,
+          "park_open_snapshots": 200,
+          "operating_snapshots": 200,
+          "down_snapshots": 0,
+          "closed_snapshots": 0,
+          "refurbishment_snapshots": 0,
+          "downtime_minutes": 0,
+          "downtime_hours": 0.0,
+          "uptime_percentage": 100.0,
+          "weighted_downtime": 0.0
+        },
+        "2024-11-20": {
+          "total_snapshots": 288,
+          "park_open_snapshots": 200,
+          "operating_snapshots": 200,
+          "down_snapshots": 0,
+          "closed_snapshots": 0,
+          "refurbishment_snapshots": 0,
+          "downtime_minutes": 0,
+          "downtime_hours": 0.0,
+          "uptime_percentage": 100.0,
+          "weighted_downtime": 0.0
+        }
+      },
+      "weekly_totals": {
+        "total_snapshots": 864,
+        "park_open_snapshots": 600,
+        "operating_snapshots": 576,
+        "down_snapshots": 24,
+        "downtime_hours": 2.0,
+        "weighted_downtime": 2.0
+      }
+    }
+  },
+  "park_daily_expected": {
+    "2024-11-18": {
+      "total_rides": 3,
+      "rides_with_downtime": 3,
+      "total_downtime_hours": 4.17,
+      "weighted_downtime_hours": 8.0,
+      "total_park_weight": 6,
+      "shame_score": 1.33,
+      "avg_uptime_percentage": 91.7
+    },
+    "2024-11-19": {
+      "total_rides": 3,
+      "rides_with_downtime": 0,
+      "total_downtime_hours": 0.0,
+      "weighted_downtime_hours": 0.0,
+      "total_park_weight": 6,
+      "shame_score": 0.0,
+      "avg_uptime_percentage": 100.0
+    },
+    "2024-11-20": {
+      "total_rides": 3,
+      "rides_with_downtime": 1,
+      "total_downtime_hours": 1.0,
+      "weighted_downtime_hours": 3.0,
+      "total_park_weight": 6,
+      "shame_score": 0.5,
+      "avg_uptime_percentage": 98.0
+    }
+  },
+  "park_weekly_expected": {
+    "total_rides": 3,
+    "total_downtime_hours": 5.17,
+    "weighted_downtime_hours": 11.0,
+    "total_park_weight": 6,
+    "shame_score": 1.83,
+    "calculation": {
+      "formula": "shame_score = weighted_downtime_hours / total_park_weight",
+      "values": "11.0 / 6 = 1.83"
+    }
+  }
+}

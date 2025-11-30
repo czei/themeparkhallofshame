@@ -1,0 +1,146 @@
+{
+  "metadata": {
+    "scenario": "maintenance_park",
+    "description": "Maintenance scenarios: refurbishment, didn't open, various status types",
+    "date_range": {"start": "2024-11-18", "end": "2024-11-24"},
+    "park_id": 3,
+    "park_name": "Test Maintenance Park",
+    "computed_by": "Hand calculation",
+    "last_verified": "2024-11-30",
+    "notes": "Tests that REFURBISHMENT and CLOSED statuses are tracked separately from DOWN"
+  },
+  "rides": {
+    "301": {
+      "ride_name": "Under Refurbishment Coaster",
+      "tier": 1,
+      "tier_weight": 3,
+      "notes": "Full week of REFURBISHMENT status",
+      "daily_stats": {
+        "2024-11-18": {
+          "total_snapshots": 288,
+          "park_open_snapshots": 200,
+          "operating_snapshots": 0,
+          "down_snapshots": 0,
+          "closed_snapshots": 0,
+          "refurbishment_snapshots": 200,
+          "downtime_minutes": 0,
+          "downtime_hours": 0.0,
+          "uptime_percentage": null,
+          "weighted_downtime": 0.0,
+          "comment": "REFURBISHMENT is NOT counted as DOWN. This is expected closure, not breakdown."
+        }
+      },
+      "weekly_totals": {
+        "down_snapshots": 0,
+        "downtime_hours": 0.0,
+        "weighted_downtime": 0.0
+      }
+    },
+    "302": {
+      "ride_name": "Didnt Open Today",
+      "tier": 2,
+      "tier_weight": 2,
+      "notes": "CLOSED status all day (scheduled closure)",
+      "daily_stats": {
+        "2024-11-18": {
+          "total_snapshots": 288,
+          "park_open_snapshots": 200,
+          "operating_snapshots": 0,
+          "down_snapshots": 0,
+          "closed_snapshots": 200,
+          "refurbishment_snapshots": 0,
+          "downtime_minutes": 0,
+          "downtime_hours": 0.0,
+          "uptime_percentage": null,
+          "weighted_downtime": 0.0,
+          "comment": "CLOSED is also NOT counted as DOWN. Scheduled non-operation."
+        }
+      },
+      "weekly_totals": {
+        "down_snapshots": 0,
+        "downtime_hours": 0.0,
+        "weighted_downtime": 0.0
+      }
+    },
+    "303": {
+      "ride_name": "Breakdown Prone Ride",
+      "tier": 2,
+      "tier_weight": 2,
+      "notes": "Mix of OPERATING and DOWN - this IS real downtime",
+      "daily_stats": {
+        "2024-11-18": {
+          "total_snapshots": 288,
+          "park_open_snapshots": 200,
+          "operating_snapshots": 140,
+          "down_snapshots": 60,
+          "closed_snapshots": 0,
+          "refurbishment_snapshots": 0,
+          "downtime_minutes": 300,
+          "downtime_hours": 5.0,
+          "uptime_percentage": 70.0,
+          "weighted_downtime": 10.0,
+          "comment": "60 down snapshots × 5 min = 300 min = 5.0 hours of ACTUAL breakdown"
+        }
+      },
+      "weekly_totals": {
+        "down_snapshots": 60,
+        "downtime_hours": 5.0,
+        "weighted_downtime": 10.0
+      }
+    },
+    "304": {
+      "ride_name": "Mixed Status Ride",
+      "tier": 3,
+      "tier_weight": 1,
+      "notes": "Operated morning, DOWN afternoon, CLOSED evening",
+      "daily_stats": {
+        "2024-11-18": {
+          "total_snapshots": 288,
+          "park_open_snapshots": 200,
+          "operating_snapshots": 100,
+          "down_snapshots": 60,
+          "closed_snapshots": 40,
+          "refurbishment_snapshots": 0,
+          "downtime_minutes": 300,
+          "downtime_hours": 5.0,
+          "uptime_percentage": 50.0,
+          "weighted_downtime": 5.0,
+          "comment": "Only the 60 DOWN snapshots count as downtime. 40 CLOSED snapshots are scheduled."
+        }
+      },
+      "weekly_totals": {
+        "down_snapshots": 60,
+        "downtime_hours": 5.0,
+        "weighted_downtime": 5.0
+      }
+    }
+  },
+  "park_daily_expected": {
+    "2024-11-18": {
+      "total_rides": 4,
+      "rides_with_downtime": 2,
+      "total_downtime_hours": 10.0,
+      "weighted_downtime_hours": 15.0,
+      "total_park_weight": 8,
+      "shame_score": 1.88,
+      "calculation": {
+        "formula": "shame_score = weighted_downtime / total_weight",
+        "breakdown": {
+          "ride_301_refurb": "0.0 hours × 3 = 0.0 (NOT counted)",
+          "ride_302_closed": "0.0 hours × 2 = 0.0 (NOT counted)",
+          "ride_303_down": "5.0 hours × 2 = 10.0 (COUNTED)",
+          "ride_304_mixed": "5.0 hours × 1 = 5.0 (COUNTED)"
+        },
+        "total_weighted": "0.0 + 0.0 + 10.0 + 5.0 = 15.0",
+        "total_weight": "3 + 2 + 2 + 1 = 8",
+        "final": "15.0 / 8 = 1.88"
+      }
+    }
+  },
+  "key_validations": {
+    "refurbishment_not_downtime": "Ride 301 with REFURBISHMENT status has 0 downtime hours",
+    "closed_not_downtime": "Ride 302 with CLOSED status has 0 downtime hours",
+    "down_is_downtime": "Ride 303 with DOWN status contributes to shame score",
+    "mixed_status_only_counts_down": "Ride 304 only counts DOWN snapshots, not CLOSED"
+  }
+}

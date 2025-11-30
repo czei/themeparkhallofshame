@@ -10,12 +10,25 @@ and it will apply everywhere consistently.
 
 Architecture Overview
 ---------------------
-This file contains the Python implementations of core calculations.
-The same logic is replicated in SQL for efficiency in:
-- database/queries/builders/expressions.py (status checks)
-- database/queries/builders/ctes.py (weighted calculations)
+This file contains the Python implementations and constants for core calculations.
+The same logic is implemented in SQL via helper classes:
 
-When modifying calculations, update BOTH this file AND the SQL equivalents.
+    utils/metrics.py          <-- YOU ARE HERE (constants, Python functions)
+         |
+         v
+    utils/sql_helpers.py      <-- SQL fragment generators (imports from here)
+         |
+         +---> database/repositories/stats_repository.py (production queries)
+         +---> database/queries/live/*.py (query classes)
+         +---> database/queries/rankings/*.py (query classes)
+
+    database/queries/builders/expressions.py  <-- SQLAlchemy expressions
+    database/queries/builders/ctes.py         <-- Common Table Expressions
+
+When modifying calculations, update:
+1. This file (metrics.py) - the constants and Python functions
+2. sql_helpers.py - if the SQL logic changes
+3. expressions.py/ctes.py - if SQLAlchemy implementations are affected
 
 Key Concepts
 ------------
@@ -26,11 +39,16 @@ Key Concepts
 
 Query Files Using These Calculations
 ------------------------------------
-- database/queries/rankings/park_downtime_rankings.py (shame_score)
-- database/queries/rankings/ride_downtime_rankings.py (downtime_hours)
-- database/queries/trends/*.py (percent changes)
-- database/queries/charts/*.py (time-series data)
-- database/queries/live/*.py (real-time calculations)
+Production (fast raw SQL via sql_helpers.py):
+- database/repositories/stats_repository.py (get_park_live_downtime_rankings, etc.)
+
+Query Classes (use sql_helpers.py):
+- database/queries/live/live_park_rankings.py
+- database/queries/live/live_ride_rankings.py
+- database/queries/rankings/park_downtime_rankings.py
+- database/queries/rankings/ride_downtime_rankings.py
+- database/queries/trends/*.py
+- database/queries/charts/*.py
 """
 from typing import Optional
 

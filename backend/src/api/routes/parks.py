@@ -78,13 +78,13 @@ def get_park_downtime_rankings():
     try:
         with get_db_connection() as conn:
             filter_disney_universal = (filter_type == 'disney-universal')
+            stats_repo = StatsRepository(conn)
 
-            # Route to appropriate query class based on period
+            # Route to appropriate query based on period
             if period == 'today':
-                # LIVE data from snapshots
-                # See: database/queries/live/live_park_rankings.py
-                query = LiveParkRankingsQuery(conn)
-                rankings = query.get_rankings(
+                # LIVE data from snapshots using fast raw SQL
+                # Uses stats_repo for optimized raw SQL query (not SQLAlchemy ORM)
+                rankings = stats_repo.get_park_live_downtime_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
@@ -102,9 +102,6 @@ def get_park_downtime_rankings():
                         filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
-
-            # Get aggregate statistics (still using StatsRepository for now)
-            stats_repo = StatsRepository(conn)
             aggregate_stats = stats_repo.get_aggregate_park_stats(
                 period=period,
                 filter_disney_universal=filter_disney_universal

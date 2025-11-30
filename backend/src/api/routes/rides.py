@@ -145,13 +145,13 @@ def get_ride_downtime_rankings():
     try:
         with get_db_connection() as conn:
             filter_disney_universal = (filter_type == 'disney-universal')
+            stats_repo = StatsRepository(conn)
 
             # Route to appropriate query class based on period
             if period == 'today':
-                # LIVE data from snapshots
-                # See: database/queries/live/live_ride_rankings.py
-                query = LiveRideRankingsQuery(conn)
-                rankings = query.get_rankings(
+                # LIVE data from snapshots using fast raw SQL
+                # Uses stats_repo for optimized raw SQL query (not SQLAlchemy ORM)
+                rankings = stats_repo.get_ride_live_downtime_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )

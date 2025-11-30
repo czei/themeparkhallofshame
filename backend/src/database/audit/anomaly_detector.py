@@ -1,14 +1,18 @@
 """
-Anomaly Detection
-=================
+Anomaly Detection (Lightweight Version)
+========================================
 
 Statistical anomaly detection for theme park data.
 Catches unusual patterns that hard validation rules might miss.
 
+Uses pre-aggregated daily stats tables for fast queries:
+- park_daily_stats: Park-level metrics
+- ride_daily_stats: Ride-level metrics
+
 Detection Methods:
 1. Z-Score: Values > 3 standard deviations from 30-day mean
 2. Sudden Change: > 200% day-over-day change in metrics
-3. Data Quality: Missing snapshots, coverage gaps
+3. Data Quality: Missing data (parks with no ride stats)
 
 Anomaly Severity:
 - CRITICAL: Likely data error, requires review before publishing
@@ -26,6 +30,7 @@ Usage:
             flag_for_review(anomaly)
 
 Created: 2024-11 (Data Accuracy Audit Framework)
+Updated: 2024-11 (Rewritten to use pre-aggregated tables)
 """
 
 from datetime import date, timedelta
@@ -128,38 +133,41 @@ class AnomalyDetector:
         A sudden spike in shame score could indicate:
         - Real operational issues (valid)
         - Data collection error (needs investigation)
+
+        Uses: park_daily_stats (pre-aggregated)
         """
         baseline_start = target_date - timedelta(days=self.thresholds["baseline_days"])
 
         query = text("""
             WITH park_baseline AS (
                 SELECT
-                    park_id,
-                    AVG(shame_score) AS mean_score,
-                    STDDEV(shame_score) AS std_score
-                FROM v_audit_park_daily
-                WHERE stat_date BETWEEN :start_date AND :end_date
-                AND shame_score IS NOT NULL
-                GROUP BY park_id
+                    pds.park_id,
+                    AVG(pds.shame_score) AS mean_score,
+                    STDDEV(pds.shame_score) AS std_score
+                FROM park_daily_stats pds
+                WHERE pds.stat_date BETWEEN :start_date AND :end_date
+                AND pds.shame_score IS NOT NULL
+                GROUP BY pds.park_id
                 HAVING COUNT(*) >= 7  -- Need at least a week of data
             )
             SELECT
-                vpd.park_id,
-                vpd.park_name,
-                vpd.stat_date,
-                vpd.shame_score AS current_value,
+                pds.park_id,
+                p.name AS park_name,
+                pds.stat_date,
+                pds.shame_score AS current_value,
                 pb.mean_score,
                 pb.std_score,
                 CASE
                     WHEN pb.std_score > 0 THEN
-                        (vpd.shame_score - pb.mean_score) / pb.std_score
+                        (pds.shame_score - pb.mean_score) / pb.std_score
                     ELSE 0
                 END AS zscore
-            FROM v_audit_park_daily vpd
-            JOIN park_baseline pb ON vpd.park_id = pb.park_id
-            WHERE vpd.stat_date = :target_date
+            FROM park_daily_stats pds
+            JOIN parks p ON pds.park_id = p.park_id
+            JOIN park_baseline pb ON pds.park_id = pb.park_id
+            WHERE pds.stat_date = :target_date
             AND pb.std_score > 0
-            AND ABS((vpd.shame_score - pb.mean_score) / pb.std_score) > :threshold
+            AND ABS((pds.shame_score - pb.mean_score) / pb.std_score) > :threshold
         """)
 
         try:
@@ -208,38 +216,43 @@ class AnomalyDetector:
     def _detect_ride_zscore_anomalies(self, target_date: date) -> List[Anomaly]:
         """
         Detect rides with downtime > 3σ from their 30-day mean.
+
+        Uses: ride_daily_stats (pre-aggregated)
+        Note: downtime_minutes is converted to hours for display
         """
         baseline_start = target_date - timedelta(days=self.thresholds["baseline_days"])
 
         query = text("""
             WITH ride_baseline AS (
                 SELECT
-                    ride_id,
-                    AVG(downtime_hours) AS mean_downtime,
-                    STDDEV(downtime_hours) AS std_downtime
-                FROM v_audit_ride_daily
-                WHERE stat_date BETWEEN :start_date AND :end_date
-                GROUP BY ride_id
-                HAVING COUNT(*) >= 7 AND STDDEV(downtime_hours) > 0.1
+                    rds.ride_id,
+                    AVG(rds.downtime_minutes / 60.0) AS mean_downtime,
+                    STDDEV(rds.downtime_minutes / 60.0) AS std_downtime
+                FROM ride_daily_stats rds
+                WHERE rds.stat_date BETWEEN :start_date AND :end_date
+                GROUP BY rds.ride_id
+                HAVING COUNT(*) >= 7 AND STDDEV(rds.downtime_minutes / 60.0) > 0.1
             )
             SELECT
-                vrd.ride_id,
-                vrd.ride_name,
-                vrd.park_name,
-                vrd.stat_date,
-                vrd.downtime_hours AS current_value,
+                rds.ride_id,
+                r.name AS ride_name,
+                p.name AS park_name,
+                rds.stat_date,
+                ROUND(rds.downtime_minutes / 60.0, 2) AS current_value,
                 rb.mean_downtime,
                 rb.std_downtime,
                 CASE
                     WHEN rb.std_downtime > 0 THEN
-                        (vrd.downtime_hours - rb.mean_downtime) / rb.std_downtime
+                        ((rds.downtime_minutes / 60.0) - rb.mean_downtime) / rb.std_downtime
                     ELSE 0
                 END AS zscore
-            FROM v_audit_ride_daily vrd
-            JOIN ride_baseline rb ON vrd.ride_id = rb.ride_id
-            WHERE vrd.stat_date = :target_date
-            AND vrd.downtime_hours > 0
-            AND (vrd.downtime_hours - rb.mean_downtime) / rb.std_downtime > :threshold
+            FROM ride_daily_stats rds
+            JOIN rides r ON rds.ride_id = r.ride_id
+            JOIN parks p ON r.park_id = p.park_id
+            JOIN ride_baseline rb ON rds.ride_id = rb.ride_id
+            WHERE rds.stat_date = :target_date
+            AND rds.downtime_minutes > 0
+            AND ((rds.downtime_minutes / 60.0) - rb.mean_downtime) / rb.std_downtime > :threshold
         """)
 
         try:
@@ -297,13 +310,15 @@ class AnomalyDetector:
         Large sudden changes might indicate:
         - Major incident (valid)
         - Data collection issue (needs investigation)
+
+        Uses: park_daily_stats (pre-aggregated)
         """
         previous_date = target_date - timedelta(days=1)
 
         query = text("""
             SELECT
                 curr.park_id,
-                curr.park_name,
+                p.name AS park_name,
                 curr.stat_date,
                 curr.shame_score AS current_value,
                 prev.shame_score AS previous_value,
@@ -312,8 +327,9 @@ class AnomalyDetector:
                         ((curr.shame_score - prev.shame_score) / prev.shame_score) * 100
                     ELSE NULL
                 END AS pct_change
-            FROM v_audit_park_daily curr
-            JOIN v_audit_park_daily prev
+            FROM park_daily_stats curr
+            JOIN parks p ON curr.park_id = p.park_id
+            JOIN park_daily_stats prev
                 ON curr.park_id = prev.park_id
                 AND prev.stat_date = :previous_date
             WHERE curr.stat_date = :target_date
@@ -367,39 +383,93 @@ class AnomalyDetector:
 
     def _detect_data_quality_issues(self, target_date: date) -> List[Anomaly]:
         """
-        Detect parks with significant missing data.
+        Detect parks with missing or incomplete data.
+
+        Uses: park_daily_stats (pre-aggregated)
+
+        Checks for:
+        1. Active parks with no stats for the target date
+        2. Parks with very few rides tracked (potential data collection issue)
         """
-        query = text("""
-            SELECT
-                park_id,
-                park_name,
-                stat_date,
-                total_rides,
-                total_park_open_snapshots,
-                ROUND(100.0 * total_park_open_snapshots / NULLIF(total_rides * 288, 0), 1) AS coverage_pct
-            FROM v_audit_park_daily
-            WHERE stat_date = :target_date
-            AND total_rides > 0
-            AND (total_park_open_snapshots * 100.0 / (total_rides * 288)) < :threshold
+        anomalies = []
+
+        # Check 1: Active parks with no daily stats
+        missing_query = text("""
+            SELECT p.park_id, p.name AS park_name, :target_date AS stat_date
+            FROM parks p
+            WHERE p.is_active = 1
+            AND NOT EXISTS (
+                SELECT 1 FROM park_daily_stats pds
+                WHERE pds.park_id = p.park_id
+                AND pds.stat_date = :target_date
+            )
         """)
 
         try:
+            result = self.conn.execute(missing_query, {"target_date": target_date})
+            rows = result.fetchall()
+
+            for row in rows:
+                row_dict = dict(row._mapping)
+                anomalies.append(
+                    Anomaly(
+                        anomaly_type="data_quality",
+                        severity="WARNING",
+                        entity_type="park",
+                        entity_id=row_dict["park_id"],
+                        entity_name=row_dict["park_name"],
+                        stat_date=row_dict["stat_date"],
+                        metric="missing_daily_stats",
+                        current_value=0,
+                        expected_value=1.0,  # Expected to have stats
+                        threshold=0,
+                        message="No daily stats recorded (park may be closed)",
+                    )
+                )
+
+        except Exception as e:
+            logger.error(f"Missing data detection failed: {e}")
+
+        # Check 2: Parks with abnormally low ride counts
+        low_rides_query = text("""
+            WITH park_avg_rides AS (
+                SELECT pds.park_id, AVG(pds.total_rides_tracked) AS avg_rides
+                FROM park_daily_stats pds
+                WHERE pds.stat_date BETWEEN :start_date AND :end_date
+                GROUP BY pds.park_id
+                HAVING AVG(pds.total_rides_tracked) > 5
+            )
+            SELECT
+                pds.park_id,
+                p.name AS park_name,
+                pds.stat_date,
+                pds.total_rides_tracked AS current_rides,
+                par.avg_rides,
+                ROUND(100.0 * pds.total_rides_tracked / par.avg_rides, 1) AS pct_of_normal
+            FROM park_daily_stats pds
+            JOIN parks p ON pds.park_id = p.park_id
+            JOIN park_avg_rides par ON pds.park_id = par.park_id
+            WHERE pds.stat_date = :target_date
+            AND pds.total_rides_tracked < par.avg_rides * 0.5
+        """)
+
+        try:
+            start_date = target_date - timedelta(days=14)
             result = self.conn.execute(
-                query,
+                low_rides_query,
                 {
                     "target_date": target_date,
-                    "threshold": 100 - self.thresholds["missing_data_pct"],  # <80% coverage
+                    "start_date": start_date,
+                    "end_date": target_date - timedelta(days=1),
                 },
             )
             rows = result.fetchall()
 
-            anomalies = []
             for row in rows:
                 row_dict = dict(row._mapping)
-                coverage = row_dict["coverage_pct"] or 0
+                pct = row_dict["pct_of_normal"] or 0
 
-                # Very low coverage is critical
-                severity = "CRITICAL" if coverage < 50 else "WARNING"
+                severity = "CRITICAL" if pct < 25 else "WARNING"
 
                 anomalies.append(
                     Anomaly(
@@ -409,22 +479,21 @@ class AnomalyDetector:
                         entity_id=row_dict["park_id"],
                         entity_name=row_dict["park_name"],
                         stat_date=row_dict["stat_date"],
-                        metric="snapshot_coverage",
-                        current_value=float(coverage),
-                        expected_value=80.0,  # Target coverage
-                        threshold=self.thresholds["missing_data_pct"],
+                        metric="rides_tracked",
+                        current_value=float(row_dict["current_rides"]),
+                        expected_value=float(row_dict["avg_rides"]),
+                        threshold=50.0,  # <50% of normal
                         message=(
-                            f"Only {coverage:.1f}% snapshot coverage "
-                            f"({row_dict['total_park_open_snapshots']} of expected {row_dict['total_rides'] * 288})"
+                            f"Only {row_dict['current_rides']} rides tracked "
+                            f"({pct:.0f}% of normal {row_dict['avg_rides']:.0f})"
                         ),
                     )
                 )
 
-            return anomalies
-
         except Exception as e:
-            logger.error(f"Data quality detection failed: {e}")
-            return []
+            logger.error(f"Low ride count detection failed: {e}")
+
+        return anomalies
 
     def get_flagged_entities(
         self, target_date: date, severity_filter: Optional[str] = None

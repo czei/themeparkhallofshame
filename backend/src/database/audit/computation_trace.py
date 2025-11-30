@@ -1,15 +1,20 @@
 """
-Computation Trace Generator
-===========================
+Computation Trace Generator (Lightweight Version)
+===================================================
 
 Generates step-by-step calculation traces for any displayed number.
 This is the core of the user-triggered audit feature.
 
+Uses pre-aggregated daily stats tables for fast queries:
+- park_daily_stats: Park-level metrics
+- ride_daily_stats: Ride-level metrics
+- ride_classifications: Tier information
+
 When a user clicks "Verify this number", they see:
-1. Raw data counts (snapshots)
-2. Each calculation step with formula
-3. Final result with verification status
-4. Data quality metrics
+1. Entity identification
+2. Pre-computed daily stats
+3. Aggregation formula
+4. Final result with verification status
 
 Usage:
     from database.audit import ComputationTracer
@@ -26,6 +31,7 @@ Usage:
     # Returns full computation trace showing how 2.45 was calculated
 
 Created: 2024-11 (Data Accuracy Audit Framework)
+Updated: 2024-11 (Rewritten to use pre-aggregated tables)
 """
 
 from datetime import date, datetime, timedelta
@@ -387,20 +393,22 @@ class ComputationTracer:
     def _get_ride_level_stats(
         self, park_id: int, start_date: date, end_date: date
     ) -> List[Dict[str, Any]]:
-        """Get ride-level stats from audit view."""
+        """Get ride-level stats from pre-aggregated tables."""
         query = text("""
             SELECT
-                ride_id,
-                ride_name,
-                SUM(total_snapshots) AS total_snapshots,
-                SUM(down_snapshots) AS down_snapshots,
-                ROUND(SUM(downtime_hours), 2) AS downtime_hours,
-                tier,
-                tier_weight
-            FROM v_audit_ride_daily
-            WHERE park_id = :park_id
-            AND stat_date BETWEEN :start_date AND :end_date
-            GROUP BY ride_id, ride_name, tier, tier_weight
+                rds.ride_id,
+                r.name AS ride_name,
+                SUM(rds.operating_hours_minutes) AS operating_minutes,
+                SUM(rds.downtime_minutes) AS downtime_minutes,
+                ROUND(SUM(rds.downtime_minutes) / 60.0, 2) AS downtime_hours,
+                rc.tier,
+                COALESCE(rc.weight, 2) AS tier_weight
+            FROM ride_daily_stats rds
+            JOIN rides r ON rds.ride_id = r.ride_id
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            WHERE r.park_id = :park_id
+            AND rds.stat_date BETWEEN :start_date AND :end_date
+            GROUP BY rds.ride_id, r.name, rc.tier, rc.weight
             ORDER BY downtime_hours DESC
         """)
         result = self.conn.execute(
@@ -411,15 +419,17 @@ class ComputationTracer:
     def _get_weighted_stats(
         self, park_id: int, start_date: date, end_date: date
     ) -> Dict[str, Any]:
-        """Get weighted downtime calculation."""
+        """Get weighted downtime calculation from pre-aggregated tables."""
         query = text("""
             SELECT
-                ROUND(SUM(downtime_hours * tier_weight), 2) AS weighted_downtime_hours,
-                SUM(tier_weight) AS total_park_weight,
-                COUNT(DISTINCT ride_id) AS total_rides
-            FROM v_audit_ride_daily
-            WHERE park_id = :park_id
-            AND stat_date BETWEEN :start_date AND :end_date
+                ROUND(SUM((rds.downtime_minutes / 60.0) * COALESCE(rc.weight, 2)), 2) AS weighted_downtime_hours,
+                SUM(COALESCE(rc.weight, 2)) AS total_park_weight,
+                COUNT(DISTINCT rds.ride_id) AS total_rides
+            FROM ride_daily_stats rds
+            JOIN rides r ON rds.ride_id = r.ride_id
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            WHERE r.park_id = :park_id
+            AND rds.stat_date BETWEEN :start_date AND :end_date
         """)
         result = self.conn.execute(
             query, {"park_id": park_id, "start_date": start_date, "end_date": end_date}
@@ -429,18 +439,21 @@ class ComputationTracer:
     def _calculate_shame_score(
         self, park_id: int, start_date: date, end_date: date
     ) -> Dict[str, Any]:
-        """Calculate final shame score."""
+        """Calculate final shame score from pre-aggregated tables."""
         query = text("""
             SELECT
-                ROUND(SUM(downtime_hours * tier_weight), 2) AS weighted_downtime_hours,
-                SUM(tier_weight) AS total_park_weight,
+                ROUND(SUM((rds.downtime_minutes / 60.0) * COALESCE(rc.weight, 2)), 2) AS weighted_downtime_hours,
+                SUM(COALESCE(rc.weight, 2)) AS total_park_weight,
                 ROUND(
-                    SUM(downtime_hours * tier_weight) / NULLIF(SUM(tier_weight), 0),
+                    SUM((rds.downtime_minutes / 60.0) * COALESCE(rc.weight, 2)) /
+                    NULLIF(SUM(COALESCE(rc.weight, 2)), 0),
                     2
                 ) AS shame_score
-            FROM v_audit_ride_daily
-            WHERE park_id = :park_id
-            AND stat_date BETWEEN :start_date AND :end_date
+            FROM ride_daily_stats rds
+            JOIN rides r ON rds.ride_id = r.ride_id
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            WHERE r.park_id = :park_id
+            AND rds.stat_date BETWEEN :start_date AND :end_date
         """)
         result = self.conn.execute(
             query, {"park_id": park_id, "start_date": start_date, "end_date": end_date}
@@ -450,18 +463,22 @@ class ComputationTracer:
     def _get_ride_snapshot_breakdown(
         self, ride_id: int, start_date: date, end_date: date
     ) -> Dict[str, Any]:
-        """Get snapshot breakdown for a single ride."""
+        """Get ride stats breakdown from pre-aggregated tables."""
+        # Note: Pre-aggregated tables have minutes, not snapshot counts
+        # We convert to equivalent metrics
         query = text("""
             SELECT
-                SUM(total_snapshots) AS total_snapshots,
-                SUM(park_open_snapshots) AS park_open_snapshots,
-                SUM(operating_snapshots) AS operating_snapshots,
-                SUM(down_snapshots) AS down_snapshots,
-                SUM(closed_snapshots) AS closed_snapshots,
-                SUM(refurbishment_snapshots) AS refurbishment_snapshots
-            FROM v_audit_ride_daily
-            WHERE ride_id = :ride_id
-            AND stat_date BETWEEN :start_date AND :end_date
+                SUM(rds.operating_hours_minutes) AS operating_minutes,
+                SUM(rds.uptime_minutes) AS uptime_minutes,
+                SUM(rds.downtime_minutes) AS downtime_minutes,
+                -- Convert to snapshot equivalents (5 min intervals)
+                ROUND(SUM(rds.operating_hours_minutes) / 5) AS park_open_snapshots,
+                ROUND(SUM(rds.uptime_minutes) / 5) AS operating_snapshots,
+                ROUND(SUM(rds.downtime_minutes) / 5) AS down_snapshots,
+                ROUND((SUM(rds.operating_hours_minutes) - SUM(rds.uptime_minutes) - SUM(rds.downtime_minutes)) / 5) AS other_snapshots
+            FROM ride_daily_stats rds
+            WHERE rds.ride_id = :ride_id
+            AND rds.stat_date BETWEEN :start_date AND :end_date
         """)
         result = self.conn.execute(
             query, {"ride_id": ride_id, "start_date": start_date, "end_date": end_date}
@@ -471,16 +488,16 @@ class ComputationTracer:
     def _get_data_quality(
         self, park_id: int, start_date: date, end_date: date
     ) -> Dict[str, Any]:
-        """Get data quality metrics for a park."""
+        """Get data quality metrics for a park from pre-aggregated tables."""
         query = text("""
             SELECT
-                SUM(total_rides) AS total_rides,
-                SUM(total_ride_snapshots) AS total_snapshots,
-                SUM(total_park_open_snapshots) AS park_open_snapshots,
-                COUNT(DISTINCT stat_date) AS days_with_data
-            FROM v_audit_park_daily
-            WHERE park_id = :park_id
-            AND stat_date BETWEEN :start_date AND :end_date
+                AVG(pds.total_rides_tracked) AS avg_rides_tracked,
+                SUM(pds.total_downtime_hours) AS total_downtime_hours,
+                AVG(pds.avg_uptime_percentage) AS avg_uptime_percentage,
+                COUNT(DISTINCT pds.stat_date) AS days_with_data
+            FROM park_daily_stats pds
+            WHERE pds.park_id = :park_id
+            AND pds.stat_date BETWEEN :start_date AND :end_date
         """)
         result = self.conn.execute(
             query, {"park_id": park_id, "start_date": start_date, "end_date": end_date}
@@ -491,17 +508,16 @@ class ComputationTracer:
 
         data = dict(result._mapping)
         days = (end_date - start_date).days + 1
-        expected_snapshots = (data.get("total_rides") or 0) * 288 * days
 
         return {
-            "total_snapshots": data.get("total_snapshots", 0),
-            "park_open_snapshots": data.get("park_open_snapshots", 0),
-            "expected_snapshots": expected_snapshots,
-            "coverage_percentage": round(
-                100.0 * (data.get("park_open_snapshots") or 0) / max(expected_snapshots, 1), 1
-            ),
+            "avg_rides_tracked": data.get("avg_rides_tracked", 0),
+            "total_downtime_hours": data.get("total_downtime_hours", 0),
+            "avg_uptime_percentage": round(data.get("avg_uptime_percentage") or 0, 1),
             "days_with_data": data.get("days_with_data", 0),
             "expected_days": days,
+            "data_completeness": round(
+                100.0 * (data.get("days_with_data") or 0) / max(days, 1), 1
+            ),
         }
 
     def to_dict(self, trace: ComputationTrace) -> Dict[str, Any]:

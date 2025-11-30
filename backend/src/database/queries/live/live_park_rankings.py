@@ -5,47 +5,36 @@ Live Park Rankings Query
 Endpoint: GET /api/parks/downtime?period=today
 UI Location: Parks tab → Downtime Rankings (today)
 
-Returns parks ranked by current-day downtime, calculated from live snapshots.
+Returns parks ranked by current-day downtime from pre-aggregated daily stats.
 
 Database Tables:
 - parks (park metadata)
-- rides (ride metadata)
+- park_daily_stats (pre-aggregated daily statistics)
+- ride_daily_stats (for calculating shame score with tier weights)
 - ride_classifications (tier weights)
-- ride_status_snapshots (live status data)
-- park_activity_snapshots (park open status)
 
-Time Window: Today's operating hours (Pacific time)
+Performance: Uses pre-aggregated tables for <100ms response time.
 
-How to Modify:
-1. For different time window: Modify _get_today_range()
-2. For different weight calculation: Update shame score formula
+Note: Requires hourly aggregation job to keep today's data fresh.
+The aggregation script is: scripts/aggregate_daily.py --date YYYY-MM-DD
 """
 
 from datetime import date, datetime
 from typing import List, Dict, Any
 
-from sqlalchemy import select, func, and_, case
+from sqlalchemy import select, func, and_, or_, text
 from sqlalchemy.engine import Connection
 
-from database.schema import (
-    parks,
-    rides,
-    ride_classifications,
-    ride_status_snapshots,
-    park_activity_snapshots,
-)
-from database.queries.builders import Filters, StatusExpressions
-
-# Each snapshot represents 5 minutes
-SNAPSHOT_INTERVAL_MINUTES = 5
-DEFAULT_TIER_WEIGHT = 2
+from database.schema import parks, rides, ride_classifications
+from database.queries.builders import Filters
+from utils.timezone import get_today_pacific
 
 
 class LiveParkRankingsQuery:
     """
     Query handler for live (today) park rankings.
 
-    Uses snapshot tables instead of aggregated stats.
+    Uses pre-aggregated park_daily_stats for fast queries.
     """
 
     def __init__(self, connection: Connection):
@@ -57,7 +46,7 @@ class LiveParkRankingsQuery:
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """
-        Get live park rankings for today.
+        Get live park rankings for today from pre-aggregated stats.
 
         Args:
             filter_disney_universal: Only Disney/Universal parks
@@ -66,129 +55,41 @@ class LiveParkRankingsQuery:
         Returns:
             List of parks ranked by shame_score (descending)
         """
-        # Get today's date range in Pacific time
-        start_utc, end_utc = self._get_today_range_utc()
+        today = get_today_pacific()
 
-        # Build the query with inline downtime calculation
-        conditions = [
-            rides.c.is_active == True,
-            rides.c.category == "ATTRACTION",
-            parks.c.is_active == True,
-            ride_status_snapshots.c.recorded_at >= start_utc,
-            ride_status_snapshots.c.recorded_at <= end_utc,
-        ]
-
-        if filter_disney_universal:
-            conditions.append(Filters.disney_universal(parks))
-
-        # Downtime case: count snapshots where ride is down and park is open
-        downtime_case = case(
-            (
-                and_(
-                    park_activity_snapshots.c.park_appears_open == True,
-                    StatusExpressions.is_down(ride_status_snapshots),
-                ),
-                SNAPSHOT_INTERVAL_MINUTES,
-            ),
-            else_=0,
-        )
-
-        # Weighted downtime includes tier weight
-        weighted_downtime_case = case(
-            (
-                and_(
-                    park_activity_snapshots.c.park_appears_open == True,
-                    StatusExpressions.is_down(ride_status_snapshots),
-                ),
-                SNAPSHOT_INTERVAL_MINUTES
-                * func.coalesce(ride_classifications.c.tier_weight, DEFAULT_TIER_WEIGHT),
-            ),
-            else_=0,
-        )
-
-        stmt = (
-            select(
-                parks.c.park_id,
-                parks.c.name.label("park_name"),
-                func.concat(parks.c.city, ", ", parks.c.state_province).label("location"),
-                func.round(func.sum(downtime_case) / 60.0, 2).label(
-                    "total_downtime_hours"
-                ),
-                func.round(
-                    func.sum(weighted_downtime_case)
-                    / 60.0
-                    / func.nullif(
-                        func.sum(
-                            func.coalesce(ride_classifications.c.tier_weight, DEFAULT_TIER_WEIGHT)
-                        ),
-                        0,
+        # Use raw SQL for optimal performance with the pre-aggregated tables
+        # Calculate shame_score from ride-level data with tier weights
+        query = text("""
+            SELECT
+                p.park_id,
+                p.name AS park_name,
+                CONCAT(p.city, ', ', p.state_province) AS location,
+                COALESCE(pds.total_downtime_hours, 0) AS total_downtime_hours,
+                COALESCE(
+                    ROUND(
+                        SUM((rds.downtime_minutes / 60.0) * COALESCE(rc.weight, 2)) /
+                        NULLIF(SUM(COALESCE(rc.weight, 2)), 0),
+                        2
                     ),
-                    2,
-                ).label("shame_score"),
-                func.count(
-                    func.distinct(
-                        case(
-                            (StatusExpressions.is_down(ride_status_snapshots), rides.c.ride_id),
-                            else_=None,
-                        )
-                    )
-                ).label("affected_rides_count"),
-            )
-            .select_from(
-                parks.join(rides, parks.c.park_id == rides.c.park_id)
-                .join(
-                    ride_status_snapshots,
-                    rides.c.ride_id == ride_status_snapshots.c.ride_id,
-                )
-                .outerjoin(
-                    ride_classifications,
-                    rides.c.ride_id == ride_classifications.c.ride_id,
-                )
-                .outerjoin(
-                    park_activity_snapshots,
-                    and_(
-                        parks.c.park_id == park_activity_snapshots.c.park_id,
-                        park_activity_snapshots.c.recorded_at
-                        == ride_status_snapshots.c.recorded_at,
-                    ),
-                )
-            )
-            .where(and_(*conditions))
-            .group_by(parks.c.park_id, parks.c.name, parks.c.city, parks.c.state_province)
-            .having(func.sum(downtime_case) > 0)
-            .order_by(
-                func.round(
-                    func.sum(weighted_downtime_case)
-                    / 60.0
-                    / func.nullif(
-                        func.sum(
-                            func.coalesce(ride_classifications.c.tier_weight, DEFAULT_TIER_WEIGHT)
-                        ),
-                        0,
-                    ),
-                    2,
-                ).desc()
-            )
-            .limit(limit)
-        )
+                    0
+                ) AS shame_score,
+                COALESCE(pds.rides_with_downtime, 0) AS affected_rides_count
+            FROM parks p
+            INNER JOIN park_daily_stats pds ON p.park_id = pds.park_id
+            LEFT JOIN rides r ON p.park_id = r.park_id AND r.is_active = 1 AND r.category = 'ATTRACTION'
+            LEFT JOIN ride_daily_stats rds ON r.ride_id = rds.ride_id AND rds.stat_date = :today
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            WHERE pds.stat_date = :today
+            AND p.is_active = 1
+            AND pds.total_downtime_hours > 0
+            {filter_clause}
+            GROUP BY p.park_id, p.name, p.city, p.state_province,
+                     pds.total_downtime_hours, pds.rides_with_downtime
+            ORDER BY shame_score DESC
+            LIMIT :limit
+        """.format(
+            filter_clause="AND (p.is_disney = 1 OR p.is_universal = 1)" if filter_disney_universal else ""
+        ))
 
-        result = self.conn.execute(stmt)
+        result = self.conn.execute(query, {"today": today, "limit": limit})
         return [dict(row._mapping) for row in result]
-
-    def _get_today_range_utc(self):
-        """
-        Get today's date range in UTC (based on Pacific time).
-
-        Returns:
-            Tuple of (start_utc, end_utc) datetimes
-        """
-        # Import here to avoid circular dependency
-        try:
-            from utils.timezone import get_pacific_day_range_utc
-            return get_pacific_day_range_utc(date.today())
-        except ImportError:
-            # Fallback: use today's date in UTC
-            today = date.today()
-            start = datetime.combine(today, datetime.min.time())
-            end = datetime.combine(today, datetime.max.time())
-            return start, end

@@ -308,31 +308,41 @@ class AggregationService:
         # Calculate downtime hours and uptime percentage
         total_snapshots = row.total_snapshots or 0
         downtime_snapshots = row.total_downtime_snapshots or 0
+        operating_minutes = float(operating_session['operating_minutes'])
 
         if total_snapshots > 0:
             downtime_ratio = float(downtime_snapshots) / float(total_snapshots)
-            operating_minutes = float(operating_session['operating_minutes'])
             operating_hours = operating_minutes / 60.0
             total_downtime_hours = operating_hours * downtime_ratio
             avg_uptime_percentage = ((float(total_snapshots) - float(downtime_snapshots)) / float(total_snapshots)) * 100.0
         else:
             total_downtime_hours = 0.0
             avg_uptime_percentage = 0.0
-            operating_hours = float(operating_session['operating_minutes']) / 60.0
+            operating_hours = operating_minutes / 60.0
+
+        # Calculate shame_score using tier weights
+        # Formula: weighted_downtime_hours / total_park_weight
+        shame_score = self._calculate_park_shame_score(
+            park_id=park_id,
+            utc_start=utc_start,
+            utc_end=utc_end,
+            operating_minutes=operating_minutes
+        )
 
         # Insert/update park daily stats
         upsert_query = text("""
             INSERT INTO park_daily_stats (
                 park_id, stat_date, total_downtime_hours, avg_uptime_percentage,
-                rides_with_downtime, total_rides_tracked, operating_hours_minutes
+                shame_score, rides_with_downtime, total_rides_tracked, operating_hours_minutes
             )
             VALUES (
                 :park_id, :stat_date, :total_downtime_hours, :avg_uptime_percentage,
-                :rides_with_downtime, :total_rides_tracked, :operating_hours_minutes
+                :shame_score, :rides_with_downtime, :total_rides_tracked, :operating_hours_minutes
             )
             ON DUPLICATE KEY UPDATE
                 total_downtime_hours = VALUES(total_downtime_hours),
                 avg_uptime_percentage = VALUES(avg_uptime_percentage),
+                shame_score = VALUES(shame_score),
                 rides_with_downtime = VALUES(rides_with_downtime),
                 total_rides_tracked = VALUES(total_rides_tracked),
                 operating_hours_minutes = VALUES(operating_hours_minutes)
@@ -343,12 +353,107 @@ class AggregationService:
             "stat_date": stat_date,
             "total_downtime_hours": round(total_downtime_hours, 2),
             "avg_uptime_percentage": round(avg_uptime_percentage, 2),
+            "shame_score": round(shame_score, 3) if shame_score else None,
             "rides_with_downtime": row.rides_with_downtime or 0,
             "total_rides_tracked": row.total_rides_tracked or 0,
             "operating_hours_minutes": int(operating_minutes)
         })
 
         logger.debug(f"Aggregated park {park_id} daily stats for {stat_date}")
+
+    def _calculate_park_shame_score(
+        self,
+        park_id: int,
+        utc_start: datetime,
+        utc_end: datetime,
+        operating_minutes: float
+    ) -> Optional[float]:
+        """
+        Calculate shame score for a park based on weighted ride downtime.
+
+        Shame Score = total_weighted_downtime_hours / total_park_weight
+
+        Where:
+        - total_weighted_downtime_hours = SUM(ride_downtime_hours * tier_weight)
+        - total_park_weight = SUM(tier_weight) for all rides in the park
+
+        Args:
+            park_id: Park ID
+            utc_start: Operating session start (UTC)
+            utc_end: Operating session end (UTC)
+            operating_minutes: Total operating minutes for the day
+
+        Returns:
+            Shame score (float) or None if no data
+        """
+        if operating_minutes <= 0:
+            return None
+
+        operating_hours = operating_minutes / 60.0
+
+        # Calculate weighted downtime and total park weight in a single query
+        shame_query = text("""
+            SELECT
+                SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight,
+                SUM(
+                    COALESCE(rc.tier_weight, 2) *
+                    (SUM(CASE WHEN rss.computed_is_open = FALSE THEN 1 ELSE 0 END) /
+                     NULLIF(COUNT(rss.snapshot_id), 0))
+                ) AS weighted_downtime_ratio
+            FROM rides r
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            LEFT JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+                AND rss.recorded_at >= :utc_start
+                AND rss.recorded_at <= :utc_end
+            WHERE r.park_id = :park_id
+                AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+        """)
+
+        # More accurate approach: calculate per-ride then aggregate
+        ride_query = text("""
+            SELECT
+                r.ride_id,
+                COALESCE(rc.tier_weight, 2) AS tier_weight,
+                COUNT(rss.snapshot_id) AS total_snapshots,
+                SUM(CASE WHEN rss.computed_is_open = FALSE THEN 1 ELSE 0 END) AS downtime_snapshots
+            FROM rides r
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            LEFT JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+                AND rss.recorded_at >= :utc_start
+                AND rss.recorded_at <= :utc_end
+            WHERE r.park_id = :park_id
+                AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+            GROUP BY r.ride_id, rc.tier_weight
+        """)
+
+        result = self.conn.execute(ride_query, {
+            "park_id": park_id,
+            "utc_start": utc_start,
+            "utc_end": utc_end
+        })
+
+        total_park_weight = 0.0
+        total_weighted_downtime_hours = 0.0
+
+        for ride in result:
+            tier_weight = float(ride.tier_weight or 2)
+            total_park_weight += tier_weight
+
+            total_snapshots = ride.total_snapshots or 0
+            downtime_snapshots = ride.downtime_snapshots or 0
+
+            if total_snapshots > 0:
+                downtime_ratio = float(downtime_snapshots) / float(total_snapshots)
+                ride_downtime_hours = operating_hours * downtime_ratio
+                total_weighted_downtime_hours += ride_downtime_hours * tier_weight
+
+        if total_park_weight <= 0:
+            return None
+
+        shame_score = total_weighted_downtime_hours / total_park_weight
+        return shame_score
 
     def _aggregate_rides_daily_stats(
         self,

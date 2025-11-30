@@ -1875,3 +1875,81 @@ footer a:hover,
         flex-wrap: wrap;
     }
 }
+
+/* ========================================
+   TRENDS CHARTS - Mary Blair Style
+   ======================================== */
+
+.trends-charts {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 24px;
+    margin-bottom: 32px;
+}
+
+.chart-container {
+    background: var(--warm-white);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    border: 1px solid rgba(0,0,0,0.05);
+}
+
+.chart-container h3 {
+    font-family: 'Space Grotesk', sans-serif;
+    color: var(--deep-teal);
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 8px 0;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--coral);
+}
+
+.chart-wrapper {
+    position: relative;
+    height: 280px;
+    width: 100%;
+}
+
+.mock-data-indicator {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--gold);
+    font-style: italic;
+    margin-bottom: 12px;
+    padding: 6px 10px;
+    background: rgba(255, 182, 39, 0.1);
+    border-radius: 4px;
+    border-left: 3px solid var(--gold);
+}
+
+/* Chart legend styling override */
+.trends-charts canvas {
+    font-family: 'Inter', sans-serif !important;
+}
+
+/* Responsive: stack charts on tablet/mobile */
+@media (max-width: 1024px) {
+    .trends-charts {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+
+    .chart-wrapper {
+        height: 250px;
+    }
+}
+
+@media (max-width: 768px) {
+    .chart-container {
+        padding: 16px;
+    }
+
+    .chart-container h3 {
+        font-size: 0.9rem;
+    }
+
+    .chart-wrapper {
+        height: 220px;
+    }
+}

@@ -3228,3 +3228,475 @@ class StatsRepository:
             summary["total"] += count
 
         return summary
+
+    # Chart Data Methods for Trends Visualization
+
+    def get_park_shame_score_history(
+        self,
+        start_date: date,
+        end_date: date,
+        filter_disney_universal: bool = True,
+        limit: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Get historical shame scores for top parks over a date range.
+
+        Returns data formatted for Chart.js line charts.
+
+        Args:
+            start_date: Start date for data
+            end_date: End date for data
+            filter_disney_universal: Filter to only Disney/Universal parks
+            limit: Number of parks to include (default 10)
+
+        Returns:
+            Dict with 'labels' (dates) and 'datasets' (park data series)
+        """
+        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+
+        # First, identify the top parks by total shame score in the period
+        top_parks_query = text(f"""
+            WITH park_weights AS (
+                SELECT
+                    p.park_id,
+                    SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
+                FROM parks p
+                INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'
+                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                WHERE p.is_active = TRUE
+                    {disney_filter}
+                GROUP BY p.park_id
+            )
+            SELECT
+                pds.park_id,
+                p.name AS park_name,
+                SUM(pds.shame_score) AS total_shame_score
+            FROM park_daily_stats pds
+            INNER JOIN parks p ON pds.park_id = p.park_id
+            INNER JOIN park_weights pw ON p.park_id = pw.park_id
+            WHERE pds.stat_date BETWEEN :start_date AND :end_date
+                AND p.is_active = TRUE
+                AND pds.operating_hours_minutes > 0
+                AND pds.shame_score IS NOT NULL
+                {disney_filter}
+            GROUP BY pds.park_id, p.name
+            ORDER BY total_shame_score DESC
+            LIMIT :limit
+        """)
+
+        result = self.conn.execute(top_parks_query, {
+            "start_date": start_date,
+            "end_date": end_date,
+            "limit": limit
+        })
+        top_parks = [dict(row._mapping) for row in result]
+
+        if not top_parks:
+            return {"labels": [], "datasets": []}
+
+        # Get the park IDs
+        park_ids = [p['park_id'] for p in top_parks]
+
+        # Generate all dates in range for labels
+        labels = []
+        current = start_date
+        while current <= end_date:
+            labels.append(current.strftime('%b %d'))
+            current += timedelta(days=1)
+
+        # Get daily shame scores for each park
+        datasets = []
+        for park in top_parks:
+            history_query = text("""
+                SELECT
+                    stat_date,
+                    COALESCE(shame_score, 0) AS shame_score
+                FROM park_daily_stats
+                WHERE park_id = :park_id
+                    AND stat_date BETWEEN :start_date AND :end_date
+                ORDER BY stat_date ASC
+            """)
+
+            result = self.conn.execute(history_query, {
+                "park_id": park['park_id'],
+                "start_date": start_date,
+                "end_date": end_date
+            })
+            scores = {row.stat_date: float(row.shame_score) for row in result}
+
+            # Build data array with None for missing dates
+            data = []
+            current = start_date
+            while current <= end_date:
+                if current in scores:
+                    data.append(round(scores[current], 2))
+                else:
+                    data.append(None)
+                current += timedelta(days=1)
+
+            datasets.append({
+                "label": park['park_name'],
+                "data": data
+            })
+
+        return {
+            "labels": labels,
+            "datasets": datasets
+        }
+
+    def get_ride_downtime_history(
+        self,
+        start_date: date,
+        end_date: date,
+        filter_disney_universal: bool = True,
+        limit: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Get historical downtime percentages for top rides over a date range.
+
+        Returns data formatted for Chart.js line charts.
+
+        Args:
+            start_date: Start date for data
+            end_date: End date for data
+            filter_disney_universal: Filter to only Disney/Universal parks
+            limit: Number of rides to include (default 10)
+
+        Returns:
+            Dict with 'labels' (dates) and 'datasets' (ride data series)
+        """
+        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+
+        # First, identify the top rides by total downtime in the period
+        top_rides_query = text(f"""
+            SELECT
+                rds.ride_id,
+                r.name AS ride_name,
+                p.name AS park_name,
+                SUM(rds.downtime_minutes) AS total_downtime
+            FROM ride_daily_stats rds
+            INNER JOIN rides r ON rds.ride_id = r.ride_id
+            INNER JOIN parks p ON r.park_id = p.park_id
+            WHERE rds.stat_date BETWEEN :start_date AND :end_date
+                AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+                AND p.is_active = TRUE
+                AND rds.operating_hours_minutes > 0
+                {disney_filter}
+            GROUP BY rds.ride_id, r.name, p.name
+            ORDER BY total_downtime DESC
+            LIMIT :limit
+        """)
+
+        result = self.conn.execute(top_rides_query, {
+            "start_date": start_date,
+            "end_date": end_date,
+            "limit": limit
+        })
+        top_rides = [dict(row._mapping) for row in result]
+
+        if not top_rides:
+            return {"labels": [], "datasets": []}
+
+        # Generate all dates in range for labels
+        labels = []
+        current = start_date
+        while current <= end_date:
+            labels.append(current.strftime('%b %d'))
+            current += timedelta(days=1)
+
+        # Get daily downtime percentages for each ride
+        datasets = []
+        for ride in top_rides:
+            history_query = text("""
+                SELECT
+                    stat_date,
+                    CASE
+                        WHEN operating_hours_minutes > 0
+                        THEN ROUND((100.0 - uptime_percentage), 1)
+                        ELSE 0
+                    END AS downtime_percentage
+                FROM ride_daily_stats
+                WHERE ride_id = :ride_id
+                    AND stat_date BETWEEN :start_date AND :end_date
+                ORDER BY stat_date ASC
+            """)
+
+            result = self.conn.execute(history_query, {
+                "ride_id": ride['ride_id'],
+                "start_date": start_date,
+                "end_date": end_date
+            })
+            percentages = {row.stat_date: float(row.downtime_percentage) for row in result}
+
+            # Build data array with None for missing dates
+            data = []
+            current = start_date
+            while current <= end_date:
+                if current in percentages:
+                    data.append(percentages[current])
+                else:
+                    data.append(None)
+                current += timedelta(days=1)
+
+            datasets.append({
+                "label": ride['ride_name'],
+                "park": ride['park_name'],
+                "data": data
+            })
+
+        return {
+            "labels": labels,
+            "datasets": datasets
+        }
+
+    def get_park_hourly_shame_scores(
+        self,
+        target_date: date,
+        filter_disney_universal: bool = True,
+        limit: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Get hourly shame scores for top parks on a specific date.
+
+        Calculates shame score per hour by querying ride_status_snapshots
+        and computing weighted downtime for each hour of the day.
+
+        Args:
+            target_date: The date to get hourly data for (usually today)
+            filter_disney_universal: Filter to only Disney/Universal parks
+            limit: Number of parks to include (default 10)
+
+        Returns:
+            Dict with 'labels' (hours) and 'datasets' (park data series)
+        """
+        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+
+        # Convert target_date to UTC datetime range using existing utility
+        utc_start, utc_end = get_pacific_day_range_utc(target_date)
+
+        # First, identify the top parks by weighted downtime today
+        # Excludes parks that are completely closed (no rides open at all = seasonal closure)
+        top_parks_query = text(f"""
+            WITH park_weights AS (
+                SELECT
+                    p.park_id,
+                    p.name AS park_name,
+                    SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
+                FROM parks p
+                INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'
+                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                WHERE p.is_active = TRUE
+                    {disney_filter}
+                GROUP BY p.park_id, p.name
+            ),
+            park_activity AS (
+                SELECT
+                    r.park_id,
+                    SUM(CASE WHEN rss.computed_is_open = FALSE THEN COALESCE(rc.tier_weight, 2) ELSE 0 END) AS weighted_downtime_count,
+                    SUM(CASE WHEN rss.computed_is_open = TRUE THEN 1 ELSE 0 END) AS open_snapshots
+                FROM ride_status_snapshots rss
+                INNER JOIN rides r ON rss.ride_id = r.ride_id
+                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                WHERE rss.recorded_at >= :utc_start
+                    AND rss.recorded_at <= :utc_end
+                    AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'
+                GROUP BY r.park_id
+            )
+            SELECT
+                pw.park_id,
+                pw.park_name,
+                pw.total_park_weight,
+                COALESCE(pa.weighted_downtime_count, 0) AS weighted_downtime_count
+            FROM park_weights pw
+            INNER JOIN park_activity pa ON pw.park_id = pa.park_id
+            WHERE pa.open_snapshots > 0
+            ORDER BY COALESCE(pa.weighted_downtime_count, 0) DESC
+            LIMIT :limit
+        """)
+
+        result = self.conn.execute(top_parks_query, {
+            "utc_start": utc_start,
+            "utc_end": utc_end,
+            "limit": limit
+        })
+        top_parks = [dict(row._mapping) for row in result]
+
+        if not top_parks:
+            return {"labels": [], "datasets": []}
+
+        # Generate hourly labels (6am to 11pm Pacific - typical park hours)
+        labels = [f"{h}:00" for h in range(6, 24)]
+
+        # Get hourly data for each park
+        datasets = []
+        for park in top_parks:
+            # Note: Using DATE_SUB with INTERVAL 8 HOUR for PST (winter)
+            # MySQL timezone tables aren't loaded so CONVERT_TZ returns NULL
+            hourly_query = text("""
+                SELECT
+                    HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) AS hour_of_day,
+                    COUNT(*) AS total_snapshots,
+                    SUM(CASE WHEN rss.computed_is_open = FALSE THEN COALESCE(rc.tier_weight, 2) ELSE 0 END) AS weighted_downtime,
+                    SUM(COALESCE(rc.tier_weight, 2)) AS total_weight
+                FROM ride_status_snapshots rss
+                INNER JOIN rides r ON rss.ride_id = r.ride_id
+                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                WHERE rss.recorded_at >= :utc_start
+                    AND rss.recorded_at <= :utc_end
+                    AND r.park_id = :park_id
+                    AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'
+                GROUP BY hour_of_day
+                ORDER BY hour_of_day
+            """)
+
+            result = self.conn.execute(hourly_query, {
+                "utc_start": utc_start,
+                "utc_end": utc_end,
+                "park_id": park['park_id']
+            })
+
+            hourly_scores = {}
+            for row in result:
+                if row.hour_of_day is None:
+                    continue
+                hour = int(row.hour_of_day)
+                if row.total_weight and row.total_weight > 0 and row.total_snapshots and row.total_snapshots > 0:
+                    # Shame score = weighted_downtime / total_weight
+                    # Normalized to a percentage-like value
+                    shame_score = round((float(row.weighted_downtime) / float(row.total_weight)) * 100, 2)
+                    hourly_scores[hour] = shame_score
+
+            # Build data array for hours 6-23
+            data = []
+            for h in range(6, 24):
+                if h in hourly_scores:
+                    data.append(hourly_scores[h])
+                else:
+                    data.append(None)
+
+            datasets.append({
+                "label": park['park_name'],
+                "data": data
+            })
+
+        return {
+            "labels": labels,
+            "datasets": datasets
+        }
+
+    def get_ride_hourly_downtime(
+        self,
+        target_date: date,
+        filter_disney_universal: bool = True,
+        limit: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Get hourly downtime percentages for top rides on a specific date.
+
+        Args:
+            target_date: The date to get hourly data for (usually today)
+            filter_disney_universal: Filter to only Disney/Universal parks
+            limit: Number of rides to include (default 10)
+
+        Returns:
+            Dict with 'labels' (hours) and 'datasets' (ride data series)
+        """
+        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+
+        # Convert target_date to UTC datetime range using existing utility
+        utc_start, utc_end = get_pacific_day_range_utc(target_date)
+
+        # First, identify the top rides by downtime today
+        # Excludes rides at closed parks (rides with 0 open snapshots = seasonal closure)
+        top_rides_query = text(f"""
+            SELECT
+                r.ride_id,
+                r.name AS ride_name,
+                p.name AS park_name,
+                COUNT(*) AS total_snapshots,
+                SUM(CASE WHEN rss.computed_is_open = FALSE THEN 1 ELSE 0 END) AS downtime_snapshots,
+                SUM(CASE WHEN rss.computed_is_open = TRUE THEN 1 ELSE 0 END) AS open_snapshots
+            FROM ride_status_snapshots rss
+            INNER JOIN rides r ON rss.ride_id = r.ride_id
+            INNER JOIN parks p ON r.park_id = p.park_id
+            WHERE rss.recorded_at >= :utc_start
+                AND rss.recorded_at <= :utc_end
+                AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+                AND p.is_active = TRUE
+                {disney_filter}
+            GROUP BY r.ride_id, r.name, p.name
+            HAVING downtime_snapshots > 0 AND open_snapshots > 0
+            ORDER BY downtime_snapshots DESC
+            LIMIT :limit
+        """)
+
+        result = self.conn.execute(top_rides_query, {
+            "utc_start": utc_start,
+            "utc_end": utc_end,
+            "limit": limit
+        })
+        top_rides = [dict(row._mapping) for row in result]
+
+        if not top_rides:
+            return {"labels": [], "datasets": []}
+
+        # Generate hourly labels (6am to 11pm Pacific - typical park hours)
+        labels = [f"{h}:00" for h in range(6, 24)]
+
+        # Get hourly data for each ride
+        datasets = []
+        for ride in top_rides:
+            # Note: Using DATE_SUB with INTERVAL 8 HOUR for PST (winter)
+            # MySQL timezone tables aren't loaded so CONVERT_TZ returns NULL
+            hourly_query = text("""
+                SELECT
+                    HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) AS hour_of_day,
+                    COUNT(*) AS total_snapshots,
+                    SUM(CASE WHEN rss.computed_is_open = FALSE THEN 1 ELSE 0 END) AS downtime_snapshots
+                FROM ride_status_snapshots rss
+                WHERE rss.recorded_at >= :utc_start
+                    AND rss.recorded_at <= :utc_end
+                    AND rss.ride_id = :ride_id
+                GROUP BY hour_of_day
+                ORDER BY hour_of_day
+            """)
+
+            result = self.conn.execute(hourly_query, {
+                "utc_start": utc_start,
+                "utc_end": utc_end,
+                "ride_id": ride['ride_id']
+            })
+
+            hourly_downtime = {}
+            for row in result:
+                if row.hour_of_day is None:
+                    continue
+                hour = int(row.hour_of_day)
+                if row.total_snapshots and row.total_snapshots > 0:
+                    downtime_pct = round((float(row.downtime_snapshots) / float(row.total_snapshots)) * 100, 1)
+                    hourly_downtime[hour] = downtime_pct
+
+            # Build data array for hours 6-23
+            data = []
+            for h in range(6, 24):
+                if h in hourly_downtime:
+                    data.append(hourly_downtime[h])
+                else:
+                    data.append(None)
+
+            datasets.append({
+                "label": ride['ride_name'],
+                "park": ride['park_name'],
+                "data": data
+            })
+
+        return {
+            "labels": labels,
+            "datasets": datasets
+        }

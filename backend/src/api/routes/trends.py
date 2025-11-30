@@ -146,6 +146,271 @@ def get_trends():
         }), 500
 
 
+@trends_bp.route('/trends/chart-data', methods=['GET'])
+def get_chart_data():
+    """
+    GET /api/trends/chart-data
+
+    Returns time-series data for charts showing shame score or downtime trends.
+
+    Query Parameters:
+        - period: today | 7days | 30days (default: 7days)
+          - today: Returns hourly breakdown (6am-11pm Pacific)
+          - 7days/30days: Returns daily breakdown
+        - type: parks | rides (default: parks)
+        - filter: disney-universal | all-parks (default: disney-universal)
+        - limit: max entities to return (default: 10, max: 20)
+
+    Returns:
+        JSON response with chart-ready data structure:
+        {
+            "success": true,
+            "chart_data": {
+                "labels": ["6:00", "7:00", ...] or ["Nov 23", "Nov 24", ...],
+                "datasets": [
+                    {"label": "Park Name", "data": [0.21, 0.18, ...]},
+                    ...
+                ]
+            },
+            "mock": false,
+            "granularity": "hourly" or "daily"
+        }
+    """
+    try:
+        # Parse query parameters
+        period = request.args.get('period', '7days')
+        data_type = request.args.get('type', 'parks')
+        park_filter = request.args.get('filter', 'disney-universal')
+        limit = int(request.args.get('limit', 10))
+
+        # Validate parameters
+        valid_periods = ['today', '7days', '30days']
+        valid_types = ['parks', 'rides']
+        valid_filters = ['disney-universal', 'all-parks']
+
+        if period not in valid_periods:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid period. Must be one of: {', '.join(valid_periods)}"
+            }), 400
+
+        if data_type not in valid_types:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid type. Must be one of: {', '.join(valid_types)}"
+            }), 400
+
+        if park_filter not in valid_filters:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid filter. Must be one of: {', '.join(valid_filters)}"
+            }), 400
+
+        if limit < 1 or limit > 20:
+            limit = min(max(limit, 1), 20)
+
+        today = get_today_pacific()
+        is_mock = False
+        granularity = 'daily'
+
+        # Get database connection
+        with get_db_connection() as conn:
+            stats_repo = StatsRepository(conn)
+
+            if period == 'today':
+                # Hourly data for today
+                granularity = 'hourly'
+                if data_type == 'parks':
+                    chart_data = stats_repo.get_park_hourly_shame_scores(
+                        target_date=today,
+                        filter_disney_universal=(park_filter == 'disney-universal'),
+                        limit=limit
+                    )
+                else:
+                    chart_data = stats_repo.get_ride_hourly_downtime(
+                        target_date=today,
+                        filter_disney_universal=(park_filter == 'disney-universal'),
+                        limit=limit
+                    )
+
+                # Generate mock hourly data if empty
+                if not chart_data or not chart_data.get('datasets') or len(chart_data.get('datasets', [])) == 0:
+                    is_mock = True
+                    chart_data = _generate_mock_hourly_chart_data(data_type, limit)
+            else:
+                # Daily data for 7days/30days
+                days = 7 if period == '7days' else 30
+                start_date = today - timedelta(days=days - 1)
+
+                if data_type == 'parks':
+                    chart_data = stats_repo.get_park_shame_score_history(
+                        start_date=start_date,
+                        end_date=today,
+                        filter_disney_universal=(park_filter == 'disney-universal'),
+                        limit=limit
+                    )
+                else:
+                    chart_data = stats_repo.get_ride_downtime_history(
+                        start_date=start_date,
+                        end_date=today,
+                        filter_disney_universal=(park_filter == 'disney-universal'),
+                        limit=limit
+                    )
+
+                # Generate mock daily data if empty
+                if not chart_data or not chart_data.get('datasets') or len(chart_data.get('datasets', [])) == 0:
+                    is_mock = True
+                    chart_data = _generate_mock_chart_data(data_type, days, limit)
+
+        return jsonify({
+            "success": True,
+            "period": period,
+            "type": data_type,
+            "filter": park_filter,
+            "chart_data": chart_data,
+            "mock": is_mock,
+            "granularity": granularity,
+            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
+            "timestamp": datetime.utcnow().isoformat() + 'Z'
+        }), 200
+
+    except ValueError as e:
+        logger.error(f"Validation error in get_chart_data: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 400
+
+    except Exception as e:
+        logger.error(f"Error in get_chart_data: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "Internal server error"
+        }), 500
+
+
+def _generate_mock_chart_data(data_type: str, days: int, limit: int) -> Dict[str, Any]:
+    """
+    Generate mock chart data for demo/development when real data is empty.
+
+    Args:
+        data_type: 'parks' or 'rides'
+        days: Number of days
+        limit: Number of entities
+
+    Returns:
+        Chart data structure with mock values
+    """
+    import random
+    from datetime import date, timedelta
+
+    today = get_today_pacific()
+    labels = [(today - timedelta(days=i)).strftime('%b %d') for i in range(days - 1, -1, -1)]
+
+    if data_type == 'parks':
+        park_names = [
+            "Disney Magic Kingdom", "Universal Studios Florida", "Disney Hollywood Studios",
+            "Universal Islands of Adventure", "Disney EPCOT", "Disney Animal Kingdom",
+            "SeaWorld Orlando", "Busch Gardens Tampa", "Universal Volcano Bay", "LEGOLAND Florida"
+        ]
+        datasets = []
+        for i, name in enumerate(park_names[:limit]):
+            # Generate realistic-looking shame scores (0.05 to 0.5 range)
+            base = random.uniform(0.1, 0.3)
+            data = [round(base + random.uniform(-0.1, 0.15), 2) for _ in range(days)]
+            datasets.append({"label": name, "data": data})
+    else:
+        ride_names = [
+            ("Hagrid's Motorbike Adventure", "Universal Islands of Adventure"),
+            ("Tron Lightcycle Run", "Disney Magic Kingdom"),
+            ("Guardians of the Galaxy", "Disney EPCOT"),
+            ("VelociCoaster", "Universal Islands of Adventure"),
+            ("Rise of the Resistance", "Disney Hollywood Studios"),
+            ("Flight of Passage", "Disney Animal Kingdom"),
+            ("Expedition Everest", "Disney Animal Kingdom"),
+            ("Space Mountain", "Disney Magic Kingdom"),
+            ("Test Track", "Disney EPCOT"),
+            ("Mako", "SeaWorld Orlando")
+        ]
+        datasets = []
+        for i, (ride, park) in enumerate(ride_names[:limit]):
+            # Generate realistic downtime percentages (0% to 15% range)
+            base = random.uniform(2, 8)
+            data = [round(max(0, base + random.uniform(-3, 5)), 1) for _ in range(days)]
+            datasets.append({"label": f"{ride}", "park": park, "data": data})
+
+    return {
+        "labels": labels,
+        "datasets": datasets
+    }
+
+
+def _generate_mock_hourly_chart_data(data_type: str, limit: int) -> Dict[str, Any]:
+    """
+    Generate mock hourly chart data for TODAY when real data is empty.
+
+    Args:
+        data_type: 'parks' or 'rides'
+        limit: Number of entities
+
+    Returns:
+        Chart data structure with mock hourly values (6am-11pm)
+    """
+    import random
+
+    # Hourly labels from 6am to 11pm
+    labels = [f"{h}:00" for h in range(6, 24)]
+    num_hours = 18  # 6am to 11pm
+
+    if data_type == 'parks':
+        park_names = [
+            "Disney Magic Kingdom", "Universal Studios Florida", "Disney Hollywood Studios",
+            "Universal Islands of Adventure", "Disney EPCOT", "Disney Animal Kingdom",
+            "SeaWorld Orlando", "Busch Gardens Tampa", "Universal Volcano Bay", "LEGOLAND Florida"
+        ]
+        datasets = []
+        for i, name in enumerate(park_names[:limit]):
+            # Generate realistic hourly shame scores (higher mid-day due to crowds)
+            data = []
+            for h in range(num_hours):
+                # Simulate higher issues mid-day (hours 4-10 = 10am-4pm)
+                if 4 <= h <= 10:
+                    base = random.uniform(15, 35)
+                else:
+                    base = random.uniform(5, 20)
+                data.append(round(base, 1))
+            datasets.append({"label": name, "data": data})
+    else:
+        ride_names = [
+            ("Hagrid's Motorbike Adventure", "Universal Islands of Adventure"),
+            ("Tron Lightcycle Run", "Disney Magic Kingdom"),
+            ("Guardians of the Galaxy", "Disney EPCOT"),
+            ("VelociCoaster", "Universal Islands of Adventure"),
+            ("Rise of the Resistance", "Disney Hollywood Studios"),
+            ("Flight of Passage", "Disney Animal Kingdom"),
+            ("Expedition Everest", "Disney Animal Kingdom"),
+            ("Space Mountain", "Disney Magic Kingdom"),
+            ("Test Track", "Disney EPCOT"),
+            ("Mako", "SeaWorld Orlando")
+        ]
+        datasets = []
+        for i, (ride, park) in enumerate(ride_names[:limit]):
+            # Generate realistic hourly downtime percentages
+            data = []
+            for h in range(num_hours):
+                # Random chance of downtime each hour
+                if random.random() < 0.3:  # 30% chance of some downtime
+                    data.append(round(random.uniform(10, 80), 1))
+                else:
+                    data.append(0)
+            datasets.append({"label": ride, "park": park, "data": data})
+
+    return {
+        "labels": labels,
+        "datasets": datasets
+    }
+
+
 def _calculate_period_dates(period: str) -> Dict[str, str]:
     """
     Calculate current and previous period date ranges.

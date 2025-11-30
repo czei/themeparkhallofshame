@@ -1,12 +1,29 @@
 /**
  * Theme Park Hall of Shame - Trends Component
  * Displays performance trends showing parks/rides with ≥5% uptime changes
+ * Includes line charts for shame score and downtime visualization
  */
+
+// Mary Blair inspired color palette for charts
+const MARY_BLAIR_COLORS = [
+    '#FF6B5A',  // Coral
+    '#00B8C5',  // Turquoise
+    '#FFB627',  // Gold
+    '#FF9BAA',  // Soft Pink
+    '#9B59B6',  // Purple
+    '#A8E6CF',  // Lime/Mint
+    '#FF8C42',  // Orange
+    '#87CEEB',  // Sky Blue
+    '#E91E63',  // Magenta
+    '#00CED1',  // Dark Cyan
+];
 
 class Trends {
     constructor(apiClient, containerId, initialFilter = 'all-parks') {
         this.apiClient = apiClient;
         this.container = document.getElementById(containerId);
+        this.parksChart = null;  // Chart.js instance for parks
+        this.ridesChart = null;  // Chart.js instance for rides
         this.state = {
             period: '7days',
             filter: initialFilter,
@@ -19,7 +36,11 @@ class Trends {
             ridesImproving: null,
             ridesDeclining: null,
             aggregateStats: null,
-            statusSummary: null
+            statusSummary: null,
+            parksChartData: null,
+            ridesChartData: null,
+            chartsMock: false,
+            chartsGranularity: 'daily'  // 'hourly' for today, 'daily' for 7/30 days
         };
     }
 
@@ -30,8 +51,44 @@ class Trends {
         this.render();
         await Promise.all([
             this.fetchAllTrends(),
-            this.fetchAggregateStats()
+            this.fetchAggregateStats(),
+            this.fetchChartData()
         ]);
+    }
+
+    /**
+     * Fetch chart data for both parks and rides
+     */
+    async fetchChartData() {
+        try {
+            // Pass the actual period - API now supports 'today' with hourly data
+            const params = {
+                period: this.state.period,
+                filter: this.state.filter,
+                limit: 4  // Top 4 worst performers for cleaner charts
+            };
+
+            // Fetch both parks and rides chart data in parallel
+            const [parksResponse, ridesResponse] = await Promise.all([
+                this.apiClient.get('/trends/chart-data', { ...params, type: 'parks' }),
+                this.apiClient.get('/trends/chart-data', { ...params, type: 'rides' })
+            ]);
+
+            const newState = {};
+            if (parksResponse.success) {
+                newState.parksChartData = parksResponse.chart_data;
+                newState.chartsMock = parksResponse.mock;
+                newState.chartsGranularity = parksResponse.granularity || 'daily';
+            }
+            if (ridesResponse.success) {
+                newState.ridesChartData = ridesResponse.chart_data;
+            }
+
+            this.setState(newState);
+            this.renderCharts();
+        } catch (error) {
+            console.error('Failed to fetch chart data:', error);
+        }
     }
 
     /**
@@ -150,11 +207,234 @@ class Trends {
         this.container.innerHTML = `
             <div class="trends-view">
                 ${this.renderAggregateStats()}
+                ${this.renderChartsSection()}
                 ${this.renderContent()}
             </div>
         `;
 
         this.attachEventListeners();
+        // Re-render charts after DOM is updated
+        setTimeout(() => this.renderCharts(), 0);
+    }
+
+    /**
+     * Render the charts section with canvas elements
+     */
+    renderChartsSection() {
+        const mockIndicator = this.state.chartsMock
+            ? '<span class="mock-data-indicator">Sample data shown - real data accumulating</span>'
+            : '';
+
+        return `
+            <div class="trends-charts">
+                <div class="chart-container">
+                    <h3>Park Shame Scores (${this.getPeriodLabel()})</h3>
+                    ${mockIndicator}
+                    <div class="chart-wrapper">
+                        <canvas id="parks-shame-chart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <h3>Ride Downtime % (${this.getPeriodLabel()})</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="rides-downtime-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Get period label for chart titles
+     * Today shows hourly breakdown, other periods show daily trends
+     */
+    getPeriodLabel() {
+        const labels = {
+            'today': 'Today (Hourly)',
+            '7days': 'Last 7 Days',
+            '30days': 'Last 30 Days'
+        };
+        return labels[this.state.period] || 'Last 7 Days';
+    }
+
+    /**
+     * Render Chart.js charts
+     */
+    renderCharts() {
+        if (typeof Chart === 'undefined') {
+            console.warn('Chart.js not loaded');
+            return;
+        }
+
+        this.renderParksChart();
+        this.renderRidesChart();
+    }
+
+    /**
+     * Render parks shame score chart
+     */
+    renderParksChart() {
+        const canvas = document.getElementById('parks-shame-chart');
+        if (!canvas || !this.state.parksChartData) return;
+
+        // Destroy existing chart if any
+        if (this.parksChart) {
+            this.parksChart.destroy();
+        }
+
+        const ctx = canvas.getContext('2d');
+        const chartData = this.state.parksChartData;
+
+        // Add colors to datasets
+        const datasets = chartData.datasets.map((dataset, index) => ({
+            ...dataset,
+            borderColor: MARY_BLAIR_COLORS[index % MARY_BLAIR_COLORS.length],
+            backgroundColor: MARY_BLAIR_COLORS[index % MARY_BLAIR_COLORS.length] + '20',
+            tension: 0.3,
+            borderWidth: 3,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            fill: false
+        }));
+
+        this.parksChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: chartData.labels,
+                datasets: datasets
+            },
+            options: this.getChartOptions('Shame Score')
+        });
+    }
+
+    /**
+     * Render rides downtime chart
+     */
+    renderRidesChart() {
+        const canvas = document.getElementById('rides-downtime-chart');
+        if (!canvas || !this.state.ridesChartData) return;
+
+        // Destroy existing chart if any
+        if (this.ridesChart) {
+            this.ridesChart.destroy();
+        }
+
+        const ctx = canvas.getContext('2d');
+        const chartData = this.state.ridesChartData;
+
+        // Add colors to datasets
+        const datasets = chartData.datasets.map((dataset, index) => ({
+            ...dataset,
+            borderColor: MARY_BLAIR_COLORS[index % MARY_BLAIR_COLORS.length],
+            backgroundColor: MARY_BLAIR_COLORS[index % MARY_BLAIR_COLORS.length] + '20',
+            tension: 0.3,
+            borderWidth: 3,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            fill: false
+        }));
+
+        this.ridesChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: chartData.labels,
+                datasets: datasets
+            },
+            options: this.getChartOptions('Downtime %')
+        });
+    }
+
+    /**
+     * Get common chart options with Mary Blair styling
+     */
+    getChartOptions(yAxisLabel) {
+        return {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        font: {
+                            family: 'Inter',
+                            size: 11
+                        },
+                        usePointStyle: true,
+                        padding: 16,
+                        boxWidth: 8
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(42, 42, 42, 0.95)',
+                    titleFont: {
+                        family: 'Space Grotesk',
+                        size: 13
+                    },
+                    bodyFont: {
+                        family: 'Inter',
+                        size: 12
+                    },
+                    padding: 12,
+                    cornerRadius: 8,
+                    displayColors: true,
+                    callbacks: {
+                        label: function(context) {
+                            const label = context.dataset.label || '';
+                            const value = context.parsed.y;
+                            if (yAxisLabel === 'Downtime %') {
+                                return `${label}: ${value}%`;
+                            }
+                            return `${label}: ${value}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: {
+                        color: 'rgba(0, 0, 0, 0.05)'
+                    },
+                    ticks: {
+                        font: {
+                            family: 'Inter',
+                            size: 11
+                        },
+                        callback: function(value) {
+                            if (yAxisLabel === 'Downtime %') {
+                                return value + '%';
+                            }
+                            return value;
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: yAxisLabel,
+                        font: {
+                            family: 'Space Grotesk',
+                            size: 12,
+                            weight: 600
+                        },
+                        color: '#007B8A'
+                    }
+                },
+                x: {
+                    grid: {
+                        display: false
+                    },
+                    ticks: {
+                        font: {
+                            family: 'Inter',
+                            size: 11
+                        }
+                    }
+                }
+            }
+        };
     }
 
     /**
@@ -422,6 +702,7 @@ class Trends {
         if (newPeriod !== this.state.period) {
             this.state.period = newPeriod;
             this.fetchAllTrends();
+            this.fetchChartData();  // Also refetch chart data
         }
     }
 

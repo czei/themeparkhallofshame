@@ -62,31 +62,39 @@ class TestFilters:
         assert "Universal" in compiled or "universal" in compiled.lower()
 
     def test_active_rides_filter(self):
-        """Test active rides filter generates correct conditions."""
+        """Test active attractions filter generates correct conditions."""
         from database.queries.builders.filters import Filters
         from database.schema import rides, parks
 
-        conditions = Filters.active_rides(rides, parks)
+        # Use active_attractions which combines ride and park active checks
+        condition = Filters.active_attractions(rides, parks)
 
-        # Should return multiple conditions
-        assert len(conditions) >= 2
+        # Compile to SQL string for inspection
+        compiled = str(condition.compile(compile_kwargs={"literal_binds": True}))
 
-    def test_time_period_filter(self):
-        """Test time period filter for stats tables."""
+        # Should check is_active and category
+        assert "is_active" in compiled.lower()
+        assert "category" in compiled.lower() or "ATTRACTION" in compiled
+
+    def test_date_range_filter(self):
+        """Test date range filter for stats tables."""
         from database.queries.builders.filters import Filters
-        from database.schema.stats_tables import park_weekly_stats
+        from database.schema.stats_tables import park_daily_stats
+        from datetime import date
 
-        condition = Filters.time_period(
-            park_weekly_stats,
-            period="7days",
-            year=2024,
-            week=45
+        start = date(2024, 11, 1)
+        end = date(2024, 11, 7)
+        condition = Filters.within_date_range(
+            park_daily_stats.c.stat_date,
+            start_date=start,
+            end_date=end
         )
 
         compiled = str(condition.compile(compile_kwargs={"literal_binds": True}))
 
-        assert "2024" in compiled
-        assert "45" in compiled
+        # Should have date boundaries
+        assert "stat_date" in compiled.lower()
+        assert "2024-11-01" in compiled or "2024-11" in compiled
 
 
 class TestStatusExpressions:
@@ -125,9 +133,9 @@ class TestParkRankingsQuery:
         mock_conn = MockConnection()
         query = ParkDowntimeRankingsQuery(mock_conn)
 
-        # Call method - it will fail on execute but we can inspect the query
+        # Call method with correct parameters
         try:
-            query.get_weekly(year=2024, week_number=45)
+            query.get_weekly(filter_disney_universal=False, limit=50)
         except (TypeError, AttributeError):
             pass  # Expected - mock doesn't return proper results
 
@@ -149,9 +157,12 @@ class TestParkRankingsQuery:
         query = ParkDowntimeRankingsQuery(mock_conn)
 
         try:
-            query.get_weekly(year=2024, week_number=45, filter_disney_universal=True)
+            query.get_weekly(filter_disney_universal=True, limit=50)
         except (TypeError, AttributeError):
             pass
+
+        # Verify query was built
+        assert mock_conn.last_query is not None
 
         compiled = str(mock_conn.last_query.compile(compile_kwargs={"literal_binds": True}))
 
@@ -170,7 +181,7 @@ class TestRideRankingsQuery:
         query = RideDowntimeRankingsQuery(mock_conn)
 
         try:
-            query.get_weekly(year=2024, week_number=45)
+            query.get_weekly(filter_disney_universal=False, limit=50)
         except (TypeError, AttributeError):
             pass
 

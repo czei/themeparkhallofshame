@@ -117,6 +117,10 @@ class StatusSummaryQuery:
             .select_from(
                 rides.join(parks, rides.c.park_id == parks.c.park_id)
                 .join(
+                    latest_snapshot,  # Join the subquery first
+                    rides.c.ride_id == latest_snapshot.c.ride_id,
+                )
+                .join(
                     ride_status_snapshots,
                     and_(
                         rides.c.ride_id == ride_status_snapshots.c.ride_id,

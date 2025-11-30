@@ -3722,3 +3722,141 @@ class StatsRepository:
             "labels": labels,
             "datasets": datasets
         }
+
+    # Live Wait Time Rankings Methods
+
+    def get_ride_live_wait_time_rankings(
+        self,
+        filter_disney_universal: bool = False,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get ride wait time rankings calculated live from today's snapshots.
+
+        This method computes wait times in real-time from ride_status_snapshots,
+        providing up-to-the-minute accuracy for the "Today" period.
+
+        Args:
+            filter_disney_universal: If True, only include Disney & Universal parks
+            limit: Maximum number of rides to return
+
+        Returns:
+            List of rides ranked by average wait time (descending)
+        """
+        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
+
+        # Get Pacific day bounds in UTC - "today" means Pacific calendar day
+        today_pacific = get_today_pacific()
+        start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
+
+        # Use centralized helpers for consistent logic across all queries
+        active_filter = RideFilterSQL.active_attractions_filter("r", "p")
+
+        # CRITICAL: Use helper subqueries that include time window filter
+        # This ensures current_status matches the status summary panel
+        # Pass park_id_expr to ensure rides at closed parks show PARK_CLOSED, not DOWN
+        current_status_sq = RideStatusSQL.current_status_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
+        current_is_open_sq = RideStatusSQL.current_is_open_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
+        park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
+
+        query = text(f"""
+            SELECT
+                r.ride_id,
+                r.queue_times_id,
+                p.queue_times_id AS park_queue_times_id,
+                r.name AS ride_name,
+                p.park_id,
+                p.name AS park_name,
+                CONCAT(p.city, ', ', p.state_province) AS location,
+
+                -- Wait time stats from today's snapshots
+                ROUND(AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END), 1) AS avg_wait_time,
+                MAX(rss.wait_time) AS peak_wait_time,
+
+                -- Get current status using centralized helper (includes time window for consistency)
+                {current_status_sq},
+
+                -- Boolean for frontend compatibility using centralized helper
+                {current_is_open_sq},
+
+                -- Park operating status using centralized helper
+                {park_is_open_sq}
+
+            FROM rides r
+            INNER JOIN parks p ON r.park_id = p.park_id
+            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
+                AND {active_filter}
+                AND rss.wait_time IS NOT NULL
+                AND rss.wait_time > 0
+                {filter_clause}
+            GROUP BY r.ride_id, r.name, p.park_id, p.name, p.city, p.state_province
+            HAVING avg_wait_time > 0
+            ORDER BY avg_wait_time DESC
+            LIMIT :limit
+        """)
+
+        result = self.conn.execute(query, {
+            "limit": limit,
+            "start_utc": start_utc,
+            "end_utc": end_utc
+        })
+        return [dict(row._mapping) for row in result.fetchall()]
+
+    def get_park_live_wait_time_rankings(
+        self,
+        filter_disney_universal: bool = False,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get park wait time rankings calculated live from today's snapshots.
+
+        This method computes wait times in real-time from ride_status_snapshots,
+        providing up-to-the-minute accuracy for the "Today" period.
+
+        Args:
+            filter_disney_universal: If True, only include Disney & Universal parks
+            limit: Maximum number of parks to return
+
+        Returns:
+            List of parks ranked by average wait time (descending)
+        """
+        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
+
+        # Get Pacific day bounds in UTC - "today" means Pacific calendar day
+        start_utc, end_utc = get_pacific_day_range_utc(get_today_pacific())
+
+        # Park operating status
+        park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
+
+        query = text(f"""
+            SELECT
+                p.park_id,
+                p.queue_times_id,
+                p.name AS park_name,
+                CONCAT(p.city, ', ', p.state_province) AS location,
+
+                -- Park-level wait time stats from today's snapshots
+                ROUND(AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END), 1) AS avg_wait_time,
+                MAX(rss.wait_time) AS peak_wait_time,
+
+                -- Park operating status using centralized helper
+                {park_is_open_sq}
+
+            FROM parks p
+            INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
+                AND p.is_active = TRUE
+                AND rss.wait_time IS NOT NULL
+                AND rss.wait_time > 0
+                {filter_clause}
+            GROUP BY p.park_id, p.name, p.city, p.state_province
+            HAVING avg_wait_time > 0
+            ORDER BY avg_wait_time DESC
+            LIMIT :limit
+        """)
+
+        result = self.conn.execute(query, {"limit": limit, "start_utc": start_utc, "end_utc": end_utc})
+        return [dict(row._mapping) for row in result.fetchall()]

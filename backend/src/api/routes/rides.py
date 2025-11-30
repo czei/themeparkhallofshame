@@ -10,7 +10,9 @@ GET /live/status-summary             → database/queries/live/status_summary.py
 GET /rides/downtime?period=today     → database/queries/live/live_ride_rankings.py
 GET /rides/downtime?period=7days     → database/queries/rankings/ride_downtime_rankings.py
 GET /rides/downtime?period=30days    → database/queries/rankings/ride_downtime_rankings.py
-GET /rides/waittimes                 → database/queries/rankings/ride_wait_time_rankings.py
+GET /rides/waittimes?period=today    → StatsRepository.get_ride_live_wait_time_rankings()
+GET /rides/waittimes?period=7days    → database/queries/rankings/ride_wait_time_rankings.py
+GET /rides/waittimes?period=30days   → database/queries/rankings/ride_wait_time_rankings.py
 """
 
 from flask import Blueprint, request, jsonify
@@ -211,9 +213,13 @@ def get_ride_wait_times():
     """
     Get ride wait times for a specified time period.
 
-    Query File Used:
-    ----------------
-    database/queries/rankings/ride_wait_time_rankings.py
+    Query Files Used:
+    -----------------
+    - period=today: StatsRepository.get_ride_live_wait_time_rankings()
+      Uses real-time snapshot data from ride_status_snapshots
+
+    - period=7days/30days: database/queries/rankings/ride_wait_time_rankings.py
+      Uses pre-aggregated data from ride_daily_stats
 
     Query Parameters:
         period (str): Time period - 'today', '7days', '30days' (default: 'today')
@@ -246,13 +252,25 @@ def get_ride_wait_times():
 
     try:
         with get_db_connection() as conn:
-            # See: database/queries/rankings/ride_wait_time_rankings.py
-            query = RideWaitTimeRankingsQuery(conn)
-            wait_times = query.get_by_period(
-                period=period,
-                filter_disney_universal=(filter_type == 'disney-universal'),
-                limit=limit
-            )
+            filter_disney_universal = (filter_type == 'disney-universal')
+
+            # Route to appropriate query based on period
+            if period == 'today':
+                # LIVE data from snapshots using fast raw SQL
+                stats_repo = StatsRepository(conn)
+                wait_times = stats_repo.get_ride_live_wait_time_rankings(
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit
+                )
+            else:
+                # Historical data from aggregated stats
+                # See: database/queries/rankings/ride_wait_time_rankings.py
+                query = RideWaitTimeRankingsQuery(conn)
+                wait_times = query.get_by_period(
+                    period=period,
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit
+                )
 
             # Add Queue-Times.com URLs and rank to wait times
             wait_times_with_urls = []

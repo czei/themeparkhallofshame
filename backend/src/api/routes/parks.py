@@ -9,7 +9,9 @@ Query File Mapping
 GET /parks/downtime?period=today    → database/queries/live/live_park_rankings.py
 GET /parks/downtime?period=7days    → database/queries/rankings/park_downtime_rankings.py
 GET /parks/downtime?period=30days   → database/queries/rankings/park_downtime_rankings.py
-GET /parks/waittimes                → database/queries/rankings/park_wait_time_rankings.py
+GET /parks/waittimes?period=today   → StatsRepository.get_park_live_wait_time_rankings()
+GET /parks/waittimes?period=7days   → database/queries/rankings/park_wait_time_rankings.py
+GET /parks/waittimes?period=30days  → database/queries/rankings/park_wait_time_rankings.py
 GET /parks/<id>/details             → (uses multiple repositories)
 """
 
@@ -147,9 +149,13 @@ def get_park_wait_times():
     """
     Get park-level wait time rankings for specified time period.
 
-    Query File Used:
-    ----------------
-    database/queries/rankings/park_wait_time_rankings.py
+    Query Files Used:
+    -----------------
+    - period=today: StatsRepository.get_park_live_wait_time_rankings()
+      Uses real-time snapshot data from ride_status_snapshots
+
+    - period=7days/30days: database/queries/rankings/park_wait_time_rankings.py
+      Uses pre-aggregated data from park_daily_stats
 
     Query Parameters:
         period (str): Time period - 'today', '7days', '30days' (default: 'today')
@@ -182,13 +188,25 @@ def get_park_wait_times():
 
     try:
         with get_db_connection() as conn:
-            # See: database/queries/rankings/park_wait_time_rankings.py
-            query = ParkWaitTimeRankingsQuery(conn)
-            wait_times = query.get_by_period(
-                period=period,
-                filter_disney_universal=(filter_type == 'disney-universal'),
-                limit=limit
-            )
+            filter_disney_universal = (filter_type == 'disney-universal')
+
+            # Route to appropriate query based on period
+            if period == 'today':
+                # LIVE data from snapshots using fast raw SQL
+                stats_repo = StatsRepository(conn)
+                wait_times = stats_repo.get_park_live_wait_time_rankings(
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit
+                )
+            else:
+                # Historical data from aggregated stats
+                # See: database/queries/rankings/park_wait_time_rankings.py
+                query = ParkWaitTimeRankingsQuery(conn)
+                wait_times = query.get_by_period(
+                    period=period,
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit
+                )
 
             # Add Queue-Times.com URLs and rank to wait times
             wait_times_with_urls = []

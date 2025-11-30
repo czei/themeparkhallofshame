@@ -140,11 +140,10 @@ class Filters:
         Returns:
             Expression: recorded_at >= NOW() - 2 hours
         """
-        from sqlalchemy import func
+        from sqlalchemy import func, text
 
-        return recorded_at_column >= func.date_sub(
-            func.now(), timedelta(hours=LIVE_WINDOW_HOURS)
-        )
+        # Use text() for MySQL INTERVAL syntax - timedelta doesn't work with date_sub
+        return recorded_at_column >= func.now() - text(f"INTERVAL {LIVE_WINDOW_HOURS} HOUR")
 
     @staticmethod
     def within_date_range(

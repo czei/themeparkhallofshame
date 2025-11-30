@@ -17,11 +17,11 @@ Time Window: Last 2 hours (LIVE_WINDOW_HOURS)
 
 Example Response:
 {
-    "operating": 245,
-    "down": 12,
-    "closed": 8,
-    "refurbishment": 3,
-    "park_closed": 15,
+    "OPERATING": 245,
+    "DOWN": 12,
+    "CLOSED": 8,
+    "REFURBISHMENT": 3,
+    "PARK_CLOSED": 15,
     "total": 283
 }
 """
@@ -142,20 +142,20 @@ class StatusSummaryQuery:
 
         if result:
             return {
-                "operating": result.operating or 0,
-                "down": result.down or 0,
-                "closed": result.closed or 0,
-                "refurbishment": result.refurbishment or 0,
-                "park_closed": result.park_closed or 0,
+                "OPERATING": result.operating or 0,
+                "DOWN": result.down or 0,
+                "CLOSED": result.closed or 0,
+                "REFURBISHMENT": result.refurbishment or 0,
+                "PARK_CLOSED": result.park_closed or 0,
                 "total": result.total or 0,
             }
 
         return {
-            "operating": 0,
-            "down": 0,
-            "closed": 0,
-            "refurbishment": 0,
-            "park_closed": 0,
+            "OPERATING": 0,
+            "DOWN": 0,
+            "CLOSED": 0,
+            "REFURBISHMENT": 0,
+            "PARK_CLOSED": 0,
             "total": 0,
         }
 

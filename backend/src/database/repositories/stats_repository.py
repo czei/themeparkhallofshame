@@ -3769,9 +3769,15 @@ class StatsRepository:
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
 
-                -- Wait time stats from today's snapshots
-                ROUND(AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END), 1) AS avg_wait_time,
-                MAX(rss.wait_time) AS peak_wait_time,
+                -- Wait time stats from today's snapshots (field names match frontend expectations)
+                ROUND(AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END), 1) AS avg_wait_minutes,
+                MAX(rss.wait_time) AS peak_wait_minutes,
+
+                -- Ride tier from classifications (frontend displays tier badge)
+                COALESCE(rc.tier, 3) AS tier,
+
+                -- Trend percentage (NULL for live data - would need historical comparison)
+                NULL AS trend_percentage,
 
                 -- Get current status using centralized helper (includes time window for consistency)
                 {current_status_sq},
@@ -3785,14 +3791,15 @@ class StatsRepository:
             FROM rides r
             INNER JOIN parks p ON r.park_id = p.park_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND {active_filter}
                 AND rss.wait_time IS NOT NULL
                 AND rss.wait_time > 0
                 {filter_clause}
-            GROUP BY r.ride_id, r.name, p.park_id, p.name, p.city, p.state_province
-            HAVING avg_wait_time > 0
-            ORDER BY avg_wait_time DESC
+            GROUP BY r.ride_id, r.name, p.park_id, p.name, p.city, p.state_province, rc.tier
+            HAVING avg_wait_minutes > 0
+            ORDER BY avg_wait_minutes DESC
             LIMIT :limit
         """)
 
@@ -3836,9 +3843,15 @@ class StatsRepository:
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
 
-                -- Park-level wait time stats from today's snapshots
-                ROUND(AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END), 1) AS avg_wait_time,
-                MAX(rss.wait_time) AS peak_wait_time,
+                -- Park-level wait time stats from today's snapshots (field names match frontend)
+                ROUND(AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END), 1) AS avg_wait_minutes,
+                MAX(rss.wait_time) AS peak_wait_minutes,
+
+                -- Count of rides reporting wait times (frontend displays in Rides column)
+                COUNT(DISTINCT r.ride_id) AS rides_reporting,
+
+                -- Trend percentage (NULL for live data - would need historical comparison)
+                NULL AS trend_percentage,
 
                 -- Park operating status using centralized helper
                 {park_is_open_sq}
@@ -3853,8 +3866,8 @@ class StatsRepository:
                 AND rss.wait_time > 0
                 {filter_clause}
             GROUP BY p.park_id, p.name, p.city, p.state_province
-            HAVING avg_wait_time > 0
-            ORDER BY avg_wait_time DESC
+            HAVING avg_wait_minutes > 0
+            ORDER BY avg_wait_minutes DESC
             LIMIT :limit
         """)
 

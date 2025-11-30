@@ -94,15 +94,11 @@ def get_park_downtime_rankings():
                 query = ParkDowntimeRankingsQuery(conn)
                 if period == '7days':
                     rankings = query.get_weekly(
-                        year=datetime.now().year,
-                        week_number=datetime.now().isocalendar()[1],
                         filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
                 else:  # 30days
                     rankings = query.get_monthly(
-                        year=datetime.now().year,
-                        month=datetime.now().month,
                         filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )

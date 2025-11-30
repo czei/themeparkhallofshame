@@ -3002,7 +3002,11 @@ class StatsRepository:
             LIMIT :limit
         """)
 
-        result = self.conn.execute(query, {"limit": limit, "start_utc": start_utc, "end_utc": end_utc})
+        result = self.conn.execute(query, {
+            "limit": limit,
+            "start_utc": start_utc,
+            "end_utc": end_utc
+        })
         return [dict(row._mapping) for row in result.fetchall()]
 
     def get_ride_live_downtime_rankings(
@@ -3749,6 +3753,10 @@ class StatsRepository:
         today_pacific = get_today_pacific()
         start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
 
+        # Calculate yesterday's date for trend comparison
+        from datetime import timedelta
+        yesterday_pacific = today_pacific - timedelta(days=1)
+
         # Use centralized helpers for consistent logic across all queries
         active_filter = RideFilterSQL.active_attractions_filter("r", "p")
 
@@ -3776,8 +3784,18 @@ class StatsRepository:
                 -- Ride tier from classifications (frontend displays tier badge)
                 COALESCE(rc.tier, 3) AS tier,
 
-                -- Trend percentage (NULL for live data - would need historical comparison)
-                NULL AS trend_percentage,
+                -- Trend percentage: compare today's avg to yesterday's avg from ride_daily_stats
+                -- Formula: ((today - yesterday) / yesterday) * 100
+                -- NULL if yesterday has no data (ride was closed, new ride, etc.)
+                CASE
+                    WHEN yesterday_stats.avg_wait_time IS NOT NULL AND yesterday_stats.avg_wait_time > 0
+                    THEN ROUND(
+                        ((AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END) - yesterday_stats.avg_wait_time)
+                         / yesterday_stats.avg_wait_time) * 100,
+                        1
+                    )
+                    ELSE NULL
+                END AS trend_percentage,
 
                 -- Get current status using centralized helper (includes time window for consistency)
                 {current_status_sq},
@@ -3792,12 +3810,17 @@ class StatsRepository:
             INNER JOIN parks p ON r.park_id = p.park_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            -- LEFT JOIN yesterday's stats for trend calculation
+            LEFT JOIN ride_daily_stats yesterday_stats
+                ON r.ride_id = yesterday_stats.ride_id
+                AND yesterday_stats.stat_date = :yesterday_date
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND {active_filter}
                 AND rss.wait_time IS NOT NULL
                 AND rss.wait_time > 0
                 {filter_clause}
-            GROUP BY r.ride_id, r.name, p.park_id, p.name, p.city, p.state_province, rc.tier
+            GROUP BY r.ride_id, r.name, p.park_id, p.name, p.city, p.state_province,
+                     rc.tier, yesterday_stats.avg_wait_time
             HAVING avg_wait_minutes > 0
             ORDER BY avg_wait_minutes DESC
             LIMIT :limit
@@ -3806,7 +3829,8 @@ class StatsRepository:
         result = self.conn.execute(query, {
             "limit": limit,
             "start_utc": start_utc,
-            "end_utc": end_utc
+            "end_utc": end_utc,
+            "yesterday_date": yesterday_pacific
         })
         return [dict(row._mapping) for row in result.fetchall()]
 
@@ -3831,7 +3855,12 @@ class StatsRepository:
         filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
 
         # Get Pacific day bounds in UTC - "today" means Pacific calendar day
-        start_utc, end_utc = get_pacific_day_range_utc(get_today_pacific())
+        today_pacific = get_today_pacific()
+        start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
+
+        # Calculate yesterday's date for trend comparison
+        from datetime import timedelta
+        yesterday_pacific = today_pacific - timedelta(days=1)
 
         # Park operating status
         park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
@@ -3850,8 +3879,18 @@ class StatsRepository:
                 -- Count of rides reporting wait times (frontend displays in Rides column)
                 COUNT(DISTINCT r.ride_id) AS rides_reporting,
 
-                -- Trend percentage (NULL for live data - would need historical comparison)
-                NULL AS trend_percentage,
+                -- Trend percentage: compare today's avg to yesterday's avg from park_daily_stats
+                -- Formula: ((today - yesterday) / yesterday) * 100
+                -- NULL if yesterday has no data (park was closed, new park, etc.)
+                CASE
+                    WHEN yesterday_stats.avg_wait_time IS NOT NULL AND yesterday_stats.avg_wait_time > 0
+                    THEN ROUND(
+                        ((AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END) - yesterday_stats.avg_wait_time)
+                         / yesterday_stats.avg_wait_time) * 100,
+                        1
+                    )
+                    ELSE NULL
+                END AS trend_percentage,
 
                 -- Park operating status using centralized helper
                 {park_is_open_sq}
@@ -3860,16 +3899,25 @@ class StatsRepository:
             INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            -- LEFT JOIN yesterday's stats for trend calculation
+            LEFT JOIN park_daily_stats yesterday_stats
+                ON p.park_id = yesterday_stats.park_id
+                AND yesterday_stats.stat_date = :yesterday_date
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND p.is_active = TRUE
                 AND rss.wait_time IS NOT NULL
                 AND rss.wait_time > 0
                 {filter_clause}
-            GROUP BY p.park_id, p.name, p.city, p.state_province
+            GROUP BY p.park_id, p.name, p.city, p.state_province, yesterday_stats.avg_wait_time
             HAVING avg_wait_minutes > 0
             ORDER BY avg_wait_minutes DESC
             LIMIT :limit
         """)
 
-        result = self.conn.execute(query, {"limit": limit, "start_utc": start_utc, "end_utc": end_utc})
+        result = self.conn.execute(query, {
+            "limit": limit,
+            "start_utc": start_utc,
+            "end_utc": end_utc,
+            "yesterday_date": yesterday_pacific
+        })
         return [dict(row._mapping) for row in result.fetchall()]

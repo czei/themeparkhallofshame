@@ -44,6 +44,20 @@ class ParkWaitTimeRankingsQuery:
     def __init__(self, connection: Connection):
         self.conn = connection
 
+    def get_by_period(
+        self,
+        period: str,
+        filter_disney_universal: bool = False,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Get park wait time rankings for the specified period."""
+        if period == 'today':
+            return self.get_weekly(filter_disney_universal, limit)  # Use 7-day data for today
+        elif period == '7days':
+            return self.get_weekly(filter_disney_universal, limit)
+        else:  # 30days
+            return self.get_monthly(filter_disney_universal, limit)
+
     def get_weekly(
         self,
         filter_disney_universal: bool = False,

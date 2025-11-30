@@ -1,13 +1,17 @@
-# Technology Decisions - Theme Park Hall of Shame
+# Architecture & Technology Decisions
 
-**Document Version**: 1.0
-**Last Updated**: 2025-11-22
-**Deployment Target**: AWS Linux (Amazon Linux 2) with Apache Web Server
-**Database**: MySQL/MariaDB (AWS RDS compatible)
+This document explains the technology choices and architecture for the Theme Park Hall of Shame project.
+
+| | |
+|---|---|
+| **Deployment Target** | Linux with Apache/Gunicorn |
+| **Database** | MySQL/MariaDB |
+| **Backend** | Python 3.11+ / Flask |
+| **Frontend** | Static HTML/CSS/JS |
 
 ---
 
-## Executive Summary
+## Overview
 
 This document outlines technology decisions for building a production-ready theme park tracking system with the following constraints:
 

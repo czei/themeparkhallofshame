@@ -51,6 +51,16 @@ class ImprovingParksQuery:
     def __init__(self, connection: Connection):
         self.conn = connection
 
+    def get_improving(
+        self,
+        period: str = '7days',
+        filter_disney_universal: bool = False,
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """Get improving parks for the specified period."""
+        # Currently all periods use weekly data
+        return self.get_weekly(filter_disney_universal, limit)
+
     def get_weekly(
         self,
         filter_disney_universal: bool = False,

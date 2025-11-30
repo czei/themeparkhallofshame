@@ -2928,9 +2928,15 @@ class StatsRepository:
         affected_rides = AffectedRidesSQL.count_distinct_down_rides("r.ride_id", "rss", "pas")
         park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
 
+        # CRITICAL: Only count downtime for rides that have operated at some point today
+        # Rides that have NEVER been OPERATING during the period are likely seasonal closures
+        # or scheduled maintenance, not unplanned outages
+        has_operated = RideStatusSQL.has_operated_subquery("r.ride_id")
+
         query = text(f"""
             WITH park_weights AS (
                 -- Calculate total weight for each park based on tier classifications
+                -- Only count rides that have actually operated today
                 SELECT
                     p.park_id,
                     SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
@@ -2939,6 +2945,7 @@ class StatsRepository:
                     AND r.category = 'ATTRACTION'
                 LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
                 WHERE p.is_active = TRUE
+                    AND {has_operated}
                     {filter_clause}
                 GROUP BY p.park_id
             )
@@ -2987,6 +2994,7 @@ class StatsRepository:
             INNER JOIN park_weights pw ON p.park_id = pw.park_id
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND p.is_active = TRUE
+                AND {has_operated}
                 {filter_clause}
             GROUP BY p.park_id, p.name, p.city, p.state_province, pw.total_park_weight
             HAVING total_downtime_hours > 0  -- Hall of Shame: only parks with actual downtime
@@ -3031,6 +3039,11 @@ class StatsRepository:
         active_filter = RideFilterSQL.active_attractions_filter("r", "p")
         downtime_hours = DowntimeSQL.downtime_hours_rounded("rss", "pas")
         uptime_pct = UptimeSQL.uptime_percentage("rss", "pas")
+
+        # CRITICAL: Only count downtime for rides that have operated at some point today
+        # Rides that have NEVER been OPERATING during the period are likely seasonal closures
+        # or scheduled maintenance, not unplanned outages
+        has_operated = RideStatusSQL.has_operated_subquery("r.ride_id")
 
         # CRITICAL: Use helper subqueries that include time window filter
         # This ensures current_status matches the status summary panel
@@ -3093,6 +3106,7 @@ class StatsRepository:
                 AND prev_day.stat_date = :yesterday_pacific
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND {active_filter}
+                AND {has_operated}
                 {filter_clause}
             GROUP BY r.ride_id, r.name, rc.tier, p.park_id, p.name, p.city, p.state_province, prev_day.downtime_minutes
             HAVING (downtime_hours > 0 AND uptime_percentage > 0) OR current_status = 'DOWN'  -- Include rides with downtime OR currently down

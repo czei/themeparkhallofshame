@@ -77,6 +77,39 @@ class RideStatusSQL:
         return f"({table_alias}.status = 'DOWN' OR ({table_alias}.status IS NULL AND {table_alias}.computed_is_open = FALSE))"
 
     @staticmethod
+    def has_operated_subquery(ride_id_expr: str, start_param: str = ":start_utc", end_param: str = ":end_utc") -> str:
+        """
+        Get SQL EXISTS subquery to check if a ride has operated during a period.
+
+        This is used to filter out rides that have NEVER operated during the
+        measurement period - such rides should not count as having "downtime"
+        since they may be seasonally closed or simply not operating.
+
+        A ride is considered to have operated if it had at least one snapshot
+        with status='OPERATING' or computed_is_open=TRUE.
+
+        Args:
+            ride_id_expr: Expression for the ride_id to check (e.g., "r.ride_id")
+            start_param: SQL parameter name for start time
+            end_param: SQL parameter name for end time
+
+        Returns:
+            SQL EXISTS clause that is TRUE if ride has operated during period
+
+        Example:
+            # Only count downtime for rides that have operated today
+            has_operated = RideStatusSQL.has_operated_subquery("r.ride_id")
+            query = f"... AND {has_operated} ..."
+        """
+        return f"""EXISTS (
+            SELECT 1 FROM ride_status_snapshots rss_op
+            WHERE rss_op.ride_id = {ride_id_expr}
+            AND rss_op.recorded_at >= {start_param}
+            AND rss_op.recorded_at < {end_param}
+            AND (rss_op.status = 'OPERATING' OR (rss_op.status IS NULL AND rss_op.computed_is_open = TRUE))
+        )"""
+
+    @staticmethod
     def current_status_subquery(
         ride_id_expr: str = "r.ride_id",
         include_time_window: bool = True,

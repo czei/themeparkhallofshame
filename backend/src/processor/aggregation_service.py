@@ -10,6 +10,11 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from utils.logger import logger
+from utils.metrics import (
+    calculate_shame_score,
+    calculate_weighted_downtime_hours,
+    DEFAULT_TIER_WEIGHT
+)
 from processor.operating_hours_detector import OperatingHoursDetector
 from processor.status_change_detector import StatusChangeDetector
 
@@ -438,7 +443,7 @@ class AggregationService:
         total_weighted_downtime_hours = 0.0
 
         for ride in result:
-            tier_weight = float(ride.tier_weight or 2)
+            tier_weight = float(ride.tier_weight or DEFAULT_TIER_WEIGHT)
             total_park_weight += tier_weight
 
             total_snapshots = ride.total_snapshots or 0
@@ -447,13 +452,14 @@ class AggregationService:
             if total_snapshots > 0:
                 downtime_ratio = float(downtime_snapshots) / float(total_snapshots)
                 ride_downtime_hours = operating_hours * downtime_ratio
-                total_weighted_downtime_hours += ride_downtime_hours * tier_weight
+                # Use centralized weighted downtime calculation
+                total_weighted_downtime_hours += calculate_weighted_downtime_hours(
+                    ride_downtime_hours,
+                    int(tier_weight)
+                )
 
-        if total_park_weight <= 0:
-            return None
-
-        shame_score = total_weighted_downtime_hours / total_park_weight
-        return shame_score
+        # Use centralized shame score calculation
+        return calculate_shame_score(total_weighted_downtime_hours, total_park_weight)
 
     def _aggregate_rides_daily_stats(
         self,

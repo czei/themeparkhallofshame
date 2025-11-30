@@ -15,12 +15,22 @@ try:
         RideStatusSQL, ParkStatusSQL, DowntimeSQL, UptimeSQL,
         RideFilterSQL, AffectedRidesSQL
     )
+    from ...utils.metrics import (
+        SNAPSHOT_INTERVAL_MINUTES,
+        calculate_shame_score,
+        calculate_downtime_hours
+    )
 except ImportError:
     from utils.logger import logger
     from utils.timezone import get_today_pacific, get_pacific_day_range_utc
     from utils.sql_helpers import (
         RideStatusSQL, ParkStatusSQL, DowntimeSQL, UptimeSQL,
         RideFilterSQL, AffectedRidesSQL
+    )
+    from utils.metrics import (
+        SNAPSHOT_INTERVAL_MINUTES,
+        calculate_shame_score,
+        calculate_downtime_hours
     )
 
 
@@ -3499,18 +3509,33 @@ class StatsRepository:
                 if row.hour_of_day is None:
                     continue
                 hour = int(row.hour_of_day)
-                if row.total_weight and row.total_weight > 0 and row.total_snapshots and row.total_snapshots > 0:
-                    # Shame score = weighted_downtime / total_weight
-                    # Normalized to a percentage-like value
-                    shame_score = round((float(row.weighted_downtime) / float(row.total_weight)) * 100, 2)
-                    hourly_scores[hour] = shame_score
+                if row.total_snapshots and row.total_snapshots > 0:
+                    # Use centralized metrics for consistent calculations
+                    # Convert weighted downtime snapshots to hours using SNAPSHOT_INTERVAL_MINUTES
+                    weighted_downtime_hours = float(row.weighted_downtime) * (SNAPSHOT_INTERVAL_MINUTES / 60.0)
+                    # Calculate shame score using centralized function
+                    hourly_shame = calculate_shame_score(
+                        weighted_downtime_hours,
+                        float(park['total_park_weight'])
+                    )
+                    if hourly_shame is not None:
+                        hourly_scores[hour] = hourly_shame
 
-            # Build data array for hours 6-23
+            # Build CUMULATIVE data array for hours 6-23
+            # Shame score grows throughout the day as downtime accumulates
             data = []
+            cumulative = 0.0
+            first_data_seen = False
             for h in range(6, 24):
                 if h in hourly_scores:
-                    data.append(hourly_scores[h])
+                    first_data_seen = True
+                    cumulative += hourly_scores[h]
+                    data.append(round(cumulative, 2))
+                elif first_data_seen:
+                    # After first data, show cumulative even if no new downtime this hour
+                    data.append(round(cumulative, 2))
                 else:
+                    # Before first data (park not open yet), show null
                     data.append(None)
 
             datasets.append({
@@ -3613,15 +3638,26 @@ class StatsRepository:
                     continue
                 hour = int(row.hour_of_day)
                 if row.total_snapshots and row.total_snapshots > 0:
-                    downtime_pct = round((float(row.downtime_snapshots) / float(row.total_snapshots)) * 100, 1)
-                    hourly_downtime[hour] = downtime_pct
+                    # Use centralized metrics for consistent calculations
+                    # This matches the downtime_hours metric shown in tables
+                    downtime_hours = calculate_downtime_hours(int(row.downtime_snapshots))
+                    hourly_downtime[hour] = downtime_hours
 
-            # Build data array for hours 6-23
+            # Build CUMULATIVE data array for hours 6-23
+            # Downtime grows throughout the day as issues accumulate
             data = []
+            cumulative = 0.0
+            first_data_seen = False
             for h in range(6, 24):
                 if h in hourly_downtime:
-                    data.append(hourly_downtime[h])
+                    first_data_seen = True
+                    cumulative += hourly_downtime[h]
+                    data.append(round(cumulative, 2))
+                elif first_data_seen:
+                    # After first data, show cumulative even if no downtime this hour
+                    data.append(round(cumulative, 2))
                 else:
+                    # Before first data (ride not tracked yet), show null
                     data.append(None)
 
             datasets.append({

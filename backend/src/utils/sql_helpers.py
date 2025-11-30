@@ -7,7 +7,12 @@ helpers to ensure consistent calculations.
 
 IMPORTANT: If you need to change how ride status or park operating hours are
 determined, change it HERE and it will apply everywhere.
+
+NOTE: All core metric constants are defined in metrics.py - SQL helpers
+import from there to ensure consistency with Python calculations.
 """
+
+from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
 
 
 class RideStatusSQL:
@@ -251,8 +256,8 @@ class DowntimeSQL:
     Centralized SQL fragments for downtime calculations.
     """
 
-    # Each snapshot represents approximately 5 minutes
-    SNAPSHOT_INTERVAL_MINUTES = 5
+    # Import from metrics.py for single source of truth
+    # (class attribute referencing module-level import)
 
     @staticmethod
     def downtime_minutes_sum(
@@ -276,7 +281,7 @@ class DowntimeSQL:
 
         return f"""SUM(CASE
             WHEN {park_open} AND {is_down}
-            THEN {DowntimeSQL.SNAPSHOT_INTERVAL_MINUTES}
+            THEN {SNAPSHOT_INTERVAL_MINUTES}
             ELSE 0
         END)"""
 
@@ -327,7 +332,7 @@ class DowntimeSQL:
         return f"""ROUND(
             SUM(CASE
                 WHEN {park_open} AND {is_down}
-                THEN {DowntimeSQL.SNAPSHOT_INTERVAL_MINUTES} * {tier_weight_expr}
+                THEN {SNAPSHOT_INTERVAL_MINUTES} * {tier_weight_expr}
                 ELSE 0
             END) / 60.0,
             {decimal_places}

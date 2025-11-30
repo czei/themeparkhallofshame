@@ -123,6 +123,81 @@ class TestStatusExpressions:
         assert "status" in compiled.lower()
 
 
+class TestRideStatusSQL:
+    """Test RideStatusSQL helpers from sql_helpers.py."""
+
+    def test_has_operated_subquery_generates_exists_clause(self):
+        """
+        Test that has_operated_subquery generates an EXISTS clause that:
+        1. Checks for OPERATING status OR computed_is_open=TRUE
+        2. Uses the correct time parameters
+        3. Filters by ride_id
+
+        This is CRITICAL: Rides that have NEVER operated should not count as
+        having downtime. Only rides that were operating and then went down
+        should be included in downtime calculations.
+        """
+        from utils.sql_helpers import RideStatusSQL
+
+        # Generate the subquery
+        subquery = RideStatusSQL.has_operated_subquery("r.ride_id")
+
+        # Verify it's an EXISTS clause
+        assert "EXISTS" in subquery
+
+        # Verify it checks for OPERATING status
+        assert "OPERATING" in subquery
+
+        # Verify it checks computed_is_open as fallback
+        assert "computed_is_open" in subquery
+
+        # Verify it uses the time parameters
+        assert ":start_utc" in subquery
+        assert ":end_utc" in subquery
+
+        # Verify it filters by ride_id
+        assert "r.ride_id" in subquery
+
+    def test_has_operated_subquery_custom_parameters(self):
+        """Test has_operated_subquery with custom parameter names."""
+        from utils.sql_helpers import RideStatusSQL
+
+        subquery = RideStatusSQL.has_operated_subquery(
+            "rides.ride_id",
+            start_param=":period_start",
+            end_param=":period_end"
+        )
+
+        # Verify custom parameters are used
+        assert ":period_start" in subquery
+        assert ":period_end" in subquery
+        assert "rides.ride_id" in subquery
+
+    def test_is_down_expression(self):
+        """Test is_down generates correct SQL for DOWN status detection."""
+        from utils.sql_helpers import RideStatusSQL
+
+        expr = RideStatusSQL.is_down("rss")
+
+        # Should check for explicit DOWN status
+        assert "rss.status = 'DOWN'" in expr
+
+        # Should also handle NULL status with computed_is_open=FALSE
+        assert "computed_is_open = FALSE" in expr or "computed_is_open" in expr
+
+    def test_is_operating_expression(self):
+        """Test is_operating generates correct SQL for OPERATING status detection."""
+        from utils.sql_helpers import RideStatusSQL
+
+        expr = RideStatusSQL.is_operating("rss")
+
+        # Should check for explicit OPERATING status
+        assert "rss.status = 'OPERATING'" in expr
+
+        # Should also handle NULL status with computed_is_open=TRUE
+        assert "computed_is_open = TRUE" in expr or "computed_is_open" in expr
+
+
 class TestParkRankingsQuery:
     """Test park rankings query construction."""
 

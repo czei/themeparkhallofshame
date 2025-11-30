@@ -185,7 +185,7 @@ class LiveParkRankingsQuery:
         # Import here to avoid circular dependency
         try:
             from utils.timezone import get_pacific_day_range_utc
-            return get_pacific_day_range_utc()
+            return get_pacific_day_range_utc(date.today())
         except ImportError:
             # Fallback: use today's date in UTC
             today = date.today()

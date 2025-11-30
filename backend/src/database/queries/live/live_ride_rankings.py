@@ -156,7 +156,7 @@ class LiveRideRankingsQuery:
         """Get today's date range in UTC."""
         try:
             from utils.timezone import get_pacific_day_range_utc
-            return get_pacific_day_range_utc()
+            return get_pacific_day_range_utc(date.today())
         except ImportError:
             today = date.today()
             start = datetime.combine(today, datetime.min.time())

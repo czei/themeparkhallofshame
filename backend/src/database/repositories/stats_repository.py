@@ -11,9 +11,17 @@ from sqlalchemy.engine import Connection
 try:
     from ...utils.logger import logger
     from ...utils.timezone import get_today_pacific, get_pacific_day_range_utc
+    from ...utils.sql_helpers import (
+        RideStatusSQL, ParkStatusSQL, DowntimeSQL, UptimeSQL,
+        RideFilterSQL, AffectedRidesSQL
+    )
 except ImportError:
     from utils.logger import logger
     from utils.timezone import get_today_pacific, get_pacific_day_range_utc
+    from utils.sql_helpers import (
+        RideStatusSQL, ParkStatusSQL, DowntimeSQL, UptimeSQL,
+        RideFilterSQL, AffectedRidesSQL
+    )
 
 
 class StatsRepository:
@@ -1107,6 +1115,8 @@ class StatsRepository:
         """
         Get ride downtime rankings for a specific day.
 
+        Uses centralized SQL helpers for consistent status logic.
+
         Args:
             stat_date: Date to get rankings for
             filter_disney_universal: If True, only include Disney & Universal parks
@@ -1115,7 +1125,13 @@ class StatsRepository:
         Returns:
             List of rides ranked by downtime hours with current status
         """
-        query = text("""
+        # Use centralized helpers for consistent logic
+        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
+        # Pass park_id_expr to ensure rides at closed parks show PARK_CLOSED, not DOWN
+        current_status_sq = RideStatusSQL.current_status_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
+        current_is_open_sq = RideStatusSQL.current_is_open_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
+
+        query = text(f"""
             SELECT
                 r.ride_id,
                 r.name AS ride_name,
@@ -1127,23 +1143,10 @@ class StatsRepository:
                 rds.uptime_percentage,
                 rds.avg_wait_time,
                 rds.peak_wait_time,
-                -- Get current status from most recent snapshot
-                -- Returns status enum (OPERATING/DOWN/CLOSED/REFURBISHMENT)
-                (
-                    SELECT COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN'))
-                    FROM ride_status_snapshots
-                    WHERE ride_id = r.ride_id
-                    ORDER BY recorded_at DESC
-                    LIMIT 1
-                ) AS current_status,
-                -- Boolean for frontend compatibility (TRUE if OPERATING)
-                (
-                    SELECT COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN')) = 'OPERATING'
-                    FROM ride_status_snapshots
-                    WHERE ride_id = r.ride_id
-                    ORDER BY recorded_at DESC
-                    LIMIT 1
-                ) AS current_is_open,
+                -- Get current status using centralized helper
+                {current_status_sq},
+                -- Boolean for frontend compatibility using centralized helper
+                {current_is_open_sq},
                 -- Trend: compare to previous day
                 CASE
                     WHEN prev_day.downtime_minutes > 0 THEN
@@ -1157,17 +1160,14 @@ class StatsRepository:
                 AND prev_day.stat_date = DATE_SUB(:stat_date, INTERVAL 1 DAY)
             WHERE rds.stat_date = :stat_date
                 AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
+                AND r.category = 'ATTRACTION'
                 AND p.is_active = TRUE
-                AND rds.operating_hours_minutes > 0  -- Exclude rides from closed parks
-                AND rds.downtime_minutes > 0  -- Only show rides with actual downtime (Hall of Shame)
-                {:filter_clause}
+                AND rds.operating_hours_minutes > 0
+                AND rds.downtime_minutes > 0
+                {filter_clause}
             ORDER BY rds.downtime_minutes DESC
             LIMIT :limit
-        """.replace(
-            "{:filter_clause}",
-            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-        ))
+        """)
 
         result = self.conn.execute(query, {
             "stat_date": stat_date,
@@ -1187,6 +1187,8 @@ class StatsRepository:
         Get ride downtime rankings for a specific week.
         Aggregates from daily stats instead of relying on weekly_stats table.
 
+        Uses centralized SQL helpers for consistent status logic.
+
         Args:
             year: Year
             week_number: ISO week number
@@ -1196,7 +1198,11 @@ class StatsRepository:
         Returns:
             List of rides ranked by downtime hours with current status
         """
-        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+        # Use centralized helpers for consistent logic
+        disney_filter = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
+        # Pass park_id_expr to ensure rides at closed parks show PARK_CLOSED, not DOWN
+        current_status_sq = RideStatusSQL.current_status_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
+        current_is_open_sq = RideStatusSQL.current_is_open_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
 
         # Calculate date range for the week (last 7 days including today)
         end_date = date.today()
@@ -1217,30 +1223,17 @@ class StatsRepository:
                 ROUND(AVG(rds.uptime_percentage), 2) AS uptime_percentage,
                 ROUND(AVG(rds.avg_wait_time), 2) AS avg_wait_time,
                 MAX(rds.peak_wait_time) AS peak_wait_time,
-                -- Get current status from most recent snapshot
-                -- Returns status enum (OPERATING/DOWN/CLOSED/REFURBISHMENT)
-                (
-                    SELECT COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN'))
-                    FROM ride_status_snapshots
-                    WHERE ride_id = r.ride_id
-                    ORDER BY recorded_at DESC
-                    LIMIT 1
-                ) AS current_status,
-                -- Boolean for frontend compatibility (TRUE if OPERATING)
-                (
-                    SELECT COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN')) = 'OPERATING'
-                    FROM ride_status_snapshots
-                    WHERE ride_id = r.ride_id
-                    ORDER BY recorded_at DESC
-                    LIMIT 1
-                ) AS current_is_open,
+                -- Get current status using centralized helper
+                {current_status_sq},
+                -- Boolean for frontend compatibility using centralized helper
+                {current_is_open_sq},
                 NULL AS trend_percentage
             FROM ride_daily_stats rds
             JOIN rides r ON rds.ride_id = r.ride_id
             JOIN parks p ON r.park_id = p.park_id
             WHERE rds.stat_date BETWEEN :start_date AND :end_date
                 AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
+                AND r.category = 'ATTRACTION'
                 AND p.is_active = TRUE
                 AND rds.operating_hours_minutes > 0
                 {disney_filter}
@@ -1268,6 +1261,8 @@ class StatsRepository:
         """
         Get ride downtime rankings for a specific month.
 
+        Uses centralized SQL helpers for consistent status logic.
+
         Args:
             year: Year
             month: Month (1-12)
@@ -1277,7 +1272,13 @@ class StatsRepository:
         Returns:
             List of rides ranked by downtime hours with current status
         """
-        query = text("""
+        # Use centralized helpers for consistent logic
+        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
+        # Pass park_id_expr to ensure rides at closed parks show PARK_CLOSED, not DOWN
+        current_status_sq = RideStatusSQL.current_status_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
+        current_is_open_sq = RideStatusSQL.current_is_open_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
+
+        query = text(f"""
             SELECT
                 r.ride_id,
                 r.queue_times_id,
@@ -1291,23 +1292,10 @@ class StatsRepository:
                 rms.uptime_percentage,
                 rms.avg_wait_time,
                 rms.peak_wait_time,
-                -- Get current status from most recent snapshot
-                -- Returns status enum (OPERATING/DOWN/CLOSED/REFURBISHMENT)
-                (
-                    SELECT COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN'))
-                    FROM ride_status_snapshots
-                    WHERE ride_id = r.ride_id
-                    ORDER BY recorded_at DESC
-                    LIMIT 1
-                ) AS current_status,
-                -- Boolean for frontend compatibility (TRUE if OPERATING)
-                (
-                    SELECT COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN')) = 'OPERATING'
-                    FROM ride_status_snapshots
-                    WHERE ride_id = r.ride_id
-                    ORDER BY recorded_at DESC
-                    LIMIT 1
-                ) AS current_is_open,
+                -- Get current status using centralized helper
+                {current_status_sq},
+                -- Boolean for frontend compatibility using centralized helper
+                {current_is_open_sq},
                 -- Trend: compare to previous month
                 CASE
                     WHEN prev_month.downtime_minutes > 0 THEN
@@ -1323,15 +1311,12 @@ class StatsRepository:
             WHERE rms.year = :year
                 AND rms.month = :month
                 AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
+                AND r.category = 'ATTRACTION'
                 AND p.is_active = TRUE
-                {:filter_clause}
+                {filter_clause}
             ORDER BY rms.downtime_minutes DESC
             LIMIT :limit
-        """.replace(
-            "{:filter_clause}",
-            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-        ))
+        """)
 
         # Calculate previous month
         prev_year = year if month > 1 else year - 1
@@ -2869,6 +2854,8 @@ class StatsRepository:
         This method computes downtime in real-time from ride_status_snapshots,
         providing up-to-the-minute accuracy for the "Today" period.
 
+        Uses centralized SQL helpers for consistent status logic.
+
         Args:
             filter_disney_universal: If True, only include Disney & Universal parks
             limit: Maximum number of parks to return
@@ -2876,10 +2863,19 @@ class StatsRepository:
         Returns:
             List of parks ranked by total downtime hours (descending)
         """
-        filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
 
         # Get Pacific day bounds in UTC - "today" means Pacific calendar day
         start_utc, end_utc = get_pacific_day_range_utc(get_today_pacific())
+
+        # Use centralized helpers for consistent logic
+        is_down = RideStatusSQL.is_down("rss")
+        park_open = ParkStatusSQL.park_appears_open_filter("pas")
+        downtime_hours = DowntimeSQL.downtime_hours_rounded("rss", "pas")
+        weighted_downtime = DowntimeSQL.weighted_downtime_hours("rss", "pas", "COALESCE(rc.tier_weight, 2)")
+        uptime_pct = UptimeSQL.uptime_percentage("rss", "pas")
+        affected_rides = AffectedRidesSQL.count_distinct_down_rides("r.ride_id", "rss", "pas")
+        park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
 
         query = text(f"""
             WITH park_weights AS (
@@ -2901,35 +2897,16 @@ class StatsRepository:
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
 
-                -- Calculate total downtime hours from today's snapshots
-                -- Each snapshot interval is ~5 minutes
-                -- Only count status='DOWN' as downtime (not CLOSED or REFURBISHMENT)
-                ROUND(
-                    SUM(CASE
-                        WHEN pas.park_appears_open = TRUE
-                            AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
-                        THEN 5
-                        ELSE 0
-                    END) / 60.0,
-                    2
-                ) AS total_downtime_hours,
+                -- Calculate total downtime hours using centralized helper
+                {downtime_hours} AS total_downtime_hours,
 
-                -- Calculate weighted downtime hours (Tier 1=3x, Tier 2=2x, Tier 3=1x)
-                ROUND(
-                    SUM(CASE
-                        WHEN pas.park_appears_open = TRUE
-                            AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
-                        THEN 5 * COALESCE(rc.tier_weight, 2)
-                        ELSE 0
-                    END) / 60.0,
-                    2
-                ) AS weighted_downtime_hours,
+                -- Calculate weighted downtime hours using centralized helper
+                {weighted_downtime} AS weighted_downtime_hours,
 
                 -- Shame Score = weighted downtime / total park weight
                 ROUND(
                     SUM(CASE
-                        WHEN pas.park_appears_open = TRUE
-                            AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
+                        WHEN {park_open} AND {is_down}
                         THEN 5 * COALESCE(rc.tier_weight, 2)
                         ELSE 0
                     END) / 60.0
@@ -2937,45 +2914,21 @@ class StatsRepository:
                     2
                 ) AS shame_score,
 
-                -- Count of rides that had any downtime today
-                COUNT(DISTINCT CASE
-                    WHEN pas.park_appears_open = TRUE
-                        AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
-                    THEN r.ride_id
-                END) AS affected_rides_count,
+                -- Count of rides that had any downtime today using centralized helper
+                {affected_rides} AS affected_rides_count,
 
-                -- Calculate uptime percentage (only during park operating hours)
-                ROUND(
-                    100.0 * SUM(CASE
-                        WHEN pas.park_appears_open = TRUE
-                            AND (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = TRUE))
-                        THEN 1
-                        ELSE 0
-                    END) /
-                    NULLIF(SUM(CASE WHEN pas.park_appears_open = TRUE THEN 1 ELSE 0 END), 0),
-                    2
-                ) AS uptime_percentage,
+                -- Calculate uptime percentage using centralized helper
+                {uptime_pct} AS uptime_percentage,
 
                 -- Trend: NULL for live data (no historical comparison needed for "Today")
                 NULL AS trend_percentage,
 
-                -- Park is operating if ANY ride has wait_time > 0 (not just "open" flag)
-                (
-                    SELECT CASE WHEN MAX(rss2.wait_time) > 0 THEN 1 ELSE 0 END
-                    FROM ride_status_snapshots rss2
-                    JOIN rides r2 ON rss2.ride_id = r2.ride_id
-                    WHERE r2.park_id = p.park_id
-                    AND r2.category = 'ATTRACTION'  -- Only include mechanical rides
-                    AND rss2.recorded_at = (
-                        SELECT MAX(recorded_at)
-                        FROM ride_status_snapshots
-                        WHERE ride_id = rss2.ride_id
-                    )
-                ) AS park_is_open
+                -- Park operating status using centralized helper
+                {park_is_open_sq}
 
             FROM parks p
             INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
+                AND r.category = 'ATTRACTION'
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
@@ -3004,6 +2957,9 @@ class StatsRepository:
         This method computes downtime in real-time from ride_status_snapshots,
         providing up-to-the-minute accuracy for the "Today" period.
 
+        Uses centralized SQL helpers to ensure current_status matches the
+        status summary panel counts.
+
         Args:
             filter_disney_universal: If True, only include Disney & Universal parks
             limit: Maximum number of rides to return
@@ -3011,11 +2967,26 @@ class StatsRepository:
         Returns:
             List of rides ranked by downtime hours (descending) with current status
         """
-        filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
 
         # Get Pacific day bounds in UTC - "today" means Pacific calendar day
         today_pacific = get_today_pacific()
         start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
+
+        # Use centralized helpers for consistent logic across all queries
+        is_down = RideStatusSQL.is_down("rss")
+        is_operating = RideStatusSQL.is_operating("rss")
+        park_open = ParkStatusSQL.park_appears_open_filter("pas")
+        active_filter = RideFilterSQL.active_attractions_filter("r", "p")
+        downtime_hours = DowntimeSQL.downtime_hours_rounded("rss", "pas")
+        uptime_pct = UptimeSQL.uptime_percentage("rss", "pas")
+
+        # CRITICAL: Use helper subqueries that include time window filter
+        # This ensures current_status matches the status summary panel
+        # Pass park_id_expr to ensure rides at closed parks show PARK_CLOSED, not DOWN
+        current_status_sq = RideStatusSQL.current_status_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
+        current_is_open_sq = RideStatusSQL.current_is_open_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
+        park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
 
         query = text(f"""
             SELECT
@@ -3028,76 +2999,31 @@ class StatsRepository:
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
 
-                -- Calculate downtime hours from today's snapshots
-                -- Each snapshot interval is ~5 minutes
-                -- Only count status='DOWN' as downtime (not CLOSED or REFURBISHMENT)
-                -- For parks without status data (Queue-Times), fall back to computed_is_open
-                ROUND(
-                    SUM(CASE
-                        WHEN pas.park_appears_open = TRUE
-                            AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
-                        THEN 5
-                        ELSE 0
-                    END) / 60.0,
-                    2
-                ) AS downtime_hours,
+                -- Calculate downtime hours from today's snapshots using centralized helper
+                {downtime_hours} AS downtime_hours,
 
-                -- Calculate uptime percentage (only during park operating hours)
-                ROUND(
-                    100.0 * SUM(CASE
-                        WHEN pas.park_appears_open = TRUE
-                            AND (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = TRUE))
-                        THEN 1
-                        ELSE 0
-                    END) /
-                    NULLIF(SUM(CASE WHEN pas.park_appears_open = TRUE THEN 1 ELSE 0 END), 0),
-                    2
-                ) AS uptime_percentage,
+                -- Calculate uptime percentage using centralized helper
+                {uptime_pct} AS uptime_percentage,
 
                 -- Wait time stats from today's snapshots
                 ROUND(AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END), 2) AS avg_wait_time,
                 MAX(rss.wait_time) AS peak_wait_time,
 
-                -- Get current status from most recent snapshot
-                -- Returns status enum (OPERATING/DOWN/CLOSED/REFURBISHMENT)
-                (
-                    SELECT COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN'))
-                    FROM ride_status_snapshots
-                    WHERE ride_id = r.ride_id
-                    ORDER BY recorded_at DESC
-                    LIMIT 1
-                ) AS current_status,
+                -- Get current status using centralized helper (includes time window for consistency)
+                {current_status_sq},
 
-                -- Boolean for frontend compatibility (TRUE if OPERATING)
-                (
-                    SELECT COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN')) = 'OPERATING'
-                    FROM ride_status_snapshots
-                    WHERE ride_id = r.ride_id
-                    ORDER BY recorded_at DESC
-                    LIMIT 1
-                ) AS current_is_open,
+                -- Boolean for frontend compatibility using centralized helper
+                {current_is_open_sq},
 
-                -- Park is operating if ANY ride has wait_time > 0 (not just "open" flag)
-                (
-                    SELECT CASE WHEN MAX(rss2.wait_time) > 0 THEN 1 ELSE 0 END
-                    FROM ride_status_snapshots rss2
-                    JOIN rides r2 ON rss2.ride_id = r2.ride_id
-                    WHERE r2.park_id = p.park_id
-                    AND r2.category = 'ATTRACTION'  -- Only include mechanical rides
-                    AND rss2.recorded_at = (
-                        SELECT MAX(recorded_at)
-                        FROM ride_status_snapshots
-                        WHERE ride_id = rss2.ride_id
-                    )
-                ) AS park_is_open,
+                -- Park operating status using centralized helper
+                {park_is_open_sq},
 
                 -- Trend: compare to yesterday's aggregated stats
                 CASE
                     WHEN prev_day.downtime_minutes > 0 THEN
                         ROUND(
                             ((SUM(CASE
-                                WHEN pas.park_appears_open = TRUE
-                                    AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
+                                WHEN {park_open} AND {is_down}
                                 THEN 5
                                 ELSE 0
                             END) - prev_day.downtime_minutes) / prev_day.downtime_minutes) * 100,
@@ -3114,12 +3040,10 @@ class StatsRepository:
             LEFT JOIN ride_daily_stats prev_day ON r.ride_id = prev_day.ride_id
                 AND prev_day.stat_date = :yesterday_pacific
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
-                AND p.is_active = TRUE
+                AND {active_filter}
                 {filter_clause}
             GROUP BY r.ride_id, r.name, r.tier, p.park_id, p.name, p.city, p.state_province, prev_day.downtime_minutes
-            HAVING downtime_hours > 0 AND uptime_percentage > 0  -- Hall of Shame: rides that were partially open (exclude never-opened)
+            HAVING (downtime_hours > 0 AND uptime_percentage > 0) OR current_status = 'DOWN'  -- Include rides with downtime OR currently down
             ORDER BY downtime_hours DESC
             LIMIT :limit
         """)
@@ -3154,6 +3078,8 @@ class StatsRepository:
         Only includes rides at parks that are currently operating
         (park_appears_open = TRUE in latest park_activity_snapshot).
 
+        Uses centralized SQL helpers for consistent status logic.
+
         Args:
             filter_disney_universal: If True, only include Disney/Universal parks
             park_id: Optional park ID to filter to a single park
@@ -3165,10 +3091,16 @@ class StatsRepository:
         params = {}
 
         if filter_disney_universal:
-            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"
+            filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}"
         if park_id:
             filter_clause += " AND p.park_id = :park_id"
             params["park_id"] = park_id
+
+        # Use centralized helpers for consistent logic
+        time_window = RideFilterSQL.live_time_window_filter("pas.recorded_at")
+        time_window_rss = RideFilterSQL.live_time_window_filter("rss.recorded_at")
+        active_filter = RideFilterSQL.active_attractions_filter("r", "p")
+        status_expr = RideStatusSQL.status_expression("ls")
 
         query = text(f"""
             WITH latest_park_status AS (
@@ -3178,7 +3110,7 @@ class StatsRepository:
                     pas.park_appears_open,
                     ROW_NUMBER() OVER (PARTITION BY pas.park_id ORDER BY pas.recorded_at DESC) as rn
                 FROM park_activity_snapshots pas
-                WHERE pas.recorded_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+                WHERE {time_window}
             ),
             latest_snapshots AS (
                 SELECT
@@ -3191,15 +3123,13 @@ class StatsRepository:
                 FROM ride_status_snapshots rss
                 JOIN rides r ON rss.ride_id = r.ride_id
                 JOIN parks p ON r.park_id = p.park_id
-                WHERE rss.recorded_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                    AND p.is_active = TRUE
+                WHERE {time_window_rss}
+                    AND {active_filter}
                     {filter_clause}
             )
             SELECT
                 -- Map NULL status to OPERATING/DOWN based on computed_is_open
-                COALESCE(ls.status, IF(ls.computed_is_open, 'OPERATING', 'DOWN')) as status_type,
+                {status_expr} as status_type,
                 COUNT(*) as count
             FROM latest_snapshots ls
             JOIN latest_park_status lps ON ls.park_id = lps.park_id AND lps.rn = 1

@@ -1,6 +1,44 @@
 """
 Theme Park Downtime Tracker - Statistics Repository
 Provides data access layer for aggregate statistics tables.
+
+DEPRECATION NOTICE
+==================
+This file is being phased out in favor of modular query classes.
+
+For new development, use the query classes in database/queries/ instead:
+
+    Rankings (tables):
+    - GET /parks/downtime?period=7days → queries/rankings/park_downtime_rankings.py
+    - GET /rides/downtime?period=7days → queries/rankings/ride_downtime_rankings.py
+    - GET /parks/waittimes            → queries/rankings/park_wait_time_rankings.py
+    - GET /rides/waittimes            → queries/rankings/ride_wait_time_rankings.py
+
+    Trends (improving/declining):
+    - GET /trends?category=parks-improving → queries/trends/improving_parks.py
+    - GET /trends?category=parks-declining → queries/trends/declining_parks.py
+    - GET /trends?category=rides-improving → queries/trends/improving_rides.py
+    - GET /trends?category=rides-declining → queries/trends/declining_rides.py
+
+    Charts (time series):
+    - GET /trends/chart-data?type=parks → queries/charts/park_shame_history.py
+    - GET /trends/chart-data?type=rides → queries/charts/ride_downtime_history.py
+
+    Live data (today):
+    - GET /live/status-summary        → queries/live/status_summary.py
+    - GET /parks/downtime?period=today → queries/live/live_park_rankings.py
+    - GET /rides/downtime?period=today → queries/live/live_ride_rankings.py
+
+Methods still in use (not yet migrated):
+- get_aggregate_park_stats()
+- get_park_tier_distribution()
+- get_park_operating_sessions()
+- get_park_current_status()
+
+Migration Guide:
+1. Import the specific query class you need
+2. Instantiate with connection: query = ParkDowntimeRankingsQuery(conn)
+3. Call the appropriate method: results = query.get_weekly(year, week)
 """
 
 from typing import List, Dict, Any, Optional

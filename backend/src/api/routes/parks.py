@@ -1,6 +1,16 @@
 """
 Theme Park Downtime Tracker - Parks API Routes
+===============================================
+
 Endpoints for park-level downtime rankings and statistics.
+
+Query File Mapping
+------------------
+GET /parks/downtime?period=today    → database/queries/live/live_park_rankings.py
+GET /parks/downtime?period=7days    → database/queries/rankings/park_downtime_rankings.py
+GET /parks/downtime?period=30days   → database/queries/rankings/park_downtime_rankings.py
+GET /parks/waittimes                → database/queries/rankings/park_wait_time_rankings.py
+GET /parks/<id>/details             → (uses multiple repositories)
 """
 
 from flask import Blueprint, request, jsonify
@@ -10,6 +20,11 @@ from datetime import date, datetime
 from database.connection import get_db_connection
 from database.repositories.park_repository import ParkRepository
 from database.repositories.stats_repository import StatsRepository
+
+# New query imports - each file handles one specific data source
+from database.queries.live import LiveParkRankingsQuery
+from database.queries.rankings import ParkDowntimeRankingsQuery, ParkWaitTimeRankingsQuery
+
 from utils.logger import logger
 from utils.timezone import get_today_pacific
 
@@ -20,6 +35,14 @@ parks_bp = Blueprint('parks', __name__)
 def get_park_downtime_rankings():
     """
     Get park downtime rankings for specified time period.
+
+    Query Files Used:
+    -----------------
+    - period=today: database/queries/live/live_park_rankings.py
+      Uses real-time snapshot data from ride_status_snapshots
+
+    - period=7days/30days: database/queries/rankings/park_downtime_rankings.py
+      Uses pre-aggregated data from park_weekly_stats/park_monthly_stats
 
     Query Parameters:
         period (str): Time period - 'today', '7days', '30days' (default: 'today')
@@ -54,42 +77,47 @@ def get_park_downtime_rankings():
 
     try:
         with get_db_connection() as conn:
-            stats_repo = StatsRepository(conn)
+            filter_disney_universal = (filter_type == 'disney-universal')
 
-            # Get park rankings based on period
+            # Route to appropriate query class based on period
             if period == 'today':
-                # Use LIVE snapshot data for "today" - computed up to the minute
-                rankings = stats_repo.get_park_live_downtime_rankings(
-                    filter_disney_universal=(filter_type == 'disney-universal'),
+                # LIVE data from snapshots
+                # See: database/queries/live/live_park_rankings.py
+                query = LiveParkRankingsQuery(conn)
+                rankings = query.get_rankings(
+                    filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
-            elif period == '7days':
-                rankings = stats_repo.get_park_weekly_rankings(
-                    year=datetime.now().year,
-                    week_number=datetime.now().isocalendar()[1],
-                    filter_disney_universal=(filter_type == 'disney-universal'),
-                    limit=limit,
-                    weighted=weighted
-                )
-            else:  # 30days
-                rankings = stats_repo.get_park_monthly_rankings(
-                    year=datetime.now().year,
-                    month=datetime.now().month,
-                    filter_disney_universal=(filter_type == 'disney-universal'),
-                    limit=limit,
-                    weighted=weighted
-                )
+            else:
+                # Historical data from aggregated stats
+                # See: database/queries/rankings/park_downtime_rankings.py
+                query = ParkDowntimeRankingsQuery(conn)
+                if period == '7days':
+                    rankings = query.get_weekly(
+                        year=datetime.now().year,
+                        week_number=datetime.now().isocalendar()[1],
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                else:  # 30days
+                    rankings = query.get_monthly(
+                        year=datetime.now().year,
+                        month=datetime.now().month,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
 
-            # Get aggregate statistics
+            # Get aggregate statistics (still using StatsRepository for now)
+            stats_repo = StatsRepository(conn)
             aggregate_stats = stats_repo.get_aggregate_park_stats(
                 period=period,
-                filter_disney_universal=(filter_type == 'disney-universal')
+                filter_disney_universal=filter_disney_universal
             )
 
             # Add Queue-Times.com URLs to rankings
             rankings_with_urls = []
             for rank_idx, park in enumerate(rankings, start=1):
-                park_dict = dict(park)
+                park_dict = dict(park) if hasattr(park, '_mapping') else dict(park)
                 park_dict['rank'] = rank_idx
                 if 'queue_times_id' in park_dict:
                     park_dict['queue_times_url'] = f"https://queue-times.com/parks/{park_dict['queue_times_id']}"
@@ -126,6 +154,10 @@ def get_park_wait_times():
     """
     Get park-level wait time rankings for specified time period.
 
+    Query File Used:
+    ----------------
+    database/queries/rankings/park_wait_time_rankings.py
+
     Query Parameters:
         period (str): Time period - 'today', '7days', '30days' (default: 'today')
         filter (str): Park filter - 'disney-universal', 'all-parks' (default: 'all-parks')
@@ -157,10 +189,9 @@ def get_park_wait_times():
 
     try:
         with get_db_connection() as conn:
-            stats_repo = StatsRepository(conn)
-
-            # Get park wait time rankings
-            wait_times = stats_repo.get_park_wait_times_by_period(
+            # See: database/queries/rankings/park_wait_time_rankings.py
+            query = ParkWaitTimeRankingsQuery(conn)
+            wait_times = query.get_by_period(
                 period=period,
                 filter_disney_universal=(filter_type == 'disney-universal'),
                 limit=limit
@@ -169,9 +200,10 @@ def get_park_wait_times():
             # Add Queue-Times.com URLs and rank to wait times
             wait_times_with_urls = []
             for rank_idx, park in enumerate(wait_times, start=1):
-                park_dict = dict(park)
+                park_dict = dict(park) if hasattr(park, '_mapping') else dict(park)
                 park_dict['rank'] = rank_idx
-                park_dict['queue_times_url'] = f"https://queue-times.com/parks/{park_dict['queue_times_id']}"
+                if 'queue_times_id' in park_dict:
+                    park_dict['queue_times_url'] = f"https://queue-times.com/parks/{park_dict['queue_times_id']}"
                 wait_times_with_urls.append(park_dict)
 
             # Build response
@@ -202,6 +234,9 @@ def get_park_wait_times():
 def get_park_details(park_id: int):
     """
     Get detailed information for a specific park.
+
+    Note: This endpoint uses repositories rather than query classes
+    because it aggregates data from multiple sources.
 
     Path Parameters:
         park_id (int): Park ID

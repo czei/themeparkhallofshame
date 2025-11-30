@@ -1,6 +1,17 @@
 """
 Trends API Routes
-GET /api/trends - Performance trends showing parks/rides with ≥5% uptime changes
+=================
+
+Performance trends showing parks/rides with ≥5% uptime changes.
+
+Query File Mapping
+------------------
+GET /trends?category=parks-improving  → database/queries/trends/improving_parks.py
+GET /trends?category=parks-declining  → database/queries/trends/declining_parks.py
+GET /trends?category=rides-improving  → database/queries/trends/improving_rides.py
+GET /trends?category=rides-declining  → database/queries/trends/declining_rides.py
+GET /trends/chart-data?type=parks     → database/queries/charts/park_shame_history.py
+GET /trends/chart-data?type=rides     → database/queries/charts/ride_downtime_history.py
 """
 
 from flask import Blueprint, request, jsonify
@@ -9,6 +20,16 @@ from typing import Dict, List, Any, Optional
 
 from database.connection import get_db_connection
 from database.repositories.stats_repository import StatsRepository
+
+# New query imports - each file handles one specific data source
+from database.queries.trends import (
+    ImprovingParksQuery,
+    DecliningParksQuery,
+    ImprovingRidesQuery,
+    DecliningRidesQuery,
+)
+from database.queries.charts import ParkShameHistoryQuery, RideDowntimeHistoryQuery
+
 from utils.logger import logger
 from utils.timezone import get_today_pacific
 
@@ -22,6 +43,13 @@ def get_trends():
     GET /api/trends
 
     Returns parks/rides showing ≥5% uptime changes comparing current period to previous period.
+
+    Query Files Used:
+    -----------------
+    - parks-improving: database/queries/trends/improving_parks.py
+    - parks-declining: database/queries/trends/declining_parks.py
+    - rides-improving: database/queries/trends/improving_rides.py
+    - rides-declining: database/queries/trends/declining_rides.py
 
     Query Parameters:
         - period: today | 7days | 30days (default: 7days)
@@ -77,34 +105,41 @@ def get_trends():
 
         # Calculate period dates
         period_info = _calculate_period_dates(period)
+        filter_disney_universal = (park_filter == 'disney-universal')
 
         # Get database connection using context manager
         with get_db_connection() as conn:
-            stats_repo = StatsRepository(conn)
-
-            # Get trends based on category
+            # Route to appropriate query class based on category
             if category == 'parks-improving':
-                results = stats_repo.get_parks_improving(
+                # See: database/queries/trends/improving_parks.py
+                query = ImprovingParksQuery(conn)
+                results = query.get_improving(
                     period=period,
-                    park_filter=park_filter,
+                    filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
             elif category == 'parks-declining':
-                results = stats_repo.get_parks_declining(
+                # See: database/queries/trends/declining_parks.py
+                query = DecliningParksQuery(conn)
+                results = query.get_declining(
                     period=period,
-                    park_filter=park_filter,
+                    filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
             elif category == 'rides-improving':
-                results = stats_repo.get_rides_improving(
+                # See: database/queries/trends/improving_rides.py
+                query = ImprovingRidesQuery(conn)
+                results = query.get_improving(
                     period=period,
-                    park_filter=park_filter,
+                    filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
             elif category == 'rides-declining':
-                results = stats_repo.get_rides_declining(
+                # See: database/queries/trends/declining_rides.py
+                query = DecliningRidesQuery(conn)
+                results = query.get_declining(
                     period=period,
-                    park_filter=park_filter,
+                    filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
 
@@ -152,6 +187,11 @@ def get_chart_data():
     GET /api/trends/chart-data
 
     Returns time-series data for charts showing shame score or downtime trends.
+
+    Query Files Used:
+    -----------------
+    - type=parks: database/queries/charts/park_shame_history.py
+    - type=rides: database/queries/charts/ride_downtime_history.py
 
     Query Parameters:
         - period: today | 7days | 30days (default: 7days)
@@ -212,24 +252,27 @@ def get_chart_data():
         today = get_today_pacific()
         is_mock = False
         granularity = 'daily'
+        filter_disney_universal = (park_filter == 'disney-universal')
 
         # Get database connection
         with get_db_connection() as conn:
-            stats_repo = StatsRepository(conn)
-
             if period == 'today':
                 # Hourly data for today
                 granularity = 'hourly'
                 if data_type == 'parks':
-                    chart_data = stats_repo.get_park_hourly_shame_scores(
+                    # See: database/queries/charts/park_shame_history.py
+                    query = ParkShameHistoryQuery(conn)
+                    chart_data = query.get_hourly(
                         target_date=today,
-                        filter_disney_universal=(park_filter == 'disney-universal'),
+                        filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
                 else:
-                    chart_data = stats_repo.get_ride_hourly_downtime(
+                    # See: database/queries/charts/ride_downtime_history.py
+                    query = RideDowntimeHistoryQuery(conn)
+                    chart_data = query.get_hourly(
                         target_date=today,
-                        filter_disney_universal=(park_filter == 'disney-universal'),
+                        filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
 
@@ -240,20 +283,21 @@ def get_chart_data():
             else:
                 # Daily data for 7days/30days
                 days = 7 if period == '7days' else 30
-                start_date = today - timedelta(days=days - 1)
 
                 if data_type == 'parks':
-                    chart_data = stats_repo.get_park_shame_score_history(
-                        start_date=start_date,
-                        end_date=today,
-                        filter_disney_universal=(park_filter == 'disney-universal'),
+                    # See: database/queries/charts/park_shame_history.py
+                    query = ParkShameHistoryQuery(conn)
+                    chart_data = query.get_daily(
+                        days=days,
+                        filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
                 else:
-                    chart_data = stats_repo.get_ride_downtime_history(
-                        start_date=start_date,
-                        end_date=today,
-                        filter_disney_universal=(park_filter == 'disney-universal'),
+                    # See: database/queries/charts/ride_downtime_history.py
+                    query = RideDowntimeHistoryQuery(conn)
+                    chart_data = query.get_daily(
+                        days=days,
+                        filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
 

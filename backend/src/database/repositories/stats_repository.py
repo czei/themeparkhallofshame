@@ -1135,7 +1135,7 @@ class StatsRepository:
             SELECT
                 r.ride_id,
                 r.name AS ride_name,
-                r.tier,
+                rc.tier,
                 p.park_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
@@ -1156,6 +1156,7 @@ class StatsRepository:
             FROM ride_daily_stats rds
             JOIN rides r ON rds.ride_id = r.ride_id
             JOIN parks p ON r.park_id = p.park_id
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             LEFT JOIN ride_daily_stats prev_day ON rds.ride_id = prev_day.ride_id
                 AND prev_day.stat_date = DATE_SUB(:stat_date, INTERVAL 1 DAY)
             WHERE rds.stat_date = :stat_date
@@ -1215,7 +1216,7 @@ class StatsRepository:
                 r.queue_times_id,
                 p.queue_times_id AS park_queue_times_id,
                 r.name AS ride_name,
-                r.tier,
+                rc.tier,
                 p.park_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
@@ -1231,13 +1232,14 @@ class StatsRepository:
             FROM ride_daily_stats rds
             JOIN rides r ON rds.ride_id = r.ride_id
             JOIN parks p ON r.park_id = p.park_id
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             WHERE rds.stat_date BETWEEN :start_date AND :end_date
                 AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'
                 AND p.is_active = TRUE
                 AND rds.operating_hours_minutes > 0
                 {disney_filter}
-            GROUP BY r.ride_id, r.queue_times_id, p.queue_times_id, r.name, r.tier, p.park_id, p.name, p.city, p.state_province
+            GROUP BY r.ride_id, r.queue_times_id, p.queue_times_id, r.name, rc.tier, p.park_id, p.name, p.city, p.state_province
             HAVING SUM(rds.downtime_minutes) > 0
             ORDER BY downtime_hours DESC
             LIMIT :limit
@@ -1284,7 +1286,7 @@ class StatsRepository:
                 r.queue_times_id,
                 p.queue_times_id AS park_queue_times_id,
                 r.name AS ride_name,
-                r.tier,
+                rc.tier,
                 p.park_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
@@ -1305,6 +1307,7 @@ class StatsRepository:
             FROM ride_monthly_stats rms
             JOIN rides r ON rms.ride_id = r.ride_id
             JOIN parks p ON r.park_id = p.park_id
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             LEFT JOIN ride_monthly_stats prev_month ON rms.ride_id = prev_month.ride_id
                 AND prev_month.year = :prev_year
                 AND prev_month.month = :prev_month
@@ -2994,7 +2997,7 @@ class StatsRepository:
                 r.queue_times_id,
                 p.queue_times_id AS park_queue_times_id,
                 r.name AS ride_name,
-                r.tier,
+                rc.tier,
                 p.park_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
@@ -3037,12 +3040,13 @@ class StatsRepository:
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
                 AND pas.recorded_at = rss.recorded_at
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             LEFT JOIN ride_daily_stats prev_day ON r.ride_id = prev_day.ride_id
                 AND prev_day.stat_date = :yesterday_pacific
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND {active_filter}
                 {filter_clause}
-            GROUP BY r.ride_id, r.name, r.tier, p.park_id, p.name, p.city, p.state_province, prev_day.downtime_minutes
+            GROUP BY r.ride_id, r.name, rc.tier, p.park_id, p.name, p.city, p.state_province, prev_day.downtime_minutes
             HAVING (downtime_hours > 0 AND uptime_percentage > 0) OR current_status = 'DOWN'  -- Include rides with downtime OR currently down
             ORDER BY downtime_hours DESC
             LIMIT :limit

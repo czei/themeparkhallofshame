@@ -130,6 +130,7 @@ class RideDowntimeHistoryQuery:
         top_rides_query = text(f"""
             SELECT
                 r.ride_id,
+                p.park_id,
                 r.name AS ride_name,
                 p.name AS park_name,
                 SUM(CASE
@@ -146,7 +147,7 @@ class RideDowntimeHistoryQuery:
                 AND r.category = 'ATTRACTION'
                 AND p.is_active = TRUE
                 {disney_filter}
-            GROUP BY r.ride_id, r.name, p.name
+            GROUP BY r.ride_id, p.park_id, r.name, p.name
             HAVING total_downtime_hours > 0
             ORDER BY total_downtime_hours DESC
             LIMIT :limit
@@ -166,7 +167,7 @@ class RideDowntimeHistoryQuery:
         datasets = []
         for ride in top_rides:
             hourly_data = self._get_ride_hourly_data(
-                ride["ride_id"], start_utc, end_utc
+                ride["ride_id"], ride["park_id"], start_utc, end_utc
             )
 
             # Align data to labels (6am to 11pm)
@@ -184,32 +185,67 @@ class RideDowntimeHistoryQuery:
     def _get_ride_hourly_data(
         self,
         ride_id: int,
+        park_id: int,
         start_utc,
         end_utc,
     ) -> List[Dict[str, Any]]:
-        """Get hourly downtime for a specific ride from live snapshots."""
+        """Get hourly downtime for a specific ride from live snapshots.
+
+        Logic:
+        1. Only count hours where park_appears_open = TRUE
+        2. Only count downtime AFTER the ride first operated today
+        """
         # Use DATE_SUB with 8-hour offset for PST (UTC-8)
-        # Note: This doesn't handle DST perfectly but works for most cases
         query = text("""
+            WITH ride_first_operating AS (
+                -- Find the first hour this ride was operating today
+                SELECT
+                    MIN(HOUR(DATE_SUB(rss_inner.recorded_at, INTERVAL 8 HOUR))) as first_op_hour
+                FROM ride_status_snapshots rss_inner
+                WHERE rss_inner.ride_id = :ride_id
+                    AND rss_inner.recorded_at >= :start_utc AND rss_inner.recorded_at < :end_utc
+                    AND (rss_inner.status = 'OPERATING'
+                         OR (rss_inner.status IS NULL AND rss_inner.computed_is_open = 1))
+            ),
+            park_hourly_open AS (
+                -- Check if park was open during each hour
+                SELECT
+                    HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR)) as hour,
+                    MAX(pas.park_appears_open) as park_open
+                FROM park_activity_snapshots pas
+                WHERE pas.park_id = :park_id
+                    AND pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
+                GROUP BY hour
+            )
             SELECT
                 HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) AS hour,
                 ROUND(
                     SUM(CASE
-                        WHEN rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0)
-                        THEN 5  -- 5-minute interval
+                        WHEN pho.park_open = 1
+                            AND rfo.first_op_hour IS NOT NULL
+                            AND HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) >= rfo.first_op_hour
+                            AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0))
+                        THEN 5
                         ELSE 0
                     END) / 60.0,
                     2
                 ) AS downtime_hours
             FROM ride_status_snapshots rss
+            CROSS JOIN ride_first_operating rfo
+            LEFT JOIN park_hourly_open pho
+                ON HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) = pho.hour
             WHERE rss.ride_id = :ride_id
                 AND rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
+                AND pho.park_open = 1  -- Only include hours when park is open
+                AND rfo.first_op_hour IS NOT NULL  -- Only if ride has operated
+                AND HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) >= rfo.first_op_hour
             GROUP BY hour
             ORDER BY hour
         """)
 
         result = self.conn.execute(query, {
             "ride_id": ride_id,
+            "park_id": park_id,
             "start_utc": start_utc,
             "end_utc": end_utc
         })

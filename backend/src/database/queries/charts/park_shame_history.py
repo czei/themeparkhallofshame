@@ -199,33 +199,83 @@ class ParkShameHistoryQuery:
         end_utc,
         target_date: date,
     ) -> List[Dict[str, Any]]:
-        """Get hourly shame scores for a specific park from live snapshots."""
+        """Get hourly shame scores for a specific park from live snapshots.
+
+        Logic:
+        1. Only count hours where park_appears_open = TRUE
+        2. Only count a ride's downtime AFTER it has operated at least once today
+        3. Rides that never operated today don't contribute to shame score
+        """
         # Use DATE_SUB with 8-hour offset for PST (UTC-8)
-        # Note: This doesn't handle DST perfectly but works for most cases
         query = text("""
+            WITH ride_first_operating AS (
+                -- Find the first hour each ride was operating today
+                SELECT
+                    rss_inner.ride_id,
+                    MIN(HOUR(DATE_SUB(rss_inner.recorded_at, INTERVAL 8 HOUR))) as first_op_hour
+                FROM ride_status_snapshots rss_inner
+                INNER JOIN rides r_inner ON rss_inner.ride_id = r_inner.ride_id
+                WHERE r_inner.park_id = :park_id
+                    AND r_inner.is_active = TRUE
+                    AND r_inner.category = 'ATTRACTION'
+                    AND rss_inner.recorded_at >= :start_utc AND rss_inner.recorded_at < :end_utc
+                    AND (rss_inner.status = 'OPERATING'
+                         OR (rss_inner.status IS NULL AND rss_inner.computed_is_open = 1))
+                GROUP BY rss_inner.ride_id
+            ),
+            park_hourly_open AS (
+                -- Check if park was open during each hour
+                SELECT
+                    HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR)) as hour,
+                    MAX(pas.park_appears_open) as park_open
+                FROM park_activity_snapshots pas
+                WHERE pas.park_id = :park_id
+                    AND pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
+                GROUP BY hour
+            )
             SELECT
                 HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) AS hour,
-                COUNT(DISTINCT r.ride_id) AS total_rides,
+                -- Only count rides that have operated at some point today
+                COUNT(DISTINCT CASE WHEN rfo.ride_id IS NOT NULL THEN r.ride_id END) AS total_rides,
+                -- Only count downtime when:
+                -- 1. Park is open this hour
+                -- 2. Ride has operated before (first_op_hour <= current hour)
                 SUM(CASE
-                    WHEN rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0)
-                    THEN 5  -- 5-minute interval in minutes
+                    WHEN pho.park_open = 1
+                        AND rfo.ride_id IS NOT NULL
+                        AND HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) >= rfo.first_op_hour
+                        AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0))
+                    THEN 5
                     ELSE 0
                 END) AS down_minutes,
                 ROUND(
                     SUM(CASE
-                        WHEN rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0)
+                        WHEN pho.park_open = 1
+                            AND rfo.ride_id IS NOT NULL
+                            AND HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) >= rfo.first_op_hour
+                            AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0))
                         THEN 5
                         ELSE 0
-                    END) / 60.0 / NULLIF(COUNT(DISTINCT r.ride_id), 0),
+                    END) / 60.0 / NULLIF(
+                        COUNT(DISTINCT CASE
+                            WHEN rfo.ride_id IS NOT NULL
+                                AND HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) >= rfo.first_op_hour
+                            THEN r.ride_id
+                        END), 0),
                     2
                 ) AS shame_score
             FROM rides r
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            LEFT JOIN ride_first_operating rfo ON r.ride_id = rfo.ride_id
+            LEFT JOIN park_hourly_open pho
+                ON HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) = pho.hour
             WHERE r.park_id = :park_id
                 AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'
                 AND rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
+                AND pho.park_open = 1  -- Only include hours when park is open
             GROUP BY hour
+            HAVING total_rides > 0  -- Only show hours with rides that have operated
             ORDER BY hour
         """)
 

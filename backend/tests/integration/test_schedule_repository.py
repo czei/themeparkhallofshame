@@ -291,18 +291,28 @@ class TestScheduleRepositoryHasRecent:
         """
         repo = ScheduleRepository(mysql_connection)
 
-        # Insert schedule with old fetched_at
+        # Create a separate test park for this test to avoid interference
         from sqlalchemy import text
+        mysql_connection.execute(text("""
+            INSERT IGNORE INTO parks (queue_times_id, name, city, country, timezone, is_active)
+            VALUES (99902, 'Old Schedule Park', 'Test', 'US', 'America/New_York', 1)
+        """))
+        result = mysql_connection.execute(
+            text("SELECT park_id FROM parks WHERE queue_times_id = 99902")
+        )
+        old_park_id = result.fetchone()[0]
+
+        # Insert schedule with old fetched_at (48 hours ago)
         mysql_connection.execute(text("""
             INSERT INTO park_schedules (park_id, schedule_date, opening_time, closing_time,
                                        schedule_type, fetched_at)
-            VALUES (99999, CURDATE() + INTERVAL 7 DAY, NOW(), NOW() + INTERVAL 12 HOUR,
+            VALUES (:park_id, CURDATE() + INTERVAL 14 DAY, NOW(), NOW() + INTERVAL 12 HOUR,
                     'OPERATING', NOW() - INTERVAL 48 HOUR)
             ON DUPLICATE KEY UPDATE fetched_at = NOW() - INTERVAL 48 HOUR
-        """))
+        """), {"park_id": old_park_id})
         mysql_connection.commit()
 
-        result = repo.has_recent_schedule(99999, max_age_hours=24)
+        result = repo.has_recent_schedule(old_park_id, max_age_hours=24)
 
         assert result is False
 

@@ -550,13 +550,16 @@ class ShameScoreSQL:
             - park_weights CTE (pw) with total_park_weight
             - LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
         """
-        return f"""ROUND(
-            SUM(CASE
-                WHEN {currently_down_condition}
-                THEN {tier_weight_expr}
-                ELSE 0
-            END) / NULLIF({total_weight_expr}, 0) * {SHAME_SCORE_MULTIPLIER},
-            {SHAME_SCORE_PRECISION}
+        # Use a subquery to get DISTINCT sum of tier weights for currently down rides
+        # This avoids counting each ride multiple times across snapshots
+        return f"""(
+            SELECT ROUND(
+                COALESCE(SUM(COALESCE(rc_inner.tier_weight, 2)), 0) / NULLIF({total_weight_expr}, 0) * {SHAME_SCORE_MULTIPLIER},
+                {SHAME_SCORE_PRECISION}
+            )
+            FROM rides r_inner
+            LEFT JOIN ride_classifications rc_inner ON r_inner.ride_id = rc_inner.ride_id
+            WHERE r_inner.ride_id IN (SELECT ride_id FROM rides_currently_down WHERE park_id = p.park_id)
         )"""
 
     @staticmethod

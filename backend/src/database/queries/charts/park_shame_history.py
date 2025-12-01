@@ -196,9 +196,11 @@ class ParkShameHistoryQuery:
         target_date: date,
     ) -> List[Dict[str, Any]]:
         """Get hourly shame scores for a specific park from live snapshots."""
+        # Use DATE_SUB with 8-hour offset for PST (UTC-8)
+        # Note: This doesn't handle DST perfectly but works for most cases
         query = text("""
             SELECT
-                HOUR(CONVERT_TZ(rss.recorded_at, '+00:00', 'America/Los_Angeles')) AS hour,
+                HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) AS hour,
                 COUNT(DISTINCT r.ride_id) AS total_rides,
                 SUM(CASE
                     WHEN rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0)

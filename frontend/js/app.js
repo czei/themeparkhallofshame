@@ -6,7 +6,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Global application state
     const globalState = {
         filter: 'all-parks',  // Global filter: 'all-parks' or 'disney-universal'
-        period: 'live'        // Time period: 'live', 'today', '7days', '30days'
+        period: 'live',       // Time period: 'live', 'today', '7days', '30days'
+        currentView: 'downtime'  // Track current view for filter visibility
     };
 
     // Tab switching logic
@@ -39,6 +40,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Load appropriate view
             const view = item.dataset.view;
+            globalState.currentView = view;
+
+            // Update filter visibility based on view
+            updateFilterVisibility();
+
+            // If switching to awards and currently on 'live', switch to 'today'
+            if (view === 'awards' && globalState.period === 'live') {
+                globalState.period = 'today';
+                updateTimePeriodUI();
+            }
+
             loadView(view);
         });
     });
@@ -128,13 +140,44 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function updateTimePeriodUI() {
         const timeBtns = document.querySelectorAll('.time-btn');
+        const isAwards = globalState.currentView === 'awards';
+
         timeBtns.forEach(btn => {
+            // Hide/disable LIVE button for Awards tab
+            if (btn.dataset.period === 'live') {
+                if (isAwards) {
+                    btn.classList.add('hidden');
+                } else {
+                    btn.classList.remove('hidden');
+                }
+            }
+
             if (btn.dataset.period === globalState.period) {
                 btn.classList.add('active');
             } else {
                 btn.classList.remove('active');
             }
         });
+    }
+
+    /**
+     * Update filter visibility based on current view
+     * Awards tab hides the park filter (always shows all parks)
+     */
+    function updateFilterVisibility() {
+        const filterRow = document.querySelector('.park-filter');
+        const isAwards = globalState.currentView === 'awards';
+
+        if (filterRow) {
+            if (isAwards) {
+                filterRow.classList.add('hidden');
+            } else {
+                filterRow.classList.remove('hidden');
+            }
+        }
+
+        // Also update time period UI to hide/show LIVE button
+        updateTimePeriodUI();
     }
 
     async function loadView(viewName) {
@@ -167,14 +210,27 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     break;
 
-                case 'trends':
-                    if (typeof Trends !== 'undefined') {
-                        currentComponent = new Trends(apiClient, 'view-container', globalState.filter);
-                        // Respect the current period selection (don't override)
-                        currentComponent.state.period = globalState.period;
+                case 'awards':
+                    if (typeof Awards !== 'undefined') {
+                        currentComponent = new Awards(apiClient, 'view-container', globalState.filter);
+                        // Awards uses 'today' if 'live' is selected
+                        currentComponent.state.period = globalState.period === 'live' ? 'today' : globalState.period;
                         await currentComponent.init();
                     } else {
-                        throw new Error('Trends component not loaded');
+                        throw new Error('Awards component not loaded');
+                    }
+                    break;
+
+                case 'charts':
+                    if (typeof Charts !== 'undefined') {
+                        currentComponent = new Charts(apiClient, 'view-container', globalState.filter);
+                        // Sync the period before fetching data
+                        currentComponent.state.period = globalState.period;
+                        await currentComponent.init();
+                        // Store reference for cleanup
+                        window.chartsComponent = currentComponent;
+                    } else {
+                        throw new Error('Charts component not loaded');
                     }
                     break;
 

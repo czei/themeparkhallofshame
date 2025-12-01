@@ -1210,7 +1210,8 @@ class StatsRepository:
         total_park_weight = float(weight_row.total_park_weight) if weight_row and weight_row.total_park_weight else 0
 
         # Check if park appears open (using 50% threshold)
-        is_down = RideStatusSQL.is_down("rss")
+        # PARK-TYPE AWARE: Disney/Universal only count DOWN, others count CLOSED too
+        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
 
         park_open_query = text(f"""
@@ -1239,7 +1240,8 @@ class StatsRepository:
         # CRITICAL: Only count rides that have operated at some point today
         # This ensures consistency with get_park_live_downtime_rankings()
         # Rides that never showed OPERATING status are likely seasonal closures
-        is_operating = RideStatusSQL.is_operating("rss_check")
+        # PARK-TYPE AWARE: Disney/Universal needs 1 snapshot, others need 6 (30 min)
+        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p")
 
         # Get rides currently down with tier info
         rides_down_query = text(f"""
@@ -1248,14 +1250,6 @@ class StatsRepository:
                 FROM ride_status_snapshots
                 WHERE recorded_at >= :start_utc AND recorded_at < :end_utc
                 GROUP BY ride_id
-            ),
-            rides_that_operated AS (
-                -- Only include rides that have shown OPERATING at some point today
-                -- This excludes seasonal closures and scheduled maintenance
-                SELECT DISTINCT rss_check.ride_id
-                FROM ride_status_snapshots rss_check
-                WHERE rss_check.recorded_at >= :start_utc AND rss_check.recorded_at < :end_utc
-                    AND ({is_operating})
             )
             SELECT
                 r.ride_id,
@@ -1265,18 +1259,19 @@ class StatsRepository:
                 rss.status,
                 rss.recorded_at
             FROM rides r
+            INNER JOIN parks p ON r.park_id = p.park_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN latest_snapshot ls ON rss.ride_id = ls.ride_id
                 AND rss.recorded_at = ls.latest_recorded_at
             INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
                 AND pas.recorded_at = rss.recorded_at
-            INNER JOIN rides_that_operated rto ON r.ride_id = rto.ride_id
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             WHERE r.park_id = :park_id
                 AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'
                 AND {is_down}
                 AND {park_open}
+                AND {has_operated}
             ORDER BY tier ASC, r.name ASC
         """)
 
@@ -1351,26 +1346,23 @@ class StatsRepository:
         # Snapshot interval in minutes
         SNAPSHOT_INTERVAL_MINUTES = 5
 
-        is_down = RideStatusSQL.is_down("rss")
-        is_operating = RideStatusSQL.is_operating("rss_op")
+        # PARK-TYPE AWARE: Disney/Universal only count DOWN, others count CLOSED too
+        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
         park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
+        # PARK-TYPE AWARE: Disney/Universal needs 1 snapshot, others need 6 (30 min)
+        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p")
 
         # Get total park weight - ONLY for rides that have operated today
         weight_query = text(f"""
-            WITH rides_that_operated AS (
-                SELECT DISTINCT rss_op.ride_id
-                FROM ride_status_snapshots rss_op
-                WHERE rss_op.recorded_at >= :start_utc AND rss_op.recorded_at < :end_utc
-                    AND ({is_operating})
-            )
             SELECT SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
             FROM rides r
-            INNER JOIN rides_that_operated rto ON r.ride_id = rto.ride_id
+            INNER JOIN parks p ON r.park_id = p.park_id
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             WHERE r.park_id = :park_id
                 AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'
+                AND {has_operated}
         """)
         weight_result = self.conn.execute(weight_query, {
             "park_id": park_id,
@@ -1392,14 +1384,9 @@ class StatsRepository:
 
         # Get rides that had ANY downtime today with cumulative hours
         # CRITICAL: Only count rides that have operated at some point today
+        # PARK-TYPE AWARE: Disney/Universal needs 1 snapshot, others need 6 (30 min)
         rides_query = text(f"""
-            WITH rides_that_operated AS (
-                SELECT DISTINCT rss_op.ride_id
-                FROM ride_status_snapshots rss_op
-                WHERE rss_op.recorded_at >= :start_utc AND rss_op.recorded_at < :end_utc
-                    AND ({is_operating})
-            ),
-            latest_snapshot AS (
+            WITH latest_snapshot AS (
                 SELECT ride_id, MAX(recorded_at) as latest_recorded_at
                 FROM ride_status_snapshots
                 WHERE recorded_at >= :start_utc AND recorded_at < :end_utc
@@ -1438,7 +1425,7 @@ class StatsRepository:
                  WHERE rss2.ride_id = r.ride_id
                  ORDER BY rss2.recorded_at DESC LIMIT 1) AS current_status
             FROM rides r
-            INNER JOIN rides_that_operated rto ON r.ride_id = rto.ride_id
+            INNER JOIN parks p ON r.park_id = p.park_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
                 AND pas.recorded_at = rss.recorded_at
@@ -1448,6 +1435,7 @@ class StatsRepository:
                 AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'
                 AND rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
+                AND {has_operated}
             GROUP BY r.ride_id, r.name, rc.tier, rc.tier_weight
             HAVING downtime_hours > 0
             ORDER BY weighted_downtime_hours DESC, downtime_hours DESC
@@ -3321,7 +3309,8 @@ class StatsRepository:
         start_utc, end_utc = get_pacific_day_range_utc(get_today_pacific())
 
         # Use centralized helpers for consistent logic
-        is_down = RideStatusSQL.is_down("rss")
+        # PARK-TYPE AWARE: Disney/Universal only counts DOWN, others count CLOSED too
+        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
         downtime_hours = DowntimeSQL.downtime_hours_rounded("rss", "pas")
         weighted_downtime = DowntimeSQL.weighted_downtime_hours("rss", "pas", "COALESCE(rc.tier_weight, 2)")
@@ -3332,16 +3321,20 @@ class StatsRepository:
         shame_score_sql = ShameScoreSQL.instantaneous_shame_score()
 
         # CRITICAL: Only count downtime for rides that have operated at some point today
-        # Rides that have NEVER been OPERATING during the period are likely seasonal closures
-        # or scheduled maintenance, not unplanned outages
-        has_operated = RideStatusSQL.has_operated_subquery("r.ride_id")
+        # PARK-TYPE AWARE: Disney/Universal needs 1 snapshot, others need 6 (30 min)
+        # This filters out seasonal closures while allowing legitimate breakdowns
+        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p")
 
         # For latest snapshot check - used in rides_currently_down CTE
-        is_down_latest = RideStatusSQL.is_down("rss_latest")
+        # Now uses p_inner alias for park-type-aware logic
+        is_down_latest = RideStatusSQL.is_down("rss_latest", parks_alias="p_inner")
         park_open_latest = ParkStatusSQL.park_appears_open_filter("pas_latest")
 
         # CRITICAL: Also need is_operating for rides_that_operated CTE
         is_operating_cte = RideStatusSQL.is_operating("rss_op")
+
+        # PARK-TYPE AWARE: For rides_currently_down CTE (uses p_inner and r_inner aliases)
+        has_operated_cte = RideStatusSQL.has_operated_for_park_type("r_inner.ride_id", "p_inner")
 
         query = text(f"""
             WITH
@@ -3363,18 +3356,21 @@ class StatsRepository:
             rides_currently_down AS (
                 -- Identify rides that are DOWN in their latest snapshot
                 -- CRITICAL: Only count rides that have operated at some point today
+                -- PARK-TYPE AWARE: Disney/Universal only count DOWN, others count CLOSED too
+                -- PARK-TYPE AWARE: Disney/Universal need 1 operating snapshot, others need 6
                 SELECT DISTINCT r_inner.ride_id, r_inner.park_id
                 FROM rides r_inner
+                INNER JOIN parks p_inner ON r_inner.park_id = p_inner.park_id
                 INNER JOIN ride_status_snapshots rss_latest ON r_inner.ride_id = rss_latest.ride_id
                 INNER JOIN latest_snapshot ls ON rss_latest.ride_id = ls.ride_id
                     AND rss_latest.recorded_at = ls.latest_recorded_at
                 INNER JOIN park_activity_snapshots pas_latest ON r_inner.park_id = pas_latest.park_id
                     AND pas_latest.recorded_at = rss_latest.recorded_at
-                INNER JOIN rides_that_operated rto ON r_inner.ride_id = rto.ride_id
                 WHERE r_inner.is_active = TRUE
                     AND r_inner.category = 'ATTRACTION'
                     AND {is_down_latest}
                     AND {park_open_latest}
+                    AND {has_operated_cte}
             ),
             park_weights AS (
                 -- Calculate total weight for each park based on tier classifications
@@ -3476,7 +3472,8 @@ class StatsRepository:
         start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
 
         # Use centralized helpers for consistent logic across all queries
-        is_down = RideStatusSQL.is_down("rss")
+        # PARK-TYPE AWARE: Disney/Universal only counts DOWN, others count CLOSED too
+        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
         is_operating = RideStatusSQL.is_operating("rss")
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
         active_filter = RideFilterSQL.active_attractions_filter("r", "p")
@@ -3486,7 +3483,8 @@ class StatsRepository:
         # CRITICAL: Only count downtime for rides that have operated at some point today
         # Rides that have NEVER been OPERATING during the period are likely seasonal closures
         # or scheduled maintenance, not unplanned outages
-        has_operated = RideStatusSQL.has_operated_subquery("r.ride_id")
+        # PARK-TYPE AWARE: Disney/Universal needs 1 snapshot, others need 6 (30 min)
+        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p")
 
         # CRITICAL: Use helper subqueries that include time window filter
         # This ensures current_status matches the status summary panel

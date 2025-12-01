@@ -282,6 +282,10 @@ body {
     padding: 4px;
 }
 
+.nav-grid-4 {
+    grid-template-columns: repeat(4, 1fr);
+}
+
 .nav-item {
     background: var(--warm-white);
     padding: 20px;
@@ -2568,5 +2572,494 @@ footer a:hover,
 
     .chart-wrapper {
         height: 220px;
+    }
+}
+
+/* ========================================
+   CHARTS VIEW (Standalone Charts Tab)
+   ======================================== */
+
+.charts-view {
+    padding: 0;
+}
+
+.charts-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 24px;
+    margin-top: 20px;
+}
+
+/* Responsive: Charts grid on larger screens */
+@media (min-width: 1024px) {
+    .charts-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* ========================================
+   AWARDS SECTION - Trends View
+   ======================================== */
+
+.awards-section {
+    margin-bottom: 32px;
+}
+
+.awards-section .section-header {
+    margin-bottom: 16px;
+}
+
+.awards-section .section-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--charcoal);
+    margin: 0;
+    padding-bottom: 8px;
+    border-bottom: 3px solid var(--gold);
+}
+
+.awards-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 24px;
+}
+
+@media (min-width: 1024px) {
+    .awards-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.awards-table-container {
+    background: var(--warm-white);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    border: 1px solid rgba(0,0,0,0.05);
+}
+
+.awards-table-header {
+    background: linear-gradient(135deg, var(--deep-teal) 0%, #005a66 100%);
+    color: white;
+    padding: 14px 20px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.awards-icon {
+    font-size: 1.2rem;
+}
+
+.awards-table {
+    width: 100%;
+}
+
+.awards-table thead th {
+    background: rgba(0, 123, 138, 0.08);
+    padding: 10px 12px;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--deep-teal);
+}
+
+.awards-table tbody tr {
+    border-bottom: 1px solid rgba(0,0,0,0.05);
+    transition: background 0.2s ease;
+}
+
+.awards-table tbody tr:hover {
+    background: rgba(0, 123, 138, 0.04);
+}
+
+.awards-row.medal-1 {
+    background: linear-gradient(90deg, rgba(255, 215, 0, 0.15) 0%, transparent 50%);
+}
+
+.awards-row.medal-2 {
+    background: linear-gradient(90deg, rgba(192, 192, 192, 0.15) 0%, transparent 50%);
+}
+
+.awards-row.medal-3 {
+    background: linear-gradient(90deg, rgba(205, 127, 50, 0.15) 0%, transparent 50%);
+}
+
+.rank-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 0.85rem;
+    background: var(--charcoal);
+    color: white;
+}
+
+.rank-badge.medal-1 {
+    background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+    color: #5a4000;
+    box-shadow: 0 2px 6px rgba(255, 215, 0, 0.4);
+}
+
+.rank-badge.medal-2 {
+    background: linear-gradient(135deg, #E8E8E8 0%, #A0A0A0 100%);
+    color: #404040;
+    box-shadow: 0 2px 6px rgba(160, 160, 160, 0.4);
+}
+
+.rank-badge.medal-3 {
+    background: linear-gradient(135deg, #CD7F32 0%, #8B4513 100%);
+    color: white;
+    box-shadow: 0 2px 6px rgba(205, 127, 50, 0.4);
+}
+
+.awards-table .rank-col {
+    width: 50px;
+    text-align: center;
+    padding: 10px 8px;
+}
+
+.awards-table .ride-col {
+    padding: 10px 12px;
+    font-weight: 500;
+    max-width: 180px;
+}
+
+.awards-table .ride-col .ride-name {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.awards-table .park-col {
+    padding: 10px 12px;
+    color: var(--charcoal);
+    opacity: 0.75;
+    font-size: 0.85rem;
+    max-width: 140px;
+}
+
+.awards-table .park-col .park-name {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.awards-table .metric-col {
+    padding: 10px 12px;
+    text-align: right;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+}
+
+.metric-value {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: rgba(0, 123, 138, 0.1);
+    color: var(--deep-teal);
+    font-size: 0.9rem;
+}
+
+.metric-value.metric-bad {
+    background: rgba(255, 107, 90, 0.15);
+    color: var(--coral);
+}
+
+/* Awards empty state */
+.awards-table-container .empty-state {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--charcoal);
+    opacity: 0.7;
+}
+
+/* Responsive: Awards on mobile */
+@media (max-width: 768px) {
+    .awards-table-header {
+        padding: 12px 16px;
+        font-size: 0.9rem;
+    }
+
+    .awards-table thead th {
+        padding: 8px 10px;
+        font-size: 0.7rem;
+    }
+
+    .awards-table .rank-col {
+        width: 40px;
+        padding: 8px 6px;
+    }
+
+    .rank-badge {
+        width: 24px;
+        height: 24px;
+        font-size: 0.75rem;
+    }
+
+    .awards-table .ride-col,
+    .awards-table .park-col,
+    .awards-table .metric-col {
+        padding: 8px 10px;
+        font-size: 0.8rem;
+    }
+
+    .awards-table .ride-col {
+        max-width: 120px;
+    }
+
+    .awards-table .park-col {
+        max-width: 100px;
+    }
+
+    .metric-value {
+        padding: 2px 6px;
+        font-size: 0.8rem;
+    }
+}
+
+/* Nav responsive for 4 columns */
+@media (max-width: 600px) {
+    .nav-grid-4 {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+.hidden {
+    display: none !important;
+}
+
+/* ============================================
+   AWARDS VIEW - V2 Card Design (matching mockup)
+   ============================================ */
+.awards-view {
+    padding: 20px 0;
+}
+
+/* Awards Grid - 2x2 layout */
+.awards-grid-2x2 {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+    max-width: 1000px;
+    margin: 0 auto;
+}
+
+@media (max-width: 768px) {
+    .awards-grid-2x2 {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+}
+
+/* Award Card V2 - Dark body with colored header */
+.award-card-v2 {
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.award-card-v2:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+}
+
+/* Header - colored section */
+.award-header-v2 {
+    padding: 16px 20px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.award-header-icon {
+    font-size: 28px;
+    line-height: 1;
+}
+
+.award-header-text {
+    flex: 1;
+}
+
+.award-header-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: white;
+    margin-bottom: 2px;
+}
+
+.award-header-subtitle {
+    font-size: 0.8rem;
+    color: rgba(255,255,255,0.85);
+    line-height: 1.3;
+}
+
+/* Header colors per award type */
+.award-card-wait-park .award-header-v2 {
+    background: var(--gold);
+}
+.award-card-wait-park .award-header-title,
+.award-card-wait-park .award-header-subtitle {
+    color: var(--charcoal);
+}
+.award-card-wait-park .award-header-subtitle {
+    color: rgba(42,42,42,0.75);
+}
+
+.award-card-wait-ride .award-header-v2 {
+    background: var(--turquoise);
+}
+
+.award-card-reliable-park .award-header-v2 {
+    background: var(--coral);
+}
+
+.award-card-reliable-ride .award-header-v2 {
+    background: var(--soft-pink);
+}
+.award-card-reliable-ride .award-header-title,
+.award-card-reliable-ride .award-header-subtitle {
+    color: var(--charcoal);
+}
+.award-card-reliable-ride .award-header-subtitle {
+    color: rgba(42,42,42,0.75);
+}
+
+/* Body - dark section */
+.award-body-v2 {
+    background: #2A2A2A;
+    padding: 24px 20px;
+    text-align: center;
+    min-height: 180px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+/* Award Badge */
+.award-badge-v2 {
+    display: inline-block;
+    background: rgba(255,255,255,0.1);
+    color: white;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 6px 14px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+}
+
+/* Badge colors match header */
+.award-card-wait-park .award-badge-v2 {
+    background: var(--gold);
+    color: var(--charcoal);
+}
+
+.award-card-wait-ride .award-badge-v2 {
+    background: var(--turquoise);
+    color: white;
+}
+
+.award-card-reliable-park .award-badge-v2 {
+    background: var(--coral);
+    color: white;
+}
+
+.award-card-reliable-ride .award-badge-v2 {
+    background: var(--soft-pink);
+    color: var(--charcoal);
+}
+
+/* Period label */
+.award-period-v2 {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+}
+
+.award-card-wait-park .award-period-v2 {
+    color: var(--gold);
+}
+
+.award-card-wait-ride .award-period-v2 {
+    color: var(--turquoise);
+}
+
+.award-card-reliable-park .award-period-v2 {
+    color: var(--coral);
+}
+
+.award-card-reliable-ride .award-period-v2 {
+    color: var(--soft-pink);
+}
+
+/* Winner name */
+.award-winner-v2 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: white;
+    margin-bottom: 6px;
+    line-height: 1.2;
+}
+
+/* Stat text */
+.award-stat-v2 {
+    font-size: 0.9rem;
+    color: rgba(255,255,255,0.7);
+}
+
+/* Empty state */
+.award-empty-v2 {
+    color: rgba(255,255,255,0.5);
+    font-size: 0.9rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+    .award-header-v2 {
+        padding: 14px 16px;
+    }
+
+    .award-header-icon {
+        font-size: 24px;
+    }
+
+    .award-header-title {
+        font-size: 1rem;
+    }
+
+    .award-header-subtitle {
+        font-size: 0.75rem;
+    }
+
+    .award-body-v2 {
+        padding: 20px 16px;
+        min-height: 160px;
+    }
+
+    .award-winner-v2 {
+        font-size: 1.2rem;
+    }
+
+    .award-stat-v2 {
+        font-size: 0.85rem;
     }
 }

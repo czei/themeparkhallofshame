@@ -386,3 +386,127 @@ class TestSchemaDefinitions:
         assert park_weekly_stats is not None
         assert ride_daily_stats is not None
         assert ride_weekly_stats is not None
+
+
+class TestAwardsQueries:
+    """Test Awards query construction (Longest Wait Times, Least Reliable)."""
+
+    def test_longest_wait_times_parks_query_structure(self):
+        """Test parks-level wait times query includes expected columns."""
+        from database.queries.trends.longest_wait_times import LongestWaitTimesQuery
+
+        mock_conn = MockConnection()
+        query = LongestWaitTimesQuery(mock_conn)
+
+        try:
+            query.get_park_rankings(period="7days", filter_disney_universal=False, limit=10)
+        except (TypeError, AttributeError):
+            pass
+
+        assert mock_conn.last_query is not None
+
+        compiled = str(mock_conn.last_query.compile(compile_kwargs={"literal_binds": True}))
+
+        # Should include park-specific columns
+        assert "park_name" in compiled.lower() or "name" in compiled.lower()
+        assert "location" in compiled.lower() or "city" in compiled.lower()
+        assert "cumulative_wait_hours" in compiled.lower() or "wait" in compiled.lower()
+
+    def test_longest_wait_times_parks_filter_applied(self):
+        """Test Disney/Universal filter is applied for parks wait times."""
+        from database.queries.trends.longest_wait_times import LongestWaitTimesQuery
+
+        mock_conn = MockConnection()
+        query = LongestWaitTimesQuery(mock_conn)
+
+        try:
+            query.get_park_rankings(period="7days", filter_disney_universal=True, limit=10)
+        except (TypeError, AttributeError):
+            pass
+
+        assert mock_conn.last_query is not None
+
+        compiled = str(mock_conn.last_query.compile(compile_kwargs={"literal_binds": True}))
+
+        # Should contain Disney/Universal filter
+        assert "disney" in compiled.lower() or "universal" in compiled.lower()
+
+    def test_least_reliable_parks_query_structure(self):
+        """Test parks-level reliability query includes expected columns."""
+        from database.queries.trends.least_reliable_rides import LeastReliableRidesQuery
+
+        mock_conn = MockConnection()
+        query = LeastReliableRidesQuery(mock_conn)
+
+        try:
+            query.get_park_rankings(period="7days", filter_disney_universal=False, limit=10)
+        except (TypeError, AttributeError):
+            pass
+
+        assert mock_conn.last_query is not None
+
+        compiled = str(mock_conn.last_query.compile(compile_kwargs={"literal_binds": True}))
+
+        # Should include park-specific columns
+        assert "park_name" in compiled.lower() or "name" in compiled.lower()
+        assert "location" in compiled.lower() or "city" in compiled.lower()
+        # Parks are sorted by avg_shame_score (not downtime_hours like rides)
+        assert "shame_score" in compiled.lower()
+        assert "uptime_percentage" in compiled.lower() or "uptime" in compiled.lower()
+
+    def test_least_reliable_parks_filter_applied(self):
+        """Test Disney/Universal filter is applied for parks reliability."""
+        from database.queries.trends.least_reliable_rides import LeastReliableRidesQuery
+
+        mock_conn = MockConnection()
+        query = LeastReliableRidesQuery(mock_conn)
+
+        try:
+            query.get_park_rankings(period="7days", filter_disney_universal=True, limit=10)
+        except (TypeError, AttributeError):
+            pass
+
+        assert mock_conn.last_query is not None
+
+        compiled = str(mock_conn.last_query.compile(compile_kwargs={"literal_binds": True}))
+
+        # Should contain Disney/Universal filter
+        assert "disney" in compiled.lower() or "universal" in compiled.lower()
+
+    def test_longest_wait_times_rides_still_works(self):
+        """Test ride-level wait times query still works (backward compatibility)."""
+        from database.queries.trends.longest_wait_times import LongestWaitTimesQuery
+
+        mock_conn = MockConnection()
+        query = LongestWaitTimesQuery(mock_conn)
+
+        try:
+            query.get_rankings(period="7days", filter_disney_universal=False, limit=10)
+        except (TypeError, AttributeError):
+            pass
+
+        assert mock_conn.last_query is not None
+
+        compiled = str(mock_conn.last_query.compile(compile_kwargs={"literal_binds": True}))
+
+        # Should include ride-specific columns
+        assert "ride_name" in compiled.lower() or "ride" in compiled.lower()
+
+    def test_least_reliable_rides_still_works(self):
+        """Test ride-level reliability query still works (backward compatibility)."""
+        from database.queries.trends.least_reliable_rides import LeastReliableRidesQuery
+
+        mock_conn = MockConnection()
+        query = LeastReliableRidesQuery(mock_conn)
+
+        try:
+            query.get_rankings(period="7days", filter_disney_universal=False, limit=10)
+        except (TypeError, AttributeError):
+            pass
+
+        assert mock_conn.last_query is not None
+
+        compiled = str(mock_conn.last_query.compile(compile_kwargs={"literal_binds": True}))
+
+        # Should include ride-specific columns
+        assert "ride_name" in compiled.lower() or "ride" in compiled.lower()

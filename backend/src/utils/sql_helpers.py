@@ -66,24 +66,84 @@ class RideStatusSQL:
         return f"({table_alias}.status = 'OPERATING' OR ({table_alias}.status IS NULL AND {table_alias}.computed_is_open = TRUE))"
 
     @staticmethod
-    def is_down(table_alias: str = "rss") -> str:
+    def is_down(table_alias: str = "rss", parks_alias: str = None) -> str:
         """
         Get SQL condition for checking if a ride is down (not operating).
 
-        Includes both DOWN and CLOSED status because many non-Disney/Universal
-        parks report all non-operating rides as CLOSED (no breakdown distinction).
-        The has_operated_subquery filter ensures we only count rides that were
-        operating at some point, filtering out true seasonal closures.
+        PARK-TYPE AWARE LOGIC:
+        - Disney/Universal parks: Only count DOWN status (not CLOSED)
+          because they properly distinguish between breakdowns (DOWN) and
+          scheduled closures (CLOSED)
+        - Other parks: Include both DOWN and CLOSED because many parks
+          (Dollywood, Busch Gardens, etc.) only report CLOSED for all
+          non-operating rides. The has_operated_subquery filter ensures
+          we only count rides that were operating at some point.
 
         Note: REFURBISHMENT is excluded as it indicates long-term scheduled maintenance.
 
         Args:
             table_alias: The alias used for ride_status_snapshots table
+            parks_alias: Optional alias for parks table. If provided, uses
+                        park-type-aware logic. If None, uses legacy behavior.
 
         Returns:
             SQL condition that is TRUE when ride is down
         """
+        if parks_alias:
+            # Park-type aware logic
+            return f"""(
+                CASE
+                    WHEN ({parks_alias}.is_disney = TRUE OR {parks_alias}.is_universal = TRUE) THEN
+                        -- Disney/Universal: Only count explicit DOWN status
+                        {table_alias}.status = 'DOWN'
+                    ELSE
+                        -- Other parks: Count DOWN, CLOSED, or computed_is_open=FALSE
+                        ({table_alias}.status IN ('DOWN', 'CLOSED') OR ({table_alias}.status IS NULL AND {table_alias}.computed_is_open = FALSE))
+                END
+            )"""
+        else:
+            # Legacy behavior (backwards compatibility)
+            return f"({table_alias}.status IN ('DOWN', 'CLOSED') OR ({table_alias}.status IS NULL AND {table_alias}.computed_is_open = FALSE))"
+
+    @staticmethod
+    def is_down_disney_universal(table_alias: str = "rss") -> str:
+        """
+        Get SQL condition for checking if a ride is down at a Disney/Universal park.
+
+        Disney and Universal parks properly distinguish between:
+        - DOWN: Unexpected breakdown (counts as downtime)
+        - CLOSED: Scheduled closure (does NOT count as downtime)
+
+        Args:
+            table_alias: The alias used for ride_status_snapshots table
+
+        Returns:
+            SQL condition that is TRUE when ride is DOWN (broken)
+        """
+        return f"{table_alias}.status = 'DOWN'"
+
+    @staticmethod
+    def is_down_other_parks(table_alias: str = "rss") -> str:
+        """
+        Get SQL condition for checking if a ride is down at non-Disney/Universal parks.
+
+        Most other parks (Dollywood, Busch Gardens, SeaWorld, etc.) only report
+        CLOSED status for all non-operating rides - they don't distinguish between
+        breakdowns and scheduled closures. We include both DOWN and CLOSED.
+
+        Use with a stricter has_operated filter to avoid counting seasonal closures.
+
+        Args:
+            table_alias: The alias used for ride_status_snapshots table
+
+        Returns:
+            SQL condition that is TRUE when ride is not operating
+        """
         return f"({table_alias}.status IN ('DOWN', 'CLOSED') OR ({table_alias}.status IS NULL AND {table_alias}.computed_is_open = FALSE))"
+
+    # Minimum operating snapshots required for non-Disney/Universal parks
+    # to count their CLOSED status as downtime (6 snapshots = 30 minutes)
+    MIN_OPERATING_SNAPSHOTS_OTHER_PARKS = 6
 
     @staticmethod
     def has_operated_subquery(ride_id_expr: str, start_param: str = ":start_utc", end_param: str = ":end_utc") -> str:
@@ -124,6 +184,97 @@ class RideStatusSQL:
             AND rss_op.recorded_at >= {start_param}
             AND rss_op.recorded_at < {end_param}
             AND (rss_op.status = 'OPERATING' OR (rss_op.status IS NULL AND rss_op.computed_is_open = TRUE))
+        )"""
+
+    @staticmethod
+    def has_operated_minimum_subquery(
+        ride_id_expr: str,
+        start_param: str = ":start_utc",
+        end_param: str = ":end_utc",
+        min_snapshots: int = None
+    ) -> str:
+        """
+        Get SQL subquery to check if a ride has operated for a minimum duration.
+
+        STRICTER VERSION for non-Disney/Universal parks:
+        Requires at least MIN_OPERATING_SNAPSHOTS_OTHER_PARKS (6) operating snapshots
+        before counting CLOSED as downtime. This filters out rides that only
+        operated briefly (e.g., for testing) before going CLOSED.
+
+        Args:
+            ride_id_expr: Expression for the ride_id to check (e.g., "r.ride_id")
+            start_param: SQL parameter name for start time
+            end_param: SQL parameter name for end time
+            min_snapshots: Minimum number of operating snapshots required
+                          (defaults to MIN_OPERATING_SNAPSHOTS_OTHER_PARKS)
+
+        Returns:
+            SQL subquery that returns TRUE if ride has operated enough
+
+        Example:
+            # Only count downtime for rides that have operated at least 30 min
+            has_min = RideStatusSQL.has_operated_minimum_subquery("r.ride_id")
+            query = f"... AND {has_min} ..."
+        """
+        if min_snapshots is None:
+            min_snapshots = RideStatusSQL.MIN_OPERATING_SNAPSHOTS_OTHER_PARKS
+
+        return f"""(
+            SELECT COUNT(*) >= {min_snapshots}
+            FROM ride_status_snapshots rss_op
+            WHERE rss_op.ride_id = {ride_id_expr}
+            AND rss_op.recorded_at >= {start_param}
+            AND rss_op.recorded_at < {end_param}
+            AND (rss_op.status = 'OPERATING' OR (rss_op.status IS NULL AND rss_op.computed_is_open = TRUE))
+        )"""
+
+    @staticmethod
+    def has_operated_for_park_type(
+        ride_id_expr: str,
+        parks_alias: str,
+        start_param: str = ":start_utc",
+        end_param: str = ":end_utc"
+    ) -> str:
+        """
+        Get park-type-aware "has operated" check.
+
+        - Disney/Universal: Just needs 1 operating snapshot (they have proper DOWN status)
+        - Other parks: Need at least MIN_OPERATING_SNAPSHOTS_OTHER_PARKS (6) snapshots
+          to count CLOSED as downtime (filters out seasonal/weather closures)
+
+        Args:
+            ride_id_expr: Expression for the ride_id to check
+            parks_alias: Alias for the parks table
+            start_param: SQL parameter name for start time
+            end_param: SQL parameter name for end time
+
+        Returns:
+            SQL condition that returns TRUE if ride has operated enough for its park type
+        """
+        min_snaps = RideStatusSQL.MIN_OPERATING_SNAPSHOTS_OTHER_PARKS
+
+        return f"""(
+            CASE
+                WHEN ({parks_alias}.is_disney = TRUE OR {parks_alias}.is_universal = TRUE) THEN
+                    -- Disney/Universal: Just need 1 operating snapshot
+                    EXISTS (
+                        SELECT 1 FROM ride_status_snapshots rss_op
+                        WHERE rss_op.ride_id = {ride_id_expr}
+                        AND rss_op.recorded_at >= {start_param}
+                        AND rss_op.recorded_at < {end_param}
+                        AND (rss_op.status = 'OPERATING' OR (rss_op.status IS NULL AND rss_op.computed_is_open = TRUE))
+                    )
+                ELSE
+                    -- Other parks: Need at least {min_snaps} operating snapshots (30 min)
+                    (
+                        SELECT COUNT(*) >= {min_snaps}
+                        FROM ride_status_snapshots rss_op
+                        WHERE rss_op.ride_id = {ride_id_expr}
+                        AND rss_op.recorded_at >= {start_param}
+                        AND rss_op.recorded_at < {end_param}
+                        AND (rss_op.status = 'OPERATING' OR (rss_op.status IS NULL AND rss_op.computed_is_open = TRUE))
+                    )
+            END
         )"""
 
     @staticmethod

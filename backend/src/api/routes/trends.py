@@ -12,6 +12,8 @@ GET /trends?category=rides-improving  → database/queries/trends/improving_ride
 GET /trends?category=rides-declining  → database/queries/trends/declining_rides.py
 GET /trends/chart-data?type=parks     → database/queries/charts/park_shame_history.py
 GET /trends/chart-data?type=rides     → database/queries/charts/ride_downtime_history.py
+GET /trends/longest-wait-times        → database/queries/trends/longest_wait_times.py
+GET /trends/least-reliable            → database/queries/trends/least_reliable_rides.py
 """
 
 from flask import Blueprint, request, jsonify
@@ -27,6 +29,8 @@ from database.queries.trends import (
     DecliningParksQuery,
     ImprovingRidesQuery,
     DecliningRidesQuery,
+    LongestWaitTimesQuery,
+    LeastReliableRidesQuery,
 )
 from database.queries.charts import (
     ParkShameHistoryQuery,
@@ -351,6 +355,206 @@ def get_chart_data():
 
     except Exception as e:
         logger.error(f"Error in get_chart_data: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "Internal server error"
+        }), 500
+
+
+@trends_bp.route('/trends/longest-wait-times', methods=['GET'])
+def get_longest_wait_times():
+    """
+    GET /api/trends/longest-wait-times
+
+    Returns top 10 parks or rides ranked by cumulative wait-hours for the Awards section.
+
+    Query Files Used:
+    -----------------
+    - database/queries/trends/longest_wait_times.py
+
+    Query Parameters:
+        - period: today | 7days | 30days (default: today)
+        - filter: disney-universal | all-parks (default: all-parks)
+        - entity: parks | rides (default: rides)
+        - limit: max results (default: 10, max: 20)
+
+    Returns:
+        JSON response with top parks/rides by cumulative wait-hours
+    """
+    try:
+        # Parse query parameters
+        period = request.args.get('period', 'today')
+        park_filter = request.args.get('filter', 'all-parks')
+        entity = request.args.get('entity', 'rides')
+        limit = min(int(request.args.get('limit', 10)), 20)
+
+        # Validate period (LIVE not supported - frontend should convert to TODAY)
+        valid_periods = ['today', '7days', '30days']
+        if period not in valid_periods:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid period. Must be one of: {', '.join(valid_periods)}"
+            }), 400
+
+        # Validate filter
+        valid_filters = ['disney-universal', 'all-parks']
+        if park_filter not in valid_filters:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid filter. Must be one of: {', '.join(valid_filters)}"
+            }), 400
+
+        # Validate entity
+        valid_entities = ['parks', 'rides']
+        if entity not in valid_entities:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid entity. Must be one of: {', '.join(valid_entities)}"
+            }), 400
+
+        filter_disney_universal = (park_filter == 'disney-universal')
+
+        with get_db_connection() as conn:
+            query = LongestWaitTimesQuery(conn)
+            if entity == 'parks':
+                results = query.get_park_rankings(
+                    period=period,
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit
+                )
+            else:
+                results = query.get_rankings(
+                    period=period,
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit
+                )
+
+        # Add rank to results
+        ranked_results = []
+        for idx, item in enumerate(results, start=1):
+            item['rank'] = idx
+            ranked_results.append(item)
+
+        return jsonify({
+            "success": True,
+            "period": period,
+            "filter": park_filter,
+            "entity": entity,
+            "count": len(ranked_results),
+            "data": ranked_results,
+            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
+            "timestamp": datetime.utcnow().isoformat() + 'Z'
+        }), 200
+
+    except ValueError as e:
+        logger.error(f"Validation error in get_longest_wait_times: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 400
+
+    except Exception as e:
+        logger.error(f"Error in get_longest_wait_times: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "Internal server error"
+        }), 500
+
+
+@trends_bp.route('/trends/least-reliable', methods=['GET'])
+def get_least_reliable():
+    """
+    GET /api/trends/least-reliable
+
+    Returns top 10 parks or rides ranked by total downtime hours for the Awards section.
+
+    Query Files Used:
+    -----------------
+    - database/queries/trends/least_reliable_rides.py
+
+    Query Parameters:
+        - period: today | 7days | 30days (default: today)
+        - filter: disney-universal | all-parks (default: all-parks)
+        - entity: parks | rides (default: rides)
+        - limit: max results (default: 10, max: 20)
+
+    Returns:
+        JSON response with top parks/rides by downtime hours
+    """
+    try:
+        # Parse query parameters
+        period = request.args.get('period', 'today')
+        park_filter = request.args.get('filter', 'all-parks')
+        entity = request.args.get('entity', 'rides')
+        limit = min(int(request.args.get('limit', 10)), 20)
+
+        # Validate period (LIVE not supported - frontend should convert to TODAY)
+        valid_periods = ['today', '7days', '30days']
+        if period not in valid_periods:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid period. Must be one of: {', '.join(valid_periods)}"
+            }), 400
+
+        # Validate filter
+        valid_filters = ['disney-universal', 'all-parks']
+        if park_filter not in valid_filters:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid filter. Must be one of: {', '.join(valid_filters)}"
+            }), 400
+
+        # Validate entity
+        valid_entities = ['parks', 'rides']
+        if entity not in valid_entities:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid entity. Must be one of: {', '.join(valid_entities)}"
+            }), 400
+
+        filter_disney_universal = (park_filter == 'disney-universal')
+
+        with get_db_connection() as conn:
+            query = LeastReliableRidesQuery(conn)
+            if entity == 'parks':
+                results = query.get_park_rankings(
+                    period=period,
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit
+                )
+            else:
+                results = query.get_rankings(
+                    period=period,
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit
+                )
+
+        # Add rank to results
+        ranked_results = []
+        for idx, item in enumerate(results, start=1):
+            item['rank'] = idx
+            ranked_results.append(item)
+
+        return jsonify({
+            "success": True,
+            "period": period,
+            "filter": park_filter,
+            "entity": entity,
+            "count": len(ranked_results),
+            "data": ranked_results,
+            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
+            "timestamp": datetime.utcnow().isoformat() + 'Z'
+        }), 200
+
+    except ValueError as e:
+        logger.error(f"Validation error in get_least_reliable: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 400
+
+    except Exception as e:
+        logger.error(f"Error in get_least_reliable: {e}", exc_info=True)
         return jsonify({
             "success": False,
             "error": "Internal server error"

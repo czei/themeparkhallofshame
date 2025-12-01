@@ -170,15 +170,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'trends':
                     if (typeof Trends !== 'undefined') {
                         currentComponent = new Trends(apiClient, 'view-container', globalState.filter);
-                        // For Trends, default to 7days if globalState is 'today'
-                        // (daily trends are less meaningful than weekly/monthly)
-                        if (globalState.period === 'today') {
-                            currentComponent.state.period = '7days';
-                            globalState.period = '7days';
-                            updateTimePeriodUI();
-                        } else {
-                            currentComponent.state.period = globalState.period;
-                        }
+                        // Respect the current period selection (don't override)
+                        currentComponent.state.period = globalState.period;
                         await currentComponent.init();
                     } else {
                         throw new Error('Trends component not loaded');

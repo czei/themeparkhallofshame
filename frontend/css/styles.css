@@ -2001,6 +2001,115 @@ td {
     text-align: center;
 }
 
+/* Shame Breakdown - Period Badge (LIVE vs TODAY) */
+.shame-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.breakdown-period-badge {
+    display: inline-block;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    border-radius: 2px;
+}
+
+.breakdown-period-badge.live {
+    background: var(--coral);
+    color: white;
+}
+
+.breakdown-period-badge.today {
+    background: var(--deep-teal);
+    color: white;
+}
+
+/* Today Breakdown - Cumulative Stats */
+.today-breakdown .shame-formula-box {
+    background: linear-gradient(135deg, #f0f9fa 0%, #e8f4f5 100%);
+    border-color: var(--deep-teal);
+}
+
+.today-explanation {
+    padding: 0.75rem;
+    background: rgba(0, 123, 138, 0.08);
+    border-left: 3px solid var(--deep-teal);
+    margin-bottom: 0.75rem;
+}
+
+.cumulative-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.cumulative-stats .stat-item {
+    text-align: center;
+    padding: 0.75rem;
+    background: white;
+    border: 2px solid var(--charcoal);
+}
+
+.cumulative-stats .stat-value {
+    display: block;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: var(--deep-teal);
+    line-height: 1.2;
+}
+
+.cumulative-stats .stat-label {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #666;
+    margin-top: 0.25rem;
+}
+
+/* Today Breakdown - Rides Section */
+.rides-section-note {
+    font-size: 0.85rem;
+    color: #666;
+    margin: -0.5rem 0 1rem 0;
+    font-style: italic;
+}
+
+.today-rides-list .ride-item {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.today-ride-item .ride-name {
+    flex: 1;
+    min-width: 150px;
+}
+
+.ride-downtime-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.8rem;
+}
+
+.ride-downtime {
+    color: var(--coral);
+    font-weight: 600;
+}
+
+.ride-weighted {
+    color: var(--deep-teal);
+    font-weight: 600;
+    font-size: 0.75rem;
+}
+
 /* Park Details - Current Status Section */
 .current-status-section {
     margin-bottom: 1.5rem;

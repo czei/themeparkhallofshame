@@ -179,8 +179,10 @@ class TestRideStatusSQL:
 
         expr = RideStatusSQL.is_down("rss")
 
-        # Should check for explicit DOWN status
-        assert "rss.status = 'DOWN'" in expr
+        # Should check for DOWN and CLOSED status (CLOSED included for non-Disney parks)
+        assert "'DOWN'" in expr
+        assert "'CLOSED'" in expr
+        assert "IN" in expr  # Should use IN clause for multiple statuses
 
         # Should also handle NULL status with computed_is_open=FALSE
         assert "computed_is_open = FALSE" in expr or "computed_is_open" in expr

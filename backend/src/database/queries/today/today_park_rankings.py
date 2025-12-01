@@ -107,6 +107,21 @@ class TodayParkRankingsQuery:
                 INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
                 WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :now_utc
                     AND rss.computed_is_open = TRUE
+            ),
+            park_operating_snapshots AS (
+                -- Count total ride-snapshots when park was open (for uptime calculation)
+                SELECT
+                    r.park_id,
+                    COUNT(*) AS total_snapshots
+                FROM rides r
+                INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+                INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
+                    AND pas.recorded_at = rss.recorded_at
+                INNER JOIN rides_that_operated rto ON r.ride_id = rto.ride_id
+                WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :now_utc
+                    AND r.is_active = TRUE AND r.category = 'ATTRACTION'
+                    AND {park_open}
+                GROUP BY r.park_id
             )
             SELECT
                 p.park_id,
@@ -145,6 +160,18 @@ class TodayParkRankingsQuery:
                     1
                 ) AS shame_score,
 
+                -- Uptime percentage = (total - down) / total * 100
+                ROUND(
+                    100.0 - (
+                        SUM(CASE
+                            WHEN {is_down} AND {park_open} AND rto.ride_id IS NOT NULL
+                            THEN 1
+                            ELSE 0
+                        END) * 100.0 / NULLIF(pos.total_snapshots, 0)
+                    ),
+                    1
+                ) AS uptime_percentage,
+
                 -- Count of DISTINCT rides that were down at some point today
                 COUNT(DISTINCT CASE
                     WHEN {is_down} AND {park_open} AND rto.ride_id IS NOT NULL
@@ -163,10 +190,11 @@ class TodayParkRankingsQuery:
                 AND pas.recorded_at = rss.recorded_at
             INNER JOIN park_weights pw ON p.park_id = pw.park_id
             LEFT JOIN rides_that_operated rto ON r.ride_id = rto.ride_id
+            LEFT JOIN park_operating_snapshots pos ON p.park_id = pos.park_id
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :now_utc
                 AND p.is_active = TRUE
                 {filter_clause}
-            GROUP BY p.park_id, p.name, p.city, p.state_province, pw.total_park_weight
+            GROUP BY p.park_id, p.name, p.city, p.state_province, pw.total_park_weight, pos.total_snapshots
             HAVING total_downtime_hours > 0
             ORDER BY {sort_column} DESC
             LIMIT :limit

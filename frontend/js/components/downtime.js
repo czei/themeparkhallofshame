@@ -687,7 +687,8 @@ class Downtime {
                 const parkId = parseInt(btn.dataset.parkId);
                 const parkName = btn.dataset.parkName;
                 if (this.parkDetailsModal && parkId) {
-                    this.parkDetailsModal.open(parkId, parkName);
+                    // Pass current period to modal so it can fetch appropriate breakdown
+                    this.parkDetailsModal.open(parkId, parkName, this.state.period);
                 }
             });
         });

@@ -292,11 +292,21 @@ def get_park_details(park_id: int):
     Path Parameters:
         park_id (int): Park ID
 
+    Query Parameters:
+        period (str): 'live' (default) or 'today' - determines shame breakdown type
+            - live: Shows rides currently down (instantaneous)
+            - today: Shows all rides that had downtime today (cumulative)
+
     Returns:
         JSON response with park details, tier distribution, and operating hours
 
     Performance: <100ms
     """
+    # Get period parameter (defaults to 'live' for backwards compatibility)
+    period = request.args.get('period', 'live')
+    if period not in ('live', 'today'):
+        period = 'live'
+
     try:
         with get_db_connection() as conn:
             park_repo = ParkRepository(conn)
@@ -322,8 +332,13 @@ def get_park_details(park_id: int):
             # Get current ride status summary
             current_status = stats_repo.get_park_current_status(park_id)
 
-            # Get shame score breakdown (rides currently down with tier weights)
-            shame_breakdown = stats_repo.get_park_shame_breakdown(park_id)
+            # Get shame score breakdown based on period
+            # - live: rides CURRENTLY down (instantaneous)
+            # - today: all rides that had ANY downtime today (cumulative)
+            if period == 'today':
+                shame_breakdown = stats_repo.get_park_today_shame_breakdown(park_id)
+            else:
+                shame_breakdown = stats_repo.get_park_shame_breakdown(park_id)
 
             # Build response
             response = {

@@ -36,6 +36,7 @@ from database.repositories.park_repository import ParkRepository
 from database.repositories.ride_repository import RideRepository
 from database.repositories.snapshot_repository import RideStatusSnapshotRepository, ParkActivitySnapshotRepository
 from database.repositories.status_change_repository import RideStatusChangeRepository
+from database.repositories.schedule_repository import ScheduleRepository
 
 
 class SnapshotCollector:
@@ -77,13 +78,17 @@ class SnapshotCollector:
                 snapshot_repo = RideStatusSnapshotRepository(conn)
                 park_activity_repo = ParkActivitySnapshotRepository(conn)
                 status_change_repo = RideStatusChangeRepository(conn)
+                schedule_repo = ScheduleRepository(conn)
 
                 parks = park_repo.get_all_active()
                 logger.info(f"Processing {len(parks)} active parks...")
 
+                # Step 1.5: Refresh schedules for parks that need it (every 24 hours)
+                self._refresh_schedules_if_needed(parks, schedule_repo)
+
                 # Step 2: Process each park
                 for park in parks:
-                    self._process_park(park, park_activity_repo, ride_repo, snapshot_repo, status_change_repo)
+                    self._process_park(park, park_activity_repo, ride_repo, snapshot_repo, status_change_repo, schedule_repo)
 
             # Step 3: Print summary
             self._print_summary()
@@ -96,9 +101,45 @@ class SnapshotCollector:
             logger.error(f"Fatal error during snapshot collection: {e}", exc_info=True)
             sys.exit(1)
 
+    def _refresh_schedules_if_needed(self, parks: List, schedule_repo: ScheduleRepository):
+        """
+        Refresh park schedules from ThemeParks.wiki API if stale (>24 hours).
+
+        Only refreshes a few parks per collection run to avoid API overload.
+
+        Args:
+            parks: List of park objects
+            schedule_repo: Schedule repository
+        """
+        MAX_REFRESHES_PER_RUN = 5  # Limit API calls per collection run
+
+        refresh_count = 0
+        for park in parks:
+            if refresh_count >= MAX_REFRESHES_PER_RUN:
+                break
+
+            park_id = park.park_id
+            themeparks_wiki_id = getattr(park, 'themeparks_wiki_id', None)
+
+            # Only fetch schedules for parks with ThemeParks.wiki IDs
+            if not themeparks_wiki_id:
+                continue
+
+            # Check if schedule needs refresh
+            if schedule_repo.has_recent_schedule(park_id, max_age_hours=24):
+                continue
+
+            try:
+                logger.info(f"Refreshing schedule for {park.name}...")
+                entries = schedule_repo.fetch_and_store_schedule(park_id, themeparks_wiki_id)
+                self.stats['schedules_refreshed'] = self.stats.get('schedules_refreshed', 0) + 1
+                refresh_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to refresh schedule for {park.name}: {e}")
+
     def _process_park(self, park: Dict, park_activity_repo: ParkActivitySnapshotRepository,
                       ride_repo: RideRepository, snapshot_repo: RideStatusSnapshotRepository,
-                      status_change_repo: RideStatusChangeRepository):
+                      status_change_repo: RideStatusChangeRepository, schedule_repo: ScheduleRepository):
         """
         Process a single park: fetch wait times and store snapshots.
 
@@ -110,6 +151,7 @@ class SnapshotCollector:
             ride_repo: Ride repository
             snapshot_repo: Ride status snapshot repository
             status_change_repo: Ride status change repository
+            schedule_repo: Schedule repository for checking park hours
         """
         park_id = park.park_id
         park_name = park.name
@@ -125,14 +167,14 @@ class SnapshotCollector:
                 self.stats['parks_themeparks_wiki'] += 1
                 self._process_park_themeparks_wiki(
                     park, themeparks_wiki_id, park_activity_repo,
-                    ride_repo, snapshot_repo, status_change_repo
+                    ride_repo, snapshot_repo, status_change_repo, schedule_repo
                 )
             else:
                 logger.info(f"Processing: {park_name} [Queue-Times]")
                 self.stats['parks_queue_times'] += 1
                 self._process_park_queue_times(
                     park, queue_times_id, park_activity_repo,
-                    ride_repo, snapshot_repo, status_change_repo
+                    ride_repo, snapshot_repo, status_change_repo, schedule_repo
                 )
 
         except Exception as e:
@@ -143,7 +185,8 @@ class SnapshotCollector:
                                        park_activity_repo: ParkActivitySnapshotRepository,
                                        ride_repo: RideRepository,
                                        snapshot_repo: RideStatusSnapshotRepository,
-                                       status_change_repo: RideStatusChangeRepository):
+                                       status_change_repo: RideStatusChangeRepository,
+                                       schedule_repo: ScheduleRepository):
         """
         Process park using ThemeParks.wiki API.
 
@@ -154,6 +197,7 @@ class SnapshotCollector:
             ride_repo: Ride repository
             snapshot_repo: Ride status snapshot repository
             status_change_repo: Ride status change repository
+            schedule_repo: Schedule repository for checking park hours
         """
         park_id = park.park_id
         park_name = park.name
@@ -170,10 +214,17 @@ class SnapshotCollector:
         rides_operating = sum(1 for r in live_data if r.status == 'OPERATING')
         rides_down = sum(1 for r in live_data if r.status == 'DOWN')
         rides_closed = sum(1 for r in live_data if r.status in ('CLOSED', 'REFURBISHMENT'))
-        # Park is "open" only if >= 50% of rides are operating
-        # This prevents counting end-of-day closures as downtime when only a few rides remain open
-        min_rides_for_open = max(3, total_rides // 2)  # At least 3, or 50% of total
-        park_appears_open = rides_operating >= min_rides_for_open
+
+        # Use schedule-based park open detection (SINGLE SOURCE OF TRUTH)
+        # Falls back to heuristic if no schedule data available
+        park_appears_open = schedule_repo.is_park_open_now(park_id)
+        if not park_appears_open:
+            # Fallback: if no schedule data, use heuristic based on operating rides
+            # This handles parks without schedule data yet
+            if not schedule_repo.has_recent_schedule(park_id, max_age_hours=48):
+                min_rides_for_open = max(3, total_rides // 2)
+                park_appears_open = rides_operating >= min_rides_for_open
+                logger.debug(f"  Using heuristic for {park_name} (no schedule data)")
 
         # Calculate wait time statistics
         open_wait_times = [r.wait_time for r in live_data
@@ -346,7 +397,8 @@ class SnapshotCollector:
                                    park_activity_repo: ParkActivitySnapshotRepository,
                                    ride_repo: RideRepository,
                                    snapshot_repo: RideStatusSnapshotRepository,
-                                   status_change_repo: RideStatusChangeRepository):
+                                   status_change_repo: RideStatusChangeRepository,
+                                   schedule_repo: ScheduleRepository):
         """
         Process park using Queue-Times.com API (legacy provider).
 
@@ -357,6 +409,7 @@ class SnapshotCollector:
             ride_repo: Ride repository
             snapshot_repo: Ride status snapshot repository
             status_change_repo: Ride status change repository
+            schedule_repo: Schedule repository for checking park hours
         """
         park_id = park.park_id
         park_name = park.name
@@ -407,10 +460,16 @@ class SnapshotCollector:
             # Count rides reported as "open" by API (may include closed parks with is_open=True)
             rides_open = sum(1 for r in rides_data if r.get('wait_time', 0) > 0 or r.get('is_open'))
             rides_closed = total_rides - rides_open
-            # Park is "open" only if >= 50% of rides have wait times
-            # This prevents counting end-of-day closures as downtime when only a few rides remain open
-            min_rides_for_open = max(3, total_rides // 2)  # At least 3, or 50% of total
-            park_appears_open = rides_with_wait >= min_rides_for_open
+
+            # Use schedule-based park open detection (SINGLE SOURCE OF TRUTH)
+            # Falls back to heuristic if no schedule data available
+            park_appears_open = schedule_repo.is_park_open_now(park_id)
+            if not park_appears_open:
+                # Fallback: if no schedule data, use heuristic based on wait times
+                # Queue-Times parks don't have ThemeParks.wiki schedule data, so this is the norm
+                if not schedule_repo.has_recent_schedule(park_id, max_age_hours=48):
+                    min_rides_for_open = max(3, total_rides // 2)
+                    park_appears_open = rides_with_wait >= min_rides_for_open
 
             # Calculate wait time statistics for open rides
             open_wait_times = [r.get('wait_time', 0) for r in rides_data
@@ -620,6 +679,7 @@ class SnapshotCollector:
         logger.info(f"Rides processed:     {self.stats['rides_processed']}")
         logger.info(f"Snapshots created:   {self.stats['snapshots_created']}")
         logger.info(f"Status changes:      {self.stats['status_changes']}")
+        logger.info(f"Schedules refreshed: {self.stats.get('schedules_refreshed', 0)}")
         logger.info(f"Errors:              {self.stats['errors']}")
 
 

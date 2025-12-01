@@ -22,7 +22,7 @@ How to Add a New Table:
 """
 
 from .metadata import metadata
-from .core_tables import parks, rides, ride_classifications
+from .core_tables import parks, rides, ride_classifications, park_schedules
 from .snapshot_tables import (
     ride_status_snapshots,
     ride_status_changes,
@@ -48,6 +48,7 @@ __all__ = [
     "parks",
     "rides",
     "ride_classifications",
+    "park_schedules",
     # Raw data / snapshots
     "ride_status_snapshots",
     "ride_status_changes",

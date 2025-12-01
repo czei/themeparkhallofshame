@@ -176,3 +176,49 @@ ride_classifications = Table(
     Index("idx_rc_confidence", "confidence_score"),
     Index("idx_rc_cache_key", "cache_key"),
 )
+
+
+# =============================================================================
+# PARK_SCHEDULES TABLE
+# =============================================================================
+# Official operating schedules from ThemeParks.wiki API.
+#
+# This replaces the hacky "park_appears_open" heuristic that inferred park
+# status from ride counts. Now we use actual schedule data from the API.
+#
+# Key columns for queries:
+#   - park_id: Foreign key to parks
+#   - schedule_date: Date in park's local timezone
+#   - opening_time, closing_time: UTC times for easy comparison
+#   - schedule_type: OPERATING (normal hours), TICKETED_EVENT, etc.
+#
+# How to use:
+#   Check if park is open: NOW() BETWEEN opening_time AND closing_time
+#                          AND schedule_type = 'OPERATING'
+#
+# How to Modify:
+#   - To add schedule types: Update enum here AND in migration
+# =============================================================================
+
+park_schedules = Table(
+    "park_schedules",
+    metadata,
+    Column("schedule_id", Integer, primary_key=True, autoincrement=True),
+    Column("park_id", Integer, ForeignKey("parks.park_id", ondelete="CASCADE"), nullable=False),
+    Column("schedule_date", DateTime, nullable=False),  # Date only, stored as datetime
+    Column("opening_time", DateTime, nullable=True),  # UTC
+    Column("closing_time", DateTime, nullable=True),  # UTC
+    Column(
+        "schedule_type",
+        Enum("OPERATING", "TICKETED_EVENT", "PRIVATE_EVENT", "EXTRA_HOURS", "INFO", name="schedule_type_enum"),
+        server_default="OPERATING",
+    ),
+    Column("fetched_at", DateTime, server_default=func.now()),
+    Column("created_at", DateTime, server_default=func.now()),
+    Column("updated_at", DateTime, server_default=func.now(), onupdate=func.now()),
+    # Indexes
+    Index("idx_ps_park_date", "park_id", "schedule_date"),
+    Index("idx_ps_date", "schedule_date"),
+    Index("idx_ps_fetched", "fetched_at"),
+    Index("idx_ps_type", "schedule_type"),
+)

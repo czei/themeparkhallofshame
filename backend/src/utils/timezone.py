@@ -84,6 +84,29 @@ def get_pacific_day_range_utc(target_date: date) -> tuple[datetime, datetime]:
     )
 
 
+def get_today_range_to_now_utc() -> tuple[datetime, datetime]:
+    """
+    Get UTC datetime range from midnight Pacific to now.
+
+    Used for TODAY cumulative queries - aggregates data from
+    the start of the Pacific day to the current moment.
+
+    Returns:
+        tuple: (start_utc, now_utc) where:
+            - start_utc = midnight Pacific today, converted to UTC
+            - now_utc = current time in UTC
+
+    Example:
+        At 3 PM Pacific on 2025-11-27:
+        - start_utc = 2025-11-27 08:00:00 UTC (midnight Pacific)
+        - now_utc = 2025-11-27 23:00:00 UTC (3 PM Pacific)
+    """
+    today = get_today_pacific()
+    start_utc, _ = get_pacific_day_range_utc(today)
+    now_utc = datetime.now(UTC_TZ)
+    return (start_utc, now_utc)
+
+
 def date_to_pacific(utc_datetime: datetime) -> date:
     """
     Convert a UTC datetime to a Pacific date.

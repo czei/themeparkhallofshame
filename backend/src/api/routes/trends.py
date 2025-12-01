@@ -79,6 +79,8 @@ def get_trends():
             }), 400
 
         # Validate parameter values
+        # Note: 'live' is intentionally excluded - trends require comparison between periods,
+        # which doesn't make sense for instantaneous data. Frontend defaults to 'today' if 'live'.
         valid_periods = ['today', '7days', '30days']
         valid_categories = ['parks-improving', 'parks-declining', 'rides-improving', 'rides-declining']
         valid_filters = ['disney-universal', 'all-parks']
@@ -228,6 +230,8 @@ def get_chart_data():
         limit = int(request.args.get('limit', 10))
 
         # Validate parameters
+        # Note: 'live' is intentionally excluded - chart trends require time series data,
+        # which doesn't make sense for instantaneous data. Frontend defaults to 'today' if 'live'.
         valid_periods = ['today', '7days', '30days']
         valid_types = ['parks', 'rides', 'waittimes']
         valid_filters = ['disney-universal', 'all-parks']

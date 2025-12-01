@@ -61,9 +61,9 @@ class Trends {
      */
     async fetchChartData() {
         try {
-            // Pass the actual period - API now supports 'today' with hourly data
+            // Pass the effective period - trends don't support 'live', use 'today' instead
             const params = {
-                period: this.state.period,
+                period: this.getEffectivePeriod(),
                 filter: this.state.filter,
                 limit: 4  // Top 4 performers for cleaner charts
             };
@@ -121,6 +121,14 @@ class Trends {
     }
 
     /**
+     * Get effective period for API calls.
+     * Trends don't support 'live' period - use 'today' instead.
+     */
+    getEffectivePeriod() {
+        return this.state.period === 'live' ? 'today' : this.state.period;
+    }
+
+    /**
      * Fetch all trends categories from API
      */
     async fetchAllTrends() {
@@ -128,7 +136,7 @@ class Trends {
 
         try {
             const params = {
-                period: this.state.period,
+                period: this.getEffectivePeriod(),
                 filter: this.state.filter,
                 limit: this.state.limit
             };
@@ -249,7 +257,9 @@ class Trends {
      * Today shows hourly breakdown, other periods show daily trends
      */
     getPeriodLabel() {
+        // Note: 'live' is not supported for trends - frontend defaults to 'today'
         const labels = {
+            'live': 'Today (Hourly)',  // Fallback display if 'live' somehow gets here
             'today': 'Today (Hourly)',
             '7days': 'Last 7 Days',
             '30days': 'Last 30 Days'

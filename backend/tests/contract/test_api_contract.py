@@ -20,7 +20,7 @@ from unittest.mock import Mock, patch, MagicMock
 from flask import Flask
 
 # Load OpenAPI spec
-SPEC_PATH = Path(__file__).parent.parent.parent.parent / "specs" / "001-theme-park-tracker" / "contracts" / "api.yaml"
+SPEC_PATH = Path(__file__).parent.parent.parent.parent / ".development" / "specs" / "001-theme-park-tracker" / "contracts" / "api.yaml"
 
 
 def load_openapi_spec():
@@ -127,6 +127,7 @@ class TestParkDowntimeResponseSchema:
 
         assert period_param is not None
         valid_periods = period_param['schema']['enum']
+        assert 'live' in valid_periods
         assert 'today' in valid_periods
         assert '7days' in valid_periods
         assert '30days' in valid_periods

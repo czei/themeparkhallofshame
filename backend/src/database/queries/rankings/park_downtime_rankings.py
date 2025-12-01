@@ -88,6 +88,7 @@ class ParkDowntimeRankingsQuery:
         self,
         filter_disney_universal: bool = False,
         limit: int = 50,
+        sort_by: str = "shame_score",
     ) -> List[Dict[str, Any]]:
         """
         Get park rankings for the last 7 days.
@@ -97,9 +98,10 @@ class ParkDowntimeRankingsQuery:
         Args:
             filter_disney_universal: Only Disney/Universal parks
             limit: Maximum results
+            sort_by: Column to sort by
 
         Returns:
-            List of parks ranked by shame_score (descending)
+            List of parks ranked by specified column
         """
         end_date = date.today()
         start_date = end_date - timedelta(days=6)
@@ -109,12 +111,14 @@ class ParkDowntimeRankingsQuery:
             end_date=end_date,
             filter_disney_universal=filter_disney_universal,
             limit=limit,
+            sort_by=sort_by,
         )
 
     def get_monthly(
         self,
         filter_disney_universal: bool = False,
         limit: int = 50,
+        sort_by: str = "shame_score",
     ) -> List[Dict[str, Any]]:
         """
         Get park rankings for the last 30 days.
@@ -124,9 +128,10 @@ class ParkDowntimeRankingsQuery:
         Args:
             filter_disney_universal: Only Disney/Universal parks
             limit: Maximum results
+            sort_by: Column to sort by
 
         Returns:
-            List of parks ranked by shame_score (descending)
+            List of parks ranked by specified column
         """
         end_date = date.today()
         start_date = end_date - timedelta(days=29)
@@ -136,6 +141,7 @@ class ParkDowntimeRankingsQuery:
             end_date=end_date,
             filter_disney_universal=filter_disney_universal,
             limit=limit,
+            sort_by=sort_by,
         )
 
     def _get_rankings(
@@ -144,6 +150,7 @@ class ParkDowntimeRankingsQuery:
         end_date: date,
         filter_disney_universal: bool = False,
         limit: int = 50,
+        sort_by: str = "shame_score",
     ) -> List[Dict[str, Any]]:
         """
         Internal method to build and execute rankings query.
@@ -153,6 +160,7 @@ class ParkDowntimeRankingsQuery:
             end_date: End of date range
             filter_disney_universal: Only Disney/Universal parks
             limit: Maximum results
+            sort_by: Column to sort by
 
         Returns:
             List of park ranking dictionaries
@@ -211,14 +219,27 @@ class ParkDowntimeRankingsQuery:
                 wd.c.total_weighted_downtime_hours,
             )
             .having(func.sum(park_daily_stats.c.total_downtime_hours) > 0)
-            .order_by(
-                func.round(
-                    (wd.c.total_weighted_downtime_hours / func.nullif(pw.c.total_park_weight, 0)) * 10,
-                    1,
-                ).desc()
-            )
-            .limit(limit)
         )
+
+        # Apply dynamic sort order
+        shame_score_expr = func.round(
+            (wd.c.total_weighted_downtime_hours / func.nullif(pw.c.total_park_weight, 0)) * 10,
+            1,
+        )
+        total_downtime_expr = func.sum(park_daily_stats.c.total_downtime_hours)
+        uptime_expr = func.avg(park_daily_stats.c.avg_uptime_percentage)
+        rides_down_expr = func.max(park_daily_stats.c.rides_with_downtime)
+
+        if sort_by == "total_downtime_hours":
+            stmt = stmt.order_by(total_downtime_expr.desc())
+        elif sort_by == "uptime_percentage":
+            stmt = stmt.order_by(uptime_expr.asc())  # Lower uptime = worse
+        elif sort_by == "rides_down":
+            stmt = stmt.order_by(rides_down_expr.desc())
+        else:  # Default: shame_score
+            stmt = stmt.order_by(shame_score_expr.desc())
+
+        stmt = stmt.limit(limit)
 
         result = self.conn.execute(stmt)
         return [dict(row._mapping) for row in result]

@@ -7,10 +7,12 @@ Endpoints for ride-level downtime rankings, wait times, and live status.
 Query File Mapping
 ------------------
 GET /live/status-summary             → database/queries/live/status_summary.py
-GET /rides/downtime?period=today     → database/queries/live/live_ride_rankings.py
+GET /rides/downtime?period=live      → database/queries/live/live_ride_rankings.py (instantaneous)
+GET /rides/downtime?period=today     → database/queries/today/today_ride_rankings.py (cumulative)
 GET /rides/downtime?period=7days     → database/queries/rankings/ride_downtime_rankings.py
 GET /rides/downtime?period=30days    → database/queries/rankings/ride_downtime_rankings.py
-GET /rides/waittimes?period=today    → StatsRepository.get_ride_live_wait_time_rankings()
+GET /rides/waittimes?period=live     → StatsRepository.get_ride_live_wait_time_rankings()
+GET /rides/waittimes?period=today    → database/queries/today/today_ride_wait_times.py (cumulative)
 GET /rides/waittimes?period=7days    → database/queries/rankings/ride_wait_time_rankings.py
 GET /rides/waittimes?period=30days   → database/queries/rankings/ride_wait_time_rankings.py
 """
@@ -26,6 +28,7 @@ from database.repositories.stats_repository import StatsRepository
 # New query imports - each file handles one specific data source
 from database.queries.live import LiveRideRankingsQuery, StatusSummaryQuery
 from database.queries.rankings import RideDowntimeRankingsQuery, RideWaitTimeRankingsQuery
+from database.queries.today import TodayRideRankingsQuery, TodayRideWaitTimesQuery
 
 from utils.logger import logger
 from utils.timezone import get_today_pacific
@@ -109,16 +112,20 @@ def get_ride_downtime_rankings():
 
     Query Files Used:
     -----------------
-    - period=today: database/queries/live/live_ride_rankings.py
-      Uses real-time snapshot data from ride_status_snapshots
+    - period=live: database/queries/live/live_ride_rankings.py
+      Uses real-time snapshot data (instantaneous - rides down RIGHT NOW)
+
+    - period=today: database/queries/today/today_ride_rankings.py
+      Uses snapshot data aggregated from midnight Pacific to now (cumulative)
 
     - period=7days/30days: database/queries/rankings/ride_downtime_rankings.py
       Uses pre-aggregated data from ride_weekly_stats/ride_monthly_stats
 
     Query Parameters:
-        period (str): Time period - 'today', '7days', '30days' (default: '7days')
+        period (str): Time period - 'live', 'today', '7days', '30days' (default: 'live')
         filter (str): Park filter - 'disney-universal', 'all-parks' (default: 'all-parks')
         limit (int): Maximum results (default: 100, max: 200)
+        sort_by (str): Sort column - 'current_is_open', 'downtime_hours', 'uptime_percentage', 'trend_percentage' (default: 'downtime_hours')
 
     Returns:
         JSON response with ride rankings including current status and trends
@@ -126,15 +133,16 @@ def get_ride_downtime_rankings():
     Performance: <100ms for all periods
     """
     # Parse query parameters
-    period = request.args.get('period', '7days')
+    period = request.args.get('period', 'live')
     filter_type = request.args.get('filter', 'all-parks')
     limit = min(int(request.args.get('limit', 100)), 200)
+    sort_by = request.args.get('sort_by', 'downtime_hours')
 
     # Validate period
-    if period not in ['today', '7days', '30days']:
+    if period not in ['live', 'today', '7days', '30days']:
         return jsonify({
             "success": False,
-            "error": "Invalid period. Must be 'today', '7days', or '30days'"
+            "error": "Invalid period. Must be 'live', 'today', '7days', or '30days'"
         }), 400
 
     # Validate filter
@@ -144,16 +152,33 @@ def get_ride_downtime_rankings():
             "error": "Invalid filter. Must be 'disney-universal' or 'all-parks'"
         }), 400
 
+    # Validate sort_by
+    valid_sort_options = ['current_is_open', 'downtime_hours', 'uptime_percentage', 'trend_percentage']
+    if sort_by not in valid_sort_options:
+        return jsonify({
+            "success": False,
+            "error": f"Invalid sort_by. Must be one of: {', '.join(valid_sort_options)}"
+        }), 400
+
     try:
         with get_db_connection() as conn:
             filter_disney_universal = (filter_type == 'disney-universal')
             stats_repo = StatsRepository(conn)
 
             # Route to appropriate query class based on period
-            if period == 'today':
-                # LIVE data from snapshots using fast raw SQL
+            if period == 'live':
+                # LIVE data - instantaneous snapshot (rides down RIGHT NOW)
                 # Uses stats_repo for optimized raw SQL query (not SQLAlchemy ORM)
                 rankings = stats_repo.get_ride_live_downtime_rankings(
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit,
+                    sort_by=sort_by
+                )
+            elif period == 'today':
+                # TODAY data - cumulative from midnight Pacific to now
+                # See: database/queries/today/today_ride_rankings.py
+                query = TodayRideRankingsQuery(conn)
+                rankings = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
@@ -164,12 +189,14 @@ def get_ride_downtime_rankings():
                 if period == '7days':
                     rankings = query.get_weekly(
                         filter_disney_universal=filter_disney_universal,
-                        limit=limit
+                        limit=limit,
+                        sort_by=sort_by
                     )
                 else:  # 30days
                     rankings = query.get_monthly(
                         filter_disney_universal=filter_disney_universal,
-                        limit=limit
+                        limit=limit,
+                        sort_by=sort_by
                     )
 
             # Add Queue-Times.com URLs and rank to rankings
@@ -215,14 +242,17 @@ def get_ride_wait_times():
 
     Query Files Used:
     -----------------
-    - period=today: StatsRepository.get_ride_live_wait_time_rankings()
-      Uses real-time snapshot data from ride_status_snapshots
+    - period=live: StatsRepository.get_ride_live_wait_time_rankings()
+      Uses real-time snapshot data (instantaneous current wait times)
+
+    - period=today: database/queries/today/today_ride_wait_times.py
+      Uses snapshot data aggregated from midnight Pacific to now (cumulative)
 
     - period=7days/30days: database/queries/rankings/ride_wait_time_rankings.py
       Uses pre-aggregated data from ride_daily_stats
 
     Query Parameters:
-        period (str): Time period - 'today', '7days', '30days' (default: 'today')
+        period (str): Time period - 'live', 'today', '7days', '30days' (default: 'live')
         filter (str): Park filter - 'disney-universal', 'all-parks' (default: 'all-parks')
         limit (int): Maximum results (default: 100, max: 200)
 
@@ -232,15 +262,15 @@ def get_ride_wait_times():
     Performance: <100ms for all periods
     """
     # Parse query parameters
-    period = request.args.get('period', 'today')
+    period = request.args.get('period', 'live')
     filter_type = request.args.get('filter', 'all-parks')
     limit = min(int(request.args.get('limit', 100)), 200)
 
     # Validate period
-    if period not in ['today', '7days', '30days']:
+    if period not in ['live', 'today', '7days', '30days']:
         return jsonify({
             "success": False,
-            "error": "Invalid period. Must be 'today', '7days', or '30days'"
+            "error": "Invalid period. Must be 'live', 'today', '7days', or '30days'"
         }), 400
 
     # Validate filter
@@ -255,10 +285,18 @@ def get_ride_wait_times():
             filter_disney_universal = (filter_type == 'disney-universal')
 
             # Route to appropriate query based on period
-            if period == 'today':
-                # LIVE data from snapshots using fast raw SQL
+            if period == 'live':
+                # LIVE data - instantaneous current wait times
                 stats_repo = StatsRepository(conn)
                 wait_times = stats_repo.get_ride_live_wait_time_rankings(
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit
+                )
+            elif period == 'today':
+                # TODAY data - cumulative from midnight Pacific to now
+                # See: database/queries/today/today_ride_wait_times.py
+                query = TodayRideWaitTimesQuery(conn)
+                wait_times = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )

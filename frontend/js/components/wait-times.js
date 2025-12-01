@@ -172,6 +172,7 @@ class WaitTimes {
      */
     getPeriodTitle(baseTitle) {
         const periodLabels = {
+            'live': 'Live',
             'today': "Today's",
             '7days': '7 Day',
             '30days': '30 Day'

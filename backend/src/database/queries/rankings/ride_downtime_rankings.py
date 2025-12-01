@@ -66,6 +66,7 @@ class RideDowntimeRankingsQuery:
         self,
         filter_disney_universal: bool = False,
         limit: int = 50,
+        sort_by: str = "downtime_hours",
     ) -> List[Dict[str, Any]]:
         """
         Get ride rankings for the last 7 days.
@@ -73,9 +74,10 @@ class RideDowntimeRankingsQuery:
         Args:
             filter_disney_universal: Only Disney/Universal parks
             limit: Maximum results
+            sort_by: Column to sort by (downtime_hours, uptime_percentage, trend_percentage)
 
         Returns:
-            List of rides ranked by downtime (descending)
+            List of rides ranked by specified column
         """
         end_date = date.today()
         start_date = end_date - timedelta(days=6)
@@ -85,12 +87,14 @@ class RideDowntimeRankingsQuery:
             end_date=end_date,
             filter_disney_universal=filter_disney_universal,
             limit=limit,
+            sort_by=sort_by,
         )
 
     def get_monthly(
         self,
         filter_disney_universal: bool = False,
         limit: int = 50,
+        sort_by: str = "downtime_hours",
     ) -> List[Dict[str, Any]]:
         """
         Get ride rankings for the last 30 days.
@@ -98,9 +102,10 @@ class RideDowntimeRankingsQuery:
         Args:
             filter_disney_universal: Only Disney/Universal parks
             limit: Maximum results
+            sort_by: Column to sort by (downtime_hours, uptime_percentage, trend_percentage)
 
         Returns:
-            List of rides ranked by downtime (descending)
+            List of rides ranked by specified column
         """
         end_date = date.today()
         start_date = end_date - timedelta(days=29)
@@ -110,7 +115,31 @@ class RideDowntimeRankingsQuery:
             end_date=end_date,
             filter_disney_universal=filter_disney_universal,
             limit=limit,
+            sort_by=sort_by,
         )
+
+    def _get_order_by_clause(self, sort_by: str):
+        """
+        Get the ORDER BY expression for ride downtime rankings.
+
+        Args:
+            sort_by: Column to sort by
+
+        Returns:
+            SQLAlchemy order expression
+        """
+        # Map sort options to SQLAlchemy expressions
+        # Note: current_is_open not available for historical data, falls back to downtime
+        downtime_expr = func.sum(ride_daily_stats.c.downtime_minutes)
+        uptime_expr = func.avg(ride_daily_stats.c.uptime_percentage)
+
+        sort_mapping = {
+            "downtime_hours": downtime_expr.desc(),
+            "uptime_percentage": uptime_expr.asc(),  # Lower uptime = worse
+            "trend_percentage": downtime_expr.desc(),  # Trend not available, fall back
+            "current_is_open": downtime_expr.desc(),  # Status not available, fall back
+        }
+        return sort_mapping.get(sort_by, downtime_expr.desc())
 
     def _get_rankings(
         self,
@@ -118,9 +147,17 @@ class RideDowntimeRankingsQuery:
         end_date: date,
         filter_disney_universal: bool = False,
         limit: int = 50,
+        sort_by: str = "downtime_hours",
     ) -> List[Dict[str, Any]]:
         """
         Internal method to build and execute rankings query.
+
+        Args:
+            start_date: Start of date range
+            end_date: End of date range
+            filter_disney_universal: Only Disney/Universal parks
+            limit: Maximum results
+            sort_by: Column to sort by
         """
         conditions = [
             rides.c.is_active == True,
@@ -167,7 +204,7 @@ class RideDowntimeRankingsQuery:
                 ride_classifications.c.tier,
             )
             .having(func.sum(ride_daily_stats.c.downtime_minutes) > 0)
-            .order_by(func.sum(ride_daily_stats.c.downtime_minutes).desc())
+            .order_by(self._get_order_by_clause(sort_by))
             .limit(limit)
         )
 

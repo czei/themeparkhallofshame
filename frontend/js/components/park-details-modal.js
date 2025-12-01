@@ -16,21 +16,28 @@ class ParkDetailsModal {
 
     /**
      * Open modal and fetch park details
+     * @param {number} parkId - The park ID
+     * @param {string} parkName - The park name for display
+     * @param {string} period - The time period ('live', 'today', '7days', '30days')
      */
-    async open(parkId, parkName) {
+    async open(parkId, parkName, period = 'live') {
+        // Map period to API-supported values (API only supports 'live' or 'today' for details)
+        const apiPeriod = (period === 'today') ? 'today' : 'live';
+
         this.state = {
             isOpen: true,
             loading: true,
             error: null,
             parkDetails: null,
             parkId,
-            parkName
+            parkName,
+            period: apiPeriod
         };
 
         this.render();
 
         try {
-            const response = await this.apiClient.get(`/parks/${parkId}/details`);
+            const response = await this.apiClient.get(`/parks/${parkId}/details?period=${apiPeriod}`);
 
             if (response.success) {
                 this.state.loading = false;
@@ -129,12 +136,25 @@ class ParkDetailsModal {
     }
 
     /**
-     * Render shame score breakdown - the main feature of the modal
+     * Render shame score breakdown - dispatches to live or today renderer based on breakdown_type
      */
     renderShameBreakdown(breakdown) {
         if (!breakdown) return '';
 
-        const { rides_down, total_park_weight, total_weighted_down, shame_score, park_is_open, tier_weights } = breakdown;
+        // Dispatch based on breakdown_type from API
+        if (breakdown.breakdown_type === 'today') {
+            return this.renderTodayShameBreakdown(breakdown);
+        }
+
+        // Default to live breakdown rendering
+        return this.renderLiveShameBreakdown(breakdown);
+    }
+
+    /**
+     * Render LIVE shame score breakdown - shows rides currently down RIGHT NOW
+     */
+    renderLiveShameBreakdown(breakdown) {
+        const { rides_down, total_park_weight, total_weighted_down, shame_score, park_is_open } = breakdown;
 
         // If park is closed, show that instead
         if (!park_is_open) {
@@ -142,6 +162,7 @@ class ParkDetailsModal {
                 <div class="shame-breakdown-section">
                     <div class="shame-header">
                         <h3>Shame Score Breakdown</h3>
+                        <span class="breakdown-period-badge live">LIVE</span>
                     </div>
                     <div class="shame-closed-message">
                         <div class="closed-badge">Park Closed</div>
@@ -161,6 +182,7 @@ class ParkDetailsModal {
             <div class="shame-breakdown-section">
                 <div class="shame-header">
                     <h3>Shame Score Breakdown</h3>
+                    <span class="breakdown-period-badge live">LIVE</span>
                 </div>
 
                 <div class="shame-score-display">
@@ -225,6 +247,168 @@ class ParkDetailsModal {
                 </div>
             </div>
         `;
+    }
+
+    /**
+     * Render TODAY shame score breakdown - shows CUMULATIVE downtime since midnight
+     * This is completely different from live - it shows ALL rides that had ANY downtime today
+     */
+    renderTodayShameBreakdown(breakdown) {
+        const {
+            rides_with_downtime,
+            rides_affected_count,
+            total_park_weight,
+            total_downtime_hours,
+            weighted_downtime_hours,
+            shame_score,
+            park_is_open
+        } = breakdown;
+
+        // If no data available
+        if (!rides_with_downtime) {
+            return `
+                <div class="shame-breakdown-section">
+                    <div class="shame-header">
+                        <h3>Today's Shame Score Breakdown</h3>
+                        <span class="breakdown-period-badge today">TODAY</span>
+                    </div>
+                    <div class="no-rides-down">
+                        <span class="success-icon">✓</span>
+                        <p>No downtime data available for today yet.</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Group rides by tier
+        const tier1Rides = rides_with_downtime.filter(r => r.tier === 1);
+        const tier2Rides = rides_with_downtime.filter(r => r.tier === 2);
+        const tier3Rides = rides_with_downtime.filter(r => r.tier === 3);
+
+        return `
+            <div class="shame-breakdown-section today-breakdown">
+                <div class="shame-header">
+                    <h3>Today's Shame Score Breakdown</h3>
+                    <span class="breakdown-period-badge today">TODAY</span>
+                </div>
+
+                <div class="shame-score-display">
+                    <div class="shame-score-value ${shame_score > 5 ? 'high' : shame_score > 2 ? 'medium' : 'low'}">
+                        ${shame_score.toFixed(1)}
+                    </div>
+                    <div class="shame-score-label">Cumulative Shame Score (0-10 scale)</div>
+                </div>
+
+                <div class="shame-formula-box today-formula">
+                    <div class="formula-title">How Today's Score Is Calculated</div>
+                    <div class="formula">
+                        <span class="formula-part">Shame Score</span> =
+                        <span class="formula-fraction">
+                            <span class="numerator">Weighted Downtime Hours (${weighted_downtime_hours.toFixed(2)})</span>
+                            <span class="denominator">Total Park Weight (${total_park_weight.toFixed(1)})</span>
+                        </span>
+                        <span class="formula-multiplier">× 10</span>
+                    </div>
+                    <div class="formula-explanation today-explanation">
+                        <strong>Today's score is cumulative</strong> - it tracks ALL downtime since midnight Pacific time.
+                        Unlike the live score which only shows rides down RIGHT NOW, this accumulates throughout the day.
+                        A ride that was down for 2 hours this morning (but is now running) still contributes to today's score.
+                    </div>
+                    <div class="cumulative-stats">
+                        <div class="stat-item">
+                            <span class="stat-value">${total_downtime_hours.toFixed(1)}h</span>
+                            <span class="stat-label">Total Downtime</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">${weighted_downtime_hours.toFixed(1)}h</span>
+                            <span class="stat-label">Weighted Downtime</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">${rides_affected_count}</span>
+                            <span class="stat-label">Rides Affected</span>
+                        </div>
+                    </div>
+                </div>
+
+                ${rides_with_downtime.length > 0 ? `
+                    <div class="rides-down-section">
+                        <h4>Rides With Downtime Today (${rides_affected_count})</h4>
+                        <p class="rides-section-note">All rides that experienced any downtime since midnight Pacific time, sorted by total downtime.</p>
+                        <div class="rides-down-list today-list">
+                            ${tier1Rides.length > 0 ? this.renderTodayRidesByTier(tier1Rides, 1, 'Flagship Attractions', '5x weight') : ''}
+                            ${tier2Rides.length > 0 ? this.renderTodayRidesByTier(tier2Rides, 2, 'Standard Attractions', '2x weight') : ''}
+                            ${tier3Rides.length > 0 ? this.renderTodayRidesByTier(tier3Rides, 3, 'Minor Attractions', '1x weight') : ''}
+                        </div>
+                    </div>
+                ` : `
+                    <div class="no-rides-down">
+                        <span class="success-icon">✓</span>
+                        <p>No rides have experienced downtime today!</p>
+                    </div>
+                `}
+
+                <div class="tier-weights-info">
+                    <div class="tier-weights-title">Tier Weight Reference</div>
+                    <div class="tier-weights-grid">
+                        <div class="tier-weight-item tier-1">
+                            <span class="tier-badge">Tier 1</span>
+                            <span class="weight-value">5x</span>
+                            <span class="weight-desc">Flagship E-tickets</span>
+                        </div>
+                        <div class="tier-weight-item tier-2">
+                            <span class="tier-badge">Tier 2</span>
+                            <span class="weight-value">2x</span>
+                            <span class="weight-desc">Standard rides</span>
+                        </div>
+                        <div class="tier-weight-item tier-3">
+                            <span class="tier-badge">Tier 3</span>
+                            <span class="weight-value">1x</span>
+                            <span class="weight-desc">Minor attractions</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render rides grouped by tier for TODAY breakdown (shows downtime hours per ride)
+     */
+    renderTodayRidesByTier(rides, tier, tierName, weightLabel) {
+        return `
+            <div class="tier-group tier-${tier}">
+                <div class="tier-group-header">
+                    <span class="tier-badge">Tier ${tier}</span>
+                    <span class="tier-name">${tierName}</span>
+                    <span class="tier-weight-label">${weightLabel}</span>
+                </div>
+                <ul class="rides-list today-rides-list">
+                    ${rides.map(ride => `
+                        <li class="ride-item today-ride-item">
+                            <span class="ride-name">${this.escapeHtml(ride.ride_name)}</span>
+                            <span class="ride-downtime-info">
+                                <span class="ride-downtime">${this.formatDowntimeHours(ride.downtime_hours)} down</span>
+                                <span class="ride-weighted">+${ride.weighted_contribution.toFixed(1)} weighted</span>
+                            </span>
+                        </li>
+                    `).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
+    /**
+     * Format downtime hours to readable string
+     */
+    formatDowntimeHours(hours) {
+        if (!hours || hours === 0) return '0m';
+        const numHours = Number(hours);
+        const wholeHours = Math.floor(numHours);
+        const minutes = Math.round((numHours - wholeHours) * 60);
+
+        if (wholeHours === 0) return `${minutes}m`;
+        if (minutes === 0) return `${wholeHours}h`;
+        return `${wholeHours}h ${minutes}m`;
     }
 
     /**
@@ -503,7 +687,7 @@ class ParkDetailsModal {
         const retryBtn = modal.querySelector('.retry-btn');
         if (retryBtn) {
             retryBtn.addEventListener('click', () => {
-                this.open(this.state.parkId, this.state.parkName);
+                this.open(this.state.parkId, this.state.parkName, this.state.period);
             });
         }
 

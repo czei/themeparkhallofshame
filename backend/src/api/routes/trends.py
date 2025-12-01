@@ -28,7 +28,11 @@ from database.queries.trends import (
     ImprovingRidesQuery,
     DecliningRidesQuery,
 )
-from database.queries.charts import ParkShameHistoryQuery, RideDowntimeHistoryQuery
+from database.queries.charts import (
+    ParkShameHistoryQuery,
+    ParkWaitTimeHistoryQuery,
+    RideDowntimeHistoryQuery,
+)
 
 from utils.logger import logger
 from utils.timezone import get_today_pacific
@@ -225,7 +229,7 @@ def get_chart_data():
 
         # Validate parameters
         valid_periods = ['today', '7days', '30days']
-        valid_types = ['parks', 'rides']
+        valid_types = ['parks', 'rides', 'waittimes']
         valid_filters = ['disney-universal', 'all-parks']
 
         if period not in valid_periods:
@@ -267,6 +271,14 @@ def get_chart_data():
                         filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
+                elif data_type == 'waittimes':
+                    # See: database/queries/charts/park_waittime_history.py
+                    query = ParkWaitTimeHistoryQuery(conn)
+                    chart_data = query.get_hourly(
+                        target_date=today,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
                 else:
                     # See: database/queries/charts/ride_downtime_history.py
                     query = RideDowntimeHistoryQuery(conn)
@@ -287,6 +299,14 @@ def get_chart_data():
                 if data_type == 'parks':
                     # See: database/queries/charts/park_shame_history.py
                     query = ParkShameHistoryQuery(conn)
+                    chart_data = query.get_daily(
+                        days=days,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                elif data_type == 'waittimes':
+                    # See: database/queries/charts/park_waittime_history.py
+                    query = ParkWaitTimeHistoryQuery(conn)
                     chart_data = query.get_daily(
                         days=days,
                         filter_disney_universal=filter_disney_universal,
@@ -338,7 +358,7 @@ def _generate_mock_chart_data(data_type: str, days: int, limit: int) -> Dict[str
     Generate mock chart data for demo/development when real data is empty.
 
     Args:
-        data_type: 'parks' or 'rides'
+        data_type: 'parks', 'rides', or 'waittimes'
         days: Number of days
         limit: Number of entities
 
@@ -362,6 +382,18 @@ def _generate_mock_chart_data(data_type: str, days: int, limit: int) -> Dict[str
             # Generate realistic-looking shame scores (0.05 to 0.5 range)
             base = random.uniform(0.1, 0.3)
             data = [round(base + random.uniform(-0.1, 0.15), 2) for _ in range(days)]
+            datasets.append({"label": name, "data": data})
+    elif data_type == 'waittimes':
+        park_names = [
+            "Disney Magic Kingdom", "Universal Studios Florida", "Disney Hollywood Studios",
+            "Universal Islands of Adventure", "Disney EPCOT", "Disney Animal Kingdom",
+            "SeaWorld Orlando", "Busch Gardens Tampa"
+        ]
+        datasets = []
+        for i, name in enumerate(park_names[:limit]):
+            # Generate realistic average wait times (20-70 minutes range)
+            base = random.uniform(30, 50)
+            data = [round(max(10, base + random.uniform(-15, 20)), 0) for _ in range(days)]
             datasets.append({"label": name, "data": data})
     else:
         ride_names = [
@@ -394,7 +426,7 @@ def _generate_mock_hourly_chart_data(data_type: str, limit: int) -> Dict[str, An
     Generate mock hourly chart data for TODAY when real data is empty.
 
     Args:
-        data_type: 'parks' or 'rides'
+        data_type: 'parks', 'rides', or 'waittimes'
         limit: Number of entities
 
     Returns:
@@ -423,6 +455,24 @@ def _generate_mock_hourly_chart_data(data_type: str, limit: int) -> Dict[str, An
                 else:
                     base = random.uniform(5, 20)
                 data.append(round(base, 1))
+            datasets.append({"label": name, "data": data})
+    elif data_type == 'waittimes':
+        park_names = [
+            "Disney Magic Kingdom", "Universal Studios Florida", "Disney Hollywood Studios",
+            "Universal Islands of Adventure", "Disney EPCOT", "Disney Animal Kingdom",
+            "SeaWorld Orlando", "Busch Gardens Tampa"
+        ]
+        datasets = []
+        for i, name in enumerate(park_names[:limit]):
+            # Generate realistic hourly wait times (higher mid-day due to crowds)
+            data = []
+            for h in range(num_hours):
+                # Simulate higher wait times mid-day (hours 4-10 = 10am-4pm)
+                if 4 <= h <= 10:
+                    base = random.uniform(40, 70)
+                else:
+                    base = random.uniform(20, 45)
+                data.append(round(base, 0))
             datasets.append({"label": name, "data": data})
     else:
         ride_names = [

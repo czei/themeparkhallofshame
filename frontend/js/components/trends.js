@@ -22,8 +22,8 @@ class Trends {
     constructor(apiClient, containerId, initialFilter = 'all-parks') {
         this.apiClient = apiClient;
         this.container = document.getElementById(containerId);
-        this.parksChart = null;  // Chart.js instance for parks
-        this.ridesChart = null;  // Chart.js instance for rides
+        this.parksChart = null;  // Chart.js instance for parks shame score
+        this.waitTimesChart = null;  // Chart.js instance for park wait times
         this.state = {
             period: '7days',
             filter: initialFilter,
@@ -38,7 +38,7 @@ class Trends {
             aggregateStats: null,
             statusSummary: null,
             parksChartData: null,
-            ridesChartData: null,
+            waitTimesChartData: null,
             chartsMock: false,
             chartsGranularity: 'daily'  // 'hourly' for today, 'daily' for 7/30 days
         };
@@ -57,7 +57,7 @@ class Trends {
     }
 
     /**
-     * Fetch chart data for both parks and rides
+     * Fetch chart data for parks shame score and park wait times
      */
     async fetchChartData() {
         try {
@@ -65,13 +65,13 @@ class Trends {
             const params = {
                 period: this.state.period,
                 filter: this.state.filter,
-                limit: 4  // Top 4 worst performers for cleaner charts
+                limit: 4  // Top 4 performers for cleaner charts
             };
 
-            // Fetch both parks and rides chart data in parallel
-            const [parksResponse, ridesResponse] = await Promise.all([
+            // Fetch parks shame scores and park wait times in parallel
+            const [parksResponse, waitTimesResponse] = await Promise.all([
                 this.apiClient.get('/trends/chart-data', { ...params, type: 'parks' }),
-                this.apiClient.get('/trends/chart-data', { ...params, type: 'rides' })
+                this.apiClient.get('/trends/chart-data', { ...params, type: 'waittimes' })
             ]);
 
             const newState = {};
@@ -80,8 +80,8 @@ class Trends {
                 newState.chartsMock = parksResponse.mock;
                 newState.chartsGranularity = parksResponse.granularity || 'daily';
             }
-            if (ridesResponse.success) {
-                newState.ridesChartData = ridesResponse.chart_data;
+            if (waitTimesResponse.success) {
+                newState.waitTimesChartData = waitTimesResponse.chart_data;
             }
 
             this.setState(newState);
@@ -235,9 +235,9 @@ class Trends {
                     </div>
                 </div>
                 <div class="chart-container">
-                    <h3>Ride Downtime % (${this.getPeriodLabel()})</h3>
+                    <h3>Park Avg Wait Times (${this.getPeriodLabel()})</h3>
                     <div class="chart-wrapper">
-                        <canvas id="rides-downtime-chart"></canvas>
+                        <canvas id="parks-waittimes-chart"></canvas>
                     </div>
                 </div>
             </div>
@@ -267,7 +267,7 @@ class Trends {
         }
 
         this.renderParksChart();
-        this.renderRidesChart();
+        this.renderWaitTimesChart();
     }
 
     /**
@@ -308,19 +308,19 @@ class Trends {
     }
 
     /**
-     * Render rides downtime chart
+     * Render park wait times chart
      */
-    renderRidesChart() {
-        const canvas = document.getElementById('rides-downtime-chart');
-        if (!canvas || !this.state.ridesChartData) return;
+    renderWaitTimesChart() {
+        const canvas = document.getElementById('parks-waittimes-chart');
+        if (!canvas || !this.state.waitTimesChartData) return;
 
         // Destroy existing chart if any
-        if (this.ridesChart) {
-            this.ridesChart.destroy();
+        if (this.waitTimesChart) {
+            this.waitTimesChart.destroy();
         }
 
         const ctx = canvas.getContext('2d');
-        const chartData = this.state.ridesChartData;
+        const chartData = this.state.waitTimesChartData;
 
         // Add colors to datasets
         const datasets = chartData.datasets.map((dataset, index) => ({
@@ -334,13 +334,13 @@ class Trends {
             fill: false
         }));
 
-        this.ridesChart = new Chart(ctx, {
+        this.waitTimesChart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: chartData.labels,
                 datasets: datasets
             },
-            options: this.getChartOptions('Downtime %')
+            options: this.getChartOptions('Avg Wait (min)')
         });
     }
 
@@ -385,8 +385,8 @@ class Trends {
                         label: function(context) {
                             const label = context.dataset.label || '';
                             const value = context.parsed.y;
-                            if (yAxisLabel === 'Downtime %') {
-                                return `${label}: ${value}%`;
+                            if (yAxisLabel === 'Avg Wait (min)') {
+                                return `${label}: ${value} min`;
                             }
                             return `${label}: ${value}`;
                         }
@@ -405,8 +405,8 @@ class Trends {
                             size: 11
                         },
                         callback: function(value) {
-                            if (yAxisLabel === 'Downtime %') {
-                                return value + '%';
+                            if (yAxisLabel === 'Avg Wait (min)') {
+                                return value + ' min';
                             }
                             return value;
                         }

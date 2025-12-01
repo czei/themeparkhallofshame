@@ -6,6 +6,7 @@ Query files for time-series chart data on the Trends tab.
 
 Files:
 - park_shame_history.py: GET /api/trends/chart-data?type=parks
+- park_waittime_history.py: GET /api/trends/chart-data?type=waittimes
 - ride_downtime_history.py: GET /api/trends/chart-data?type=rides
 
 Output Format (Chart.js compatible):
@@ -19,9 +20,11 @@ Output Format (Chart.js compatible):
 """
 
 from .park_shame_history import ParkShameHistoryQuery
+from .park_waittime_history import ParkWaitTimeHistoryQuery
 from .ride_downtime_history import RideDowntimeHistoryQuery
 
 __all__ = [
     "ParkShameHistoryQuery",
+    "ParkWaitTimeHistoryQuery",
     "RideDowntimeHistoryQuery",
 ]

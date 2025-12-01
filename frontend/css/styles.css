@@ -1684,6 +1684,496 @@ td {
 }
 
 /* ============================================
+   PARK DETAILS MODAL - SHAME BREAKDOWN
+   ============================================ */
+.park-details-modal {
+    max-width: 700px;
+}
+
+.park-details-content {
+    padding: 1.5rem 2rem 2rem;
+}
+
+.shame-breakdown-section {
+    margin-bottom: 2rem;
+}
+
+.shame-header h3 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--deep-teal);
+    margin: 0 0 1.5rem 0;
+    padding-bottom: 0.75rem;
+    border-bottom: 3px solid var(--coral);
+}
+
+.shame-score-display {
+    text-align: center;
+    padding: 1.5rem;
+    background: linear-gradient(135deg, var(--charcoal) 0%, #2c3e50 100%);
+    border: 4px solid var(--charcoal);
+    margin-bottom: 1.5rem;
+}
+
+.shame-score-value {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 4rem;
+    font-weight: 800;
+    line-height: 1;
+    margin-bottom: 0.5rem;
+}
+
+.shame-score-value.low { color: #27ae60; }
+.shame-score-value.medium { color: var(--gold); }
+.shame-score-value.high { color: var(--coral); }
+
+.shame-score-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.shame-closed-message {
+    text-align: center;
+    padding: 2rem;
+    background: #f8f9fa;
+    border: 3px solid var(--charcoal);
+}
+
+.closed-badge {
+    display: inline-block;
+    background: var(--charcoal);
+    color: white;
+    padding: 0.5rem 1.5rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 1rem;
+}
+
+.shame-closed-message p {
+    color: var(--charcoal);
+    margin: 0;
+    line-height: 1.6;
+}
+
+.shame-formula-box {
+    background: #f8f9fa;
+    border: 3px solid var(--charcoal);
+    padding: 1.25rem;
+    margin-bottom: 1.5rem;
+}
+
+.formula-title {
+    font-weight: 700;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--deep-teal);
+    margin-bottom: 0.75rem;
+}
+
+.formula {
+    font-family: 'Space Grotesk', monospace;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+.formula-part {
+    font-weight: 700;
+    color: var(--deep-teal);
+}
+
+.formula-fraction {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    background: white;
+    padding: 0.5rem 0.75rem;
+    border: 2px solid var(--charcoal);
+}
+
+.formula-fraction .numerator {
+    font-weight: 600;
+    color: var(--coral);
+    padding-bottom: 0.25rem;
+    border-bottom: 2px solid var(--charcoal);
+    font-size: 0.85rem;
+}
+
+.formula-fraction .denominator {
+    font-weight: 600;
+    color: var(--deep-teal);
+    padding-top: 0.25rem;
+    font-size: 0.85rem;
+}
+
+.formula-explanation {
+    font-size: 0.85rem;
+    color: #666;
+    line-height: 1.5;
+}
+
+.rides-down-section {
+    margin-bottom: 1.5rem;
+}
+
+.rides-down-section h4 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--charcoal);
+    margin: 0 0 1rem 0;
+}
+
+.rides-down-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.tier-group {
+    border: 3px solid var(--charcoal);
+    background: white;
+}
+
+.tier-group-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 2px solid var(--charcoal);
+}
+
+.tier-group.tier-1 .tier-group-header { background: rgba(231, 76, 60, 0.1); }
+.tier-group.tier-2 .tier-group-header { background: rgba(249, 175, 25, 0.1); }
+.tier-group.tier-3 .tier-group-header { background: rgba(74, 137, 138, 0.1); }
+
+.tier-badge {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    font-weight: 700;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: white;
+}
+
+.tier-group.tier-1 .tier-badge { background: var(--coral); }
+.tier-group.tier-2 .tier-badge { background: var(--gold); color: var(--charcoal); }
+.tier-group.tier-3 .tier-badge { background: var(--deep-teal); }
+
+.tier-name {
+    font-weight: 600;
+    color: var(--charcoal);
+    flex: 1;
+}
+
+.tier-weight-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--coral);
+}
+
+.rides-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.ride-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid #eee;
+}
+
+.ride-item:last-child {
+    border-bottom: none;
+}
+
+.ride-name {
+    color: var(--charcoal);
+    font-size: 0.9rem;
+}
+
+.ride-weight {
+    font-weight: 700;
+    color: var(--coral);
+    font-size: 0.85rem;
+}
+
+.no-rides-down {
+    text-align: center;
+    padding: 2rem;
+    background: #e8f5e9;
+    border: 3px solid #27ae60;
+}
+
+.no-rides-down .success-icon {
+    display: inline-block;
+    font-size: 2.5rem;
+    color: #27ae60;
+    margin-bottom: 0.5rem;
+}
+
+.no-rides-down p {
+    margin: 0;
+    font-weight: 600;
+    color: #27ae60;
+}
+
+.tier-weights-info {
+    background: #f8f9fa;
+    border: 3px solid var(--charcoal);
+    padding: 1rem;
+}
+
+.tier-weights-title {
+    font-weight: 700;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--charcoal);
+    margin-bottom: 0.75rem;
+}
+
+.tier-weights-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+}
+
+.tier-weight-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0.5rem;
+    background: white;
+    border: 2px solid var(--charcoal);
+}
+
+.tier-weight-item .tier-badge {
+    font-size: 0.65rem;
+    margin-bottom: 0.25rem;
+}
+
+.tier-weight-item.tier-1 .tier-badge { background: var(--coral); }
+.tier-weight-item.tier-2 .tier-badge { background: var(--gold); color: var(--charcoal); }
+.tier-weight-item.tier-3 .tier-badge { background: var(--deep-teal); }
+
+.tier-weight-item .weight-value {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: var(--charcoal);
+}
+
+.tier-weight-item .weight-desc {
+    font-size: 0.7rem;
+    color: #666;
+    text-align: center;
+}
+
+/* Park Details - Current Status Section */
+.current-status-section {
+    margin-bottom: 1.5rem;
+}
+
+.current-status-section h3 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--charcoal);
+    margin: 0 0 0.75rem 0;
+}
+
+.status-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+}
+
+.status-card {
+    background: white;
+    border: 3px solid var(--charcoal);
+    padding: 0.75rem;
+    text-align: center;
+}
+
+.status-card .status-label {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #666;
+    margin-bottom: 0.25rem;
+}
+
+.status-card .status-value {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--charcoal);
+}
+
+.status-card.status-running .status-value { color: #27ae60; }
+.status-card.status-down .status-value { color: var(--coral); }
+
+/* Park Details - Tier Distribution Section */
+.tier-distribution-section {
+    margin-bottom: 1.5rem;
+}
+
+.tier-distribution-section h3 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--charcoal);
+    margin: 0 0 0.25rem 0;
+}
+
+.tier-distribution-section .section-description {
+    font-size: 0.85rem;
+    color: #666;
+    margin: 0 0 1rem 0;
+}
+
+.tier-breakdown {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.tier-item {
+    background: white;
+    border: 2px solid var(--charcoal);
+    padding: 0.75rem;
+}
+
+.tier-item .tier-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.25rem;
+}
+
+.tier-item .tier-description {
+    font-size: 0.8rem;
+    color: #666;
+    margin-bottom: 0.5rem;
+}
+
+.tier-item .tier-count {
+    font-weight: 700;
+    color: var(--charcoal);
+}
+
+.tier-bar {
+    height: 8px;
+    background: #e0e0e0;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.tier-fill {
+    height: 100%;
+    border-radius: 4px;
+}
+
+.tier-item.tier-1 .tier-fill { background: var(--coral); }
+.tier-item.tier-2 .tier-fill { background: var(--gold); }
+.tier-item.tier-3 .tier-fill { background: var(--deep-teal); }
+
+/* Park Details - Info Section */
+.park-info-section {
+    margin-bottom: 1.5rem;
+}
+
+.park-info-section h3 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--charcoal);
+    margin: 0 0 0.75rem 0;
+}
+
+.info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+}
+
+.info-item {
+    background: white;
+    border: 2px solid var(--charcoal);
+    padding: 0.75rem;
+}
+
+.info-label {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #666;
+    margin-bottom: 0.25rem;
+}
+
+.info-value {
+    font-weight: 600;
+    color: var(--charcoal);
+}
+
+.info-value a.external-link {
+    color: var(--deep-teal);
+    text-decoration: none;
+}
+
+.info-value a.external-link:hover {
+    text-decoration: underline;
+}
+
+/* Park Details Modal Responsive */
+@media (max-width: 600px) {
+    .park-details-modal {
+        max-width: 100%;
+        margin: 0.5rem;
+    }
+
+    .park-details-content {
+        padding: 1rem;
+    }
+
+    .shame-score-value {
+        font-size: 3rem;
+    }
+
+    .formula {
+        font-size: 0.85rem;
+    }
+
+    .status-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .tier-weights-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .info-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ============================================
    FOOTER
    ============================================ */
 footer,

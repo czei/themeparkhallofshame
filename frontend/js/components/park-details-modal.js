@@ -116,14 +116,134 @@ class ParkDetailsModal {
             return '<div class="empty-state"><p>No park details available</p></div>';
         }
 
-        const { park, tier_distribution, operating_sessions, current_status } = this.state.parkDetails;
+        const { park, tier_distribution, operating_sessions, current_status, shame_breakdown } = this.state.parkDetails;
 
         return `
             <div class="park-details-content">
-                ${this.renderParkInfo(park)}
+                ${this.renderShameBreakdown(shame_breakdown)}
                 ${this.renderCurrentStatus(current_status)}
                 ${this.renderTierDistribution(tier_distribution)}
-                ${this.renderOperatingSessions(operating_sessions)}
+                ${this.renderParkInfo(park)}
+            </div>
+        `;
+    }
+
+    /**
+     * Render shame score breakdown - the main feature of the modal
+     */
+    renderShameBreakdown(breakdown) {
+        if (!breakdown) return '';
+
+        const { rides_down, total_park_weight, total_weighted_down, shame_score, park_is_open, tier_weights } = breakdown;
+
+        // If park is closed, show that instead
+        if (!park_is_open) {
+            return `
+                <div class="shame-breakdown-section">
+                    <div class="shame-header">
+                        <h3>Shame Score Breakdown</h3>
+                    </div>
+                    <div class="shame-closed-message">
+                        <div class="closed-badge">Park Closed</div>
+                        <p>This park is currently closed or has fewer than 50% of rides operating.
+                           The shame score is not calculated when parks are closed.</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Group rides by tier
+        const tier1Rides = rides_down.filter(r => r.tier === 1);
+        const tier2Rides = rides_down.filter(r => r.tier === 2);
+        const tier3Rides = rides_down.filter(r => r.tier === 3);
+
+        return `
+            <div class="shame-breakdown-section">
+                <div class="shame-header">
+                    <h3>Shame Score Breakdown</h3>
+                </div>
+
+                <div class="shame-score-display">
+                    <div class="shame-score-value ${shame_score > 0.5 ? 'high' : shame_score > 0.2 ? 'medium' : 'low'}">
+                        ${shame_score.toFixed(2)}
+                    </div>
+                    <div class="shame-score-label">Current Shame Score</div>
+                </div>
+
+                <div class="shame-formula-box">
+                    <div class="formula-title">How It's Calculated</div>
+                    <div class="formula">
+                        <span class="formula-part">Shame Score</span> =
+                        <span class="formula-fraction">
+                            <span class="numerator">Sum of Down Ride Weights (${total_weighted_down.toFixed(1)})</span>
+                            <span class="denominator">Total Park Weight (${total_park_weight.toFixed(1)})</span>
+                        </span>
+                    </div>
+                    <div class="formula-explanation">
+                        The shame score measures how much of a park's ride capacity is currently unavailable,
+                        weighted by ride importance. Flagship attractions (Tier 1) count 5x more than minor rides (Tier 3).
+                    </div>
+                </div>
+
+                ${rides_down.length > 0 ? `
+                    <div class="rides-down-section">
+                        <h4>Rides Currently Down (${rides_down.length})</h4>
+                        <div class="rides-down-list">
+                            ${tier1Rides.length > 0 ? this.renderRidesByTier(tier1Rides, 1, 'Flagship Attractions', '5x weight') : ''}
+                            ${tier2Rides.length > 0 ? this.renderRidesByTier(tier2Rides, 2, 'Standard Attractions', '2x weight') : ''}
+                            ${tier3Rides.length > 0 ? this.renderRidesByTier(tier3Rides, 3, 'Minor Attractions', '1x weight') : ''}
+                        </div>
+                    </div>
+                ` : `
+                    <div class="no-rides-down">
+                        <span class="success-icon">✓</span>
+                        <p>All rides are currently operating!</p>
+                    </div>
+                `}
+
+                <div class="tier-weights-info">
+                    <div class="tier-weights-title">Tier Weight Reference</div>
+                    <div class="tier-weights-grid">
+                        <div class="tier-weight-item tier-1">
+                            <span class="tier-badge">Tier 1</span>
+                            <span class="weight-value">5x</span>
+                            <span class="weight-desc">Flagship E-tickets</span>
+                        </div>
+                        <div class="tier-weight-item tier-2">
+                            <span class="tier-badge">Tier 2</span>
+                            <span class="weight-value">2x</span>
+                            <span class="weight-desc">Standard rides</span>
+                        </div>
+                        <div class="tier-weight-item tier-3">
+                            <span class="tier-badge">Tier 3</span>
+                            <span class="weight-value">1x</span>
+                            <span class="weight-desc">Minor attractions</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render rides grouped by tier
+     */
+    renderRidesByTier(rides, tier, tierName, weightLabel) {
+        return `
+            <div class="tier-group tier-${tier}">
+                <div class="tier-group-header">
+                    <span class="tier-badge">Tier ${tier}</span>
+                    <span class="tier-name">${tierName}</span>
+                    <span class="tier-weight-label">${weightLabel}</span>
+                </div>
+                <ul class="rides-list">
+                    ${rides.map(ride => `
+                        <li class="ride-item">
+                            <span class="ride-name">${this.escapeHtml(ride.ride_name)}</span>
+                            <span class="ride-weight">+${ride.tier_weight}</span>
+                        </li>
+                    `).join('')}
+                </ul>
             </div>
         `;
     }

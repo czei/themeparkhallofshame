@@ -282,6 +282,9 @@ def get_park_details(park_id: int):
             # Get current ride status summary
             current_status = stats_repo.get_park_current_status(park_id)
 
+            # Get shame score breakdown (rides currently down with tier weights)
+            shame_breakdown = stats_repo.get_park_shame_breakdown(park_id)
+
             # Build response
             response = {
                 "success": True,
@@ -296,6 +299,7 @@ def get_park_details(park_id: int):
                 "tier_distribution": tier_distribution,
                 "operating_sessions": operating_sessions,
                 "current_status": current_status,
+                "shame_breakdown": shame_breakdown,
                 "attribution": {
                     "data_source": "ThemeParks.wiki",
                     "url": "https://themeparks.wiki"

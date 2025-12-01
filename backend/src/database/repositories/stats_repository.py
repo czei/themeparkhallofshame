@@ -1154,6 +1154,137 @@ class StatsRepository:
         row = result.fetchone()
         return dict(row._mapping) if row else {}
 
+    def get_park_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
+        """
+        Get detailed shame score breakdown for a park.
+
+        Returns the list of rides currently down with their tier weights,
+        total park weight, and the calculated shame score.
+
+        CRITICAL: Shame score only counts rides CURRENTLY down (latest snapshot).
+
+        Args:
+            park_id: Park ID
+
+        Returns:
+            Dictionary with:
+            - rides_down: List of rides currently down with tier info
+            - total_park_weight: Sum of all tier weights
+            - shame_score: Calculated shame score
+            - park_is_open: Whether park appears open
+        """
+        from utils.timezone import get_today_pacific, get_pacific_day_range_utc
+        from utils.sql_helpers import RideStatusSQL, ParkStatusSQL
+
+        today = get_today_pacific()
+        start_utc, end_utc = get_pacific_day_range_utc(today)
+
+        # Get total park weight
+        weight_query = text("""
+            SELECT SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
+            FROM rides r
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            WHERE r.park_id = :park_id
+                AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+        """)
+        weight_result = self.conn.execute(weight_query, {"park_id": park_id})
+        weight_row = weight_result.fetchone()
+        total_park_weight = float(weight_row.total_park_weight) if weight_row and weight_row.total_park_weight else 0
+
+        # Check if park appears open (using 50% threshold)
+        is_down = RideStatusSQL.is_down("rss")
+        park_open = ParkStatusSQL.park_appears_open_filter("pas")
+
+        park_open_query = text(f"""
+            SELECT
+                (SELECT COUNT(*)
+                 FROM rides r2
+                 WHERE r2.park_id = :park_id
+                   AND r2.is_active = TRUE
+                   AND r2.category = 'ATTRACTION') as total_rides,
+                pas.park_appears_open,
+                {park_open} as meets_threshold
+            FROM park_activity_snapshots pas
+            WHERE pas.park_id = :park_id
+                AND pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
+            ORDER BY pas.recorded_at DESC
+            LIMIT 1
+        """)
+        park_open_result = self.conn.execute(park_open_query, {
+            "park_id": park_id,
+            "start_utc": start_utc,
+            "end_utc": end_utc
+        })
+        park_open_row = park_open_result.fetchone()
+        park_is_open = bool(park_open_row and park_open_row.meets_threshold) if park_open_row else False
+
+        # Get rides currently down with tier info
+        rides_down_query = text(f"""
+            WITH latest_snapshot AS (
+                SELECT ride_id, MAX(recorded_at) as latest_recorded_at
+                FROM ride_status_snapshots
+                WHERE recorded_at >= :start_utc AND recorded_at < :end_utc
+                GROUP BY ride_id
+            )
+            SELECT
+                r.ride_id,
+                r.name AS ride_name,
+                COALESCE(rc.tier, 2) AS tier,
+                COALESCE(rc.tier_weight, 2) AS tier_weight,
+                rss.status,
+                rss.recorded_at
+            FROM rides r
+            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            INNER JOIN latest_snapshot ls ON rss.ride_id = ls.ride_id
+                AND rss.recorded_at = ls.latest_recorded_at
+            INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
+                AND pas.recorded_at = rss.recorded_at
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            WHERE r.park_id = :park_id
+                AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+                AND {is_down}
+                AND {park_open}
+            ORDER BY tier ASC, r.name ASC
+        """)
+
+        rides_down_result = self.conn.execute(rides_down_query, {
+            "park_id": park_id,
+            "start_utc": start_utc,
+            "end_utc": end_utc
+        })
+
+        rides_down = []
+        total_weighted_down = 0
+        for row in rides_down_result:
+            ride_data = {
+                "ride_id": row.ride_id,
+                "ride_name": row.ride_name,
+                "tier": row.tier,
+                "tier_weight": float(row.tier_weight),
+                "status": row.status
+            }
+            rides_down.append(ride_data)
+            total_weighted_down += float(row.tier_weight)
+
+        # Calculate shame score
+        # Each ride is treated as having ~5 minutes of "current" downtime for display
+        shame_score = round(total_weighted_down / total_park_weight, 2) if total_park_weight > 0 else 0
+
+        return {
+            "rides_down": rides_down,
+            "total_park_weight": total_park_weight,
+            "total_weighted_down": total_weighted_down,
+            "shame_score": shame_score,
+            "park_is_open": park_is_open,
+            "tier_weights": {
+                1: 5,  # Tier 1 (Flagship) = 5x weight
+                2: 2,  # Tier 2 (Standard) = 2x weight
+                3: 1   # Tier 3 (Minor) = 1x weight
+            }
+        }
+
     def get_ride_daily_rankings(
         self,
         stat_date: date,

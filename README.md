@@ -6,7 +6,7 @@ A data-driven web application that tracks and ranks theme park ride reliability 
 
 ## What It Does
 
-- **Collects** ride status data from 80+ North American theme parks every 10 minutes
+- **Collects** ride status data from 80+ North American theme parks every 5 minutes
 - **Tracks** when rides go down and calculates downtime statistics
 - **Ranks** parks and rides by reliability with daily, weekly, and monthly aggregates
 - **Displays** interactive dashboards showing the "Hall of Shame" - parks and rides with the worst downtime
@@ -22,7 +22,7 @@ A data-driven web application that tracks and ranks theme park ride reliability 
 | **Backend** | Python 3.11+, Flask |
 | **Database** | MySQL/MariaDB |
 | **Frontend** | HTML, CSS, JavaScript (no framework) |
-| **Data Source** | [Queue-Times.com](https://queue-times.com) API |
+| **Data Source** | [ThemeParks.wiki](https://themeparks.wiki) API |
 | **Hosting** | Apache + Gunicorn on Linux |
 
 ## Project Structure
@@ -33,7 +33,7 @@ ThemeParkHallOfShame/
 │   ├── src/
 │   │   ├── api/           # Flask REST API
 │   │   ├── database/      # SQLAlchemy models & repositories
-│   │   ├── collector/     # Queue-Times API client
+│   │   ├── collector/     # ThemeParks.wiki API client
 │   │   ├── processor/     # Status detection & aggregation
 │   │   └── scripts/       # Cron job entry points
 │   └── tests/             # pytest unit & integration tests
@@ -111,7 +111,7 @@ The system collects data via cron jobs:
 
 | Job | Schedule | Description |
 |-----|----------|-------------|
-| `collect_snapshots` | Every 10 min | Captures current ride status |
+| `collect_snapshots` | Every 5 min | Captures current ride status from ThemeParks.wiki |
 | `aggregate_daily` | 1 AM UTC | Calculates daily statistics |
 | `collect_parks` | Sunday 2 AM | Refreshes park/ride metadata |
 
@@ -138,7 +138,7 @@ See [API documentation](docs/architecture.md) for full details.
 
 ## How Downtime is Calculated
 
-1. **Data Collection**: Ride status is captured every 10 minutes from Queue-Times.com
+1. **Data Collection**: Ride status is captured every 5 minutes from ThemeParks.wiki
 2. **Status Logic**: A ride is considered "open" if `wait_time > 0` OR `is_open = true`
 3. **Operating Hours**: Only time when the park is actually open counts toward uptime calculations
 4. **Aggregation**: Daily stats are computed from raw snapshots, then rolled up to weekly/monthly
@@ -168,13 +168,11 @@ Contributions are welcome! Please:
 
 ## Data Attribution
 
-This project uses the free [Queue-Times.com](https://queue-times.com) API.
+This project uses the open-source [ThemeParks.wiki](https://themeparks.wiki) API.
 
-Per their terms of service:
+> **Powered by [ThemeParks.wiki](https://themeparks.wiki)** — Open-source API providing live wait times & ride status for 50+ parks worldwide.
 
-> **Powered by [Queue-Times.com](https://queue-times.com)**
-
-Queue-Times.com provides excellent detailed statistics, hourly charts, and historical data. This project focuses specifically on downtime tracking and park reliability rankings as a complementary view.
+The ThemeParks.wiki project is available on GitHub: [github.com/ThemeParks/parksapi](https://github.com/ThemeParks/parksapi)
 
 ## License
 

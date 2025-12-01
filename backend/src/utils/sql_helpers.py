@@ -283,6 +283,47 @@ class ParkStatusSQL:
         """
         return f"{table_alias}.park_appears_open = TRUE"
 
+    @staticmethod
+    def latest_snapshot_join_sql(
+        park_alias: str = "p",
+        start_param: str = ":start_utc",
+        end_param: str = ":end_utc",
+    ) -> str:
+        """
+        Get SQL JOIN clauses for filtering to parks that appear open.
+
+        Use this in time-range queries (charts, historical data) to exclude
+        closed/seasonal parks. Joins to latest park_activity_snapshot in the
+        time range and filters where park_appears_open = TRUE.
+
+        Args:
+            park_alias: Alias for parks table (default "p")
+            start_param: Parameter name for start time (default ":start_utc")
+            end_param: Parameter name for end time (default ":end_utc")
+
+        Returns:
+            SQL string containing INNER JOIN clauses and filter condition
+
+        Usage:
+            query = f'''
+                SELECT ...
+                FROM parks p
+                {ParkStatusSQL.latest_snapshot_join_sql("p")}
+                WHERE ...
+            '''
+        """
+        return f"""
+            INNER JOIN (
+                SELECT park_id, MAX(snapshot_id) AS max_snapshot_id
+                FROM park_activity_snapshots
+                WHERE recorded_at >= {start_param} AND recorded_at < {end_param}
+                GROUP BY park_id
+            ) latest_pas ON {park_alias}.park_id = latest_pas.park_id
+            INNER JOIN park_activity_snapshots pas
+                ON pas.park_id = {park_alias}.park_id
+                AND pas.snapshot_id = latest_pas.max_snapshot_id
+                AND pas.park_appears_open = TRUE"""
+
 
 class DowntimeSQL:
     """

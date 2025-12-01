@@ -47,6 +47,7 @@ from database.schema import (
 )
 from database.queries.builders import Filters, ParkWeightsCTE, WeightedDowntimeCTE
 from utils.timezone import get_pacific_day_range_utc
+from utils.sql_helpers import ParkStatusSQL
 
 
 class ParkShameHistoryQuery:
@@ -139,6 +140,7 @@ class ParkShameHistoryQuery:
 
         # Get top parks with most downtime today
         # Only include parks that appear OPEN (excludes seasonal closures)
+        open_parks_join = ParkStatusSQL.latest_snapshot_join_sql("p")
         top_parks_query = text(f"""
             SELECT
                 p.park_id,
@@ -152,17 +154,9 @@ class ParkShameHistoryQuery:
             INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            INNER JOIN (
-                SELECT park_id, MAX(snapshot_id) AS max_snapshot_id
-                FROM park_activity_snapshots
-                WHERE recorded_at >= :start_utc AND recorded_at < :end_utc
-                GROUP BY park_id
-            ) latest_pas ON p.park_id = latest_pas.park_id
-            INNER JOIN park_activity_snapshots pas
-                ON pas.park_id = p.park_id AND pas.snapshot_id = latest_pas.max_snapshot_id
+            {open_parks_join}
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND p.is_active = TRUE
-                AND pas.park_appears_open = TRUE
                 {disney_filter}
             GROUP BY p.park_id, p.name
             HAVING total_downtime_hours > 0

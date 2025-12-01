@@ -1103,13 +1103,15 @@ class StatsRepository:
         query = text("""
             SELECT
                 COUNT(*) AS total_rides,
-                SUM(CASE WHEN tier = 1 THEN 1 ELSE 0 END) AS tier1_count,
-                SUM(CASE WHEN tier = 2 THEN 1 ELSE 0 END) AS tier2_count,
-                SUM(CASE WHEN tier = 3 THEN 1 ELSE 0 END) AS tier3_count,
-                SUM(CASE WHEN tier IS NULL THEN 1 ELSE 0 END) AS unclassified_count
-            FROM rides
-            WHERE park_id = :park_id
-                AND is_active = TRUE
+                SUM(CASE WHEN rc.tier = 1 THEN 1 ELSE 0 END) AS tier_1_count,
+                SUM(CASE WHEN rc.tier = 2 THEN 1 ELSE 0 END) AS tier_2_count,
+                SUM(CASE WHEN rc.tier = 3 THEN 1 ELSE 0 END) AS tier_3_count,
+                SUM(CASE WHEN rc.tier IS NULL THEN 1 ELSE 0 END) AS unclassified_count
+            FROM rides r
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            WHERE r.park_id = :park_id
+                AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
         """)
 
         result = self.conn.execute(query, {"park_id": park_id})

@@ -692,6 +692,7 @@ class Trends {
         if (newFilter !== this.state.filter) {
             this.state.filter = newFilter;
             this.fetchAllTrends();
+            this.fetchChartData();  // Also refetch chart data
         }
     }
 

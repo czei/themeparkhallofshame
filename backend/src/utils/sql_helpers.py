@@ -85,9 +85,17 @@ class RideStatusSQL:
         """
         Get SQL EXISTS subquery to check if a ride has operated during a period.
 
-        This is used to filter out rides that have NEVER operated during the
-        measurement period - such rides should not count as having "downtime"
-        since they may be seasonally closed or simply not operating.
+        SINGLE SOURCE OF TRUTH: This determines if a ride is a "breakdown" vs "seasonal closure".
+        A ride that has NEVER operated during the period is a seasonal closure, not a breakdown.
+
+        SQLAlchemy equivalent: StatusExpressions.has_operated_today_subquery()
+        in database/queries/builders/expressions.py
+        BOTH MUST STAY IN SYNC - if you change this, update that too!
+
+        This is used to:
+        1. Exclude seasonal closures from "Rides DOWN" count in status summary panel
+        2. Exclude seasonal closures from downtime rankings table
+        3. Ensure panel count matches table count for DOWN rides
 
         A ride is considered to have operated if it had at least one snapshot
         with status='OPERATING' or computed_is_open=TRUE.

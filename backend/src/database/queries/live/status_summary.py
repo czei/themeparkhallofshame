@@ -39,7 +39,6 @@ from database.schema import (
 )
 from database.queries.builders import Filters, StatusExpressions
 from database.queries.builders.filters import LIVE_WINDOW_HOURS
-from utils.timezone import get_today_pacific, get_pacific_day_range_utc
 
 
 class StatusSummaryQuery:
@@ -74,7 +73,8 @@ class StatusSummaryQuery:
 
         # Get subquery for rides that have operated today
         # CRITICAL: Rides that have NEVER operated today are seasonal closures, not breakdowns
-        has_operated_today = self._get_has_operated_today_subquery()
+        # Uses centralized SINGLE SOURCE OF TRUTH from StatusExpressions
+        has_operated_today = StatusExpressions.has_operated_today_subquery()
 
         conditions = [
             rides.c.is_active == True,
@@ -234,40 +234,3 @@ class StatusSummaryQuery:
             .subquery()
         )
 
-    def _get_has_operated_today_subquery(self):
-        """Get subquery for rides that have operated at least once today.
-
-        CRITICAL: This distinguishes actual breakdowns from seasonal closures.
-        A ride showing status='DOWN' that has NEVER operated today is likely
-        a seasonal closure (e.g., water ride in winter), NOT a breakdown.
-
-        Uses the Pacific day range for consistency with other "today" queries.
-
-        Returns:
-            Subquery with ride_id for rides that had at least one OPERATING
-            snapshot today.
-        """
-        today_pacific = get_today_pacific()
-        start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
-
-        # Create an alias for the subquery to avoid conflicts with main query
-        rss_operated = ride_status_snapshots.alias("rss_operated")
-
-        return (
-            select(rss_operated.c.ride_id)
-            .where(
-                and_(
-                    rss_operated.c.recorded_at >= start_utc,
-                    rss_operated.c.recorded_at < end_utc,
-                    or_(
-                        rss_operated.c.status == "OPERATING",
-                        and_(
-                            rss_operated.c.status.is_(None),
-                            rss_operated.c.computed_is_open == True,
-                        ),
-                    ),
-                )
-            )
-            .distinct()
-            .subquery()
-        )

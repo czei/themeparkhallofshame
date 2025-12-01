@@ -25,14 +25,16 @@ How to Modify:
 3. After changes: Verify sql_helpers.py has matching logic (for compatibility)
 """
 
-from sqlalchemy import and_, or_, case, func
+from sqlalchemy import and_, or_, case, func, select
 from sqlalchemy.sql import ColumnElement
 from sqlalchemy.sql.expression import BinaryExpression
+from sqlalchemy.sql.selectable import Subquery
 
 from database.schema import (
     ride_status_snapshots,
     park_activity_snapshots,
 )
+from utils.timezone import get_today_pacific, get_pacific_day_range_utc
 
 
 class StatusExpressions:
@@ -240,4 +242,64 @@ class StatusExpressions:
         return case(
             (pas.c.park_appears_open == True, 1),
             else_=0,
+        )
+
+    # =========================================================================
+    # HAS OPERATED TODAY - SINGLE SOURCE OF TRUTH
+    # =========================================================================
+    # CRITICAL: This determines if a ride is a "breakdown" vs "seasonal closure"
+    # A ride that has NEVER operated today is a seasonal closure, not a breakdown.
+    # =========================================================================
+
+    @staticmethod
+    def has_operated_today_subquery(rss=ride_status_snapshots) -> Subquery:
+        """
+        Get subquery for rides that have operated at least once today.
+
+        SINGLE SOURCE OF TRUTH for distinguishing breakdowns from seasonal closures.
+
+        This is used to:
+        1. Exclude seasonal closures from "Rides DOWN" count in status summary panel
+        2. Exclude seasonal closures from downtime rankings table
+        3. Ensure panel count matches table count for DOWN rides
+
+        Logic:
+        - A ride has "operated" if it had at least one snapshot with:
+          - status = 'OPERATING', OR
+          - status IS NULL AND computed_is_open = TRUE
+
+        Note: sql_helpers.py has a matching raw SQL version: RideStatusSQL.has_operated_subquery()
+        Both MUST stay in sync. If you change this, update that too.
+
+        Uses Pacific day range for "today" consistency across all queries.
+
+        Args:
+            rss: ride_status_snapshots table reference
+
+        Returns:
+            Subquery with ride_id for rides that operated today
+        """
+        today_pacific = get_today_pacific()
+        start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
+
+        # Create an alias to avoid conflicts when used in larger queries
+        rss_operated = rss.alias("rss_operated")
+
+        return (
+            select(rss_operated.c.ride_id)
+            .where(
+                and_(
+                    rss_operated.c.recorded_at >= start_utc,
+                    rss_operated.c.recorded_at < end_utc,
+                    or_(
+                        rss_operated.c.status == "OPERATING",
+                        and_(
+                            rss_operated.c.status.is_(None),
+                            rss_operated.c.computed_is_open == True,
+                        ),
+                    ),
+                )
+            )
+            .distinct()
+            .subquery("has_operated_today")
         )

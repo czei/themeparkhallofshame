@@ -3126,14 +3126,15 @@ class StatsRepository:
 
                 -- Shame Score = weighted downtime ONLY for rides CURRENTLY down
                 -- Rides that were down earlier but are now operating don't count
+                -- Multiplied by 10 for readability (0-10 scale)
                 ROUND(
-                    SUM(CASE
+                    (SUM(CASE
                         WHEN rcd.ride_id IS NOT NULL AND {park_open} AND {is_down}
                         THEN 5 * COALESCE(rc.tier_weight, 2)
                         ELSE 0
                     END) / 60.0
-                    / NULLIF(pw.total_park_weight, 0),
-                    2
+                    / NULLIF(pw.total_park_weight, 0)) * 10,
+                    1
                 ) AS shame_score,
 
                 -- Count of rides CURRENTLY down (not cumulative)

@@ -124,6 +124,7 @@ class RideDowntimeHistoryQuery:
         disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
 
         # Get top rides with most downtime today
+        # Only include rides from parks that appear OPEN (excludes seasonal closures)
         top_rides_query = text(f"""
             SELECT
                 r.ride_id,
@@ -137,10 +138,19 @@ class RideDowntimeHistoryQuery:
             FROM rides r
             INNER JOIN parks p ON r.park_id = p.park_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            INNER JOIN (
+                SELECT park_id, MAX(snapshot_id) AS max_snapshot_id
+                FROM park_activity_snapshots
+                WHERE recorded_at >= :start_utc AND recorded_at < :end_utc
+                GROUP BY park_id
+            ) latest_pas ON p.park_id = latest_pas.park_id
+            INNER JOIN park_activity_snapshots pas
+                ON pas.park_id = p.park_id AND pas.snapshot_id = latest_pas.max_snapshot_id
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'
                 AND p.is_active = TRUE
+                AND pas.park_appears_open = TRUE
                 {disney_filter}
             GROUP BY r.ride_id, r.name, p.name
             HAVING total_downtime_hours > 0

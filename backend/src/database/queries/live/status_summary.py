@@ -67,6 +67,10 @@ class StatusSummaryQuery:
         # Get latest snapshot for each ride within live window
         latest_snapshot = self._get_latest_snapshots_subquery()
 
+        # Get latest park_activity_snapshot per park to avoid count inflation
+        # (joining all snapshots in window causes ~24x multiplication)
+        latest_park_snapshot = self._get_latest_park_snapshots_subquery()
+
         conditions = [
             rides.c.is_active == True,
             rides.c.category == "ATTRACTION",
@@ -128,10 +132,14 @@ class StatusSummaryQuery:
                     ),
                 )
                 .outerjoin(
+                    latest_park_snapshot,
+                    parks.c.park_id == latest_park_snapshot.c.park_id,
+                )
+                .outerjoin(
                     park_activity_snapshots,
                     and_(
                         parks.c.park_id == park_activity_snapshots.c.park_id,
-                        Filters.within_live_window(park_activity_snapshots.c.recorded_at),
+                        park_activity_snapshots.c.snapshot_id == latest_park_snapshot.c.max_pas_snapshot_id,
                     ),
                 )
             )
@@ -168,5 +176,22 @@ class StatusSummaryQuery:
             )
             .where(Filters.within_live_window(ride_status_snapshots.c.recorded_at))
             .group_by(ride_status_snapshots.c.ride_id)
+            .subquery()
+        )
+
+    def _get_latest_park_snapshots_subquery(self):
+        """Get subquery for latest park_activity_snapshot per park within live window.
+
+        CRITICAL: Without this, joining directly to park_activity_snapshots
+        causes each ride to be counted once per snapshot in the window
+        (~24x inflation in a 2-hour window with 5-minute snapshots).
+        """
+        return (
+            select(
+                park_activity_snapshots.c.park_id,
+                func.max(park_activity_snapshots.c.snapshot_id).label("max_pas_snapshot_id"),
+            )
+            .where(Filters.within_live_window(park_activity_snapshots.c.recorded_at))
+            .group_by(park_activity_snapshots.c.park_id)
             .subquery()
         )

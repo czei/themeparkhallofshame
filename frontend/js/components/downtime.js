@@ -106,7 +106,7 @@ class Downtime {
      */
     getPeriodTitle(baseTitle) {
         const periodLabels = {
-            'today': "Today's",
+            'today': 'Live',
             '7days': '7 Day',
             '30days': '30 Day'
         };

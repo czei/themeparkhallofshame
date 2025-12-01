@@ -3740,6 +3740,11 @@ class StatsRepository:
         This method computes wait times in real-time from ride_status_snapshots,
         providing up-to-the-minute accuracy for the "Today" period.
 
+        CONSISTENCY: Uses the same filtering as downtime rankings:
+        - park_activity_snapshots join for park_appears_open
+        - has_operated check (ride must have operated at least once)
+        - active_filter for is_active and ATTRACTION category
+
         Args:
             filter_disney_universal: If True, only include Disney & Universal parks
             limit: Maximum number of rides to return
@@ -3758,7 +3763,10 @@ class StatsRepository:
         yesterday_pacific = today_pacific - timedelta(days=1)
 
         # Use centralized helpers for consistent logic across all queries
+        # CRITICAL: Must match downtime rankings filtering for consistency
         active_filter = RideFilterSQL.active_attractions_filter("r", "p")
+        park_open = ParkStatusSQL.park_appears_open_filter("pas")
+        has_operated = RideStatusSQL.has_operated_subquery("r.ride_id")
 
         # CRITICAL: Use helper subqueries that include time window filter
         # This ensures current_status matches the status summary panel
@@ -3778,8 +3786,9 @@ class StatsRepository:
                 CONCAT(p.city, ', ', p.state_province) AS location,
 
                 -- Wait time stats from today's snapshots (field names match frontend expectations)
-                ROUND(AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END), 1) AS avg_wait_minutes,
-                MAX(rss.wait_time) AS peak_wait_minutes,
+                -- Only count wait times when park is open
+                ROUND(AVG(CASE WHEN {park_open} AND rss.wait_time > 0 THEN rss.wait_time END), 1) AS avg_wait_minutes,
+                MAX(CASE WHEN {park_open} THEN rss.wait_time END) AS peak_wait_minutes,
 
                 -- Ride tier from classifications (frontend displays tier badge)
                 COALESCE(rc.tier, 3) AS tier,
@@ -3790,7 +3799,7 @@ class StatsRepository:
                 CASE
                     WHEN yesterday_stats.avg_wait_time IS NOT NULL AND yesterday_stats.avg_wait_time > 0
                     THEN ROUND(
-                        ((AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END) - yesterday_stats.avg_wait_time)
+                        ((AVG(CASE WHEN {park_open} AND rss.wait_time > 0 THEN rss.wait_time END) - yesterday_stats.avg_wait_time)
                          / yesterday_stats.avg_wait_time) * 100,
                         1
                     )
@@ -3809,6 +3818,9 @@ class StatsRepository:
             FROM rides r
             INNER JOIN parks p ON r.park_id = p.park_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            -- CRITICAL: Join park_activity_snapshots for consistent park filtering
+            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
+                AND pas.recorded_at = rss.recorded_at
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             -- LEFT JOIN yesterday's stats for trend calculation
             LEFT JOIN ride_daily_stats yesterday_stats
@@ -3816,6 +3828,7 @@ class StatsRepository:
                 AND yesterday_stats.stat_date = :yesterday_date
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND {active_filter}
+                AND {has_operated}
                 AND rss.wait_time IS NOT NULL
                 AND rss.wait_time > 0
                 {filter_clause}

@@ -25,11 +25,12 @@ Output Format:
 from datetime import date, timedelta
 from typing import List, Dict, Any
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, text
 from sqlalchemy.engine import Connection
 
-from database.schema import parks, rides, ride_daily_stats
+from database.schema import parks, rides, ride_daily_stats, ride_status_snapshots
 from database.queries.builders import Filters
+from utils.timezone import get_pacific_day_range_utc
 
 
 class RideDowntimeHistoryQuery:
@@ -92,6 +93,121 @@ class RideDowntimeHistoryQuery:
             })
 
         return {"labels": labels, "datasets": datasets}
+
+    def get_hourly(
+        self,
+        target_date: date,
+        filter_disney_universal: bool = False,
+        limit: int = 5,
+    ) -> Dict[str, Any]:
+        """
+        Get hourly downtime data for TODAY.
+
+        Uses live snapshot data (ride_status_snapshots) to calculate
+        downtime progression throughout the day.
+
+        Args:
+            target_date: The date to get hourly data for (usually today)
+            filter_disney_universal: Only Disney/Universal parks
+            limit: Number of rides to include
+
+        Returns:
+            Chart.js compatible dict with hourly labels and datasets
+        """
+        # Generate hourly labels (6am to 11pm = 18 hours)
+        labels = [f"{h}:00" for h in range(6, 24)]
+
+        # Get UTC time range for the target date in Pacific timezone
+        start_utc, end_utc = get_pacific_day_range_utc(target_date)
+
+        # Build filter clause
+        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+
+        # Get top rides with most downtime today
+        top_rides_query = text(f"""
+            SELECT
+                r.ride_id,
+                r.name AS ride_name,
+                p.name AS park_name,
+                SUM(CASE
+                    WHEN rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0)
+                    THEN 5  -- 5-minute interval
+                    ELSE 0
+                END) / 60.0 AS total_downtime_hours
+            FROM rides r
+            INNER JOIN parks p ON r.park_id = p.park_id
+            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
+                AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+                AND p.is_active = TRUE
+                {disney_filter}
+            GROUP BY r.ride_id, r.name, p.name
+            HAVING total_downtime_hours > 0
+            ORDER BY total_downtime_hours DESC
+            LIMIT :limit
+        """)
+
+        result = self.conn.execute(top_rides_query, {
+            "start_utc": start_utc,
+            "end_utc": end_utc,
+            "limit": limit
+        })
+        top_rides = [dict(row._mapping) for row in result]
+
+        if not top_rides:
+            return {"labels": labels, "datasets": []}
+
+        # Get hourly data for each ride
+        datasets = []
+        for ride in top_rides:
+            hourly_data = self._get_ride_hourly_data(
+                ride["ride_id"], start_utc, end_utc
+            )
+
+            # Align data to labels (6am to 11pm)
+            data_by_hour = {row["hour"]: row["downtime_hours"] for row in hourly_data}
+            aligned_data = [data_by_hour.get(h) for h in range(6, 24)]
+
+            datasets.append({
+                "label": ride["ride_name"],
+                "park": ride["park_name"],
+                "data": aligned_data,
+            })
+
+        return {"labels": labels, "datasets": datasets}
+
+    def _get_ride_hourly_data(
+        self,
+        ride_id: int,
+        start_utc,
+        end_utc,
+    ) -> List[Dict[str, Any]]:
+        """Get hourly downtime for a specific ride from live snapshots."""
+        query = text("""
+            SELECT
+                HOUR(CONVERT_TZ(rss.recorded_at, '+00:00', 'America/Los_Angeles')) AS hour,
+                ROUND(
+                    SUM(CASE
+                        WHEN rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0)
+                        THEN 5  -- 5-minute interval
+                        ELSE 0
+                    END) / 60.0,
+                    2
+                ) AS downtime_hours
+            FROM ride_status_snapshots rss
+            WHERE rss.ride_id = :ride_id
+                AND rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
+            GROUP BY hour
+            ORDER BY hour
+        """)
+
+        result = self.conn.execute(query, {
+            "ride_id": ride_id,
+            "start_utc": start_utc,
+            "end_utc": end_utc
+        })
+        return [dict(row._mapping) for row in result]
 
     def _get_top_rides(
         self,

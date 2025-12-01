@@ -161,3 +161,88 @@ class TestHourlyDataSource:
 
         assert uses_snapshots, \
             "Hourly data should come from ride_status_snapshots, not daily stats"
+
+
+class TestTimestampLevelComparison:
+    """Test that hourly queries use timestamp-level, not hour-level comparison.
+
+    Bug Fixed: When a ride first operates at 12:55, the old code used hour-level
+    comparison (hour 12 >= first_op_hour 12 = TRUE) which incorrectly counted
+    all snapshots from 12:00-12:55 as downtime. Now we use timestamp-level
+    comparison (recorded_at >= first_op_time) to only count downtime after
+    the ride actually operated.
+    """
+
+    def test_park_shame_query_uses_timestamp_comparison(self):
+        """
+        ParkShameHistoryQuery.get_hourly should use timestamp-level comparison,
+        not hour-level comparison, to avoid counting pre-opening time as downtime.
+        """
+        import inspect
+        from database.queries.charts.park_shame_history import ParkShameHistoryQuery
+
+        source = inspect.getsource(ParkShameHistoryQuery._get_park_hourly_data)
+
+        # Should use timestamp column name, not hour column
+        uses_timestamp = 'first_op_time' in source
+        uses_hour = 'first_op_hour' in source
+
+        assert uses_timestamp, \
+            "_get_park_hourly_data should use first_op_time (timestamp level)"
+        assert not uses_hour, \
+            "_get_park_hourly_data should NOT use first_op_hour (hour level) - " \
+            "this causes pre-opening snapshots within same hour to be counted as downtime"
+
+    def test_park_shame_query_compares_recorded_at_to_first_op_time(self):
+        """
+        The query should compare rss.recorded_at >= rfo.first_op_time,
+        not HOUR(...) >= first_op_hour.
+        """
+        import inspect
+        from database.queries.charts.park_shame_history import ParkShameHistoryQuery
+
+        source = inspect.getsource(ParkShameHistoryQuery._get_park_hourly_data)
+
+        # Should have comparison: recorded_at >= ... first_op_time
+        has_timestamp_comparison = (
+            'recorded_at >= rfo.first_op_time' in source or
+            'rss.recorded_at >= rfo.first_op_time' in source
+        )
+
+        assert has_timestamp_comparison, \
+            "Query should compare recorded_at >= first_op_time for accurate downtime"
+
+    def test_ride_downtime_query_uses_timestamp_comparison(self):
+        """
+        RideDowntimeHistoryQuery.get_hourly should use timestamp-level comparison.
+        """
+        import inspect
+        from database.queries.charts.ride_downtime_history import RideDowntimeHistoryQuery
+
+        source = inspect.getsource(RideDowntimeHistoryQuery._get_ride_hourly_data)
+
+        # Should use timestamp column name, not hour column
+        uses_timestamp = 'first_op_time' in source
+        uses_hour = 'first_op_hour' in source
+
+        assert uses_timestamp, \
+            "_get_ride_hourly_data should use first_op_time (timestamp level)"
+        assert not uses_hour, \
+            "_get_ride_hourly_data should NOT use first_op_hour (hour level)"
+
+    def test_ride_downtime_query_compares_recorded_at_to_first_op_time(self):
+        """
+        The query should compare rss.recorded_at >= rfo.first_op_time.
+        """
+        import inspect
+        from database.queries.charts.ride_downtime_history import RideDowntimeHistoryQuery
+
+        source = inspect.getsource(RideDowntimeHistoryQuery._get_ride_hourly_data)
+
+        has_timestamp_comparison = (
+            'recorded_at >= rfo.first_op_time' in source or
+            'rss.recorded_at >= rfo.first_op_time' in source
+        )
+
+        assert has_timestamp_comparison, \
+            "Query should compare recorded_at >= first_op_time for accurate downtime"

@@ -228,7 +228,7 @@ class Downtime {
                             <th class="status-col" title="Whether the park is currently open or closed">Status</th>
                             <th class="downtime-col" title="Total accumulated ride downtime hours during the selected period">Downtime</th>
                             <th class="uptime-col" title="Percentage of time rides were operational during the selected period">Uptime %</th>
-                            <th class="affected-col" title="Number of rides that experienced downtime during the selected period">Affected Rides</th>
+                            <th class="affected-col" title="Number of rides currently down right now">Rides Down</th>
                             <th class="trend-col" title="Change in downtime compared to previous period. Positive (+) = more downtime = worse performance">Trend</th>
                         </tr>
                     </thead>
@@ -307,7 +307,7 @@ class Downtime {
                         </div>
                     </div>
                 </td>
-                <td class="affected-col">${park.affected_rides_count || 0}</td>
+                <td class="affected-col">${park.rides_down || 0}</td>
                 <td class="trend-col">
                     <span class="trend-indicator ${trendClass}">
                         ${trendIcon} ${trendText}

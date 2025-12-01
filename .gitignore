@@ -18,6 +18,9 @@ config/secrets.yml
 # Claude Code agent folder (may contain credentials)
 .claude/
 
+# Local planning files
+.plan/
+
 # OS files
 .DS_Store
 Thumbs.db

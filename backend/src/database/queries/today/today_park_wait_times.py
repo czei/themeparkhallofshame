@@ -74,25 +74,28 @@ class TodayParkWaitTimesQuery:
                 CONCAT(p.city, ', ', p.state_province) AS location,
 
                 -- Average wait time across all rides (only when park is open and wait > 0)
+                -- IMPORTANT: Use avg_wait_minutes (not avg_wait_time) for frontend compatibility
                 ROUND(
                     AVG(CASE
                         WHEN {park_open} AND rss.wait_time > 0
                         THEN rss.wait_time
                     END),
                     1
-                ) AS avg_wait_time,
+                ) AS avg_wait_minutes,
 
                 -- Peak wait time today
+                -- IMPORTANT: Use peak_wait_minutes (not peak_wait_time) for frontend compatibility
                 MAX(CASE
                     WHEN {park_open}
                     THEN rss.wait_time
-                END) AS peak_wait_time,
+                END) AS peak_wait_minutes,
 
                 -- Count of rides with wait time data
+                -- IMPORTANT: Use rides_reporting (not rides_with_waits) for frontend compatibility
                 COUNT(DISTINCT CASE
                     WHEN rss.wait_time > 0
                     THEN r.ride_id
-                END) AS rides_with_waits,
+                END) AS rides_reporting,
 
                 -- Park operating status (current)
                 {park_is_open_sq}
@@ -107,8 +110,8 @@ class TodayParkWaitTimesQuery:
                 AND p.is_active = TRUE
                 {filter_clause}
             GROUP BY p.park_id, p.name, p.city, p.state_province
-            HAVING avg_wait_time IS NOT NULL
-            ORDER BY avg_wait_time DESC
+            HAVING avg_wait_minutes IS NOT NULL
+            ORDER BY avg_wait_minutes DESC
             LIMIT :limit
         """)
 

@@ -79,19 +79,21 @@ class TodayRideWaitTimesQuery:
                 rc.tier,
 
                 -- Average wait time (only when park is open and wait > 0)
+                -- IMPORTANT: Use avg_wait_minutes (not avg_wait_time) for frontend compatibility
                 ROUND(
                     AVG(CASE
                         WHEN {park_open} AND rss.wait_time > 0
                         THEN rss.wait_time
                     END),
                     1
-                ) AS avg_wait_time,
+                ) AS avg_wait_minutes,
 
                 -- Peak wait time today
+                -- IMPORTANT: Use peak_wait_minutes (not peak_wait_time) for frontend compatibility
                 MAX(CASE
                     WHEN {park_open}
                     THEN rss.wait_time
-                END) AS peak_wait_time,
+                END) AS peak_wait_minutes,
 
                 -- Current wait time (most recent snapshot)
                 (SELECT rss2.wait_time
@@ -99,6 +101,20 @@ class TodayRideWaitTimesQuery:
                  WHERE rss2.ride_id = r.ride_id
                  ORDER BY rss2.recorded_at DESC
                  LIMIT 1) AS current_wait_time,
+
+                -- Current ride status (most recent snapshot) - for status badge
+                (SELECT rss3.status
+                 FROM ride_status_snapshots rss3
+                 WHERE rss3.ride_id = r.ride_id
+                 ORDER BY rss3.recorded_at DESC
+                 LIMIT 1) AS current_status,
+
+                -- Current ride open status (most recent snapshot) - for status badge
+                (SELECT rss4.computed_is_open
+                 FROM ride_status_snapshots rss4
+                 WHERE rss4.ride_id = r.ride_id
+                 ORDER BY rss4.recorded_at DESC
+                 LIMIT 1) AS current_is_open,
 
                 -- Park operating status (current)
                 {park_is_open_sq}
@@ -115,8 +131,8 @@ class TodayRideWaitTimesQuery:
                 AND p.is_active = TRUE
                 {filter_clause}
             GROUP BY r.ride_id, r.name, p.name, p.park_id, p.city, p.state_province, rc.tier
-            HAVING avg_wait_time IS NOT NULL
-            ORDER BY avg_wait_time DESC
+            HAVING avg_wait_minutes IS NOT NULL
+            ORDER BY avg_wait_minutes DESC
             LIMIT :limit
         """)
 

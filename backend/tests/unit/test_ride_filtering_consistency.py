@@ -102,23 +102,24 @@ class TestDowntimeWaitTimeConsistency:
             "for consistency with downtime rankings"
 
 
-class TestAffectedRidesConsistency:
-    """Test that affected_rides_count is calculated consistently."""
+class TestRidesDownCount:
+    """Test that rides_down count shows currently down rides."""
 
-    def test_live_park_rankings_uses_centralized_affected_rides_helper(self):
+    def test_live_park_rankings_uses_rides_currently_down_cte(self):
         """
-        Park rankings should use AffectedRidesSQL helper for consistency.
+        Park rankings should use rides_currently_down CTE to count
+        rides that are DOWN in the latest snapshot (not cumulative).
         """
         import inspect
         from database.queries.live.live_park_rankings import LiveParkRankingsQuery
 
         source = inspect.getsource(LiveParkRankingsQuery.get_rankings)
 
-        uses_helper = 'AffectedRidesSQL' in source
+        uses_current_down = 'rides_currently_down' in source
 
-        assert uses_helper, \
-            "LiveParkRankingsQuery should use AffectedRidesSQL helper " \
-            "for consistent affected_rides calculation"
+        assert uses_current_down, \
+            "LiveParkRankingsQuery should use rides_currently_down CTE " \
+            "to count rides DOWN in the latest snapshot"
 
 
 class TestShameScoreRideConsistency:

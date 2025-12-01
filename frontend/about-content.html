@@ -37,7 +37,7 @@ downtime hurts guests, accounting for both the <em>amount</em> of downtime and t
 of the rides that went down.</p>
 
             <div class="formula-box">
-                <strong>Shame Score = Total Weighted Downtime Hours ÷ Total Park Weight</strong>
+                <strong>Shame Score = (Total Weighted Downtime Hours ÷ Total Park Weight) × 10</strong>
             </div>
 
             <p>Where:</p>
@@ -95,9 +95,9 @@ ride downtime, reflecting actual guest disappointment</li>
 
             <h4>Example</h4>
             <p><strong>Park A</strong> (small park): 1 Tier 1 ride down for 2 hours = 6 weighted hours.
-Total park weight = 15. <strong>Shame Score = 0.40</strong></p>
+Total park weight = 15. <strong>Shame Score = (6 ÷ 15) × 10 = 4.0</strong></p>
             <p><strong>Park B</strong> (large park): 3 Tier 3 rides down for 2 hours each = 6 weighted hours.
-Total park weight = 45. <strong>Shame Score = 0.13</strong></p>
+Total park weight = 45. <strong>Shame Score = (6 ÷ 45) × 10 = 1.3</strong></p>
             <p>Park A has a higher shame score because losing a flagship ride hurts more than losing three
 minor rides, even though total downtime hours were the same.</p>
 
@@ -110,14 +110,14 @@ minor rides, even though total downtime hours were the same.</p>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr><td>0.00 – 0.10</td><td>Excellent reliability</td></tr>
-                    <tr><td>0.10 – 0.30</td><td>Good performance</td></tr>
-                    <tr><td>0.30 – 0.50</td><td>Average</td></tr>
-                    <tr><td>0.50 – 1.00</td><td>Below average</td></tr>
-                    <tr><td>&gt; 1.00</td><td>Poor reliability</td></tr>
+                    <tr><td>0.0 – 1.0</td><td>Excellent reliability</td></tr>
+                    <tr><td>1.0 – 3.0</td><td>Good performance</td></tr>
+                    <tr><td>3.0 – 5.0</td><td>Average</td></tr>
+                    <tr><td>5.0 – 10.0</td><td>Below average</td></tr>
+                    <tr><td>&gt; 10.0</td><td>Poor reliability</td></tr>
                 </tbody>
             </table>
-            <p><em>Higher score = More shame = Worse performance</em></p>
+            <p><em>Higher score = More shame = Worse performance (0-10+ scale)</em></p>
 
             <h4>Screenshot</h4>
             <p>Here's what the downtime rankings look like:</p>

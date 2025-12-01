@@ -658,7 +658,7 @@ class StatsRepository:
                     p.name AS park_name,
                     CONCAT(p.city, ', ', p.state_province) AS location,
                     wd.total_weighted_downtime_hours AS total_downtime_hours,
-                    ROUND(wd.total_weighted_downtime_hours / pw.total_park_weight, 2) AS shame_score,
+                    ROUND((wd.total_weighted_downtime_hours / pw.total_park_weight) * 10, 1) AS shame_score,
                     pds.rides_with_downtime AS affected_rides_count,
                     pds.avg_uptime_percentage AS uptime_percentage,
                     ROUND(
@@ -787,7 +787,7 @@ class StatsRepository:
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
                 ROUND(SUM(pds.total_downtime_hours), 2) AS total_downtime_hours,
-                ROUND(wd.total_weighted_downtime_hours / pw.total_park_weight, 2) AS shame_score,
+                ROUND((wd.total_weighted_downtime_hours / pw.total_park_weight) * 10, 1) AS shame_score,
                 MAX(pds.rides_with_downtime) AS affected_rides_count,
                 ROUND(AVG(pds.avg_uptime_percentage), 2) AS uptime_percentage,
                 NULL AS trend_percentage
@@ -870,7 +870,7 @@ class StatsRepository:
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
                 pms.total_downtime_hours,
-                ROUND(wd.total_weighted_downtime_hours / NULLIF(pw.total_park_weight, 0), 2) AS shame_score,
+                ROUND((wd.total_weighted_downtime_hours / NULLIF(pw.total_park_weight, 0)) * 10, 1) AS shame_score,
                 pms.rides_with_downtime AS affected_rides_count,
                 pms.avg_uptime_percentage AS uptime_percentage,
                 pms.trend_vs_previous_month AS trend_percentage
@@ -1270,9 +1270,9 @@ class StatsRepository:
             rides_down.append(ride_data)
             total_weighted_down += float(row.tier_weight)
 
-        # Calculate shame score
+        # Calculate shame score (scaled by 10 for readability)
         # Each ride is treated as having ~5 minutes of "current" downtime for display
-        shame_score = round(total_weighted_down / total_park_weight, 2) if total_park_weight > 0 else 0
+        shame_score = round((total_weighted_down / total_park_weight) * 10, 1) if total_park_weight > 0 else 0
 
         return {
             "rides_down": rides_down,

@@ -62,9 +62,13 @@ from typing import Optional
 SNAPSHOT_INTERVAL_MINUTES = 5
 
 # Precision for different metric types (decimal places)
-SHAME_SCORE_PRECISION = 2   # e.g., 2.45 hours
+SHAME_SCORE_PRECISION = 1   # e.g., 3.4 (on 0-10 scale)
 PERCENTAGE_PRECISION = 1    # e.g., 95.5%
 HOURS_PRECISION = 2         # e.g., 3.25 hours
+
+# Shame score is multiplied by this to get a 0-10 scale (instead of 0-1)
+# This makes scores more intuitive: "3.4" is easier to understand than "0.34"
+SHAME_SCORE_MULTIPLIER = 10
 
 # Default tier weight when ride classification is missing
 # Tier 1 (flagship) = 3, Tier 2 (major) = 2, Tier 3 (minor) = 1
@@ -255,17 +259,17 @@ def calculate_shame_score(
     total_park_weight: float
 ) -> Optional[float]:
     """
-    Calculate park shame score.
+    Calculate park shame score on a 0-10 scale.
 
     THE CORE METRIC of Theme Park Hall of Shame.
 
     This is NOT a percentage! It represents the average weighted downtime
-    per unit of park capacity. Think of it as "how many hours of flagship-
-    equivalent downtime did guests experience?"
+    per unit of park capacity, scaled by 10 for readability. Think of it
+    as a "reliability rating" where higher is worse.
 
     Formula
     -------
-    shame_score = total_weighted_downtime_hours ÷ total_park_weight
+    shame_score = (total_weighted_downtime_hours ÷ total_park_weight) × 10
 
     Where:
     - total_weighted_downtime_hours = Σ(ride_downtime_hours × ride_tier_weight)
@@ -281,10 +285,11 @@ def calculate_shame_score(
     Calculations:
     - total_weighted_downtime = 6 + 2 + 0 = 8 weighted hours
     - total_park_weight = 3 + 2 + 1 = 6
-    - shame_score = 8 ÷ 6 = 1.33
+    - raw_score = 8 ÷ 6 = 1.33
+    - shame_score = 1.33 × 10 = 13.3
 
-    Interpretation: "On average, each unit of park capacity experienced
-    1.33 hours of downtime."
+    Interpretation: A score of 13.3 means significant downtime issues.
+    Typical scores range from 0 (perfect) to 10+ (severe problems).
 
     Why Normalize by Weight?
     ------------------------
@@ -318,7 +323,8 @@ def calculate_shame_score(
         return None
     if total_weighted_downtime_hours is None:
         return 0.0
-    return round(total_weighted_downtime_hours / total_park_weight, SHAME_SCORE_PRECISION)
+    raw_score = total_weighted_downtime_hours / total_park_weight
+    return round(raw_score * SHAME_SCORE_MULTIPLIER, SHAME_SCORE_PRECISION)
 
 
 # =============================================================================
@@ -372,9 +378,10 @@ def calculate_hourly_shame_score(
         return None
     if weighted_downtime_minutes is None:
         return 0.0
-    # Convert minutes to hours, then divide by weight
+    # Convert minutes to hours, then divide by weight, then apply multiplier
     weighted_downtime_hours = weighted_downtime_minutes / 60.0
-    return round(weighted_downtime_hours / total_weight, SHAME_SCORE_PRECISION)
+    raw_score = weighted_downtime_hours / total_weight
+    return round(raw_score * SHAME_SCORE_MULTIPLIER, SHAME_SCORE_PRECISION)
 
 
 def calculate_hourly_downtime_percentage(

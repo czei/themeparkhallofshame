@@ -164,10 +164,10 @@ class ParkDetailsModal {
                 </div>
 
                 <div class="shame-score-display">
-                    <div class="shame-score-value ${shame_score > 0.5 ? 'high' : shame_score > 0.2 ? 'medium' : 'low'}">
-                        ${shame_score.toFixed(2)}
+                    <div class="shame-score-value ${shame_score > 5 ? 'high' : shame_score > 2 ? 'medium' : 'low'}">
+                        ${shame_score.toFixed(1)}
                     </div>
-                    <div class="shame-score-label">Current Shame Score</div>
+                    <div class="shame-score-label">Current Shame Score (0-10 scale)</div>
                 </div>
 
                 <div class="shame-formula-box">
@@ -178,10 +178,12 @@ class ParkDetailsModal {
                             <span class="numerator">Sum of Down Ride Weights (${total_weighted_down.toFixed(1)})</span>
                             <span class="denominator">Total Park Weight (${total_park_weight.toFixed(1)})</span>
                         </span>
+                        <span class="formula-multiplier">× 10</span>
                     </div>
                     <div class="formula-explanation">
                         The shame score measures how much of a park's ride capacity is currently unavailable,
                         weighted by ride importance. Flagship attractions (Tier 1) count 5x more than minor rides (Tier 3).
+                        Scores typically range from 0 (perfect) to 10+ (severe problems).
                     </div>
                 </div>
 

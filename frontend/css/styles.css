@@ -1815,6 +1815,13 @@ td {
     font-size: 0.85rem;
 }
 
+.formula-multiplier {
+    font-weight: 800;
+    color: var(--coral);
+    font-size: 1.5rem;
+    margin-left: 0.5rem;
+}
+
 .formula-explanation {
     font-size: 0.85rem;
     color: #666;

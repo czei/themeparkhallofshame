@@ -186,8 +186,8 @@ class ParkDowntimeRankingsQuery:
                     "total_downtime_hours"
                 ),
                 func.round(
-                    wd.c.total_weighted_downtime_hours / func.nullif(pw.c.total_park_weight, 0),
-                    2,
+                    (wd.c.total_weighted_downtime_hours / func.nullif(pw.c.total_park_weight, 0)) * 10,
+                    1,
                 ).label("shame_score"),
                 func.max(park_daily_stats.c.rides_with_downtime).label("affected_rides_count"),
                 func.round(func.avg(park_daily_stats.c.avg_uptime_percentage), 2).label(
@@ -213,8 +213,8 @@ class ParkDowntimeRankingsQuery:
             .having(func.sum(park_daily_stats.c.total_downtime_hours) > 0)
             .order_by(
                 func.round(
-                    wd.c.total_weighted_downtime_hours / func.nullif(pw.c.total_park_weight, 0),
-                    2,
+                    (wd.c.total_weighted_downtime_hours / func.nullif(pw.c.total_park_weight, 0)) * 10,
+                    1,
                 ).desc()
             )
             .limit(limit)

@@ -12,7 +12,7 @@ info:
     - Park rankings by total downtime hours
     - Individual ride performance tracking
     - Real-time wait time monitoring
-    - Flexible time period filtering (today, 7 days, 30 days)
+    - Flexible time period filtering (live, today, 7 days, 30 days)
     - Disney & Universal park filtering
 
     **Data Attribution**: All data powered by Queue-Times.com
@@ -57,15 +57,21 @@ paths:
       parameters:
         - name: period
           in: query
-          description: Time period for ranking calculation
+          description: |
+            Time period for ranking calculation:
+            - `live`: Instantaneous snapshot (rides down RIGHT NOW)
+            - `today`: Cumulative from midnight Pacific to now
+            - `7days`: Rolling 7-day aggregate
+            - `30days`: Rolling 30-day aggregate
           required: false
           schema:
             type: string
             enum:
+              - live
               - today
               - 7days
               - 30days
-            default: today
+            default: live
         - name: filter
           in: query
           description: Filter parks by operator
@@ -162,15 +168,21 @@ paths:
             example: 16
         - name: period
           in: query
-          description: Time period for statistics
+          description: |
+            Time period for statistics:
+            - `live`: Instantaneous snapshot
+            - `today`: Cumulative from midnight Pacific to now
+            - `7days`: Rolling 7-day aggregate
+            - `30days`: Rolling 30-day aggregate
           required: false
           schema:
             type: string
             enum:
+              - live
               - today
               - 7days
               - 30days
-            default: today
+            default: live
       responses:
         '200':
           description: Successful response with park details
@@ -237,15 +249,21 @@ paths:
       parameters:
         - name: period
           in: query
-          description: Time period for ranking calculation
+          description: |
+            Time period for ranking calculation:
+            - `live`: Instantaneous snapshot (rides down RIGHT NOW)
+            - `today`: Cumulative from midnight Pacific to now
+            - `7days`: Rolling 7-day aggregate
+            - `30days`: Rolling 30-day aggregate
           required: false
           schema:
             type: string
             enum:
+              - live
               - today
               - 7days
               - 30days
-            default: 7days
+            default: live
         - name: filter
           in: query
           description: Filter rides by park operator

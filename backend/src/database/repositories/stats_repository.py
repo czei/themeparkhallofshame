@@ -3051,6 +3051,27 @@ class StatsRepository:
         }
         return sort_mapping.get(sort_by, "shame_score DESC")
 
+    def _get_ride_order_by_clause(self, sort_by: str) -> str:
+        """
+        Get the ORDER BY clause for ride downtime rankings.
+
+        Args:
+            sort_by: Column to sort by
+
+        Returns:
+            SQL ORDER BY expression (column + direction)
+        """
+        # Map sort options to SQL expressions
+        # current_is_open ASC puts down rides (0) first
+        # uptime_percentage ASC puts lowest uptime (worst) first
+        sort_mapping = {
+            "current_is_open": "current_is_open ASC, downtime_hours DESC",
+            "downtime_hours": "downtime_hours DESC",
+            "uptime_percentage": "uptime_percentage ASC",  # Lower uptime = worse
+            "trend_percentage": "trend_percentage DESC",
+        }
+        return sort_mapping.get(sort_by, "downtime_hours DESC")
+
     # Live Downtime Rankings (for "Today" period - computed from snapshots)
 
     def get_park_live_downtime_rankings(
@@ -3201,7 +3222,8 @@ class StatsRepository:
     def get_ride_live_downtime_rankings(
         self,
         filter_disney_universal: bool = False,
-        limit: int = 100
+        limit: int = 100,
+        sort_by: str = "downtime_hours"
     ) -> List[Dict[str, Any]]:
         """
         Get ride downtime rankings calculated live from today's snapshots.
@@ -3215,11 +3237,13 @@ class StatsRepository:
         Args:
             filter_disney_universal: If True, only include Disney & Universal parks
             limit: Maximum number of rides to return
+            sort_by: Column to sort by (current_is_open, downtime_hours, uptime_percentage, trend_percentage)
 
         Returns:
-            List of rides ranked by downtime hours (descending) with current status
+            List of rides ranked by specified sort column with current status
         """
         filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
+        order_by_clause = self._get_ride_order_by_clause(sort_by)
 
         # Get Pacific day bounds in UTC - "today" means Pacific calendar day
         today_pacific = get_today_pacific()
@@ -3303,7 +3327,7 @@ class StatsRepository:
                 {filter_clause}
             GROUP BY r.ride_id, r.name, rc.tier, p.park_id, p.name, p.city, p.state_province, prev_day.downtime_minutes
             HAVING (downtime_hours > 0 AND uptime_percentage > 0) OR current_status = 'DOWN'  -- Include rides with downtime OR currently down
-            ORDER BY downtime_hours DESC
+            ORDER BY {order_by_clause}
             LIMIT :limit
         """)
 

@@ -1,5 +1,77 @@
 # Precalculated Table Views Implementation Plan
 
+## 🚫 STATUS: DEFERRED (Future Optimization)
+
+**Decision Date:** 2025-12-01
+**Reason:** Premature optimization. Site is still establishing core functionality.
+
+### When to Revisit This Plan
+
+Only implement when ANY of these conditions are met:
+- API response times exceed 500ms consistently
+- Database CPU usage becomes a bottleneck
+- Traffic exceeds 100 requests/minute sustained
+- Users report noticeable slowness
+
+**Current state:** API responses are <200ms, traffic is low, no performance complaints.
+
+---
+
+## 📋 Architecture Review Summary (2025-12-01)
+
+**Reviewed by:** Claude + Gemini 2.5 Pro
+**Verdict:** Plan has fundamental architectural flaw - must be revised before implementation.
+
+### Original Problem
+
+Cache key format `{entity}_{metric}_{period}_{filter}` doesn't include `sort_by` parameter (added after plan was written). Would cause **67 keys to explode to 200+**, and sorting would be completely broken.
+
+### Revised Architecture (When Implemented)
+
+**Key Change:** Cache raw query results, not final API responses.
+
+```
+OLD (Flawed):                          NEW (Correct):
+┌─────────────────┐                    ┌─────────────────┐
+│ Cache Key:      │                    │ Cache Key:      │
+│ park_downtime_  │  ← 200+ keys       │ data:park_      │  ← ~12 keys
+│ today_all_      │    (sort × period  │ downtime:       │    (period × filter)
+│ shame_score     │     × filter)      │ today:all       │
+└─────────────────┘                    └─────────────────┘
+         │                                      │
+         ▼                                      ▼
+┌─────────────────┐                    ┌─────────────────┐
+│ Cached: Final   │                    │ Cached: Raw     │
+│ sorted JSON     │                    │ unsorted list   │
+└─────────────────┘                    └─────────────────┘
+         │                                      │
+         ▼                                      ▼
+┌─────────────────┐                    ┌─────────────────┐
+│ Return directly │                    │ Sort in Python  │  ← Fast, in-memory
+│ (wrong if sort  │                    │ Apply limit     │
+│ param differs)  │                    │ Return result   │
+└─────────────────┘                    └─────────────────┘
+```
+
+### Required Changes to Original Plan
+
+1. **Cache versioning** - Add `CACHE_VERSION` prefix to keys for easy invalidation
+2. **Sort in API layer** - Routes must sort cached data in Python
+3. **Coordinate all jobs** - Refresh after snapshots AND daily/weekly aggregation
+4. **Fewer cache definitions** - ~12 keys instead of 67+
+
+### Files to Update When Implementing
+
+| File | Change |
+|------|--------|
+| `cache_refresh_service.py` | Simpler CACHE_DEFINITIONS (~12 entries) |
+| `parks.py`, `rides.py`, `trends.py` | Add in-memory sorting after cache fetch |
+| `cache_helper.py` | Add cache versioning support |
+| `collect_snapshots.py` | Trigger refresh |
+| `aggregate_daily.py` | Trigger refresh |
+
+---
+
 ## Overview
 
 Currently, API endpoints recalculate rankings and statistics on every request, even though the underlying data only changes every 10 minutes (when snapshots are collected). This plan introduces a caching layer that precalculates all table views after each data collection, reducing redundant computation and improving API response times.

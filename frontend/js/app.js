@@ -6,7 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Global application state
     const globalState = {
         filter: 'all-parks',  // Global filter: 'all-parks' or 'disney-universal'
-        period: 'today'       // Time period: 'today', '7days', '30days'
+        period: 'live'        // Time period: 'live', 'today', '7days', '30days'
     };
 
     // Tab switching logic

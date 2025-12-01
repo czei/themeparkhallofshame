@@ -18,7 +18,8 @@ class Downtime {
             parkData: null,
             rideData: null,
             aggregateStats: null,
-            statusSummary: null
+            statusSummary: null,
+            sortBy: 'shame_score'  // Default sort column
         };
         // Initialize park details modal
         this.parkDetailsModal = null;
@@ -45,7 +46,8 @@ class Downtime {
             const parkParams = {
                 period: this.state.period,
                 filter: this.state.filter,
-                limit: this.state.parkLimit
+                limit: this.state.parkLimit,
+                sort_by: this.state.sortBy
             };
 
             const rideParams = {
@@ -221,14 +223,30 @@ class Downtime {
                 <table class="rankings-table">
                     <thead>
                         <tr>
-                            <th class="rank-col" title="Position in the Hall of Shame based on shame score (lower rank = worse performance)">Rank</th>
+                            <th class="rank-col" title="Position in the Hall of Shame based on current sort order">Rank</th>
                             <th class="park-col" title="Theme park name">Park</th>
-                            <th class="shame-col" title="Weighted downtime per ride weight point. Higher = worse. Tier 1 rides count 3x, Tier 2 count 2x, Tier 3 count 1x.">Shame Score</th>
+                            <th class="shame-col sortable ${this.state.sortBy === 'shame_score' ? 'sorted' : ''}"
+                                data-sort="shame_score"
+                                title="Weighted downtime per ride weight point. Higher = worse. Click to sort.">
+                                Shame Score ${this.getSortIndicator('shame_score')}
+                            </th>
                             <th class="location-col" title="Geographic location of the park">Location</th>
                             <th class="status-col" title="Whether the park is currently open or closed">Status</th>
-                            <th class="downtime-col" title="Total accumulated ride downtime hours during the selected period">Cumulative Downtime</th>
-                            <th class="uptime-col" title="Percentage of time rides were operational during the selected period">Uptime %</th>
-                            <th class="affected-col" title="Number of rides currently down right now">Rides Down</th>
+                            <th class="downtime-col sortable ${this.state.sortBy === 'total_downtime_hours' ? 'sorted' : ''}"
+                                data-sort="total_downtime_hours"
+                                title="Total accumulated ride downtime hours during the selected period. Click to sort.">
+                                Cumulative Downtime ${this.getSortIndicator('total_downtime_hours')}
+                            </th>
+                            <th class="uptime-col sortable ${this.state.sortBy === 'uptime_percentage' ? 'sorted' : ''}"
+                                data-sort="uptime_percentage"
+                                title="Percentage of time rides were operational. Click to sort.">
+                                Uptime % ${this.getSortIndicator('uptime_percentage')}
+                            </th>
+                            <th class="affected-col sortable ${this.state.sortBy === 'rides_down' ? 'sorted' : ''}"
+                                data-sort="rides_down"
+                                title="Number of rides currently down right now. Click to sort.">
+                                Rides Down ${this.getSortIndicator('rides_down')}
+                            </th>
                             <th class="trend-col" title="Change in downtime compared to previous period. Positive (+) = more downtime = worse performance">Trend</th>
                         </tr>
                     </thead>
@@ -529,6 +547,28 @@ class Downtime {
     }
 
     /**
+     * Get sort indicator arrow for column header
+     */
+    getSortIndicator(column) {
+        if (this.state.sortBy !== column) {
+            return '<span class="sort-indicator"></span>';
+        }
+        // uptime_percentage sorts ascending (higher is better), others sort descending
+        const isAscending = column === 'uptime_percentage';
+        return `<span class="sort-indicator active">${isAscending ? '↑' : '↓'}</span>`;
+    }
+
+    /**
+     * Handle sort column click
+     */
+    handleSortClick(sortColumn) {
+        if (sortColumn !== this.state.sortBy) {
+            this.state.sortBy = sortColumn;
+            this.fetchAllData();
+        }
+    }
+
+    /**
      * Format hours into readable string
      */
     formatHours(hours) {
@@ -606,6 +646,17 @@ class Downtime {
                 const parkName = btn.dataset.parkName;
                 if (this.parkDetailsModal && parkId) {
                     this.parkDetailsModal.open(parkId, parkName);
+                }
+            });
+        });
+
+        // Sortable column headers
+        const sortableHeaders = this.container.querySelectorAll('th.sortable');
+        sortableHeaders.forEach(th => {
+            th.addEventListener('click', () => {
+                const sortColumn = th.dataset.sort;
+                if (sortColumn) {
+                    this.handleSortClick(sortColumn);
                 }
             });
         });

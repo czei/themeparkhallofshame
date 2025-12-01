@@ -835,6 +835,17 @@ th.sortable.sorted {
     color: var(--gold);
 }
 
+.sort-indicator {
+    margin-left: 4px;
+    font-size: 0.8em;
+    opacity: 0.3;
+}
+
+.sort-indicator.active {
+    opacity: 1;
+    color: var(--gold);
+}
+
 tbody tr {
     border-bottom: 1px solid var(--light-gray);
     transition: background 0.2s ease;

@@ -3027,12 +3027,37 @@ class StatsRepository:
 
         return [dict(row._mapping) for row in result.fetchall()]
 
+    # =========================================================================
+    # SORT ORDER HELPER
+    # =========================================================================
+
+    def _get_order_by_clause(self, sort_by: str) -> str:
+        """
+        Get the ORDER BY clause for park downtime rankings.
+
+        Args:
+            sort_by: Column to sort by
+
+        Returns:
+            SQL ORDER BY expression (column + direction)
+        """
+        # Map sort options to SQL expressions
+        # Note: uptime_percentage sorts ASC (higher is better), others sort DESC (higher = worse)
+        sort_mapping = {
+            "shame_score": "shame_score DESC",
+            "total_downtime_hours": "total_downtime_hours DESC",
+            "uptime_percentage": "uptime_percentage ASC",  # Higher uptime is better
+            "rides_down": "rides_down DESC",
+        }
+        return sort_mapping.get(sort_by, "shame_score DESC")
+
     # Live Downtime Rankings (for "Today" period - computed from snapshots)
 
     def get_park_live_downtime_rankings(
         self,
         filter_disney_universal: bool = False,
-        limit: int = 50
+        limit: int = 50,
+        sort_by: str = "shame_score"
     ) -> List[Dict[str, Any]]:
         """
         Get park downtime rankings calculated live from today's snapshots.
@@ -3049,9 +3074,11 @@ class StatsRepository:
         Args:
             filter_disney_universal: If True, only include Disney & Universal parks
             limit: Maximum number of parks to return
+            sort_by: Column to sort by - 'shame_score', 'total_downtime_hours',
+                     'uptime_percentage', 'rides_down'
 
         Returns:
-            List of parks ranked by total downtime hours (descending)
+            List of parks ranked by specified column (descending, except uptime which is ascending)
         """
         filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
 
@@ -3160,7 +3187,7 @@ class StatsRepository:
                 {filter_clause}
             GROUP BY p.park_id, p.name, p.city, p.state_province, pw.total_park_weight
             HAVING total_downtime_hours > 0  -- Hall of Shame: only parks with actual downtime
-            ORDER BY shame_score DESC
+            ORDER BY {self._get_order_by_clause(sort_by)}
             LIMIT :limit
         """)
 
@@ -4085,6 +4112,7 @@ class StatsRepository:
                 {filter_clause}
             GROUP BY p.park_id, p.name, p.city, p.state_province, yesterday_stats.avg_wait_time
             HAVING avg_wait_minutes > 0
+                AND park_is_open = 1
             ORDER BY avg_wait_minutes DESC
             LIMIT :limit
         """)

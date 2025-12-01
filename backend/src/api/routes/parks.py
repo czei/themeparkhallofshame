@@ -51,6 +51,7 @@ def get_park_downtime_rankings():
         filter (str): Park filter - 'disney-universal', 'all-parks' (default: 'all-parks')
         limit (int): Maximum results (default: 50, max: 100)
         weighted (bool): Use weighted scoring by ride tier (default: false)
+        sort_by (str): Sort column - 'shame_score', 'total_downtime_hours', 'uptime_percentage', 'rides_down' (default: 'shame_score')
 
     Returns:
         JSON response with park rankings and aggregate statistics
@@ -62,6 +63,7 @@ def get_park_downtime_rankings():
     filter_type = request.args.get('filter', 'all-parks')
     limit = min(int(request.args.get('limit', 50)), 100)
     weighted = request.args.get('weighted', 'false').lower() == 'true'
+    sort_by = request.args.get('sort_by', 'shame_score')
 
     # Validate period
     if period not in ['today', '7days', '30days']:
@@ -77,6 +79,14 @@ def get_park_downtime_rankings():
             "error": "Invalid filter. Must be 'disney-universal' or 'all-parks'"
         }), 400
 
+    # Validate sort_by
+    valid_sort_options = ['shame_score', 'total_downtime_hours', 'uptime_percentage', 'rides_down']
+    if sort_by not in valid_sort_options:
+        return jsonify({
+            "success": False,
+            "error": f"Invalid sort_by. Must be one of: {', '.join(valid_sort_options)}"
+        }), 400
+
     try:
         with get_db_connection() as conn:
             filter_disney_universal = (filter_type == 'disney-universal')
@@ -88,7 +98,8 @@ def get_park_downtime_rankings():
                 # Uses stats_repo for optimized raw SQL query (not SQLAlchemy ORM)
                 rankings = stats_repo.get_park_live_downtime_rankings(
                     filter_disney_universal=filter_disney_universal,
-                    limit=limit
+                    limit=limit,
+                    sort_by=sort_by
                 )
             else:
                 # Historical data from aggregated stats
@@ -97,12 +108,14 @@ def get_park_downtime_rankings():
                 if period == '7days':
                     rankings = query.get_weekly(
                         filter_disney_universal=filter_disney_universal,
-                        limit=limit
+                        limit=limit,
+                        sort_by=sort_by
                     )
                 else:  # 30days
                     rankings = query.get_monthly(
                         filter_disney_universal=filter_disney_universal,
-                        limit=limit
+                        limit=limit,
+                        sort_by=sort_by
                     )
             aggregate_stats = stats_repo.get_aggregate_park_stats(
                 period=period,
@@ -124,6 +137,7 @@ def get_park_downtime_rankings():
                 "period": period,
                 "filter": filter_type,
                 "weighted": weighted,
+                "sort_by": sort_by,
                 "aggregate_stats": aggregate_stats,
                 "data": rankings_with_urls,
                 "attribution": {
@@ -132,7 +146,7 @@ def get_park_downtime_rankings():
                 }
             }
 
-            logger.info(f"Park rankings requested: period={period}, filter={filter_type}, weighted={weighted}, results={len(rankings_with_urls)}")
+            logger.info(f"Park rankings requested: period={period}, filter={filter_type}, weighted={weighted}, sort_by={sort_by}, results={len(rankings_with_urls)}")
 
             return jsonify(response), 200
 

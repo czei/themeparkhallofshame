@@ -196,11 +196,13 @@ class RideDowntimeHistoryQuery:
         2. Only count downtime AFTER the ride first operated today
         """
         # Use DATE_SUB with 8-hour offset for PST (UTC-8)
+        # IMPORTANT: Use timestamp-level comparison, not hour-level, to avoid
+        # counting pre-opening time within an hour as downtime
         query = text("""
             WITH ride_first_operating AS (
-                -- Find the first hour this ride was operating today
+                -- Find the exact timestamp this ride first operated today
                 SELECT
-                    MIN(HOUR(DATE_SUB(rss_inner.recorded_at, INTERVAL 8 HOUR))) as first_op_hour
+                    MIN(rss_inner.recorded_at) as first_op_time
                 FROM ride_status_snapshots rss_inner
                 WHERE rss_inner.ride_id = :ride_id
                     AND rss_inner.recorded_at >= :start_utc AND rss_inner.recorded_at < :end_utc
@@ -222,8 +224,8 @@ class RideDowntimeHistoryQuery:
                 ROUND(
                     SUM(CASE
                         WHEN pho.park_open = 1
-                            AND rfo.first_op_hour IS NOT NULL
-                            AND HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) >= rfo.first_op_hour
+                            AND rfo.first_op_time IS NOT NULL
+                            AND rss.recorded_at >= rfo.first_op_time
                             AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0))
                         THEN 5
                         ELSE 0
@@ -237,8 +239,8 @@ class RideDowntimeHistoryQuery:
             WHERE rss.ride_id = :ride_id
                 AND rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND pho.park_open = 1  -- Only include hours when park is open
-                AND rfo.first_op_hour IS NOT NULL  -- Only if ride has operated
-                AND HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) >= rfo.first_op_hour
+                AND rfo.first_op_time IS NOT NULL  -- Only if ride has operated
+                AND rss.recorded_at >= rfo.first_op_time
             GROUP BY hour
             ORDER BY hour
         """)

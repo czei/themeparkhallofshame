@@ -207,12 +207,14 @@ class ParkShameHistoryQuery:
         3. Rides that never operated today don't contribute to shame score
         """
         # Use DATE_SUB with 8-hour offset for PST (UTC-8)
+        # IMPORTANT: Use timestamp-level comparison, not hour-level, to avoid
+        # counting pre-opening time within an hour as downtime
         query = text("""
             WITH ride_first_operating AS (
-                -- Find the first hour each ride was operating today
+                -- Find the exact timestamp each ride first operated today
                 SELECT
                     rss_inner.ride_id,
-                    MIN(HOUR(DATE_SUB(rss_inner.recorded_at, INTERVAL 8 HOUR))) as first_op_hour
+                    MIN(rss_inner.recorded_at) as first_op_time
                 FROM ride_status_snapshots rss_inner
                 INNER JOIN rides r_inner ON rss_inner.ride_id = r_inner.ride_id
                 WHERE r_inner.park_id = :park_id
@@ -239,11 +241,11 @@ class ParkShameHistoryQuery:
                 COUNT(DISTINCT CASE WHEN rfo.ride_id IS NOT NULL THEN r.ride_id END) AS total_rides,
                 -- Only count downtime when:
                 -- 1. Park is open this hour
-                -- 2. Ride has operated before (first_op_hour <= current hour)
+                -- 2. Ride has operated before (snapshot time >= first_op_time)
                 SUM(CASE
                     WHEN pho.park_open = 1
                         AND rfo.ride_id IS NOT NULL
-                        AND HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) >= rfo.first_op_hour
+                        AND rss.recorded_at >= rfo.first_op_time
                         AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0))
                     THEN 5
                     ELSE 0
@@ -252,14 +254,14 @@ class ParkShameHistoryQuery:
                     SUM(CASE
                         WHEN pho.park_open = 1
                             AND rfo.ride_id IS NOT NULL
-                            AND HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) >= rfo.first_op_hour
+                            AND rss.recorded_at >= rfo.first_op_time
                             AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0))
                         THEN 5
                         ELSE 0
                     END) / 60.0 / NULLIF(
                         COUNT(DISTINCT CASE
                             WHEN rfo.ride_id IS NOT NULL
-                                AND HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) >= rfo.first_op_hour
+                                AND rss.recorded_at >= rfo.first_op_time
                             THEN r.ride_id
                         END), 0),
                     2

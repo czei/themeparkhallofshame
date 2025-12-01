@@ -327,6 +327,60 @@ def calculate_shame_score(
     return round(raw_score * SHAME_SCORE_MULTIPLIER, SHAME_SCORE_PRECISION)
 
 
+def calculate_instantaneous_shame_score(
+    total_weighted_down: float,
+    total_park_weight: float
+) -> Optional[float]:
+    """
+    Calculate LIVE/INSTANTANEOUS park shame score on a 0-10 scale.
+
+    This is the REAL-TIME shame score measuring what proportion of the
+    park's ride capacity is currently down. No time component involved.
+
+    Formula
+    -------
+    shame_score = (sum of tier_weights for rides currently down / total_park_weight) × 10
+
+    This gives a 0-10 scale where:
+    - 0 = All rides operating
+    - 10 = 100% of park weight is down (all rides down)
+
+    Worked Example
+    --------------
+    A park with 3 rides and currently 1 down:
+    - Space Mountain (Tier 1, weight=5): DOWN → contributes 5 weight
+    - Pirates (Tier 2, weight=2): OPERATING → contributes 0
+    - Carousel (Tier 3, weight=1): OPERATING → contributes 0
+
+    Calculations:
+    - total_weighted_down = 5
+    - total_park_weight = 5 + 2 + 1 = 8
+    - shame_score = (5 / 8) × 10 = 6.25 → rounds to 6.3
+
+    When to Use This vs calculate_shame_score
+    ------------------------------------------
+    - calculate_instantaneous_shame_score: For LIVE "right now" displays
+    - calculate_shame_score: For historical/cumulative data (period rankings)
+
+    SQL Equivalent
+    --------------
+    Use ShameScoreSQL.instantaneous_shame_score() from utils/sql_helpers.py
+
+    Args:
+        total_weighted_down: Sum of tier_weights for rides currently down
+        total_park_weight: Sum of all ride tier weights in the park
+
+    Returns:
+        Shame score on 0-10 scale, or None if no weight data
+    """
+    if total_park_weight is None or total_park_weight <= 0:
+        return None
+    if total_weighted_down is None:
+        return 0.0
+    raw_score = total_weighted_down / total_park_weight
+    return round(raw_score * SHAME_SCORE_MULTIPLIER, SHAME_SCORE_PRECISION)
+
+
 # =============================================================================
 # HELPER FUNCTIONS FOR CHART DATA
 # =============================================================================

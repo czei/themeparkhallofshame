@@ -51,11 +51,12 @@ try:
     from ...utils.timezone import get_today_pacific, get_pacific_day_range_utc
     from ...utils.sql_helpers import (
         RideStatusSQL, ParkStatusSQL, DowntimeSQL, UptimeSQL,
-        RideFilterSQL, AffectedRidesSQL
+        RideFilterSQL, AffectedRidesSQL, ShameScoreSQL
     )
     from ...utils.metrics import (
         SNAPSHOT_INTERVAL_MINUTES,
         calculate_shame_score,
+        calculate_instantaneous_shame_score,
         calculate_downtime_hours
     )
 except ImportError:
@@ -63,11 +64,12 @@ except ImportError:
     from utils.timezone import get_today_pacific, get_pacific_day_range_utc
     from utils.sql_helpers import (
         RideStatusSQL, ParkStatusSQL, DowntimeSQL, UptimeSQL,
-        RideFilterSQL, AffectedRidesSQL
+        RideFilterSQL, AffectedRidesSQL, ShameScoreSQL
     )
     from utils.metrics import (
         SNAPSHOT_INTERVAL_MINUTES,
         calculate_shame_score,
+        calculate_instantaneous_shame_score,
         calculate_downtime_hours
     )
 
@@ -1270,65 +1272,9 @@ class StatsRepository:
             rides_down.append(ride_data)
             total_weighted_down += float(row.tier_weight)
 
-        # Get the actual shame score from the live rankings query (same as table)
-        # This ensures the popup matches the table value
-        shame_score_query = text(f"""
-            WITH
-            latest_snapshot AS (
-                SELECT ride_id, MAX(recorded_at) as latest_recorded_at
-                FROM ride_status_snapshots
-                WHERE recorded_at >= :start_utc AND recorded_at < :end_utc
-                GROUP BY ride_id
-            ),
-            rides_currently_down AS (
-                SELECT DISTINCT r_inner.ride_id, r_inner.park_id
-                FROM rides r_inner
-                INNER JOIN ride_status_snapshots rss_latest ON r_inner.ride_id = rss_latest.ride_id
-                INNER JOIN latest_snapshot ls ON rss_latest.ride_id = ls.ride_id
-                    AND rss_latest.recorded_at = ls.latest_recorded_at
-                INNER JOIN park_activity_snapshots pas_latest ON r_inner.park_id = pas_latest.park_id
-                    AND pas_latest.recorded_at = rss_latest.recorded_at
-                WHERE r_inner.is_active = TRUE
-                    AND r_inner.category = 'ATTRACTION'
-                    AND {is_down}
-                    AND {park_open}
-            ),
-            park_weights AS (
-                SELECT SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
-                FROM rides r
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE r.park_id = :park_id
-                    AND r.is_active = TRUE AND r.category = 'ATTRACTION'
-            )
-            SELECT
-                ROUND(
-                    (SUM(CASE
-                        WHEN rcd.ride_id IS NOT NULL AND {park_open} AND {is_down}
-                        THEN 5 * COALESCE(rc.tier_weight, 2)
-                        ELSE 0
-                    END) / 60.0
-                    / NULLIF(pw.total_park_weight, 0)) * 10,
-                    1
-                ) AS shame_score
-            FROM rides r
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            CROSS JOIN park_weights pw
-            LEFT JOIN rides_currently_down rcd ON r.ride_id = rcd.ride_id
-            WHERE r.park_id = :park_id
-                AND r.is_active = TRUE AND r.category = 'ATTRACTION'
-                AND rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-        """.replace("{is_down}", is_down).replace("{park_open}", park_open))
-
-        shame_result = self.conn.execute(shame_score_query, {
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
-        shame_row = shame_result.fetchone()
-        shame_score = float(shame_row.shame_score) if shame_row and shame_row.shame_score else 0.0
+        # Calculate INSTANTANEOUS shame score using centralized function (single source of truth)
+        # This is the same calculation used by the table rankings
+        shame_score = calculate_instantaneous_shame_score(total_weighted_down, total_park_weight) or 0.0
 
         return {
             "rides_down": rides_down,
@@ -3120,6 +3066,9 @@ class StatsRepository:
         uptime_pct = UptimeSQL.uptime_percentage("rss", "pas")
         park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
 
+        # INSTANTANEOUS shame score - uses centralized helper for single source of truth
+        shame_score_sql = ShameScoreSQL.instantaneous_shame_score()
+
         # CRITICAL: Only count downtime for rides that have operated at some point today
         # Rides that have NEVER been OPERATING during the period are likely seasonal closures
         # or scheduled maintenance, not unplanned outages
@@ -3180,18 +3129,9 @@ class StatsRepository:
                 -- Calculate weighted downtime hours using centralized helper
                 {weighted_downtime} AS weighted_downtime_hours,
 
-                -- Shame Score = weighted downtime ONLY for rides CURRENTLY down
-                -- Rides that were down earlier but are now operating don't count
-                -- Multiplied by 10 for readability (0-10 scale)
-                ROUND(
-                    (SUM(CASE
-                        WHEN rcd.ride_id IS NOT NULL AND {park_open} AND {is_down}
-                        THEN 5 * COALESCE(rc.tier_weight, 2)
-                        ELSE 0
-                    END) / 60.0
-                    / NULLIF(pw.total_park_weight, 0)) * 10,
-                    1
-                ) AS shame_score,
+                -- Shame Score = INSTANTANEOUS (rides currently down, not cumulative)
+                -- Uses centralized ShameScoreSQL helper for single source of truth
+                {shame_score_sql} AS shame_score,
 
                 -- Count of rides CURRENTLY down (not cumulative)
                 COUNT(DISTINCT rcd.ride_id) AS rides_down,

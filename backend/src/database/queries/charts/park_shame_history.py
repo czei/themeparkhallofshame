@@ -263,7 +263,7 @@ class ParkShameHistoryQuery:
                             WHEN rfo.ride_id IS NOT NULL
                                 AND rss.recorded_at >= rfo.first_op_time
                             THEN r.ride_id
-                        END), 0)) * 10,
+                        END), 0) * 10,
                     1
                 ) AS shame_score
             FROM rides r

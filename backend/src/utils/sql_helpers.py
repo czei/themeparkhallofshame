@@ -12,7 +12,11 @@ NOTE: All core metric constants are defined in metrics.py - SQL helpers
 import from there to ensure consistency with Python calculations.
 """
 
-from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
+from utils.metrics import (
+    SNAPSHOT_INTERVAL_MINUTES,
+    SHAME_SCORE_MULTIPLIER,
+    SHAME_SCORE_PRECISION,
+)
 
 
 class RideStatusSQL:
@@ -500,6 +504,136 @@ class RideFilterSQL:
             SQL condition for live time window
         """
         return f"{recorded_at_expr} >= DATE_SUB(NOW(), INTERVAL {RideStatusSQL.LIVE_WINDOW_HOURS} HOUR)"
+
+
+class ShameScoreSQL:
+    """
+    Centralized SQL for shame score calculations.
+
+    IMPORTANT: Shame Score is LIVE/INSTANTANEOUS - it measures the proportion
+    of park weight that is currently down, NOT cumulative downtime over time.
+
+    Formula: (sum of tier_weights for rides currently down / total_park_weight) × 10
+
+    This gives a 0-10 scale where:
+    - 0 = All rides operating
+    - 10 = 100% of park weight is down
+
+    Constants imported from metrics.py (single source of truth):
+    - SHAME_SCORE_MULTIPLIER = 10
+    - SHAME_SCORE_PRECISION = 1
+    """
+
+    @staticmethod
+    def instantaneous_shame_score(
+        tier_weight_expr: str = "COALESCE(rc.tier_weight, 2)",
+        total_weight_expr: str = "pw.total_park_weight",
+        currently_down_condition: str = "rcd.ride_id IS NOT NULL",
+    ) -> str:
+        """
+        Get SQL expression for instantaneous shame score.
+
+        This calculates shame based on rides CURRENTLY down, not cumulative
+        downtime over time. It's a snapshot of "how bad is it RIGHT NOW".
+
+        Args:
+            tier_weight_expr: Expression for individual ride tier weight
+            total_weight_expr: Expression for total park weight
+            currently_down_condition: Condition that is TRUE when ride is currently down
+
+        Returns:
+            SQL expression for shame score (0-10 scale, 1 decimal place)
+
+        Usage in query:
+            Must have:
+            - rides_currently_down CTE (rcd) with ride_id for currently down rides
+            - park_weights CTE (pw) with total_park_weight
+            - LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+        """
+        return f"""ROUND(
+            SUM(CASE
+                WHEN {currently_down_condition}
+                THEN {tier_weight_expr}
+                ELSE 0
+            END) / NULLIF({total_weight_expr}, 0) * {SHAME_SCORE_MULTIPLIER},
+            {SHAME_SCORE_PRECISION}
+        )"""
+
+    @staticmethod
+    def rides_currently_down_cte(
+        start_param: str = ":start_utc",
+        end_param: str = ":end_utc",
+        filter_clause: str = ""
+    ) -> str:
+        """
+        Get SQL CTE for identifying rides that are currently down.
+
+        "Currently down" means:
+        1. The ride's LATEST snapshot shows it as DOWN
+        2. The park appears open at that snapshot time
+
+        Args:
+            start_param: Parameter for period start (usually today's start)
+            end_param: Parameter for period end (usually today's end)
+            filter_clause: Optional additional filter (e.g., Disney/Universal only)
+
+        Returns:
+            SQL CTE definition (without the WITH keyword)
+        """
+        is_down = RideStatusSQL.is_down("rss_latest")
+        park_open = ParkStatusSQL.park_appears_open_filter("pas_latest")
+
+        return f"""latest_snapshot AS (
+            -- Find the most recent snapshot timestamp for each ride
+            SELECT ride_id, MAX(recorded_at) as latest_recorded_at
+            FROM ride_status_snapshots
+            WHERE recorded_at >= {start_param} AND recorded_at < {end_param}
+            GROUP BY ride_id
+        ),
+        rides_currently_down AS (
+            -- Identify rides that are DOWN in their latest snapshot
+            SELECT DISTINCT r_inner.ride_id, r_inner.park_id
+            FROM rides r_inner
+            INNER JOIN ride_status_snapshots rss_latest ON r_inner.ride_id = rss_latest.ride_id
+            INNER JOIN latest_snapshot ls ON rss_latest.ride_id = ls.ride_id
+                AND rss_latest.recorded_at = ls.latest_recorded_at
+            INNER JOIN park_activity_snapshots pas_latest ON r_inner.park_id = pas_latest.park_id
+                AND pas_latest.recorded_at = rss_latest.recorded_at
+            WHERE r_inner.is_active = TRUE
+                AND r_inner.category = 'ATTRACTION'
+                AND {is_down}
+                AND {park_open}
+                {filter_clause}
+        )"""
+
+    @staticmethod
+    def park_weights_cte(
+        has_operated_condition: str = "",
+        filter_clause: str = ""
+    ) -> str:
+        """
+        Get SQL CTE for calculating total park weight.
+
+        Args:
+            has_operated_condition: Optional condition to only count rides that have operated
+            filter_clause: Optional additional filter (e.g., Disney/Universal only)
+
+        Returns:
+            SQL CTE definition (without the WITH keyword or comma)
+        """
+        return f"""park_weights AS (
+            SELECT
+                p.park_id,
+                SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
+            FROM parks p
+            INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            WHERE p.is_active = TRUE
+                {has_operated_condition}
+                {filter_clause}
+            GROUP BY p.park_id
+        )"""
 
 
 class AffectedRidesSQL:

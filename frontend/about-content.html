@@ -32,19 +32,21 @@ just go with uptime percentage, you're penalizing parks that have a bunch of com
 simple old-fashioned carnival-style rides.</p>
 
             <h4>The Shame Score</h4>
-            <p>The <strong>Shame Score</strong> is a normalized metric that measures how much a theme park's
-downtime hurts guests, accounting for both the <em>amount</em> of downtime and the <em>importance</em>
-of the rides that went down.</p>
+            <p>The <strong>Shame Score</strong> is a LIVE, instantaneous metric that measures what proportion
+of a park's ride capacity is currently down, weighted by ride importance.</p>
 
             <div class="formula-box">
-                <strong>Shame Score = (Total Weighted Downtime Hours ÷ Total Park Weight) × 10</strong>
+                <strong>Shame Score = (Sum of Tier Weights for Rides Currently Down ÷ Total Park Weight) × 10</strong>
             </div>
 
             <p>Where:</p>
             <ul>
-                <li><strong>Weighted Downtime</strong> = Each ride's downtime hours × its tier weight</li>
+                <li><strong>Weighted Down</strong> = Sum of tier weights for all rides currently showing as DOWN</li>
                 <li><strong>Total Park Weight</strong> = Sum of all ride tier weights in the park</li>
             </ul>
+
+            <p>This is a real-time "right now" score, not cumulative over time. When a ride comes back up,
+the shame score immediately drops.</p>
 
             <h4>Ride Tiers</h4>
             <p>Every ride is classified into one of three tiers based on guest demand and impact:</p>
@@ -94,12 +96,12 @@ ride downtime, reflecting actual guest disappointment</li>
             </ol>
 
             <h4>Example</h4>
-            <p><strong>Park A</strong> (small park): 1 Tier 1 ride down for 2 hours = 6 weighted hours.
-Total park weight = 15. <strong>Shame Score = (6 ÷ 15) × 10 = 4.0</strong></p>
-            <p><strong>Park B</strong> (large park): 3 Tier 3 rides down for 2 hours each = 6 weighted hours.
-Total park weight = 45. <strong>Shame Score = (6 ÷ 45) × 10 = 1.3</strong></p>
-            <p>Park A has a higher shame score because losing a flagship ride hurts more than losing three
-minor rides, even though total downtime hours were the same.</p>
+            <p><strong>Park A</strong> (small park): 1 Tier 1 ride currently down (weight = 5).
+Total park weight = 15. <strong>Shame Score = (5 ÷ 15) × 10 = 3.3</strong></p>
+            <p><strong>Park B</strong> (large park): 3 Tier 3 rides currently down (weight = 3 total).
+Total park weight = 45. <strong>Shame Score = (3 ÷ 45) × 10 = 0.7</strong></p>
+            <p>Park A has a higher shame score because losing a single flagship ride has more guest impact
+than losing three minor rides. The score updates instantly as rides go down or come back up.</p>
 
             <h4>Interpreting Scores</h4>
             <table class="score-table">

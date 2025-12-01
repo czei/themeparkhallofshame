@@ -170,7 +170,10 @@ class SnapshotCollector:
         rides_operating = sum(1 for r in live_data if r.status == 'OPERATING')
         rides_down = sum(1 for r in live_data if r.status == 'DOWN')
         rides_closed = sum(1 for r in live_data if r.status in ('CLOSED', 'REFURBISHMENT'))
-        park_appears_open = rides_operating >= 3
+        # Park is "open" only if >= 50% of rides are operating
+        # This prevents counting end-of-day closures as downtime when only a few rides remain open
+        min_rides_for_open = max(3, total_rides // 2)  # At least 3, or 50% of total
+        park_appears_open = rides_operating >= min_rides_for_open
 
         # Calculate wait time statistics
         open_wait_times = [r.wait_time for r in live_data
@@ -404,9 +407,10 @@ class SnapshotCollector:
             # Count rides reported as "open" by API (may include closed parks with is_open=True)
             rides_open = sum(1 for r in rides_data if r.get('wait_time', 0) > 0 or r.get('is_open'))
             rides_closed = total_rides - rides_open
-            # Park is truly "open" only if at least 3 rides have wait_time > 0
-            # (Filters out stale data from seasonal parks where 1-2 rides have cached wait times)
-            park_appears_open = rides_with_wait >= 3
+            # Park is "open" only if >= 50% of rides have wait times
+            # This prevents counting end-of-day closures as downtime when only a few rides remain open
+            min_rides_for_open = max(3, total_rides // 2)  # At least 3, or 50% of total
+            park_appears_open = rides_with_wait >= min_rides_for_open
 
             # Calculate wait time statistics for open rides
             open_wait_times = [r.get('wait_time', 0) for r in rides_data

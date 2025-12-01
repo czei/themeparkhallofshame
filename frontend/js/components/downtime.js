@@ -226,7 +226,7 @@ class Downtime {
                             <th class="shame-col" title="Weighted downtime per ride weight point. Higher = worse. Tier 1 rides count 3x, Tier 2 count 2x, Tier 3 count 1x.">Shame Score</th>
                             <th class="location-col" title="Geographic location of the park">Location</th>
                             <th class="status-col" title="Whether the park is currently open or closed">Status</th>
-                            <th class="downtime-col" title="Total accumulated ride downtime hours during the selected period">Downtime</th>
+                            <th class="downtime-col" title="Total accumulated ride downtime hours during the selected period">Cumulative Downtime</th>
                             <th class="uptime-col" title="Percentage of time rides were operational during the selected period">Uptime %</th>
                             <th class="affected-col" title="Number of rides currently down right now">Rides Down</th>
                             <th class="trend-col" title="Change in downtime compared to previous period. Positive (+) = more downtime = worse performance">Trend</th>
@@ -343,7 +343,7 @@ class Downtime {
                             <th class="tier-col" title="Importance tier: Tier 1 = flagship attractions (3x weight), Tier 2 = major rides (2x weight), Tier 3 = standard attractions (1x weight)">Tier</th>
                             <th class="park-col" title="Theme park where the ride is located">Park</th>
                             <th class="status-col" title="Current operating status: Operating, Down (breakdown), Closed (scheduled), or Refurbishment">Status</th>
-                            <th class="downtime-col" title="Total time the ride was non-operational during the selected period">Downtime</th>
+                            <th class="downtime-col" title="Total time the ride was non-operational during the selected period">Cumulative Downtime</th>
                             <th class="uptime-col" title="Percentage of time the ride was operational during the selected period">Uptime %</th>
                             <th class="trend-col" title="Change in downtime compared to previous period. Positive (+) = more downtime = worse performance">Trend</th>
                         </tr>

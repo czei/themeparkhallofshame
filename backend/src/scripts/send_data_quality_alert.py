@@ -15,7 +15,7 @@ Environment Variables:
 
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime  # noqa: F401 - used in f-string
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -64,18 +64,26 @@ def get_summary_stats() -> dict:
         repo = DataQualityRepository(conn)
         summary = repo.get_summary_for_reporting(days=7, data_source="themeparks_wiki")
 
+        # Filter out CLOSED status - those are expected for seasonal parks
+        # Only show entities that report OPERATING but have stale data
+        actionable = [
+            s for s in summary
+            if s.get("statuses_seen") and "CLOSED" not in s.get("statuses_seen", "")
+        ]
+
         # Calculate stats
         total_entities = len(summary)
-        if summary:
-            max_staleness = max(s.get("max_staleness_minutes", 0) for s in summary)
+        if actionable:
+            max_staleness = max(s.get("max_staleness_minutes", 0) for s in actionable)
             max_staleness_days = max_staleness / (60 * 24)
         else:
             max_staleness_days = 0
 
         return {
             "total_entities_with_issues": total_entities,
+            "actionable_count": len(actionable),
             "max_staleness_days": round(max_staleness_days, 1),
-            "top_offenders": summary[:10],  # Top 10 worst
+            "top_offenders": actionable[:10],  # Top 10 worst (excluding CLOSED)
         }
 
 
@@ -104,41 +112,52 @@ def format_email_html(issues: list, stats: dict) -> str:
 
         <div style="display: flex; gap: 40px; margin: 20px 0;">
             <div>
-                <div class="stat">{stats['total_entities_with_issues']}</div>
-                <div class="stat-label">Entities with stale data (7 days)</div>
+                <div class="stat">{stats.get('actionable_count', 0)}</div>
+                <div class="stat-label">Actionable issues</div>
             </div>
             <div>
                 <div class="stat">{stats['max_staleness_days']} days</div>
                 <div class="stat-label">Oldest stale data</div>
             </div>
             <div>
-                <div class="stat">{len(issues)}</div>
-                <div class="stat-label">New issues (24h)</div>
+                <div class="stat">{stats['total_entities_with_issues']}</div>
+                <div class="stat-label">Total (incl. CLOSED)</div>
             </div>
         </div>
 
-        <h2>Top Offenders (Last 7 Days)</h2>
+        <h2>Actionable Issues (Last 7 Days)</h2>
+        <p style="color: #666; font-size: 13px;">
+            Showing only entities with non-CLOSED status that have stale data.
+            CLOSED rides at seasonal parks are filtered out.
+        </p>
         <table>
             <tr>
+                <th>Park</th>
                 <th>Entity Name</th>
-                <th>Status</th>
+                <th>Reported Status</th>
                 <th>Staleness</th>
-                <th>Issue Count</th>
-                <th>ThemeParks.wiki ID</th>
+                <th>First Seen</th>
+                <th>ThemeParks.wiki</th>
             </tr>
     """
 
     for item in stats.get("top_offenders", [])[:10]:
         staleness_days = round(item.get("max_staleness_minutes", 0) / (60 * 24), 1)
         staleness_class = "stale" if staleness_days > 30 else ""
+        wiki_id = item.get('themeparks_wiki_id', '')
+        wiki_link = f'<a href="https://api.themeparks.wiki/v1/entity/{wiki_id}/live" target="_blank">View Live</a>' if wiki_id else 'N/A'
+        park_name = item.get('park_name') or 'Unknown Park'
+        first_detected = item.get('first_detected')
+        first_detected_str = first_detected.strftime('%Y-%m-%d') if first_detected else 'N/A'
 
         html += f"""
             <tr>
+                <td>{park_name}</td>
                 <td>{item.get('entity_name', 'Unknown')}</td>
-                <td>{item.get('statuses_seen', 'N/A')}</td>
+                <td><code>{item.get('statuses_seen', 'N/A')}</code></td>
                 <td class="{staleness_class}">{staleness_days} days</td>
-                <td>{item.get('issue_count', 0)}</td>
-                <td><code>{item.get('themeparks_wiki_id', 'N/A')}</code></td>
+                <td>{first_detected_str}</td>
+                <td>{wiki_link}</td>
             </tr>
         """
 

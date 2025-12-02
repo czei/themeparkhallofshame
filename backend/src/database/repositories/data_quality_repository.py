@@ -220,19 +220,21 @@ class DataQualityRepository:
 
         query = text("""
             SELECT
-                themeparks_wiki_id,
-                entity_name,
+                dqi.themeparks_wiki_id,
+                dqi.entity_name,
+                p.name as park_name,
                 COUNT(*) as issue_count,
-                MAX(data_age_minutes) as max_staleness_minutes,
-                AVG(data_age_minutes) as avg_staleness_minutes,
-                MIN(detected_at) as first_detected,
-                MAX(detected_at) as last_detected,
-                GROUP_CONCAT(DISTINCT reported_status) as statuses_seen
-            FROM data_quality_issues
-            WHERE data_source = :data_source
-              AND issue_type = 'STALE_DATA'
-              AND detected_at >= :cutoff
-            GROUP BY themeparks_wiki_id, entity_name
+                MAX(dqi.data_age_minutes) as max_staleness_minutes,
+                AVG(dqi.data_age_minutes) as avg_staleness_minutes,
+                MIN(dqi.detected_at) as first_detected,
+                MAX(dqi.detected_at) as last_detected,
+                GROUP_CONCAT(DISTINCT dqi.reported_status) as statuses_seen
+            FROM data_quality_issues dqi
+            LEFT JOIN parks p ON dqi.park_id = p.park_id
+            WHERE dqi.data_source = :data_source
+              AND dqi.issue_type = 'STALE_DATA'
+              AND dqi.detected_at >= :cutoff
+            GROUP BY dqi.themeparks_wiki_id, dqi.entity_name, p.name
             ORDER BY issue_count DESC, max_staleness_minutes DESC
         """)
 

@@ -73,7 +73,8 @@ class TodayRideRankingsQuery:
 
         # Use centralized SQL helpers for consistent logic
         filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
-        is_down = RideStatusSQL.is_down("rss")
+        # PARK-TYPE AWARE: Disney/Universal only counts DOWN (not CLOSED)
+        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
         current_status_sq = RideStatusSQL.current_status_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
         current_is_open_sq = RideStatusSQL.current_is_open_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")

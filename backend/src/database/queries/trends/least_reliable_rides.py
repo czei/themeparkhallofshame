@@ -92,7 +92,8 @@ class LeastReliableRidesQuery:
 
         # Use centralized helpers for consistent status checks
         has_operated = RideStatusSQL.has_operated_subquery("r.ride_id")
-        is_down = RideStatusSQL.is_down("rss")
+        # PARK-TYPE AWARE: Disney/Universal only counts DOWN (not CLOSED)
+        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
         is_operating = RideStatusSQL.is_operating("rss")
 
@@ -253,7 +254,8 @@ class LeastReliableRidesQuery:
 
         # Use centralized helpers for consistent status checks
         has_operated = RideStatusSQL.has_operated_subquery("r.ride_id")
-        is_down = RideStatusSQL.is_down("rss")
+        # PARK-TYPE AWARE: Disney/Universal only counts DOWN (not CLOSED)
+        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
         is_operating = RideStatusSQL.is_operating("rss")
 

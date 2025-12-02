@@ -3312,7 +3312,11 @@ class StatsRepository:
         # PARK-TYPE AWARE: Disney/Universal only counts DOWN, others count CLOSED too
         is_down = RideStatusSQL.is_down("rss", parks_alias="p")
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
-        downtime_hours = DowntimeSQL.downtime_hours_rounded("rss", "pas")
+        # Use schedule-based filtering (not heuristic) for more accurate downtime
+        # This fixes the bug where park_appears_open heuristic marked parks as open
+        # before official opening time due to test rides operating
+        # PARK-TYPE AWARE: Disney/Universal only count DOWN status (not CLOSED)
+        downtime_hours = DowntimeSQL.downtime_hours_rounded("rss", "pas", park_id_expr="p.park_id", parks_alias="p")
         weighted_downtime = DowntimeSQL.weighted_downtime_hours("rss", "pas", "COALESCE(rc.tier_weight, 2)")
         uptime_pct = UptimeSQL.uptime_percentage("rss", "pas")
         park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
@@ -3477,7 +3481,11 @@ class StatsRepository:
         is_operating = RideStatusSQL.is_operating("rss")
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
         active_filter = RideFilterSQL.active_attractions_filter("r", "p")
-        downtime_hours = DowntimeSQL.downtime_hours_rounded("rss", "pas")
+        # Use schedule-based filtering (not heuristic) for more accurate downtime
+        # This fixes the bug where park_appears_open heuristic marked parks as open
+        # before official opening time due to test rides operating
+        # PARK-TYPE AWARE: Disney/Universal only count DOWN status (not CLOSED)
+        downtime_hours = DowntimeSQL.downtime_hours_rounded("rss", "pas", park_id_expr="p.park_id", parks_alias="p")
         uptime_pct = UptimeSQL.uptime_percentage("rss", "pas")
 
         # CRITICAL: Only count downtime for rides that have operated at some point today

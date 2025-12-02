@@ -492,8 +492,12 @@ class ParkStatusSQL:
         Get SQL condition for checking if park was open at a specific timestamp.
 
         Priority:
-        1. Use park_schedules if available for the date
+        1. Use park_schedules if timestamp falls within ANY OPERATING schedule's time window
         2. Fall back to park_appears_open from park_activity_snapshots
+
+        IMPORTANT: Uses time-range matching (timestamp between opening/closing) rather
+        than date matching. This correctly handles schedules that span midnight UTC,
+        such as a park that opens at 16:00 UTC Dec 1 and closes at 07:00 UTC Dec 2.
 
         This is for historical queries where we check each snapshot timestamp.
 
@@ -506,27 +510,24 @@ class ParkStatusSQL:
             SQL condition that is TRUE when park was open at that time
         """
         return f"""(
-            -- Check if park has schedule for the date
+            -- Check if timestamp falls within ANY OPERATING schedule's time window
+            -- Uses time-range matching (not date matching) to handle midnight-spanning schedules
             CASE WHEN EXISTS (
                 SELECT 1 FROM park_schedules ps
                 WHERE ps.park_id = {park_id_expr}
-                    AND ps.schedule_date = DATE({timestamp_expr})
                     AND ps.schedule_type = 'OPERATING'
                     AND ps.opening_time IS NOT NULL
                     AND ps.closing_time IS NOT NULL
-            ) THEN (
-                -- Use schedule: check if timestamp is within operating hours
-                SELECT {timestamp_expr} >= ps2.opening_time AND {timestamp_expr} <= ps2.closing_time
-                FROM park_schedules ps2
+                    AND {timestamp_expr} >= ps.opening_time
+                    AND {timestamp_expr} <= ps.closing_time
+            ) THEN TRUE
+            -- Check if park has ANY schedule data (to distinguish from parks without schedules)
+            WHEN EXISTS (
+                SELECT 1 FROM park_schedules ps2
                 WHERE ps2.park_id = {park_id_expr}
-                    AND ps2.schedule_date = DATE({timestamp_expr})
                     AND ps2.schedule_type = 'OPERATING'
-                    AND ps2.opening_time IS NOT NULL
-                    AND ps2.closing_time IS NOT NULL
-                ORDER BY ps2.opening_time
-                LIMIT 1
-            )
-            -- Fall back to heuristic
+            ) THEN FALSE  -- Schedule exists but timestamp not in operating window
+            -- Fall back to heuristic for parks without schedule data
             ELSE {pas_alias}.park_appears_open = TRUE
             END
         )"""
@@ -584,7 +585,10 @@ class DowntimeSQL:
     @staticmethod
     def downtime_minutes_sum(
         rss_alias: str = "rss",
-        pas_alias: str = "pas"
+        pas_alias: str = "pas",
+        park_id_expr: str = None,
+        use_schedule: bool = True,
+        parks_alias: str = None
     ) -> str:
         """
         Get SQL expression for summing downtime minutes from snapshots.
@@ -594,12 +598,30 @@ class DowntimeSQL:
         Args:
             rss_alias: Alias for ride_status_snapshots table
             pas_alias: Alias for park_activity_snapshots table
+            park_id_expr: Expression for park_id (e.g., "p.park_id") - required for schedule-based filtering
+            use_schedule: If True and park_id_expr provided, use schedule-based park open check
+                         instead of park_appears_open heuristic. This is more accurate for
+                         parks with schedules (e.g., Disney) where the heuristic may incorrectly
+                         mark the park as open before official opening time.
+            parks_alias: Alias for parks table (e.g., "p") - enables park-type-aware downtime logic.
+                        Disney/Universal: Only count DOWN status (not CLOSED)
+                        Other parks: Count DOWN, CLOSED, or computed_is_open=FALSE
 
         Returns:
             SQL expression that sums to total downtime minutes
         """
-        is_down = RideStatusSQL.is_down(rss_alias)
-        park_open = ParkStatusSQL.park_appears_open_filter(pas_alias)
+        # PARK-TYPE AWARE: Disney/Universal only count DOWN, others count CLOSED too
+        is_down = RideStatusSQL.is_down(rss_alias, parks_alias=parks_alias)
+
+        # Use schedule-based check if park_id is provided, otherwise fall back to heuristic
+        if use_schedule and park_id_expr:
+            park_open = ParkStatusSQL.park_is_open_at_time_filter(
+                park_id_expr=park_id_expr,
+                timestamp_expr=f"{rss_alias}.recorded_at",
+                pas_alias=pas_alias
+            )
+        else:
+            park_open = ParkStatusSQL.park_appears_open_filter(pas_alias)
 
         return f"""SUM(CASE
             WHEN {park_open} AND {is_down}
@@ -611,7 +633,10 @@ class DowntimeSQL:
     def downtime_hours_rounded(
         rss_alias: str = "rss",
         pas_alias: str = "pas",
-        decimal_places: int = 2
+        decimal_places: int = 2,
+        park_id_expr: str = None,
+        use_schedule: bool = True,
+        parks_alias: str = None
     ) -> str:
         """
         Get SQL expression for downtime hours (rounded).
@@ -620,11 +645,14 @@ class DowntimeSQL:
             rss_alias: Alias for ride_status_snapshots table
             pas_alias: Alias for park_activity_snapshots table
             decimal_places: Number of decimal places to round to
+            park_id_expr: Expression for park_id - enables schedule-based filtering
+            use_schedule: If True and park_id_expr provided, use schedule-based park open check
+            parks_alias: Alias for parks table - enables park-type-aware downtime logic
 
         Returns:
             SQL expression for downtime hours
         """
-        minutes = DowntimeSQL.downtime_minutes_sum(rss_alias, pas_alias)
+        minutes = DowntimeSQL.downtime_minutes_sum(rss_alias, pas_alias, park_id_expr, use_schedule, parks_alias)
         return f"ROUND({minutes} / 60.0, {decimal_places})"
 
     @staticmethod

@@ -405,7 +405,9 @@ class Downtime {
             ? `${trendPct > 0 ? '+' : ''}${trendPct.toFixed(1)}%`
             : 'N/A';
 
-        const statusBadge = this.getStatusBadge(ride.current_is_open, ride.park_is_open);
+        // Handle both LIVE (is_down) and TODAY (current_is_open) field names
+        const isOpen = ride.current_is_open !== undefined ? ride.current_is_open : (ride.is_down !== undefined ? !ride.is_down : null);
+        const statusBadge = this.getStatusBadge(isOpen, ride.park_is_open);
         const tierBadge = this.getTierBadge(ride.tier);
 
         return `
@@ -445,7 +447,7 @@ class Downtime {
                 </td>
                 <td class="downtime-col">
                     <span class="downtime-value">
-                        ${this.formatHours(ride.downtime_hours || 0)}
+                        ${this.formatHours(ride.downtime_hours || ride.total_downtime_hours || 0)}
                     </span>
                 </td>
                 <td class="uptime-col">

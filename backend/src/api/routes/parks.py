@@ -114,8 +114,8 @@ def get_park_downtime_rankings():
             stats_repo = StatsRepository(conn)
 
             # Route to appropriate query based on period
-            if period in ('live', 'today'):
-                # LIVE/TODAY: Try pre-aggregated cache first (instant ~10ms)
+            if period == 'live':
+                # LIVE: Try pre-aggregated cache first (instant ~10ms)
                 # Falls back to raw query (~7s) if cache is empty/stale
                 rankings = stats_repo.get_park_live_rankings_cached(
                     filter_disney_universal=filter_disney_universal,
@@ -126,19 +126,19 @@ def get_park_downtime_rankings():
                 # If cache miss, fall back to computing from raw snapshots
                 if not rankings:
                     logger.warning(f"Park live rankings cache miss, falling back to raw query")
-                    if period == 'live':
-                        rankings = stats_repo.get_park_live_downtime_rankings(
-                            filter_disney_universal=filter_disney_universal,
-                            limit=limit,
-                            sort_by=sort_by
-                        )
-                    else:  # today
-                        query = TodayParkRankingsQuery(conn)
-                        rankings = query.get_rankings(
-                            filter_disney_universal=filter_disney_universal,
-                            limit=limit,
-                            sort_by=sort_by
-                        )
+                    rankings = stats_repo.get_park_live_downtime_rankings(
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit,
+                        sort_by=sort_by
+                    )
+            elif period == 'today':
+                # TODAY: Cumulative data from midnight Pacific to now
+                query = TodayParkRankingsQuery(conn)
+                rankings = query.get_rankings(
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit,
+                    sort_by=sort_by
+                )
             else:
                 # Historical data from aggregated stats (calendar-based periods)
                 # See: database/queries/rankings/park_downtime_rankings.py

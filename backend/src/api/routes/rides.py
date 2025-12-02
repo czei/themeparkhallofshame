@@ -195,8 +195,8 @@ def get_ride_downtime_rankings():
             stats_repo = StatsRepository(conn)
 
             # Route to appropriate query class based on period
-            if period in ('live', 'today'):
-                # LIVE/TODAY: Try pre-aggregated cache first (instant ~10ms)
+            if period == 'live':
+                # LIVE: Try pre-aggregated cache first (instant ~10ms)
                 # Falls back to raw query (~7s) if cache is empty/stale
                 rankings = stats_repo.get_ride_live_rankings_cached(
                     filter_disney_universal=filter_disney_universal,
@@ -207,18 +207,18 @@ def get_ride_downtime_rankings():
                 # If cache miss, fall back to computing from raw snapshots
                 if not rankings:
                     logger.warning(f"Ride live rankings cache miss, falling back to raw query")
-                    if period == 'live':
-                        rankings = stats_repo.get_ride_live_downtime_rankings(
-                            filter_disney_universal=filter_disney_universal,
-                            limit=limit,
-                            sort_by=sort_by
-                        )
-                    else:  # today
-                        query = TodayRideRankingsQuery(conn)
-                        rankings = query.get_rankings(
-                            filter_disney_universal=filter_disney_universal,
-                            limit=limit
-                        )
+                    rankings = stats_repo.get_ride_live_downtime_rankings(
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit,
+                        sort_by=sort_by
+                    )
+            elif period == 'today':
+                # TODAY: Cumulative data from midnight Pacific to now
+                query = TodayRideRankingsQuery(conn)
+                rankings = query.get_rankings(
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit
+                )
             else:
                 # Historical data from aggregated stats (calendar-based periods)
                 # See: database/queries/rankings/ride_downtime_rankings.py

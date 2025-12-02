@@ -153,6 +153,68 @@ const reliablePark = await this.apiClient.get('/trends/least-reliable', {...});
 const reliableRide = await this.apiClient.get('/trends/least-reliable', {...});
 ```
 
+### 6. Browser-Side Response Caching
+
+**Files**: `frontend/js/api-client.js`, `frontend/js/app.js`
+
+Added in-memory response caching in the browser to eliminate redundant network requests when switching tabs.
+
+**Problem**: Even with fast server responses (8ms), network latency to EC2 added ~1-1.5s per request. Tab switches made 3-4 API calls, resulting in ~5 second delays.
+
+**Solution**: Cache API responses in the browser with 5-minute TTL matching server cache.
+
+```javascript
+// api-client.js - Response caching
+class APIClient {
+    constructor() {
+        this._cache = {};
+        this._cacheTTL = 5 * 60 * 1000; // 5 minutes
+    }
+
+    async get(endpoint, params = {}) {
+        const cacheKey = this._getCacheKey(url);
+        const cached = this._getFromCache(cacheKey);
+        if (cached) {
+            console.log(`API CACHE HIT: ${url.href}`);
+            return cached;  // Instant return, no network call
+        }
+        // ... fetch and cache response
+    }
+
+    async prefetch(period, filter) {
+        // Load all common endpoints in parallel on page load
+        const endpoints = [
+            '/parks/downtime', '/rides/downtime', '/live/status-summary',
+            '/parks/waittimes', '/rides/waittimes'
+        ];
+        await Promise.all(endpoints.map(e => this.get(e, {period, filter})));
+    }
+}
+```
+
+**Integration in app.js**:
+```javascript
+// On page load - prefetch all tabs in background
+loadView('downtime');
+apiClient.prefetch(globalState.period, globalState.filter);
+
+// On period/filter change - clear cache and re-prefetch
+apiClient.clearCache();
+apiClient.prefetch(globalState.period, globalState.filter);
+```
+
+**Impact**:
+- First tab load: ~5s (network requests, now cached)
+- Tab switching after initial load: **instant** (cache hits)
+- Period/filter change: ~5s (cache cleared, new data fetched)
+
+**Debugging**:
+```javascript
+// In browser console
+apiClient.getCacheStats()
+// {totalEntries: 5, validEntries: 5, ttlSeconds: 300}
+```
+
 ## Performance Summary
 
 | Query Type | Before | After (Cold) | After (Cached) |
@@ -162,6 +224,7 @@ const reliableRide = await this.apiClient.get('/trends/least-reliable', {...});
 | 30-day rankings | 2-5s | 2-5s | ~8ms |
 | LIVE rankings | <1s | <1s | N/A (not cached) |
 | Awards page | 90-120s | 15-30s | ~40ms |
+| **Tab switching** | ~5s | ~5s | **instant** |
 
 ## Gunicorn Worker Considerations
 
@@ -209,13 +272,15 @@ SHOW ENGINE INNODB STATUS;
 
 | File | Change |
 |------|--------|
-| `src/utils/cache.py` | Query cache implementation |
-| `src/api/routes/parks.py` | Added caching to downtime/waittimes |
-| `src/api/routes/rides.py` | Added caching to downtime/waittimes |
-| `src/api/routes/trends.py` | Added caching to Awards endpoints |
-| `src/database/queries/today/today_ride_wait_times.py` | CTEs instead of subqueries |
-| `src/database/migrations/005_performance_indexes.sql` | Covering indexes |
+| `backend/src/utils/cache.py` | Server-side query cache implementation |
+| `backend/src/api/routes/parks.py` | Added caching to downtime/waittimes |
+| `backend/src/api/routes/rides.py` | Added caching to downtime/waittimes |
+| `backend/src/api/routes/trends.py` | Added caching to Awards endpoints |
+| `backend/src/database/queries/today/today_ride_wait_times.py` | CTEs instead of subqueries |
+| `backend/src/database/migrations/005_performance_indexes.sql` | Covering indexes |
 | `frontend/js/components/awards.js` | Sequential API calls |
+| `frontend/js/api-client.js` | Browser-side response caching + prefetch |
+| `frontend/js/app.js` | Prefetch on load, clear cache on period/filter change |
 
 ## Testing
 

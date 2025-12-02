@@ -72,6 +72,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Update UI
                     updateGlobalFilterUI();
 
+                    // Clear cache and prefetch with new filter
+                    apiClient.clearCache();
+                    apiClient.prefetch(globalState.period, globalState.filter);
+
                     // Update current component if it exists and has updateFilter method
                     if (currentComponent && typeof currentComponent.updateFilter === 'function') {
                         currentComponent.updateFilter(globalState.filter);
@@ -114,6 +118,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     // Update UI
                     updateTimePeriodUI();
+
+                    // Clear cache and prefetch with new period
+                    apiClient.clearCache();
+                    apiClient.prefetch(globalState.period, globalState.filter);
 
                     // Update current component if it exists and has updatePeriod method
                     if (currentComponent && typeof currentComponent.updatePeriod === 'function') {
@@ -253,4 +261,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Load default view (Downtime)
     loadView('downtime');
+
+    // Prefetch data for all tabs in the background
+    // This makes tab switching instant after initial load
+    apiClient.prefetch(globalState.period, globalState.filter);
 });

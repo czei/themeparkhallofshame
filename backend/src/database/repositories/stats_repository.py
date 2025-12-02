@@ -1241,7 +1241,8 @@ class StatsRepository:
         # This ensures consistency with get_park_live_downtime_rankings()
         # Rides that never showed OPERATING status are likely seasonal closures
         # PARK-TYPE AWARE: Disney/Universal needs 1 snapshot, others need 6 (30 min)
-        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p")
+        # Must pass park_id_expr to check park_appears_open during operation
+        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p", park_id_expr="r.park_id")
 
         # Get rides currently down with tier info
         rides_down_query = text(f"""
@@ -1351,7 +1352,8 @@ class StatsRepository:
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
         park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
         # PARK-TYPE AWARE: Disney/Universal needs 1 snapshot, others need 6 (30 min)
-        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p")
+        # Must pass park_id_expr to check park_appears_open during operation
+        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p", park_id_expr="r.park_id")
 
         # Get total park weight - ONLY for rides that have operated today
         weight_query = text(f"""
@@ -3518,7 +3520,8 @@ class StatsRepository:
         # CRITICAL: Only count downtime for rides that have operated at some point today
         # PARK-TYPE AWARE: Disney/Universal needs 1 snapshot, others need 6 (30 min)
         # This filters out seasonal closures while allowing legitimate breakdowns
-        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p")
+        # Must pass park_id_expr to check park_appears_open during operation
+        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p", park_id_expr="r.park_id")
 
         # For latest snapshot check - used in rides_currently_down CTE
         # Now uses p_inner alias for park-type-aware logic
@@ -3529,7 +3532,8 @@ class StatsRepository:
         is_operating_cte = RideStatusSQL.is_operating("rss_op")
 
         # PARK-TYPE AWARE: For rides_currently_down CTE (uses p_inner and r_inner aliases)
-        has_operated_cte = RideStatusSQL.has_operated_for_park_type("r_inner.ride_id", "p_inner")
+        # Must pass park_id_expr to check park_appears_open during operation
+        has_operated_cte = RideStatusSQL.has_operated_for_park_type("r_inner.ride_id", "p_inner", park_id_expr="r_inner.park_id")
 
         query = text(f"""
             WITH
@@ -3882,7 +3886,8 @@ class StatsRepository:
         # Rides that have NEVER been OPERATING during the period are likely seasonal closures
         # or scheduled maintenance, not unplanned outages
         # PARK-TYPE AWARE: Disney/Universal needs 1 snapshot, others need 6 (30 min)
-        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p")
+        # Must pass park_id_expr to check park_appears_open during operation
+        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p", park_id_expr="r.park_id")
 
         # CRITICAL: Use helper subqueries that include time window filter
         # This ensures current_status matches the status summary panel

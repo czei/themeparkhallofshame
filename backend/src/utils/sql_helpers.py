@@ -65,17 +65,21 @@ class RideStatusSQL:
         """
         return f"({table_alias}.status = 'OPERATING' OR ({table_alias}.status IS NULL AND {table_alias}.computed_is_open = TRUE))"
 
+    # Parks that properly report DOWN status (distinct from CLOSED)
+    # These parks only count status='DOWN' as breakdowns, not CLOSED
+    PARKS_WITH_DOWN_STATUS = "({parks_alias}.is_disney = TRUE OR {parks_alias}.is_universal = TRUE OR {parks_alias}.name = 'Dollywood')"
+
     @staticmethod
     def is_down(table_alias: str = "rss", parks_alias: str = None) -> str:
         """
         Get SQL condition for checking if a ride is down (not operating).
 
         PARK-TYPE AWARE LOGIC:
-        - Disney/Universal parks: Only count DOWN status (not CLOSED)
+        - Disney/Universal/Dollywood parks: Only count DOWN status (not CLOSED)
           because they properly distinguish between breakdowns (DOWN) and
           scheduled closures (CLOSED)
         - Other parks: Include both DOWN and CLOSED because many parks
-          (Dollywood, Busch Gardens, etc.) only report CLOSED for all
+          (Busch Gardens, SeaWorld, etc.) only report CLOSED for all
           non-operating rides. The has_operated_subquery filter ensures
           we only count rides that were operating at some point.
 
@@ -90,11 +94,12 @@ class RideStatusSQL:
             SQL condition that is TRUE when ride is down
         """
         if parks_alias:
+            parks_with_down = RideStatusSQL.PARKS_WITH_DOWN_STATUS.format(parks_alias=parks_alias)
             # Park-type aware logic
             return f"""(
                 CASE
-                    WHEN ({parks_alias}.is_disney = TRUE OR {parks_alias}.is_universal = TRUE) THEN
-                        -- Disney/Universal: Only count explicit DOWN status
+                    WHEN {parks_with_down} THEN
+                        -- Disney/Universal/Dollywood: Only count explicit DOWN status
                         {table_alias}.status = 'DOWN'
                     ELSE
                         -- Other parks: Count DOWN, CLOSED, or computed_is_open=FALSE
@@ -260,7 +265,8 @@ class RideStatusSQL:
         ride_id_expr: str,
         parks_alias: str,
         start_param: str = ":start_utc",
-        end_param: str = ":end_utc"
+        end_param: str = ":end_utc",
+        park_id_expr: str = None
     ) -> str:
         """
         Get park-type-aware "has operated" check.
@@ -269,37 +275,59 @@ class RideStatusSQL:
         - Other parks: Need at least MIN_OPERATING_SNAPSHOTS_OTHER_PARKS (6) snapshots
           to count CLOSED as downtime (filters out seasonal/weather closures)
 
+        CRITICAL: If park_id_expr is provided, the check also requires that the park
+        was marked as open (park_appears_open=TRUE) at the time of the snapshot.
+        This prevents counting OPERATING snapshots from parks that weren't truly open.
+
         Args:
             ride_id_expr: Expression for the ride_id to check
             parks_alias: Alias for the parks table
             start_param: SQL parameter name for start time
             end_param: SQL parameter name for end time
+            park_id_expr: Expression for park_id (e.g., "p.park_id"). If provided,
+                         requires park_appears_open=TRUE for snapshots to count.
 
         Returns:
             SQL condition that returns TRUE if ride has operated enough for its park type
         """
         min_snaps = RideStatusSQL.MIN_OPERATING_SNAPSHOTS_OTHER_PARKS
 
+        # Build the park open check if park_id_expr is provided
+        if park_id_expr:
+            park_join = f"""INNER JOIN park_activity_snapshots pas_op
+                            ON pas_op.park_id = {park_id_expr}
+                            AND pas_op.recorded_at = rss_op.recorded_at"""
+            park_filter = "AND pas_op.park_appears_open = TRUE"
+        else:
+            park_join = ""
+            park_filter = ""
+
+        parks_with_down = RideStatusSQL.PARKS_WITH_DOWN_STATUS.format(parks_alias=parks_alias)
+
         return f"""(
             CASE
-                WHEN ({parks_alias}.is_disney = TRUE OR {parks_alias}.is_universal = TRUE) THEN
-                    -- Disney/Universal: Just need 1 operating snapshot
+                WHEN {parks_with_down} THEN
+                    -- Disney/Universal/Dollywood: Just need 1 operating snapshot while park is open
                     EXISTS (
                         SELECT 1 FROM ride_status_snapshots rss_op
+                        {park_join}
                         WHERE rss_op.ride_id = {ride_id_expr}
                         AND rss_op.recorded_at >= {start_param}
                         AND rss_op.recorded_at < {end_param}
                         AND (rss_op.status = 'OPERATING' OR (rss_op.status IS NULL AND rss_op.computed_is_open = TRUE))
+                        {park_filter}
                     )
                 ELSE
-                    -- Other parks: Need at least {min_snaps} operating snapshots (30 min)
+                    -- Other parks: Need at least {min_snaps} operating snapshots (30 min) while park is open
                     (
                         SELECT COUNT(*) >= {min_snaps}
                         FROM ride_status_snapshots rss_op
+                        {park_join}
                         WHERE rss_op.ride_id = {ride_id_expr}
                         AND rss_op.recorded_at >= {start_param}
                         AND rss_op.recorded_at < {end_param}
                         AND (rss_op.status = 'OPERATING' OR (rss_op.status IS NULL AND rss_op.computed_is_open = TRUE))
+                        {park_filter}
                     )
             END
         )"""

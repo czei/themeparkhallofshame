@@ -27,6 +27,63 @@ Python 3.11+: Follow standard conventions
 
 <!-- MANUAL ADDITIONS START -->
 
+## Canonical Business Rules
+
+These are the authoritative rules that govern how ride and park data is interpreted. All queries and calculations MUST follow these rules. The single source of truth for implementation is `src/utils/sql_helpers.py`.
+
+### Rule 1: Park Status Takes Precedence Over Ride Status
+
+**CRITICAL: If a park is closed, ignore ALL ride statuses.**
+
+Many parks do not update ride status data when the park is closed:
+- Parks closed for winter may leave rides showing as "CLOSED" or "DOWN" even though no downtime is occurring
+- Parks may report bogus ride status values when closed
+- Test rides may operate before official park opening
+
+**Implementation:**
+- `park_appears_open = TRUE` must be checked before counting any ride as "down"
+- The `RideStatusSQL.rides_that_operated_cte()` helper enforces this automatically
+- Rides should only count toward downtime/shame if they have operated while the park was open
+
+### Rule 2: Rides Must Have Operated to Count
+
+A ride only counts toward downtime calculations if it has "operated" during the analysis period. A ride has "operated" if and only if:
+1. The ride had at least one snapshot with `status='OPERATING'` or `computed_is_open=TRUE`
+2. AND the park was open at that time (`park_appears_open=TRUE`)
+
+**Why this matters:**
+- Prevents closed parks from appearing in reliability rankings
+- Filters out rides that never opened (e.g., seasonal rides, rides under refurbishment)
+- Ensures Michigan's Adventure doesn't show 0% uptime when it's closed for the season
+
+**Implementation:**
+- Use `RideStatusSQL.rides_that_operated_cte()` for all downtime/reliability queries
+- This CTE joins `park_activity_snapshots` to verify park was open when ride operated
+
+### Rule 3: Park-Type Aware Downtime Logic
+
+Disney and Universal parks properly distinguish between:
+- `DOWN` = Unexpected breakdown
+- `CLOSED` = Scheduled closure (e.g., meal breaks, weather)
+
+Other parks (Dollywood, Busch Gardens, etc.) only report `CLOSED` for all non-operating rides, so we must treat `CLOSED` as potential downtime for non-Disney/Universal parks.
+
+**Implementation:**
+- Use `RideStatusSQL.is_down(table_alias, parks_alias="p")` with the parks_alias parameter
+- The helper automatically applies park-type-aware logic
+
+### Single Source of Truth
+
+**ALL** ride status logic lives in `src/utils/sql_helpers.py`:
+- `RideStatusSQL` - Ride operating/down status checks
+- `ParkStatusSQL` - Park open/closed checks
+- `DowntimeSQL` - Downtime calculations
+- `UptimeSQL` - Uptime percentage calculations
+
+**NEVER** duplicate status logic inline in queries. Always use the centralized helpers.
+
+---
+
 ## Test-Driven Development (TDD) Process
 
 This project follows classic Test-Driven Development. All code changes must adhere to the TDD cycle.

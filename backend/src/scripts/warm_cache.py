@@ -47,9 +47,15 @@ ENDPOINTS = [
     "/api/parks/waittimes?period=live&filter=all-parks&limit=50",
     "/api/rides/waittimes?period=live&filter=all-parks&limit=50",
 
-    # Trends tab
+    # Trends tab - charts
     "/api/trends/chart-data?type=waittimes&period=today&limit=4",
     "/api/trends/chart-data?type=waittimes&period=7days&limit=4",
+
+    # Trends tab - Awards (CRITICAL: Must be warmed to match Wait Times table)
+    "/api/trends/longest-wait-times?period=today&filter=all-parks&entity=rides&limit=10",
+    "/api/trends/longest-wait-times?period=today&filter=all-parks&entity=parks&limit=10",
+    "/api/trends/least-reliable?period=today&filter=all-parks&entity=rides&limit=10",
+    "/api/trends/least-reliable?period=today&filter=all-parks&entity=parks&limit=10",
 ]
 
 

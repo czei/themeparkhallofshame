@@ -372,7 +372,10 @@ def get_longest_wait_times():
     """
     GET /api/trends/longest-wait-times
 
-    Returns top 10 parks or rides ranked by cumulative wait-hours for the Awards section.
+    Returns top 10 parks or rides ranked by average wait time for the Awards section.
+
+    IMPORTANT: Rankings use avg_wait_time to match the Wait Times table.
+    This ensures consistency between Awards and the main rankings.
 
     Query Files Used:
     -----------------
@@ -385,7 +388,7 @@ def get_longest_wait_times():
         - limit: max results (default: 10, max: 20)
 
     Returns:
-        JSON response with top parks/rides by cumulative wait-hours
+        JSON response with top parks/rides by average wait time
     """
     try:
         # Parse query parameters

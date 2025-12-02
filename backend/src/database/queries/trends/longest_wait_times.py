@@ -5,22 +5,22 @@ Longest Wait Times Query (Awards)
 Endpoint: GET /api/trends/longest-wait-times
 UI Location: Trends tab → Awards section
 
-Returns top 10 rides ranked by cumulative wait-hours.
+Returns top 10 rides ranked by average wait time (in minutes).
 
-Formula: SUM(wait_time) / 60 = total wait-hours
-Example: A ride with 60-min wait for 2 hours (24 snapshots) = 24 wait-hours
+IMPORTANT: Rankings use avg_wait_time to match the Wait Times table.
+This ensures consistency between Awards and the main rankings.
 
 Uses CTE-based queries for performance on large snapshot tables.
 
 Periods:
 - today: Aggregates from ride_status_snapshots (midnight Pacific to now)
-- 7days/30days: Aggregates from ride_daily_stats
+- last_week/last_month: Aggregates from ride_daily_stats
 
 Database Tables:
 - rides (ride metadata)
 - parks (park metadata)
-- ride_status_snapshots (TODAY period)
-- ride_daily_stats (7days/30days periods)
+- ride_status_snapshots + park_activity_snapshots (TODAY period)
+- ride_daily_stats (last_week/last_month periods)
 """
 
 from datetime import date, timedelta
@@ -30,12 +30,15 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from utils.timezone import get_today_range_to_now_utc, get_today_pacific
-from utils.sql_helpers import RideFilterSQL
+from utils.sql_helpers import RideFilterSQL, ParkStatusSQL
 
 
 class LongestWaitTimesQuery:
     """
-    Query for rides with highest cumulative wait-hours.
+    Query for rides with highest average wait times.
+
+    IMPORTANT: Rankings use avg_wait_time (not cumulative_wait_hours)
+    to match the Wait Times table for consistency.
     """
 
     # Snapshot interval in minutes
@@ -51,21 +54,21 @@ class LongestWaitTimesQuery:
         limit: int = 10,
     ) -> List[Dict[str, Any]]:
         """
-        Get rides ranked by cumulative wait-hours.
+        Get rides ranked by average wait time.
 
         Args:
-            period: 'today', '7days', or '30days'
+            period: 'today', 'last_week', or 'last_month'
             filter_disney_universal: Only Disney/Universal parks
             limit: Maximum results (default 10)
 
         Returns:
-            List of rides with cumulative wait-hours
+            List of rides with average wait time (ranked highest first)
         """
         if period == 'today':
             return self._get_today(filter_disney_universal, limit)
-        elif period == '7days':
+        elif period == 'last_week':
             return self._get_daily_aggregate(7, filter_disney_universal, limit)
-        else:  # 30days
+        else:  # last_month
             return self._get_daily_aggregate(30, filter_disney_universal, limit)
 
     def _get_today(
@@ -74,9 +77,10 @@ class LongestWaitTimesQuery:
         limit: int = 10,
     ) -> List[Dict[str, Any]]:
         """
-        Get cumulative wait-hours from TODAY (snapshot data).
+        Get average wait times from TODAY (snapshot data).
 
-        Formula: SUM(wait_time) / 60 = wait-hours
+        Ranked by avg_wait_time to match the Wait Times table.
+        Uses park_appears_open for consistency with other queries.
 
         Uses CTE-based query for performance on large snapshot tables.
         """
@@ -85,6 +89,9 @@ class LongestWaitTimesQuery:
         filter_clause = ""
         if filter_disney_universal:
             filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"
+
+        # Use centralized helper for park open check
+        park_open = ParkStatusSQL.park_appears_open_filter("pas")
 
         sql = text(f"""
             WITH active_rides AS (
@@ -99,6 +106,7 @@ class LongestWaitTimesQuery:
             ),
             wait_time_snapshots AS (
                 -- PERFORMANCE: Only select snapshots with wait times for active rides
+                -- Uses park_appears_open for consistency with Wait Times table
                 SELECT
                     ar.ride_id,
                     ar.ride_name,
@@ -107,22 +115,25 @@ class LongestWaitTimesQuery:
                     rss.wait_time
                 FROM ride_status_snapshots rss
                 INNER JOIN active_rides ar ON rss.ride_id = ar.ride_id
+                INNER JOIN park_activity_snapshots pas
+                    ON ar.park_id = pas.park_id
+                    AND pas.recorded_at = rss.recorded_at
                 WHERE rss.recorded_at >= :start_utc
                   AND rss.recorded_at <= :now_utc
                   AND rss.wait_time > 0
-                  AND rss.computed_is_open = TRUE
+                  AND {park_open}
             )
             SELECT
                 ride_id,
                 ride_name,
                 park_id,
                 park_name,
-                ROUND(SUM(wait_time) / 60.0, 2) AS cumulative_wait_hours,
                 ROUND(AVG(wait_time), 0) AS avg_wait_time,
+                MAX(wait_time) AS peak_wait_time,
                 COUNT(*) AS snapshot_count
             FROM wait_time_snapshots
             GROUP BY ride_id, ride_name, park_id, park_name
-            ORDER BY cumulative_wait_hours DESC
+            ORDER BY avg_wait_time DESC
             LIMIT :limit
         """)
 
@@ -141,9 +152,9 @@ class LongestWaitTimesQuery:
         limit: int = 10,
     ) -> List[Dict[str, Any]]:
         """
-        Get cumulative wait-hours from daily stats (7days/30days).
+        Get average wait times from daily stats (last_week/last_month).
 
-        Uses ride_daily_stats.avg_wait_time * operating_hours as proxy.
+        Ranked by avg_wait_time to match the Wait Times table.
         """
         today = get_today_pacific()
         start_date = today - timedelta(days=days - 1)
@@ -158,11 +169,8 @@ class LongestWaitTimesQuery:
                 r.name AS ride_name,
                 p.park_id,
                 p.name AS park_name,
-                ROUND(SUM(
-                    COALESCE(rds.avg_wait_time, 0) *
-                    COALESCE(rds.operating_hours_minutes, 0) / 60.0
-                ) / 60.0, 2) AS cumulative_wait_hours,
                 ROUND(AVG(rds.avg_wait_time), 0) AS avg_wait_time,
+                MAX(rds.peak_wait_time) AS peak_wait_time,
                 COUNT(rds.stat_id) AS days_with_data
             FROM rides r
             INNER JOIN parks p ON r.park_id = p.park_id
@@ -175,7 +183,7 @@ class LongestWaitTimesQuery:
               AND p.is_active = TRUE
               {filter_clause}
             GROUP BY r.ride_id, r.name, p.park_id, p.name
-            ORDER BY cumulative_wait_hours DESC
+            ORDER BY avg_wait_time DESC
             LIMIT :limit
         """)
 
@@ -198,21 +206,21 @@ class LongestWaitTimesQuery:
         limit: int = 10,
     ) -> List[Dict[str, Any]]:
         """
-        Get parks ranked by cumulative wait-hours (sum of all rides).
+        Get parks ranked by average wait time.
 
         Args:
-            period: 'today', '7days', or '30days'
+            period: 'today', 'last_week', or 'last_month'
             filter_disney_universal: Only Disney/Universal parks
             limit: Maximum results (default 10)
 
         Returns:
-            List of parks with cumulative wait-hours
+            List of parks with average wait time (ranked highest first)
         """
         if period == 'today':
             return self._get_parks_today(filter_disney_universal, limit)
-        elif period == '7days':
+        elif period == 'last_week':
             return self._get_parks_daily_aggregate(7, filter_disney_universal, limit)
-        else:  # 30days
+        else:  # last_month
             return self._get_parks_daily_aggregate(30, filter_disney_universal, limit)
 
     def _get_parks_today(
@@ -223,7 +231,8 @@ class LongestWaitTimesQuery:
         """
         Get park-level wait time rankings from TODAY (snapshot data).
 
-        Sorted by avg_wait_time (not cumulative hours - that just shows parks with most rides).
+        Sorted by avg_wait_time to match the Wait Times table.
+        Uses park_appears_open for consistency with other queries.
         Uses CTE-based query for performance on large snapshot tables.
         """
         start_utc, now_utc = get_today_range_to_now_utc()
@@ -231,6 +240,9 @@ class LongestWaitTimesQuery:
         filter_clause = ""
         if filter_disney_universal:
             filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"
+
+        # Use centralized helper for park open check
+        park_open = ParkStatusSQL.park_appears_open_filter("pas")
 
         sql = text(f"""
             WITH active_rides AS (
@@ -245,6 +257,7 @@ class LongestWaitTimesQuery:
             ),
             wait_time_snapshots AS (
                 -- PERFORMANCE: Only select snapshots with wait times for active rides
+                -- Uses park_appears_open for consistency with Wait Times table
                 SELECT
                     ar.park_id,
                     ar.park_name,
@@ -254,10 +267,13 @@ class LongestWaitTimesQuery:
                     rss.wait_time
                 FROM ride_status_snapshots rss
                 INNER JOIN active_rides ar ON rss.ride_id = ar.ride_id
+                INNER JOIN park_activity_snapshots pas
+                    ON ar.park_id = pas.park_id
+                    AND pas.recorded_at = rss.recorded_at
                 WHERE rss.recorded_at >= :start_utc
                   AND rss.recorded_at <= :now_utc
                   AND rss.wait_time > 0
-                  AND rss.computed_is_open = TRUE
+                  AND {park_open}
             )
             SELECT
                 park_id,

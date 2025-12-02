@@ -146,12 +146,24 @@ class RideStatusSQL:
     MIN_OPERATING_SNAPSHOTS_OTHER_PARKS = 6
 
     @staticmethod
-    def has_operated_subquery(ride_id_expr: str, start_param: str = ":start_utc", end_param: str = ":end_utc") -> str:
+    def has_operated_subquery(
+        ride_id_expr: str,
+        park_id_expr: str = None,
+        start_param: str = ":start_utc",
+        end_param: str = ":end_utc"
+    ) -> str:
         """
         Get SQL EXISTS subquery to check if a ride has operated during a period.
 
         SINGLE SOURCE OF TRUTH: This determines if a ride is a "breakdown" vs "seasonal closure".
         A ride that has NEVER operated during the period is a seasonal closure, not a breakdown.
+
+        CRITICAL RULE: A ride can only be considered "operated" if:
+        1. The ride had status='OPERATING' or computed_is_open=TRUE
+        2. AND the park was open at that time (park_appears_open=TRUE)
+
+        If park_id_expr is provided, this enforces the park-open check.
+        If not provided (legacy mode), only ride status is checked.
 
         SQLAlchemy equivalent: StatusExpressions.has_operated_today_subquery()
         in database/queries/builders/expressions.py
@@ -162,11 +174,10 @@ class RideStatusSQL:
         2. Exclude seasonal closures from downtime rankings table
         3. Ensure panel count matches table count for DOWN rides
 
-        A ride is considered to have operated if it had at least one snapshot
-        with status='OPERATING' or computed_is_open=TRUE.
-
         Args:
             ride_id_expr: Expression for the ride_id to check (e.g., "r.ride_id")
+            park_id_expr: Expression for the park_id (e.g., "r.park_id"). If provided,
+                         enforces that park must be open for ride to count as operated.
             start_param: SQL parameter name for start time
             end_param: SQL parameter name for end time
 
@@ -174,17 +185,33 @@ class RideStatusSQL:
             SQL EXISTS clause that is TRUE if ride has operated during period
 
         Example:
-            # Only count downtime for rides that have operated today
-            has_operated = RideStatusSQL.has_operated_subquery("r.ride_id")
+            # Only count downtime for rides that have operated today (with park check)
+            has_operated = RideStatusSQL.has_operated_subquery("r.ride_id", "r.park_id")
             query = f"... AND {has_operated} ..."
         """
-        return f"""EXISTS (
-            SELECT 1 FROM ride_status_snapshots rss_op
-            WHERE rss_op.ride_id = {ride_id_expr}
-            AND rss_op.recorded_at >= {start_param}
-            AND rss_op.recorded_at < {end_param}
-            AND (rss_op.status = 'OPERATING' OR (rss_op.status IS NULL AND rss_op.computed_is_open = TRUE))
-        )"""
+        if park_id_expr:
+            # CORRECT: Check both ride status AND park status
+            return f"""EXISTS (
+                SELECT 1 FROM ride_status_snapshots rss_op
+                INNER JOIN park_activity_snapshots pas_op
+                    ON pas_op.park_id = {park_id_expr}
+                    AND pas_op.recorded_at = rss_op.recorded_at
+                WHERE rss_op.ride_id = {ride_id_expr}
+                AND rss_op.recorded_at >= {start_param}
+                AND rss_op.recorded_at < {end_param}
+                AND (rss_op.status = 'OPERATING' OR (rss_op.status IS NULL AND rss_op.computed_is_open = TRUE))
+                AND pas_op.park_appears_open = TRUE
+            )"""
+        else:
+            # Legacy mode (backwards compatibility) - only checks ride status
+            # WARNING: This does not check if park was open!
+            return f"""EXISTS (
+                SELECT 1 FROM ride_status_snapshots rss_op
+                WHERE rss_op.ride_id = {ride_id_expr}
+                AND rss_op.recorded_at >= {start_param}
+                AND rss_op.recorded_at < {end_param}
+                AND (rss_op.status = 'OPERATING' OR (rss_op.status IS NULL AND rss_op.computed_is_open = TRUE))
+            )"""
 
     @staticmethod
     def has_operated_minimum_subquery(
@@ -275,6 +302,70 @@ class RideStatusSQL:
                         AND (rss_op.status = 'OPERATING' OR (rss_op.status IS NULL AND rss_op.computed_is_open = TRUE))
                     )
             END
+        )"""
+
+    @staticmethod
+    def rides_that_operated_cte(
+        start_param: str = ":start_utc",
+        end_param: str = ":end_utc",
+        filter_clause: str = "",
+        cte_name: str = "rides_that_operated"
+    ) -> str:
+        """
+        Get SQL CTE for rides that have operated during a period.
+
+        SINGLE SOURCE OF TRUTH for determining which rides should be included
+        in downtime calculations. This CTE enforces the CRITICAL RULE:
+
+        A ride has "operated" if and only if:
+        1. The ride had at least one snapshot with status='OPERATING' or computed_is_open=TRUE
+        2. AND the park was open at that time (park_appears_open=TRUE)
+
+        IMPORTANT: If a park is closed (park_appears_open=FALSE), ALL ride statuses
+        are ignored. Rides cannot be considered "operating" if the park is closed,
+        regardless of what the ride status API reports.
+
+        This prevents false positives from:
+        - Seasonally closed parks with stale/bogus ride status data
+        - Parks with incorrect schedule data
+        - API glitches reporting rides as open when park is closed
+
+        Args:
+            start_param: SQL parameter name for start time
+            end_param: SQL parameter name for end time
+            filter_clause: Optional additional WHERE clause (e.g., "AND p.is_disney = TRUE")
+            cte_name: Name for the CTE (default "rides_that_operated")
+
+        Returns:
+            SQL CTE definition (without WITH keyword) that can be used in queries
+
+        Example:
+            cte = RideStatusSQL.rides_that_operated_cte()
+            query = f'''
+                WITH {cte}
+                SELECT ...
+                FROM rides r
+                LEFT JOIN rides_that_operated rto ON r.ride_id = rto.ride_id
+                WHERE rto.ride_id IS NOT NULL  -- Only rides that operated
+            '''
+        """
+        return f"""{cte_name} AS (
+            -- SINGLE SOURCE OF TRUTH: Rides that operated while park was open
+            -- CRITICAL: Both ride status AND park status must indicate "open"
+            SELECT DISTINCT r.ride_id, r.park_id
+            FROM rides r
+            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
+                AND pas.recorded_at = rss.recorded_at
+            INNER JOIN parks p ON r.park_id = p.park_id
+            WHERE rss.recorded_at >= {start_param}
+                AND rss.recorded_at < {end_param}
+                AND (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = TRUE))
+                AND pas.park_appears_open = TRUE
+                AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+                AND p.is_active = TRUE
+                {filter_clause}
         )"""
 
     @staticmethod

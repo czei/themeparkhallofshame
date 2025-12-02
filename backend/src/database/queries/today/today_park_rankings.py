@@ -89,16 +89,23 @@ class TodayParkRankingsQuery:
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
         park_open_inner = ParkStatusSQL.park_appears_open_filter("pas_inner")
         park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
-        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p")
-        has_operated_inner = RideStatusSQL.has_operated_for_park_type("r_inner.ride_id", "p_inner")
+
+        # Use centralized CTE for rides that operated (includes park-open check)
+        rides_operated_cte = RideStatusSQL.rides_that_operated_cte(
+            start_param=":start_utc",
+            end_param=":now_utc",
+            filter_clause=filter_clause
+        )
 
         # Determine sort column
         sort_column = "shame_score" if sort_by == "shame_score" else "total_downtime_hours"
 
         query = text(f"""
             WITH
+            {rides_operated_cte},
             park_weights AS (
                 -- Total tier weight for each park (for shame score normalization)
+                -- Only count rides that have operated
                 SELECT
                     p.park_id,
                     SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
@@ -107,6 +114,7 @@ class TodayParkRankingsQuery:
                     AND r.is_active = TRUE AND r.category = 'ATTRACTION'
                 LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
                 WHERE p.is_active = TRUE
+                    AND r.ride_id IN (SELECT ride_id FROM rides_that_operated)
                     {filter_clause}
                 GROUP BY p.park_id
             ),
@@ -124,6 +132,7 @@ class TodayParkRankingsQuery:
                 WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :now_utc
                     AND p.is_active = TRUE
                     AND {park_open}
+                    AND r.ride_id IN (SELECT ride_id FROM rides_that_operated)
                     {filter_clause}
                 GROUP BY p.park_id
             ),
@@ -135,7 +144,7 @@ class TodayParkRankingsQuery:
                     rss_inner.recorded_at,
                     COALESCE(
                         SUM(CASE
-                            WHEN {is_down_inner} AND {park_open_inner} AND {has_operated_inner}
+                            WHEN {is_down_inner} AND {park_open_inner} AND rto_inner.ride_id IS NOT NULL
                             THEN COALESCE(rc_inner.tier_weight, 2)
                             ELSE 0
                         END) / NULLIF(pw_inner.total_park_weight, 0) * 10,
@@ -149,9 +158,11 @@ class TodayParkRankingsQuery:
                 INNER JOIN park_activity_snapshots pas_inner ON p_inner.park_id = pas_inner.park_id
                     AND pas_inner.recorded_at = rss_inner.recorded_at
                 INNER JOIN park_weights pw_inner ON p_inner.park_id = pw_inner.park_id
+                LEFT JOIN rides_that_operated rto_inner ON r_inner.ride_id = rto_inner.ride_id
                 WHERE rss_inner.recorded_at >= :start_utc AND rss_inner.recorded_at < :now_utc
                     AND p_inner.is_active = TRUE
                     AND {park_open_inner}
+                    AND r_inner.ride_id IN (SELECT ride_id FROM rides_that_operated)
                     {filter_clause_inner}
                 GROUP BY p_inner.park_id, rss_inner.recorded_at, pw_inner.total_park_weight
             )
@@ -164,7 +175,7 @@ class TodayParkRankingsQuery:
                 -- Total downtime hours (for reference)
                 ROUND(
                     SUM(CASE
-                        WHEN {is_down} AND {park_open} AND {has_operated}
+                        WHEN {is_down} AND {park_open} AND rto.ride_id IS NOT NULL
                         THEN {self.SNAPSHOT_INTERVAL_MINUTES} / 60.0
                         ELSE 0
                     END),
@@ -174,7 +185,7 @@ class TodayParkRankingsQuery:
                 -- Weighted downtime hours (for reference)
                 ROUND(
                     SUM(CASE
-                        WHEN {is_down} AND {park_open} AND {has_operated}
+                        WHEN {is_down} AND {park_open} AND rto.ride_id IS NOT NULL
                         THEN ({self.SNAPSHOT_INTERVAL_MINUTES} / 60.0) * COALESCE(rc.tier_weight, 2)
                         ELSE 0
                     END),
@@ -192,7 +203,7 @@ class TodayParkRankingsQuery:
                 ROUND(
                     100.0 - (
                         SUM(CASE
-                            WHEN {is_down} AND {park_open} AND {has_operated}
+                            WHEN {is_down} AND {park_open} AND rto.ride_id IS NOT NULL
                             THEN 1
                             ELSE 0
                         END) * 100.0 / NULLIF(pos.total_snapshots, 0)
@@ -202,7 +213,7 @@ class TodayParkRankingsQuery:
 
                 -- Count of DISTINCT rides that were down at some point today
                 COUNT(DISTINCT CASE
-                    WHEN {is_down} AND {park_open} AND {has_operated}
+                    WHEN {is_down} AND {park_open} AND rto.ride_id IS NOT NULL
                     THEN r.ride_id
                 END) AS rides_affected,
 
@@ -218,6 +229,7 @@ class TodayParkRankingsQuery:
                 AND pas.recorded_at = rss.recorded_at
             INNER JOIN park_weights pw ON p.park_id = pw.park_id
             LEFT JOIN park_operating_snapshots pos ON p.park_id = pos.park_id
+            LEFT JOIN rides_that_operated rto ON r.ride_id = rto.ride_id
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :now_utc
                 AND p.is_active = TRUE
                 {filter_clause}

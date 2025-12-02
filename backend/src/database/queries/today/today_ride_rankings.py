@@ -80,16 +80,16 @@ class TodayRideRankingsQuery:
         current_is_open_sq = RideStatusSQL.current_is_open_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
         park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
 
+        # Use centralized CTE for rides that operated (includes park-open check)
+        rides_operated_cte = RideStatusSQL.rides_that_operated_cte(
+            start_param=":start_utc",
+            end_param=":now_utc",
+            filter_clause=filter_clause
+        )
+
         query = text(f"""
             WITH
-            rides_that_operated AS (
-                -- Rides that operated at least once today (to exclude scheduled closures)
-                SELECT DISTINCT r.ride_id
-                FROM rides r
-                INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-                WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :now_utc
-                    AND rss.computed_is_open = TRUE
-            ),
+            {rides_operated_cte},
             operating_snapshots AS (
                 -- Count total snapshots when park was open (for uptime calculation)
                 SELECT

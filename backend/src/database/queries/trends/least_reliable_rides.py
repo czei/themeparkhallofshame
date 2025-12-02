@@ -91,24 +91,20 @@ class LeastReliableRidesQuery:
             filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"
 
         # Use centralized helpers for consistent status checks
-        has_operated = RideStatusSQL.has_operated_subquery("r.ride_id")
         # PARK-TYPE AWARE: Disney/Universal only counts DOWN (not CLOSED)
         is_down = RideStatusSQL.is_down("rss", parks_alias="p")
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
         is_operating = RideStatusSQL.is_operating("rss")
 
+        # Use centralized CTE for rides that operated (includes park-open check)
+        rides_operated_cte = RideStatusSQL.rides_that_operated_cte(
+            start_param=":start_utc",
+            end_param=":now_utc",
+            filter_clause=filter_clause
+        )
+
         sql = text(f"""
-            WITH rides_that_operated AS (
-                -- CORRECTNESS: Only include rides that have operated today
-                SELECT DISTINCT r.ride_id
-                FROM rides r
-                INNER JOIN parks p ON r.park_id = p.park_id
-                WHERE r.is_active = TRUE
-                  AND r.category = 'ATTRACTION'
-                  AND p.is_active = TRUE
-                  AND {has_operated}
-                  {filter_clause}
-            ),
+            WITH {rides_operated_cte},
             downtime_snapshots AS (
                 -- PERFORMANCE: Pre-filter to only down snapshots for operated rides
                 SELECT
@@ -253,24 +249,20 @@ class LeastReliableRidesQuery:
             park_filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"
 
         # Use centralized helpers for consistent status checks
-        has_operated = RideStatusSQL.has_operated_subquery("r.ride_id")
         # PARK-TYPE AWARE: Disney/Universal only counts DOWN (not CLOSED)
         is_down = RideStatusSQL.is_down("rss", parks_alias="p")
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
         is_operating = RideStatusSQL.is_operating("rss")
 
+        # Use centralized CTE for rides that operated (includes park-open check)
+        rides_operated_cte = RideStatusSQL.rides_that_operated_cte(
+            start_param=":start_utc",
+            end_param=":now_utc",
+            filter_clause=filter_clause
+        )
+
         sql = text(f"""
-            WITH rides_that_operated AS (
-                -- CORRECTNESS: Only include rides that have operated today
-                SELECT DISTINCT r.ride_id, r.park_id
-                FROM rides r
-                INNER JOIN parks p ON r.park_id = p.park_id
-                WHERE r.is_active = TRUE
-                  AND r.category = 'ATTRACTION'
-                  AND p.is_active = TRUE
-                  AND {has_operated}
-                  {filter_clause}
-            ),
+            WITH {rides_operated_cte},
             park_weights AS (
                 -- Calculate total weight for each park (for shame score denominator)
                 SELECT

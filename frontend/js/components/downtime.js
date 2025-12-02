@@ -8,7 +8,7 @@ class Downtime {
         this.apiClient = apiClient;
         this.container = document.getElementById(containerId);
         this.state = {
-            period: '7days',  // Default to 7 days for more meaningful data (especially early in UTC day)
+            period: 'last_week',  // Default to last week for calendar-based reporting
             filter: initialFilter,
             entityType: 'parks',  // 'parks' or 'rides'
             parkLimit: 50,
@@ -112,8 +112,8 @@ class Downtime {
         const periodLabels = {
             'live': 'Live',
             'today': 'Today',
-            '7days': '7 Day',
-            '30days': '30 Day'
+            'last_week': 'Last Week',
+            'last_month': 'Last Month'
         };
         return `${periodLabels[this.state.period] || ''} ${baseTitle}`;
     }

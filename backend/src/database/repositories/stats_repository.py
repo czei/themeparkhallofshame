@@ -1483,7 +1483,198 @@ class StatsRepository:
             "shame_score": shame_score,
             "park_is_open": park_is_open,
             "breakdown_type": "today",
-            "explanation": "Cumulative downtime since midnight Pacific. Shows all rides that experienced any downtime today.",
+            "explanation": "Average shame score during operating hours today. Shows all rides that experienced downtime while the park was open.",
+            "tier_weights": {
+                1: 5,  # Tier 1 (Flagship) = 5x weight
+                2: 2,  # Tier 2 (Standard) = 2x weight
+                3: 1   # Tier 3 (Minor) = 1x weight
+            }
+        }
+
+    def get_park_weekly_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
+        """
+        Get AVERAGE shame score breakdown for a park for the previous calendar week.
+
+        Returns the average of daily shame scores (not cumulative).
+        This matches the LAST_WEEK period in the rankings table.
+
+        Args:
+            park_id: Park ID
+
+        Returns:
+            Dictionary with:
+            - rides_with_downtime: List of rides that had downtime during the week
+            - shame_score: Average of daily shame scores
+            - period_label: Human-readable date range (e.g., "Nov 24-30, 2024")
+            - breakdown_type: "last_week"
+        """
+        from utils.timezone import get_last_week_date_range
+        return self._get_historical_shame_breakdown(
+            park_id=park_id,
+            period_type="last_week",
+            get_date_range=get_last_week_date_range
+        )
+
+    def get_park_monthly_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
+        """
+        Get AVERAGE shame score breakdown for a park for the previous calendar month.
+
+        Returns the average of daily shame scores (not cumulative).
+        This matches the LAST_MONTH period in the rankings table.
+
+        Args:
+            park_id: Park ID
+
+        Returns:
+            Dictionary with:
+            - rides_with_downtime: List of rides that had downtime during the month
+            - shame_score: Average of daily shame scores
+            - period_label: Human-readable date range (e.g., "November 2024")
+            - breakdown_type: "last_month"
+        """
+        from utils.timezone import get_last_month_date_range
+        return self._get_historical_shame_breakdown(
+            park_id=park_id,
+            period_type="last_month",
+            get_date_range=get_last_month_date_range
+        )
+
+    def _get_historical_shame_breakdown(
+        self,
+        park_id: int,
+        period_type: str,
+        get_date_range
+    ) -> Dict[str, Any]:
+        """
+        Internal method to get historical shame score breakdown for a park.
+
+        Used by get_park_weekly_shame_breakdown and get_park_monthly_shame_breakdown.
+
+        The shame score is calculated as the AVERAGE of daily shame scores:
+        - For each day: daily_shame = (daily_weighted_downtime / total_park_weight) × 10
+        - Final score: average of all daily shame scores
+
+        This makes historical periods comparable to LIVE/TODAY (same 0-100 scale).
+
+        Args:
+            park_id: Park ID
+            period_type: "last_week" or "last_month"
+            get_date_range: Function that returns (start_date, end_date, period_label)
+
+        Returns:
+            Dictionary with breakdown data
+        """
+        start_date, end_date, period_label = get_date_range()
+
+        # Get total park weight (all active rides)
+        weight_query = text("""
+            SELECT SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
+            FROM rides r
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            WHERE r.park_id = :park_id
+                AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+        """)
+        weight_result = self.conn.execute(weight_query, {"park_id": park_id})
+        weight_row = weight_result.fetchone()
+        total_park_weight = float(weight_row.total_park_weight) if weight_row and weight_row.total_park_weight else 0
+
+        # Get rides with downtime during the period with per-ride stats
+        # Uses ride_daily_stats which has pre-aggregated daily downtime data
+        rides_query = text("""
+            SELECT
+                r.ride_id,
+                r.name AS ride_name,
+                COALESCE(rc.tier, 2) AS tier,
+                COALESCE(rc.tier_weight, 2) AS tier_weight,
+                -- Total downtime across the period
+                ROUND(SUM(rds.downtime_minutes) / 60.0, 2) AS downtime_hours,
+                -- Weighted downtime
+                ROUND(SUM(rds.downtime_minutes / 60.0 * COALESCE(rc.tier_weight, 2)), 2) AS weighted_downtime_hours,
+                -- Number of days with downtime
+                COUNT(DISTINCT rds.stat_date) AS days_with_downtime
+            FROM rides r
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            INNER JOIN ride_daily_stats rds ON r.ride_id = rds.ride_id
+            WHERE r.park_id = :park_id
+                AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+                AND rds.stat_date >= :start_date AND rds.stat_date <= :end_date
+                AND rds.downtime_minutes > 0
+            GROUP BY r.ride_id, r.name, rc.tier, rc.tier_weight
+            ORDER BY weighted_downtime_hours DESC
+        """)
+
+        rides_result = self.conn.execute(rides_query, {
+            "park_id": park_id,
+            "start_date": start_date,
+            "end_date": end_date
+        })
+
+        rides_with_downtime = []
+        total_downtime_hours = 0
+        total_weighted_downtime = 0
+        for row in rides_result:
+            ride_data = {
+                "ride_id": row.ride_id,
+                "ride_name": row.ride_name,
+                "tier": row.tier,
+                "tier_weight": float(row.tier_weight),
+                "downtime_hours": float(row.downtime_hours),
+                "weighted_downtime_hours": float(row.weighted_downtime_hours),
+                "weighted_contribution": float(row.weighted_downtime_hours),  # Alias for frontend
+                "days_with_downtime": row.days_with_downtime
+            }
+            rides_with_downtime.append(ride_data)
+            total_downtime_hours += float(row.downtime_hours)
+            total_weighted_downtime += float(row.weighted_downtime_hours)
+
+        # Calculate AVERAGE daily shame score (consistent with rankings)
+        # First, get daily shame scores for this park during the period
+        daily_shame_query = text("""
+            WITH daily_weighted_downtime AS (
+                SELECT
+                    rds.stat_date,
+                    SUM(rds.downtime_minutes / 60.0 * COALESCE(rc.tier_weight, 2)) AS weighted_downtime_hours
+                FROM ride_daily_stats rds
+                INNER JOIN rides r ON rds.ride_id = r.ride_id
+                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                WHERE r.park_id = :park_id
+                    AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'
+                    AND rds.stat_date >= :start_date AND rds.stat_date <= :end_date
+                GROUP BY rds.stat_date
+            )
+            SELECT
+                AVG(
+                    COALESCE((weighted_downtime_hours / NULLIF(:total_park_weight, 0)) * 10, 0)
+                ) AS avg_daily_shame_score
+            FROM daily_weighted_downtime
+        """)
+
+        shame_result = self.conn.execute(daily_shame_query, {
+            "park_id": park_id,
+            "start_date": start_date,
+            "end_date": end_date,
+            "total_park_weight": total_park_weight
+        })
+        shame_row = shame_result.fetchone()
+        shame_score = round(float(shame_row.avg_daily_shame_score or 0), 1)
+
+        # Count operating days in the period
+        days_in_period = (end_date - start_date).days + 1
+
+        return {
+            "rides_with_downtime": rides_with_downtime,
+            "rides_affected_count": len(rides_with_downtime),
+            "total_park_weight": total_park_weight,
+            "total_downtime_hours": round(total_downtime_hours, 2),
+            "weighted_downtime_hours": round(total_weighted_downtime, 2),
+            "shame_score": shame_score,
+            "period_label": period_label,
+            "days_in_period": days_in_period,
+            "breakdown_type": period_type,
+            "explanation": f"Average daily shame score for {period_label}. Shows all rides that experienced downtime during this period.",
             "tier_weights": {
                 1: 5,  # Tier 1 (Flagship) = 5x weight
                 2: 2,  # Tier 2 (Standard) = 2x weight

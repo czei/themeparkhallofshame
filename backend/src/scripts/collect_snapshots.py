@@ -230,15 +230,14 @@ class SnapshotCollector:
         rides_closed = sum(1 for r in live_data if r.status in ('CLOSED', 'REFURBISHMENT'))
 
         # Use schedule-based park open detection (SINGLE SOURCE OF TRUTH)
-        # Falls back to heuristic if no schedule data available
+        # If no schedule, park is CLOSED - we don't trust API status alone
         park_appears_open = schedule_repo.is_park_open_now(park_id)
-        if not park_appears_open:
-            # Fallback: if no schedule data, use heuristic based on operating rides
-            # This handles parks without schedule data yet
-            if not schedule_repo.has_recent_schedule(park_id, max_age_hours=48):
-                min_rides_for_open = max(3, total_rides // 2)
-                park_appears_open = rides_operating >= min_rides_for_open
-                logger.debug(f"  Using heuristic for {park_name} (no schedule data)")
+        if not park_appears_open and not schedule_repo.has_recent_schedule(park_id, max_age_hours=48):
+            # No schedule data available - log warning but keep park as CLOSED
+            # We can't trust API "OPERATING" status because some parks report
+            # rides as OPERATING even when the park is closed for the season
+            logger.warning(f"  No schedule data for {park_name} - treating as CLOSED")
+            park_appears_open = False
 
         # Calculate wait time statistics
         open_wait_times = [r.wait_time for r in live_data
@@ -514,14 +513,12 @@ class SnapshotCollector:
             rides_closed = total_rides - rides_open
 
             # Use schedule-based park open detection (SINGLE SOURCE OF TRUTH)
-            # Falls back to heuristic if no schedule data available
+            # If no schedule, park is CLOSED - we don't trust API status alone
             park_appears_open = schedule_repo.is_park_open_now(park_id)
-            if not park_appears_open:
-                # Fallback: if no schedule data, use heuristic based on wait times
-                # Queue-Times parks don't have ThemeParks.wiki schedule data, so this is the norm
-                if not schedule_repo.has_recent_schedule(park_id, max_age_hours=48):
-                    min_rides_for_open = max(3, total_rides // 2)
-                    park_appears_open = rides_with_wait >= min_rides_for_open
+            if not park_appears_open and not schedule_repo.has_recent_schedule(park_id, max_age_hours=48):
+                # No schedule data available - log warning but keep park as CLOSED
+                logger.warning(f"  No schedule data for {park_name} - treating as CLOSED")
+                park_appears_open = False
 
             # Calculate wait time statistics for open rides
             open_wait_times = [r.get('wait_time', 0) for r in rides_data

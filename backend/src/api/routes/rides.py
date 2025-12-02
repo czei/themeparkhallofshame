@@ -60,7 +60,7 @@ def get_live_status_summary():
     Returns:
         JSON response with status counts
 
-    Performance: <50ms
+    Performance: ~2.5s uncached, ~8ms cached
     """
     filter_type = request.args.get('filter', 'all-parks')
     park_id = request.args.get('park_id', type=int)
@@ -73,6 +73,18 @@ def get_live_status_summary():
         }), 400
 
     try:
+        # Generate cache key
+        cache_key = generate_cache_key(
+            "live_status_summary",
+            filter=filter_type,
+            park_id=str(park_id) if park_id else "none"
+        )
+        cache = get_query_cache()
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"Cache HIT for live status summary: filter={filter_type}")
+            return jsonify(cached_result), 200
+
         with get_db_connection() as conn:
             # See: database/queries/live/status_summary.py
             query = StatusSummaryQuery(conn)
@@ -94,7 +106,9 @@ def get_live_status_summary():
             if park_id:
                 response["park_id"] = park_id
 
-            logger.info(f"Live status summary requested: filter={filter_type}, park_id={park_id}")
+            # Cache the result (5-minute TTL)
+            cache.set(cache_key, response)
+            logger.info(f"Cache STORE for live status summary: filter={filter_type}")
 
             return jsonify(response), 200
 

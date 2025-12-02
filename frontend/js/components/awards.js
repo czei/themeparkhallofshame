@@ -162,33 +162,6 @@ class Awards {
             <div class="awards-view">
                 <div class="awards-grid-2x2">
                     ${this.renderAwardCard({
-                        type: 'wait-park',
-                        headerTitle: 'Longest Wait Time \u00b7 Park',
-                        headerSubtitle: 'Park with highest average wait across all rides',
-                        badgeText: 'WAIT TIME AWARD',
-                        badgeIcon: '\u23f1',
-                        winner: this.state.longestWaitPark,
-                        winnerName: this.state.longestWaitPark?.park_name,
-                        statText: this.state.longestWaitPark
-                            ? `${Math.round(this.state.longestWaitPark.avg_wait_time || 0)} min average wait`
-                            : null
-                    })}
-
-                    ${this.renderAwardCard({
-                        type: 'wait-ride',
-                        headerTitle: 'Longest Wait Time \u00b7 Ride',
-                        headerSubtitle: 'Individual ride with highest average queue',
-                        badgeText: 'WAIT TIME AWARD',
-                        badgeIcon: '\ud83c\udfa2',
-                        winner: this.state.longestWaitRide,
-                        winnerName: this.state.longestWaitRide?.ride_name,
-                        parkName: this.state.longestWaitRide?.park_name,
-                        statText: this.state.longestWaitRide
-                            ? `${Math.round(this.state.longestWaitRide.avg_wait_time || 0)} min average wait`
-                            : null
-                    })}
-
-                    ${this.renderAwardCard({
                         type: 'reliable-park',
                         headerTitle: 'Least Reliable \u00b7 Park',
                         headerSubtitle: 'Park with highest cumulative downtime / shame score',
@@ -212,6 +185,33 @@ class Awards {
                         parkName: this.state.leastReliableRide?.park_name,
                         statText: this.state.leastReliableRide
                             ? `${Number(this.state.leastReliableRide.downtime_hours || 0).toFixed(1)}h downtime \u00b7 ${this.state.leastReliableRide.downtime_incidents || 0} outages`
+                            : null
+                    })}
+
+                    ${this.renderAwardCard({
+                        type: 'wait-park',
+                        headerTitle: 'Longest Wait Time \u00b7 Park',
+                        headerSubtitle: 'Park with highest average wait across all rides',
+                        badgeText: 'WAIT TIME AWARD',
+                        badgeIcon: '\u23f1',
+                        winner: this.state.longestWaitPark,
+                        winnerName: this.state.longestWaitPark?.park_name,
+                        statText: this.state.longestWaitPark
+                            ? `${Math.round(this.state.longestWaitPark.avg_wait_time || 0)} min average wait`
+                            : null
+                    })}
+
+                    ${this.renderAwardCard({
+                        type: 'wait-ride',
+                        headerTitle: 'Longest Wait Time \u00b7 Ride',
+                        headerSubtitle: 'Individual ride with highest average queue',
+                        badgeText: 'WAIT TIME AWARD',
+                        badgeIcon: '\ud83c\udfa2',
+                        winner: this.state.longestWaitRide,
+                        winnerName: this.state.longestWaitRide?.ride_name,
+                        parkName: this.state.longestWaitRide?.park_name,
+                        statText: this.state.longestWaitRide
+                            ? `${Math.round(this.state.longestWaitRide.avg_wait_time || 0)} min average wait`
                             : null
                     })}
                 </div>

@@ -40,6 +40,7 @@ from database.queries.charts import (
 
 from utils.logger import logger
 from utils.timezone import get_today_pacific
+from utils.cache import get_query_cache, generate_cache_key
 
 # Create Blueprint
 trends_bp = Blueprint('trends', __name__)
@@ -414,20 +415,33 @@ def get_longest_wait_times():
 
         filter_disney_universal = (park_filter == 'disney-universal')
 
-        with get_db_connection() as conn:
-            query = LongestWaitTimesQuery(conn)
-            if entity == 'parks':
-                results = query.get_park_rankings(
-                    period=period,
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
-            else:
-                results = query.get_rankings(
-                    period=period,
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
+        # PERFORMANCE: Use 5-minute cache for expensive aggregation queries
+        cache = get_query_cache()
+        cache_key = generate_cache_key(
+            "longest_wait_times",
+            period=period,
+            filter=park_filter,
+            entity=entity,
+            limit=str(limit)
+        )
+
+        def compute_results():
+            with get_db_connection() as conn:
+                query = LongestWaitTimesQuery(conn)
+                if entity == 'parks':
+                    return query.get_park_rankings(
+                        period=period,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                else:
+                    return query.get_rankings(
+                        period=period,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+
+        results = cache.get_or_compute(key=cache_key, compute_fn=compute_results)
 
         # Add rank to results
         ranked_results = []
@@ -442,6 +456,7 @@ def get_longest_wait_times():
             "entity": entity,
             "count": len(ranked_results),
             "data": ranked_results,
+            "cached": True,
             "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }), 200
@@ -514,20 +529,33 @@ def get_least_reliable():
 
         filter_disney_universal = (park_filter == 'disney-universal')
 
-        with get_db_connection() as conn:
-            query = LeastReliableRidesQuery(conn)
-            if entity == 'parks':
-                results = query.get_park_rankings(
-                    period=period,
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
-            else:
-                results = query.get_rankings(
-                    period=period,
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
+        # PERFORMANCE: Use 5-minute cache for expensive aggregation queries
+        cache = get_query_cache()
+        cache_key = generate_cache_key(
+            "least_reliable",
+            period=period,
+            filter=park_filter,
+            entity=entity,
+            limit=str(limit)
+        )
+
+        def compute_results():
+            with get_db_connection() as conn:
+                query = LeastReliableRidesQuery(conn)
+                if entity == 'parks':
+                    return query.get_park_rankings(
+                        period=period,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                else:
+                    return query.get_rankings(
+                        period=period,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+
+        results = cache.get_or_compute(key=cache_key, compute_fn=compute_results)
 
         # Add rank to results
         ranked_results = []
@@ -542,6 +570,7 @@ def get_least_reliable():
             "entity": entity,
             "count": len(ranked_results),
             "data": ranked_results,
+            "cached": True,
             "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }), 200

@@ -32,6 +32,9 @@ class Awards {
 
     /**
      * Fetch all 4 award winners
+     *
+     * PERFORMANCE: Sequential calls to avoid overwhelming the server.
+     * With server-side caching (5 min TTL), subsequent requests are instant.
      */
     async fetchAwardsData() {
         this.setState({ loading: true, error: null });
@@ -39,13 +42,12 @@ class Awards {
         try {
             const period = this.state.period;
 
-            // Fetch all 4 categories in parallel (limit=1 for winner only)
-            const [waitPark, waitRide, reliablePark, reliableRide] = await Promise.all([
-                this.apiClient.get('/trends/longest-wait-times', { period, entity: 'parks', filter: 'all-parks', limit: 1 }),
-                this.apiClient.get('/trends/longest-wait-times', { period, entity: 'rides', filter: 'all-parks', limit: 1 }),
-                this.apiClient.get('/trends/least-reliable', { period, entity: 'parks', filter: 'all-parks', limit: 1 }),
-                this.apiClient.get('/trends/least-reliable', { period, entity: 'rides', filter: 'all-parks', limit: 1 })
-            ]);
+            // PERFORMANCE: Sequential calls to reduce server load on cold cache
+            // Each endpoint is cached for 5 minutes, so subsequent calls are instant
+            const waitPark = await this.apiClient.get('/trends/longest-wait-times', { period, entity: 'parks', filter: 'all-parks', limit: 1 });
+            const waitRide = await this.apiClient.get('/trends/longest-wait-times', { period, entity: 'rides', filter: 'all-parks', limit: 1 });
+            const reliablePark = await this.apiClient.get('/trends/least-reliable', { period, entity: 'parks', filter: 'all-parks', limit: 1 });
+            const reliableRide = await this.apiClient.get('/trends/least-reliable', { period, entity: 'rides', filter: 'all-parks', limit: 1 });
 
             this.setState({
                 longestWaitPark: waitPark.success && waitPark.data?.length > 0 ? waitPark.data[0] : null,

@@ -24,6 +24,7 @@ from datetime import date, datetime
 from database.connection import get_db_connection
 from database.repositories.ride_repository import RideRepository
 from database.repositories.stats_repository import StatsRepository
+from utils.cache import get_query_cache, generate_cache_key
 
 # New query imports - each file handles one specific data source
 from database.queries.live import LiveRideRankingsQuery, StatusSummaryQuery
@@ -161,6 +162,20 @@ def get_ride_downtime_rankings():
         }), 400
 
     try:
+        # Generate cache key - all periods are cached (live data only updates every 5 min anyway)
+        cache_key = generate_cache_key(
+            "rides_downtime",
+            period=period,
+            filter=filter_type,
+            limit=str(limit),
+            sort_by=sort_by
+        )
+        cache = get_query_cache()
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"Cache HIT for ride downtime: period={period}, filter={filter_type}")
+            return jsonify(cached_result), 200
+
         with get_db_connection() as conn:
             filter_disney_universal = (filter_type == 'disney-universal')
             stats_repo = StatsRepository(conn)
@@ -225,6 +240,10 @@ def get_ride_downtime_rankings():
 
             logger.info(f"Ride rankings requested: period={period}, filter={filter_type}, results={len(rankings_with_urls)}")
 
+            # Cache the result (5-minute TTL)
+            cache.set(cache_key, response)
+            logger.info(f"Cache STORE for ride downtime: period={period}, filter={filter_type}")
+
             return jsonify(response), 200
 
     except Exception as e:
@@ -281,6 +300,19 @@ def get_ride_wait_times():
         }), 400
 
     try:
+        # Generate cache key - all periods are cached (live data only updates every 5 min anyway)
+        cache_key = generate_cache_key(
+            "rides_waittimes",
+            period=period,
+            filter=filter_type,
+            limit=str(limit)
+        )
+        cache = get_query_cache()
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"Cache HIT for ride waittimes: period={period}, filter={filter_type}")
+            return jsonify(cached_result), 200
+
         with get_db_connection() as conn:
             filter_disney_universal = (filter_type == 'disney-universal')
 
@@ -335,6 +367,10 @@ def get_ride_wait_times():
             }
 
             logger.info(f"Wait times requested: period={period}, filter={filter_type}, results={len(wait_times_with_urls)}")
+
+            # Cache the result (5-minute TTL)
+            cache.set(cache_key, response)
+            logger.info(f"Cache STORE for ride waittimes: period={period}, filter={filter_type}")
 
             return jsonify(response), 200
 

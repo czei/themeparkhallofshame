@@ -99,6 +99,9 @@ class SnapshotCollector:
             # Step 3: Print summary
             self._print_summary()
 
+            # Step 4: Pre-aggregate live rankings for instant API responses
+            self._aggregate_live_rankings()
+
             logger.info("=" * 60)
             logger.info("SNAPSHOT COLLECTION - Complete ✓")
             logger.info("=" * 60)
@@ -731,6 +734,31 @@ class SnapshotCollector:
         logger.info(f"Schedules refreshed: {self.stats.get('schedules_refreshed', 0)}")
         logger.info(f"Stale data issues:   {self.stats.get('stale_data_issues', 0)}")
         logger.info(f"Errors:              {self.stats['errors']}")
+
+    def _aggregate_live_rankings(self):
+        """
+        Pre-aggregate live rankings for instant API responses.
+
+        Runs after snapshot collection to populate park_live_rankings
+        and ride_live_rankings tables. Uses atomic table swap for
+        zero-downtime updates.
+        """
+        try:
+            from scripts.aggregate_live_rankings import LiveRankingsAggregator
+
+            logger.info("")
+            logger.info("Pre-aggregating live rankings...")
+            aggregator = LiveRankingsAggregator()
+            stats = aggregator.run()
+
+            self.stats['parks_aggregated'] = stats.get('parks_aggregated', 0)
+            self.stats['rides_aggregated'] = stats.get('rides_aggregated', 0)
+
+        except Exception as e:
+            logger.error(f"Failed to aggregate live rankings: {e}", exc_info=True)
+            # Don't fail the whole collection if aggregation fails
+            # The API will fall back to the old (possibly stale) cached data
+            self.stats['aggregation_error'] = str(e)
 
 
 def main():

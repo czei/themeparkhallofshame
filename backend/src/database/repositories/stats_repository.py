@@ -3445,6 +3445,201 @@ class StatsRepository:
         })
         return [dict(row._mapping) for row in result.fetchall()]
 
+    # ==========================================================================
+    # PRE-AGGREGATED LIVE RANKINGS (instant response from cached tables)
+    # ==========================================================================
+
+    def get_park_live_rankings_cached(
+        self,
+        filter_disney_universal: bool = False,
+        limit: int = 50,
+        sort_by: str = "shame_score",
+        max_staleness_minutes: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Get park rankings from pre-aggregated cache table.
+
+        Returns instant results (~10ms) instead of computing from snapshots (~7s).
+        Data is refreshed every 10 minutes after snapshot collection.
+
+        Args:
+            filter_disney_universal: If True, only include Disney & Universal parks
+            limit: Maximum number of parks to return
+            sort_by: Column to sort by
+            max_staleness_minutes: Max acceptable data age (returns empty if exceeded)
+
+        Returns:
+            List of parks with pre-computed rankings, or empty list if data is stale
+
+        Raises:
+            None - returns empty list on stale data or missing table
+        """
+        filter_clause = ""
+        if filter_disney_universal:
+            filter_clause = "AND (plr.is_disney = TRUE OR plr.is_universal = TRUE)"
+
+        # Map sort_by to column
+        sort_mapping = {
+            "shame_score": "plr.shame_score DESC",
+            "total_downtime_hours": "plr.total_downtime_hours DESC",
+            "rides_down": "plr.rides_down DESC",
+            "uptime_percentage": "plr.shame_score ASC",  # Lower shame = higher uptime
+        }
+        order_by = sort_mapping.get(sort_by, "plr.shame_score DESC")
+
+        query = text(f"""
+            SELECT
+                plr.park_id,
+                plr.queue_times_id,
+                plr.park_name,
+                plr.location,
+                plr.timezone,
+                plr.is_disney,
+                plr.is_universal,
+                plr.rides_down,
+                plr.total_rides,
+                plr.shame_score,
+                plr.park_is_open,
+                plr.total_downtime_hours,
+                plr.weighted_downtime_hours,
+                plr.total_park_weight,
+                plr.calculated_at,
+                -- Calculate uptime percentage
+                ROUND(100 - (plr.rides_down * 100.0 / NULLIF(plr.total_rides, 0)), 1) as uptime_percentage
+            FROM park_live_rankings plr
+            WHERE plr.calculated_at >= DATE_SUB(NOW(), INTERVAL :max_staleness MINUTE)
+                {filter_clause}
+            ORDER BY {order_by}
+            LIMIT :limit
+        """)
+
+        try:
+            result = self.conn.execute(query, {
+                "limit": limit,
+                "max_staleness": max_staleness_minutes,
+            })
+            rows = [dict(row._mapping) for row in result.fetchall()]
+
+            if not rows:
+                logger.warning("Park live rankings cache is empty or stale")
+
+            return rows
+
+        except Exception as e:
+            logger.error(f"Error reading park_live_rankings cache: {e}")
+            return []
+
+    def get_ride_live_rankings_cached(
+        self,
+        filter_disney_universal: bool = False,
+        limit: int = 100,
+        sort_by: str = "downtime_hours",
+        max_staleness_minutes: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Get ride rankings from pre-aggregated cache table.
+
+        Returns instant results (~10ms) instead of computing from snapshots (~7s).
+        Data is refreshed every 10 minutes after snapshot collection.
+
+        Args:
+            filter_disney_universal: If True, only include Disney & Universal parks
+            limit: Maximum number of rides to return
+            sort_by: Column to sort by
+            max_staleness_minutes: Max acceptable data age (returns empty if exceeded)
+
+        Returns:
+            List of rides with pre-computed rankings, or empty list if data is stale
+        """
+        filter_clause = ""
+        if filter_disney_universal:
+            filter_clause = "AND (rlr.is_disney = TRUE OR rlr.is_universal = TRUE)"
+
+        # Map sort_by to column
+        sort_mapping = {
+            "downtime_hours": "rlr.downtime_hours DESC",
+            "is_down": "rlr.is_down DESC, rlr.downtime_hours DESC",
+            "current_wait_time": "rlr.current_wait_time DESC",
+            "avg_wait_time": "rlr.avg_wait_time DESC",
+        }
+        order_by = sort_mapping.get(sort_by, "rlr.downtime_hours DESC")
+
+        query = text(f"""
+            SELECT
+                rlr.ride_id,
+                rlr.park_id,
+                rlr.queue_times_id,
+                rlr.ride_name,
+                rlr.park_name,
+                rlr.tier,
+                rlr.tier_weight,
+                rlr.category,
+                rlr.is_disney,
+                rlr.is_universal,
+                rlr.is_down,
+                rlr.current_status,
+                rlr.current_wait_time,
+                rlr.last_status_change,
+                rlr.downtime_hours,
+                rlr.downtime_incidents,
+                rlr.avg_wait_time,
+                rlr.max_wait_time,
+                rlr.calculated_at
+            FROM ride_live_rankings rlr
+            WHERE rlr.calculated_at >= DATE_SUB(NOW(), INTERVAL :max_staleness MINUTE)
+                {filter_clause}
+            ORDER BY {order_by}
+            LIMIT :limit
+        """)
+
+        try:
+            result = self.conn.execute(query, {
+                "limit": limit,
+                "max_staleness": max_staleness_minutes,
+            })
+            rows = [dict(row._mapping) for row in result.fetchall()]
+
+            if not rows:
+                logger.warning("Ride live rankings cache is empty or stale")
+
+            return rows
+
+        except Exception as e:
+            logger.error(f"Error reading ride_live_rankings cache: {e}")
+            return []
+
+    def get_live_rankings_freshness(self) -> Dict[str, Any]:
+        """
+        Check the freshness of the live rankings cache.
+
+        Returns:
+            Dict with calculated_at timestamp and staleness info
+        """
+        query = text("""
+            SELECT
+                MAX(calculated_at) as last_updated,
+                TIMESTAMPDIFF(MINUTE, MAX(calculated_at), NOW()) as staleness_minutes
+            FROM park_live_rankings
+        """)
+
+        try:
+            result = self.conn.execute(query)
+            row = result.fetchone()
+            if row:
+                return {
+                    "last_updated": row.last_updated,
+                    "staleness_minutes": row.staleness_minutes or 999,
+                    "is_fresh": (row.staleness_minutes or 999) < 20,
+                }
+        except Exception as e:
+            logger.error(f"Error checking live rankings freshness: {e}")
+
+        return {
+            "last_updated": None,
+            "staleness_minutes": 999,
+            "is_fresh": False,
+        }
+
     def get_ride_live_downtime_rankings(
         self,
         filter_disney_universal: bool = False,

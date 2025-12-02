@@ -195,23 +195,31 @@ def get_ride_downtime_rankings():
             stats_repo = StatsRepository(conn)
 
             # Route to appropriate query class based on period
-            if period == 'live':
-                # LIVE data - instantaneous snapshot (rides down RIGHT NOW)
-                # Uses stats_repo for optimized raw SQL query (not SQLAlchemy ORM)
-                rankings = stats_repo.get_ride_live_downtime_rankings(
+            if period in ('live', 'today'):
+                # LIVE/TODAY: Try pre-aggregated cache first (instant ~10ms)
+                # Falls back to raw query (~7s) if cache is empty/stale
+                rankings = stats_repo.get_ride_live_rankings_cached(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit,
                     sort_by=sort_by
                 )
-            elif period == 'today':
-                # TODAY data - cumulative from midnight Pacific to now
-                # See: database/queries/today/today_ride_rankings.py
-                query = TodayRideRankingsQuery(conn)
-                rankings = query.get_rankings(
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
-            else:
+
+                # If cache miss, fall back to computing from raw snapshots
+                if not rankings:
+                    logger.warning(f"Ride live rankings cache miss, falling back to raw query")
+                    if period == 'live':
+                        rankings = stats_repo.get_ride_live_downtime_rankings(
+                            filter_disney_universal=filter_disney_universal,
+                            limit=limit,
+                            sort_by=sort_by
+                        )
+                    else:  # today
+                        query = TodayRideRankingsQuery(conn)
+                        rankings = query.get_rankings(
+                            filter_disney_universal=filter_disney_universal,
+                            limit=limit
+                        )
+            elif period in ('7days', '30days'):
                 # Historical data from aggregated stats
                 # See: database/queries/rankings/ride_downtime_rankings.py
                 query = RideDowntimeRankingsQuery(conn)

@@ -31,7 +31,109 @@ ON park_activity_snapshots (recorded_at, park_id, park_appears_open);
 
 **Impact**: Queries that previously did full table scans (20-30s) now use index scans (~3-7s for cold queries).
 
-### 2. Query Result Caching
+### 2. Pre-Aggregation for Live/Today Rankings (Migration 011)
+
+**Files**:
+- `backend/src/database/migrations/011_live_rankings_tables.sql`
+- `backend/src/scripts/aggregate_live_rankings.py`
+
+The most expensive queries are LIVE and TODAY rankings, which aggregate millions of snapshot rows. Pre-aggregation computes these once per collection cycle and stores results in summary tables.
+
+**Database Tables**:
+```sql
+-- Pre-computed park rankings
+CREATE TABLE park_live_rankings (
+    park_id INT PRIMARY KEY,
+    queue_times_id INT,
+    park_name VARCHAR(255),
+    location VARCHAR(255),
+    timezone VARCHAR(50),
+    is_disney BOOLEAN,
+    is_universal BOOLEAN,
+    rides_down INT,
+    total_rides INT,
+    shame_score DECIMAL(10,2),
+    park_is_open BOOLEAN,
+    total_downtime_hours DECIMAL(10,2),
+    weighted_downtime_hours DECIMAL(10,2),
+    total_park_weight DECIMAL(10,2),
+    calculated_at DATETIME
+);
+
+-- Pre-computed ride rankings
+CREATE TABLE ride_live_rankings (
+    ride_id INT PRIMARY KEY,
+    park_id INT,
+    queue_times_id INT,
+    ride_name VARCHAR(255),
+    park_name VARCHAR(255),
+    tier INT,
+    tier_weight DECIMAL(5,2),
+    category VARCHAR(50),
+    is_disney BOOLEAN,
+    is_universal BOOLEAN,
+    is_down BOOLEAN,
+    current_status VARCHAR(50),
+    current_wait_time INT,
+    last_status_change DATETIME,
+    downtime_hours DECIMAL(10,2),
+    downtime_incidents INT,
+    avg_wait_time DECIMAL(5,1),
+    max_wait_time INT,
+    calculated_at DATETIME
+);
+```
+
+**Atomic Table Swap**: Uses staging tables for zero-downtime updates:
+```sql
+-- 1. Insert fresh data into staging table
+TRUNCATE TABLE park_live_rankings_staging;
+INSERT INTO park_live_rankings_staging (...) SELECT ...;
+
+-- 2. Atomic swap (instant, no locks)
+RENAME TABLE
+    park_live_rankings TO park_live_rankings_old,
+    park_live_rankings_staging TO park_live_rankings;
+
+-- 3. Prepare for next cycle
+RENAME TABLE park_live_rankings_old TO park_live_rankings_staging;
+```
+
+**Integration with Snapshot Collection**:
+```python
+# collect_snapshots.py calls aggregation after each collection
+from scripts.aggregate_live_rankings import LiveRankingsAggregator
+
+def run_collection():
+    collect_all_snapshots()
+
+    # Run pre-aggregation
+    aggregator = LiveRankingsAggregator()
+    aggregator.run()  # ~18 seconds total
+```
+
+**API Routes**: Check pre-aggregated tables first, fall back to raw query if stale:
+```python
+# stats_repository.py
+def get_park_live_rankings_cached(self, filter_disney_universal, limit, sort_by):
+    """Fetch from pre-aggregated park_live_rankings table."""
+    query = text("""
+        SELECT * FROM park_live_rankings
+        WHERE (:filter_disney = FALSE OR is_disney = TRUE OR is_universal = TRUE)
+        ORDER BY ... LIMIT :limit
+    """)
+    return self.conn.execute(query, {...}).fetchall()
+```
+
+**Impact**:
+| Metric | Before | After |
+|--------|--------|-------|
+| LIVE/TODAY park rankings | 10-14s | ~50ms |
+| LIVE/TODAY ride rankings | 7-10s | ~30ms |
+| Aggregation overhead | N/A | ~18s per cycle |
+| Data freshness | Real-time | ≤5 min stale |
+
+### 4. Query Result Caching
 
 **File**: `backend/src/utils/cache.py`
 
@@ -76,7 +178,7 @@ generate_cache_key("parks_downtime", period="today", filter="all-parks")
 - First request: 3-7 seconds (database query)
 - Subsequent requests: ~8 milliseconds (cache hit)
 
-### 3. InnoDB Buffer Pool
+### 5. InnoDB Buffer Pool
 
 **Production Config**: `/etc/my.cnf.d/mariadb-server.cnf`
 
@@ -92,7 +194,7 @@ The buffer pool caches table and index data in memory. Increased from 128MB to 5
 SHOW VARIABLES LIKE 'innodb_buffer_pool_size';
 ```
 
-### 4. Query Refactoring (CTEs vs Correlated Subqueries)
+### 6. Query Refactoring (CTEs vs Correlated Subqueries)
 
 **File**: `backend/src/database/queries/today/today_ride_wait_times.py`
 
@@ -127,7 +229,7 @@ LEFT JOIN latest_snapshots ls ON r.ride_id = ls.ride_id
 
 **Impact**: Reduced per-row subquery execution from O(n) to O(1).
 
-### 5. Frontend Serialization (Awards)
+### 7. Frontend Serialization (Awards)
 
 **File**: `frontend/js/components/awards.js`
 
@@ -153,7 +255,7 @@ const reliablePark = await this.apiClient.get('/trends/least-reliable', {...});
 const reliableRide = await this.apiClient.get('/trends/least-reliable', {...});
 ```
 
-### 6. Browser-Side Response Caching
+### 8. Browser-Side Response Caching
 
 **Files**: `frontend/js/api-client.js`, `frontend/js/app.js`
 
@@ -217,14 +319,15 @@ apiClient.getCacheStats()
 
 ## Performance Summary
 
-| Query Type | Before | After (Cold) | After (Cached) |
-|------------|--------|--------------|----------------|
-| TODAY rankings | 20-30s | 3-7s | ~8ms |
+| Query Type | Before | After (Pre-aggregated) | After (Cached) |
+|------------|--------|------------------------|----------------|
+| LIVE park rankings | 10-14s | ~50ms | ~8ms |
+| LIVE ride rankings | 7-10s | ~30ms | ~8ms |
+| TODAY rankings | 20-30s | ~50ms | ~8ms |
 | 7-day rankings | 2-5s | 2-5s | ~8ms |
 | 30-day rankings | 2-5s | 2-5s | ~8ms |
-| LIVE rankings | <1s | <1s | N/A (not cached) |
-| Awards page | 90-120s | 15-30s | ~40ms |
-| **Tab switching** | ~5s | ~5s | **instant** |
+| Awards page | 90-120s | ~100ms | ~40ms |
+| **Tab switching** | ~5s | **instant** | **instant** |
 
 ## Gunicorn Worker Considerations
 
@@ -264,7 +367,7 @@ SHOW ENGINE INNODB STATUS;
 ## Future Optimizations
 
 1. **Redis Cache**: Shared cache across workers for consistent cache hits
-2. **Pre-aggregation Jobs**: Nightly jobs to pre-compute TODAY stats at midnight
+2. ~~**Pre-aggregation Jobs**: Nightly jobs to pre-compute TODAY stats at midnight~~ ✅ Done (Migration 011)
 3. **Query Result Materialized Views**: For complex aggregations
 4. **Connection Pooling**: If connection overhead becomes significant
 
@@ -273,11 +376,15 @@ SHOW ENGINE INNODB STATUS;
 | File | Change |
 |------|--------|
 | `backend/src/utils/cache.py` | Server-side query cache implementation |
-| `backend/src/api/routes/parks.py` | Added caching to downtime/waittimes |
-| `backend/src/api/routes/rides.py` | Added caching to downtime/waittimes |
+| `backend/src/api/routes/parks.py` | Added caching + pre-aggregated table lookups |
+| `backend/src/api/routes/rides.py` | Added caching + pre-aggregated table lookups |
 | `backend/src/api/routes/trends.py` | Added caching to Awards endpoints |
+| `backend/src/database/repositories/stats_repository.py` | Pre-aggregated table query methods |
 | `backend/src/database/queries/today/today_ride_wait_times.py` | CTEs instead of subqueries |
 | `backend/src/database/migrations/005_performance_indexes.sql` | Covering indexes |
+| `backend/src/database/migrations/011_live_rankings_tables.sql` | Pre-aggregated ranking tables |
+| `backend/src/scripts/aggregate_live_rankings.py` | Pre-aggregation script with atomic swap |
+| `backend/src/scripts/collect_snapshots.py` | Calls aggregation after collection |
 | `frontend/js/components/awards.js` | Sequential API calls |
 | `frontend/js/api-client.js` | Browser-side response caching + prefetch |
 | `frontend/js/app.js` | Prefetch on load, clear cache on period/filter change |

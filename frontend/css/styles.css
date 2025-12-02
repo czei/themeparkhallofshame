@@ -2033,7 +2033,57 @@ td {
     color: white;
 }
 
-/* Today Breakdown - Cumulative Stats */
+.breakdown-period-badge.last-week {
+    background: var(--gold);
+    color: #333;
+}
+
+.breakdown-period-badge.last-month {
+    background: var(--purple);
+    color: white;
+}
+
+/* Period label for historical breakdowns */
+.period-label {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+    font-weight: 500;
+}
+
+/* Historical Breakdown Styling */
+.historical-breakdown .shame-formula-box {
+    background: linear-gradient(135deg, #fef9f0 0%, #fef3e2 100%);
+    border-color: var(--gold);
+}
+
+.historical-explanation {
+    padding: 0.75rem;
+    background: rgba(255, 182, 39, 0.12);
+    border-left: 3px solid var(--gold);
+    margin-bottom: 0.75rem;
+}
+
+.historical-rides-list .ride-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.ride-days {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-left: 0.5rem;
+}
+
+/* Formula text display */
+.formula-text {
+    font-style: italic;
+    color: var(--deep-teal);
+    font-weight: 600;
+}
+
+/* Today Breakdown - Average Stats */
 .today-breakdown .shame-formula-box {
     background: linear-gradient(135deg, #f0f9fa 0%, #e8f4f5 100%);
     border-color: var(--deep-teal);
@@ -2048,7 +2098,7 @@ td {
 
 .cumulative-stats {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
     gap: 0.75rem;
     margin-top: 1rem;
 }

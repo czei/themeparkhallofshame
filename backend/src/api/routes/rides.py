@@ -9,12 +9,12 @@ Query File Mapping
 GET /live/status-summary             → database/queries/live/status_summary.py
 GET /rides/downtime?period=live      → database/queries/live/live_ride_rankings.py (instantaneous)
 GET /rides/downtime?period=today     → database/queries/today/today_ride_rankings.py (cumulative)
-GET /rides/downtime?period=7days     → database/queries/rankings/ride_downtime_rankings.py
-GET /rides/downtime?period=30days    → database/queries/rankings/ride_downtime_rankings.py
+GET /rides/downtime?period=last_week  → database/queries/rankings/ride_downtime_rankings.py
+GET /rides/downtime?period=last_month → database/queries/rankings/ride_downtime_rankings.py
 GET /rides/waittimes?period=live     → StatsRepository.get_ride_live_wait_time_rankings()
 GET /rides/waittimes?period=today    → database/queries/today/today_ride_wait_times.py (cumulative)
-GET /rides/waittimes?period=7days    → database/queries/rankings/ride_wait_time_rankings.py
-GET /rides/waittimes?period=30days   → database/queries/rankings/ride_wait_time_rankings.py
+GET /rides/waittimes?period=last_week  → database/queries/rankings/ride_wait_time_rankings.py
+GET /rides/waittimes?period=last_month → database/queries/rankings/ride_wait_time_rankings.py
 """
 
 from flask import Blueprint, request, jsonify
@@ -133,11 +133,11 @@ def get_ride_downtime_rankings():
     - period=today: database/queries/today/today_ride_rankings.py
       Uses snapshot data aggregated from midnight Pacific to now (cumulative)
 
-    - period=7days/30days: database/queries/rankings/ride_downtime_rankings.py
-      Uses pre-aggregated data from ride_weekly_stats/ride_monthly_stats
+    - period=last_week/last_month: database/queries/rankings/ride_downtime_rankings.py
+      Uses pre-aggregated data from ride_daily_stats (calendar-based periods)
 
     Query Parameters:
-        period (str): Time period - 'live', 'today', '7days', '30days' (default: 'live')
+        period (str): Time period - 'live', 'today', 'last_week', 'last_month' (default: 'live')
         filter (str): Park filter - 'disney-universal', 'all-parks' (default: 'all-parks')
         limit (int): Maximum results (default: 100, max: 200)
         sort_by (str): Sort column - 'current_is_open', 'downtime_hours', 'uptime_percentage', 'trend_percentage' (default: 'downtime_hours')
@@ -154,10 +154,10 @@ def get_ride_downtime_rankings():
     sort_by = request.args.get('sort_by', 'downtime_hours')
 
     # Validate period
-    if period not in ['live', 'today', '7days', '30days']:
+    if period not in ['live', 'today', 'last_week', 'last_month']:
         return jsonify({
             "success": False,
-            "error": "Invalid period. Must be 'live', 'today', '7days', or '30days'"
+            "error": "Invalid period. Must be 'live', 'today', 'last_week', or 'last_month'"
         }), 400
 
     # Validate filter
@@ -219,17 +219,17 @@ def get_ride_downtime_rankings():
                             filter_disney_universal=filter_disney_universal,
                             limit=limit
                         )
-            elif period in ('7days', '30days'):
-                # Historical data from aggregated stats
+            else:
+                # Historical data from aggregated stats (calendar-based periods)
                 # See: database/queries/rankings/ride_downtime_rankings.py
                 query = RideDowntimeRankingsQuery(conn)
-                if period == '7days':
+                if period == 'last_week':
                     rankings = query.get_weekly(
                         filter_disney_universal=filter_disney_universal,
                         limit=limit,
                         sort_by=sort_by
                     )
-                else:  # 30days
+                else:  # last_month
                     rankings = query.get_monthly(
                         filter_disney_universal=filter_disney_universal,
                         limit=limit,
@@ -289,11 +289,11 @@ def get_ride_wait_times():
     - period=today: database/queries/today/today_ride_wait_times.py
       Uses snapshot data aggregated from midnight Pacific to now (cumulative)
 
-    - period=7days/30days: database/queries/rankings/ride_wait_time_rankings.py
-      Uses pre-aggregated data from ride_daily_stats
+    - period=last_week/last_month: database/queries/rankings/ride_wait_time_rankings.py
+      Uses pre-aggregated data from ride_daily_stats (calendar-based periods)
 
     Query Parameters:
-        period (str): Time period - 'live', 'today', '7days', '30days' (default: 'live')
+        period (str): Time period - 'live', 'today', 'last_week', 'last_month' (default: 'live')
         filter (str): Park filter - 'disney-universal', 'all-parks' (default: 'all-parks')
         limit (int): Maximum results (default: 100, max: 200)
 
@@ -308,10 +308,10 @@ def get_ride_wait_times():
     limit = min(int(request.args.get('limit', 100)), 200)
 
     # Validate period
-    if period not in ['live', 'today', '7days', '30days']:
+    if period not in ['live', 'today', 'last_week', 'last_month']:
         return jsonify({
             "success": False,
-            "error": "Invalid period. Must be 'live', 'today', '7days', or '30days'"
+            "error": "Invalid period. Must be 'live', 'today', 'last_week', or 'last_month'"
         }), 400
 
     # Validate filter
@@ -355,14 +355,19 @@ def get_ride_wait_times():
                     limit=limit
                 )
             else:
-                # Historical data from aggregated stats
+                # Historical data from aggregated stats (calendar-based periods)
                 # See: database/queries/rankings/ride_wait_time_rankings.py
                 query = RideWaitTimeRankingsQuery(conn)
-                wait_times = query.get_by_period(
-                    period=period,
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
+                if period == 'last_week':
+                    wait_times = query.get_weekly(
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                else:  # last_month
+                    wait_times = query.get_monthly(
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
 
             # Add Queue-Times.com URLs and rank to wait times
             wait_times_with_urls = []

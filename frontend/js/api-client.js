@@ -134,7 +134,7 @@ class APIClient {
      * Prefetch common API endpoints in the background.
      * Loads data for all main tabs so tab switching is instant.
      *
-     * @param {string} period - Time period (live, today, 7days, 30days)
+     * @param {string} period - Time period (live, today, last_week, last_month)
      * @param {string} filter - Park filter (all-parks, disney-universal)
      */
     async prefetch(period = 'live', filter = 'all-parks') {

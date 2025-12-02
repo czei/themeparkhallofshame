@@ -125,3 +125,190 @@ def date_to_pacific(utc_datetime: datetime) -> date:
 
     pacific_dt = utc_datetime.astimezone(PACIFIC_TZ)
     return pacific_dt.date()
+
+
+# =============================================================================
+# Calendar Period Functions (for reporting/social media)
+# =============================================================================
+
+def get_last_week_range_utc() -> tuple[datetime, datetime, str]:
+    """
+    Get UTC datetime range for the previous complete week (Sunday-Saturday).
+
+    Week starts on Sunday (US convention for theme parks).
+
+    Returns:
+        tuple: (start_utc, end_utc, label) where:
+            - start_utc = Previous Sunday midnight Pacific, in UTC
+            - end_utc = Previous Saturday 11:59:59 PM Pacific, in UTC
+            - label = Human-readable date range (e.g., "Nov 24-30, 2024")
+
+    Example:
+        On Monday Dec 2, 2024 (Pacific):
+        - Returns Sunday Nov 24 through Saturday Nov 30
+        - label = "Nov 24-30, 2024"
+    """
+    today = get_today_pacific()
+
+    # Find the most recent Sunday (start of current week)
+    # weekday(): Monday=0, Sunday=6
+    days_since_sunday = (today.weekday() + 1) % 7
+
+    # Current week's Sunday
+    current_week_sunday = today - timedelta(days=days_since_sunday)
+
+    # Previous week's Sunday (7 days before current week's Sunday)
+    last_week_sunday = current_week_sunday - timedelta(days=7)
+
+    # Previous week's Saturday (6 days after previous Sunday)
+    last_week_saturday = last_week_sunday + timedelta(days=6)
+
+    # Get UTC ranges
+    start_utc, _ = get_pacific_day_range_utc(last_week_sunday)
+    _, end_utc = get_pacific_day_range_utc(last_week_saturday)
+
+    # Format label
+    if last_week_sunday.month == last_week_saturday.month:
+        # Same month: "Nov 24-30, 2024"
+        label = f"{last_week_sunday.strftime('%b')} {last_week_sunday.day}-{last_week_saturday.day}, {last_week_saturday.year}"
+    else:
+        # Different months: "Nov 24 - Dec 1, 2024"
+        label = f"{last_week_sunday.strftime('%b')} {last_week_sunday.day} - {last_week_saturday.strftime('%b')} {last_week_saturday.day}, {last_week_saturday.year}"
+
+    return (start_utc, end_utc, label)
+
+
+def get_last_month_range_utc() -> tuple[datetime, datetime, str]:
+    """
+    Get UTC datetime range for the previous complete calendar month.
+
+    Returns:
+        tuple: (start_utc, end_utc, label) where:
+            - start_utc = 1st of previous month, midnight Pacific, in UTC
+            - end_utc = Last day of previous month, 11:59:59 PM Pacific, in UTC
+            - label = Human-readable month name (e.g., "November 2024")
+
+    Example:
+        On Dec 2, 2024 (Pacific):
+        - Returns Nov 1 through Nov 30
+        - label = "November 2024"
+    """
+    today = get_today_pacific()
+
+    # Get first day of current month
+    first_of_current_month = date(today.year, today.month, 1)
+
+    # Last day of previous month = day before first of current month
+    last_day_prev_month = first_of_current_month - timedelta(days=1)
+
+    # First day of previous month
+    first_day_prev_month = date(last_day_prev_month.year, last_day_prev_month.month, 1)
+
+    # Get UTC ranges
+    start_utc, _ = get_pacific_day_range_utc(first_day_prev_month)
+    _, end_utc = get_pacific_day_range_utc(last_day_prev_month)
+
+    # Format label: "November 2024"
+    label = first_day_prev_month.strftime("%B %Y")
+
+    return (start_utc, end_utc, label)
+
+
+def get_last_week_date_range() -> tuple[date, date, str]:
+    """
+    Get Pacific date range for the previous complete week (Sunday-Saturday).
+
+    Returns:
+        tuple: (start_date, end_date, label) where:
+            - start_date = Previous Sunday (Pacific)
+            - end_date = Previous Saturday (Pacific)
+            - label = Human-readable date range (e.g., "Nov 24-30, 2024")
+    """
+    today = get_today_pacific()
+
+    # Find the most recent Sunday (start of current week)
+    days_since_sunday = (today.weekday() + 1) % 7
+
+    # Current week's Sunday
+    current_week_sunday = today - timedelta(days=days_since_sunday)
+
+    # Previous week's Sunday and Saturday
+    last_week_sunday = current_week_sunday - timedelta(days=7)
+    last_week_saturday = last_week_sunday + timedelta(days=6)
+
+    # Format label
+    if last_week_sunday.month == last_week_saturday.month:
+        label = f"{last_week_sunday.strftime('%b')} {last_week_sunday.day}-{last_week_saturday.day}, {last_week_saturday.year}"
+    else:
+        label = f"{last_week_sunday.strftime('%b')} {last_week_sunday.day} - {last_week_saturday.strftime('%b')} {last_week_saturday.day}, {last_week_saturday.year}"
+
+    return (last_week_sunday, last_week_saturday, label)
+
+
+def get_last_month_date_range() -> tuple[date, date, str]:
+    """
+    Get Pacific date range for the previous complete calendar month.
+
+    Returns:
+        tuple: (start_date, end_date, label) where:
+            - start_date = 1st of previous month (Pacific)
+            - end_date = Last day of previous month (Pacific)
+            - label = Human-readable month name (e.g., "November 2024")
+    """
+    today = get_today_pacific()
+
+    # Get first day of current month
+    first_of_current_month = date(today.year, today.month, 1)
+
+    # Last day of previous month
+    last_day_prev_month = first_of_current_month - timedelta(days=1)
+
+    # First day of previous month
+    first_day_prev_month = date(last_day_prev_month.year, last_day_prev_month.month, 1)
+
+    # Format label
+    label = first_day_prev_month.strftime("%B %Y")
+
+    return (first_day_prev_month, last_day_prev_month, label)
+
+
+def get_calendar_period_info(period: str) -> dict:
+    """
+    Get information about a calendar period for API responses.
+
+    Args:
+        period: 'last_week' or 'last_month'
+
+    Returns:
+        dict with:
+            - start_date: ISO date string (YYYY-MM-DD)
+            - end_date: ISO date string (YYYY-MM-DD)
+            - label: Human-readable label for display
+            - period_type: 'week' or 'month'
+
+    Raises:
+        ValueError: If period is not recognized
+    """
+    if period == 'last_week':
+        start_utc, end_utc, label = get_last_week_range_utc()
+        # Convert back to Pacific dates for the response
+        start_date = date_to_pacific(start_utc)
+        end_date = date_to_pacific(end_utc - timedelta(seconds=1))  # End is exclusive, so subtract 1s
+        return {
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat(),
+            'label': label,
+            'period_type': 'week'
+        }
+    elif period == 'last_month':
+        start_utc, end_utc, label = get_last_month_range_utc()
+        start_date = date_to_pacific(start_utc)
+        end_date = date_to_pacific(end_utc - timedelta(seconds=1))
+        return {
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat(),
+            'label': label,
+            'period_type': 'month'
+        }
+    else:
+        raise ValueError(f"Unknown period: {period}. Must be 'last_week' or 'last_month'")

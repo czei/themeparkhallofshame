@@ -2,22 +2,21 @@
 Ride Downtime Rankings Query
 ============================
 
-Endpoint: GET /api/rides/downtime?period=7days|30days
+Endpoint: GET /api/rides/downtime?period=last_week|last_month
 UI Location: Rides tab → Downtime Rankings table
 
 Returns rides ranked by downtime percentage during operating hours.
 Includes tier classification for context.
+
+CALENDAR-BASED PERIODS:
+- last_week: Previous complete week (Sunday-Saturday, Pacific Time)
+- last_month: Previous complete calendar month (Pacific Time)
 
 Database Tables:
 - rides (ride metadata)
 - parks (park metadata for location/filter)
 - ride_classifications (tier weights)
 - ride_daily_stats (aggregated daily downtime data)
-
-How to Modify This Query:
-1. To add a new column: Add to the select() in _get_rankings()
-2. To change the ranking order: Modify the order_by() expression
-3. To add a new filter: Add parameter and extend the where() clause
 
 Example Response:
 {
@@ -29,7 +28,8 @@ Example Response:
     "total_downtime_hours": 8.5,
     "uptime_percentage": 89.2,
     "status_changes": 12,
-    "trend_percentage": -5.2
+    "trend_percentage": -5.2,
+    "period_label": "Nov 24-30, 2024"
 }
 """
 
@@ -46,6 +46,7 @@ from database.schema import (
     ride_daily_stats,
 )
 from database.queries.builders import Filters
+from utils.timezone import get_last_week_date_range, get_last_month_date_range
 
 
 class RideDowntimeRankingsQuery:
@@ -53,8 +54,8 @@ class RideDowntimeRankingsQuery:
     Query handler for ride downtime rankings.
 
     Methods:
-        get_weekly(): 7-day period from daily stats
-        get_monthly(): 30-day period from daily stats
+        get_weekly(): Previous complete week from daily stats
+        get_monthly(): Previous complete month from daily stats
 
     For live (today) rankings, use live/live_ride_rankings.py instead.
     """
@@ -69,7 +70,7 @@ class RideDowntimeRankingsQuery:
         sort_by: str = "downtime_hours",
     ) -> List[Dict[str, Any]]:
         """
-        Get ride rankings for the last 7 days.
+        Get ride rankings for the previous complete week (Sunday-Saturday).
 
         Args:
             filter_disney_universal: Only Disney/Universal parks
@@ -79,12 +80,12 @@ class RideDowntimeRankingsQuery:
         Returns:
             List of rides ranked by specified column
         """
-        end_date = date.today()
-        start_date = end_date - timedelta(days=6)
+        start_date, end_date, period_label = get_last_week_date_range()
 
         return self._get_rankings(
             start_date=start_date,
             end_date=end_date,
+            period_label=period_label,
             filter_disney_universal=filter_disney_universal,
             limit=limit,
             sort_by=sort_by,
@@ -97,7 +98,7 @@ class RideDowntimeRankingsQuery:
         sort_by: str = "downtime_hours",
     ) -> List[Dict[str, Any]]:
         """
-        Get ride rankings for the last 30 days.
+        Get ride rankings for the previous complete calendar month.
 
         Args:
             filter_disney_universal: Only Disney/Universal parks
@@ -107,12 +108,12 @@ class RideDowntimeRankingsQuery:
         Returns:
             List of rides ranked by specified column
         """
-        end_date = date.today()
-        start_date = end_date - timedelta(days=29)
+        start_date, end_date, period_label = get_last_month_date_range()
 
         return self._get_rankings(
             start_date=start_date,
             end_date=end_date,
+            period_label=period_label,
             filter_disney_universal=filter_disney_universal,
             limit=limit,
             sort_by=sort_by,
@@ -145,6 +146,7 @@ class RideDowntimeRankingsQuery:
         self,
         start_date: date,
         end_date: date,
+        period_label: str = "",
         filter_disney_universal: bool = False,
         limit: int = 50,
         sort_by: str = "downtime_hours",
@@ -155,6 +157,7 @@ class RideDowntimeRankingsQuery:
         Args:
             start_date: Start of date range
             end_date: End of date range
+            period_label: Human-readable label (e.g., "Nov 24-30, 2024")
             filter_disney_universal: Only Disney/Universal parks
             limit: Maximum results
             sort_by: Column to sort by
@@ -209,4 +212,11 @@ class RideDowntimeRankingsQuery:
         )
 
         result = self.conn.execute(stmt)
-        return [dict(row._mapping) for row in result]
+        # Add period_label to each result
+        rankings = []
+        for row in result:
+            row_dict = dict(row._mapping)
+            if period_label:
+                row_dict['period_label'] = period_label
+            rankings.append(row_dict)
+        return rankings

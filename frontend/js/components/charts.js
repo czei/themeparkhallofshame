@@ -24,7 +24,7 @@ class Charts {
         this.parksChart = null;  // Chart.js instance for parks shame score
         this.waitTimesChart = null;  // Chart.js instance for park wait times
         this.state = {
-            period: '7days',
+            period: 'last_week',
             filter: initialFilter,
             loading: false,
             error: null,
@@ -176,10 +176,10 @@ class Charts {
         const labels = {
             'live': 'Today (Hourly)',
             'today': 'Today (Hourly)',
-            '7days': 'Last 7 Days',
-            '30days': 'Last 30 Days'
+            'last_week': 'Last Week',
+            'last_month': 'Last Month'
         };
-        return labels[this.state.period] || 'Last 7 Days';
+        return labels[this.state.period] || 'Last Week';
     }
 
     /**

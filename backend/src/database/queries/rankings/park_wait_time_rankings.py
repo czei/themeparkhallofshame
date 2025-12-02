@@ -2,19 +2,18 @@
 Park Wait Time Rankings Query
 =============================
 
-Endpoint: GET /api/parks/waittimes?period=7days|30days
+Endpoint: GET /api/parks/waittimes?period=last_week|last_month
 UI Location: Parks tab → Wait Times Rankings table
 
 Returns parks ranked by average wait time.
 
+CALENDAR-BASED PERIODS:
+- last_week: Previous complete week (Sunday-Saturday, Pacific Time)
+- last_month: Previous complete calendar month (Pacific Time)
+
 Database Tables:
 - parks (park metadata)
 - park_daily_stats (aggregated wait time data)
-
-How to Modify This Query:
-1. To add a new column: Add to the select()
-2. To change ranking order: Modify order_by()
-3. To add filter: Extend where() clause
 
 Example Response:
 {
@@ -22,7 +21,8 @@ Example Response:
     "park_name": "Magic Kingdom",
     "location": "Orlando, FL",
     "avg_wait_time": 45.5,
-    "peak_wait_time": 120
+    "peak_wait_time": 120,
+    "period_label": "Nov 24-30, 2024"
 }
 """
 
@@ -34,6 +34,7 @@ from sqlalchemy.engine import Connection
 
 from database.schema import parks, park_daily_stats
 from database.queries.builders import Filters
+from utils.timezone import get_last_week_date_range, get_last_month_date_range
 
 
 class ParkWaitTimeRankingsQuery:
@@ -51,11 +52,9 @@ class ParkWaitTimeRankingsQuery:
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """Get park wait time rankings for the specified period."""
-        if period == 'today':
-            return self.get_weekly(filter_disney_universal, limit)  # Use 7-day data for today
-        elif period == '7days':
+        if period == 'last_week':
             return self.get_weekly(filter_disney_universal, limit)
-        else:  # 30days
+        else:  # last_month
             return self.get_monthly(filter_disney_universal, limit)
 
     def get_weekly(
@@ -63,25 +62,24 @@ class ParkWaitTimeRankingsQuery:
         filter_disney_universal: bool = False,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
-        """Get park wait time rankings for the last 7 days."""
-        end_date = date.today()
-        start_date = end_date - timedelta(days=6)
-        return self._get_rankings(start_date, end_date, filter_disney_universal, limit)
+        """Get park wait time rankings for the previous complete week."""
+        start_date, end_date, period_label = get_last_week_date_range()
+        return self._get_rankings(start_date, end_date, period_label, filter_disney_universal, limit)
 
     def get_monthly(
         self,
         filter_disney_universal: bool = False,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
-        """Get park wait time rankings for the last 30 days."""
-        end_date = date.today()
-        start_date = end_date - timedelta(days=29)
-        return self._get_rankings(start_date, end_date, filter_disney_universal, limit)
+        """Get park wait time rankings for the previous complete month."""
+        start_date, end_date, period_label = get_last_month_date_range()
+        return self._get_rankings(start_date, end_date, period_label, filter_disney_universal, limit)
 
     def _get_rankings(
         self,
         start_date: date,
         end_date: date,
+        period_label: str = "",
         filter_disney_universal: bool = False,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
@@ -115,4 +113,11 @@ class ParkWaitTimeRankingsQuery:
         )
 
         result = self.conn.execute(stmt)
-        return [dict(row._mapping) for row in result]
+        # Add period_label to each result
+        rankings = []
+        for row in result:
+            row_dict = dict(row._mapping)
+            if period_label:
+                row_dict['period_label'] = period_label
+            rankings.append(row_dict)
+        return rankings

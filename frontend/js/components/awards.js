@@ -81,8 +81,8 @@ class Awards {
     getPeriodLabel() {
         const labels = {
             'today': 'TODAY',
-            '7days': 'THIS WEEK',
-            '30days': 'THIS MONTH'
+            'last_week': 'LAST WEEK',
+            'last_month': 'LAST MONTH'
         };
         return labels[this.state.period] || 'TODAY';
     }

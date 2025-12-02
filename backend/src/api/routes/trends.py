@@ -39,7 +39,7 @@ from database.queries.charts import (
 )
 
 from utils.logger import logger
-from utils.timezone import get_today_pacific
+from utils.timezone import get_today_pacific, get_last_week_date_range, get_last_month_date_range
 from utils.cache import get_query_cache, generate_cache_key
 
 # Create Blueprint
@@ -61,7 +61,7 @@ def get_trends():
     - rides-declining: database/queries/trends/declining_rides.py
 
     Query Parameters:
-        - period: today | 7days | 30days (default: 7days)
+        - period: today | last_week | last_month (default: last_week)
         - category: parks-improving | parks-declining | rides-improving | rides-declining (required)
         - filter: disney-universal | all-parks (default: all-parks)
         - limit: max results (default: 50, max: 100)
@@ -71,7 +71,7 @@ def get_trends():
     """
     try:
         # Parse query parameters
-        period = request.args.get('period', '7days')
+        period = request.args.get('period', 'last_week')
         category = request.args.get('category')
         park_filter = request.args.get('filter', 'all-parks')
         limit = int(request.args.get('limit', 50))
@@ -86,7 +86,7 @@ def get_trends():
         # Validate parameter values
         # Note: 'live' is intentionally excluded - trends require comparison between periods,
         # which doesn't make sense for instantaneous data. Frontend defaults to 'today' if 'live'.
-        valid_periods = ['today', '7days', '30days']
+        valid_periods = ['today', 'last_week', 'last_month']
         valid_categories = ['parks-improving', 'parks-declining', 'rides-improving', 'rides-declining']
         valid_filters = ['disney-universal', 'all-parks']
 
@@ -205,9 +205,9 @@ def get_chart_data():
     - type=rides: database/queries/charts/ride_downtime_history.py
 
     Query Parameters:
-        - period: today | 7days | 30days (default: 7days)
+        - period: today | last_week | last_month (default: last_week)
           - today: Returns hourly breakdown (6am-11pm Pacific)
-          - 7days/30days: Returns daily breakdown
+          - last_week/last_month: Returns daily breakdown
         - type: parks | rides (default: parks)
         - filter: disney-universal | all-parks (default: disney-universal)
         - limit: max entities to return (default: 10, max: 20)
@@ -229,7 +229,7 @@ def get_chart_data():
     """
     try:
         # Parse query parameters
-        period = request.args.get('period', '7days')
+        period = request.args.get('period', 'last_week')
         data_type = request.args.get('type', 'parks')
         park_filter = request.args.get('filter', 'disney-universal')
         limit = int(request.args.get('limit', 10))
@@ -237,7 +237,7 @@ def get_chart_data():
         # Validate parameters
         # Note: 'live' is intentionally excluded - chart trends require time series data,
         # which doesn't make sense for instantaneous data. Frontend defaults to 'today' if 'live'.
-        valid_periods = ['today', '7days', '30days']
+        valid_periods = ['today', 'last_week', 'last_month']
         valid_types = ['parks', 'rides', 'waittimes']
         valid_filters = ['disney-universal', 'all-parks']
 
@@ -302,8 +302,13 @@ def get_chart_data():
                     is_mock = True
                     chart_data = _generate_mock_hourly_chart_data(data_type, limit)
             else:
-                # Daily data for 7days/30days
-                days = 7 if period == '7days' else 30
+                # Daily data for last_week/last_month (calendar-based periods)
+                if period == 'last_week':
+                    start_date, end_date, _ = get_last_week_date_range()
+                    days = (end_date - start_date).days + 1  # Include both start and end
+                else:  # last_month
+                    start_date, end_date, _ = get_last_month_date_range()
+                    days = (end_date - start_date).days + 1
 
                 if data_type == 'parks':
                     # See: database/queries/charts/park_shame_history.py
@@ -374,7 +379,7 @@ def get_longest_wait_times():
     - database/queries/trends/longest_wait_times.py
 
     Query Parameters:
-        - period: today | 7days | 30days (default: today)
+        - period: today | last_week | last_month (default: today)
         - filter: disney-universal | all-parks (default: all-parks)
         - entity: parks | rides (default: rides)
         - limit: max results (default: 10, max: 20)
@@ -390,7 +395,7 @@ def get_longest_wait_times():
         limit = min(int(request.args.get('limit', 10)), 20)
 
         # Validate period (LIVE not supported - frontend should convert to TODAY)
-        valid_periods = ['today', '7days', '30days']
+        valid_periods = ['today', 'last_week', 'last_month']
         if period not in valid_periods:
             return jsonify({
                 "success": False,
@@ -488,7 +493,7 @@ def get_least_reliable():
     - database/queries/trends/least_reliable_rides.py
 
     Query Parameters:
-        - period: today | 7days | 30days (default: today)
+        - period: today | last_week | last_month (default: today)
         - filter: disney-universal | all-parks (default: all-parks)
         - entity: parks | rides (default: rides)
         - limit: max results (default: 10, max: 20)
@@ -504,7 +509,7 @@ def get_least_reliable():
         limit = min(int(request.args.get('limit', 10)), 20)
 
         # Validate period (LIVE not supported - frontend should convert to TODAY)
-        valid_periods = ['today', '7days', '30days']
+        valid_periods = ['today', 'last_week', 'last_month']
         if period not in valid_periods:
             return jsonify({
                 "success": False,
@@ -747,7 +752,7 @@ def _calculate_period_dates(period: str) -> Dict[str, str]:
     Calculate current and previous period date ranges.
 
     Args:
-        period: 'today', '7days', or '30days'
+        period: 'today', 'last_week', or 'last_month'
 
     Returns:
         Dict with current_period_label and previous_period_label
@@ -760,17 +765,20 @@ def _calculate_period_dates(period: str) -> Dict[str, str]:
         previous_start = today - timedelta(days=1)
         previous_end = today - timedelta(days=1)
 
-    elif period == '7days':
-        current_end = today
-        current_start = today - timedelta(days=6)  # Last 7 days including today
+    elif period == 'last_week':
+        # Calendar-based: previous complete week (Sunday-Saturday)
+        current_start, current_end, _ = get_last_week_date_range()
+        # Previous week is the week before that
         previous_end = current_start - timedelta(days=1)
         previous_start = previous_end - timedelta(days=6)
 
-    elif period == '30days':
-        current_end = today
-        current_start = today - timedelta(days=29)  # Last 30 days including today
+    elif period == 'last_month':
+        # Calendar-based: previous complete calendar month
+        current_start, current_end, _ = get_last_month_date_range()
+        # Previous month is the month before that
         previous_end = current_start - timedelta(days=1)
-        previous_start = previous_end - timedelta(days=29)
+        # Get first day of that previous month
+        previous_start = previous_end.replace(day=1)
 
     return {
         'current_period_label': f"{current_start} to {current_end}",

@@ -104,6 +104,8 @@ class LiveRankingsAggregator:
         is_down = RideStatusSQL.is_down("rss", parks_alias="p")
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
         park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
+        # Filter to exclude rides that never operated today (seasonal/weather closures)
+        has_operated = RideStatusSQL.has_operated_for_park_type("r_inner.ride_id", "p")
 
         # Step 1: Truncate staging table
         conn.execute(text("TRUNCATE TABLE park_live_rankings_staging"))
@@ -138,6 +140,7 @@ class LiveRankingsAggregator:
                     AND r_inner.category = 'ATTRACTION'
                     AND {is_down_latest}
                     AND {park_open_latest}
+                    AND {has_operated}
             ),
             park_weights AS (
                 SELECT

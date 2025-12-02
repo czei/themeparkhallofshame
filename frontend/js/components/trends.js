@@ -9,7 +9,7 @@ class Trends {
         this.apiClient = apiClient;
         this.container = document.getElementById(containerId);
         this.state = {
-            period: '7days',
+            period: 'last_week',
             filter: initialFilter,
             entityType: 'parks',  // 'parks' or 'rides'
             limit: 20,
@@ -247,10 +247,10 @@ class Trends {
         const labels = {
             'live': 'Today',
             'today': 'Today',
-            '7days': 'Last 7 Days',
-            '30days': 'Last 30 Days'
+            'last_week': 'Last Week',
+            'last_month': 'Last Month'
         };
-        return labels[this.state.period] || 'Last 7 Days';
+        return labels[this.state.period] || 'Last Week';
     }
 
     /**
@@ -699,8 +699,8 @@ class Trends {
         const periodLabels = {
             'live': "Today's",
             'today': "Today's",
-            '7days': '7 Day',
-            '30days': '30 Day'
+            'last_week': 'Last Week',
+            'last_month': 'Last Month'
         };
         return `${periodLabels[this.state.period] || ''} ${baseTitle}`;
     }

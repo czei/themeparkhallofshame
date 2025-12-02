@@ -76,15 +76,55 @@ class Awards {
     }
 
     /**
-     * Get period label for display
+     * Get period label for display - shows actual dates for social media
      */
     getPeriodLabel() {
-        const labels = {
-            'today': 'TODAY',
-            'last_week': 'LAST WEEK',
-            'last_month': 'LAST MONTH'
-        };
-        return labels[this.state.period] || 'TODAY';
+        const now = new Date();
+        const options = { month: 'short', day: 'numeric', year: 'numeric' };
+
+        if (this.state.period === 'today') {
+            // Show today's date: "Dec 2, 2025"
+            return now.toLocaleDateString('en-US', options);
+        } else if (this.state.period === 'last_week') {
+            // Show date range: "Nov 25 - Dec 1, 2025"
+            const endDate = new Date(now);
+            endDate.setDate(endDate.getDate() - 1); // Yesterday
+            const startDate = new Date(endDate);
+            startDate.setDate(startDate.getDate() - 6); // 7 days ago
+
+            const startMonth = startDate.toLocaleDateString('en-US', { month: 'short' });
+            const startDay = startDate.getDate();
+            const endMonth = endDate.toLocaleDateString('en-US', { month: 'short' });
+            const endDay = endDate.getDate();
+            const year = endDate.getFullYear();
+
+            // Same month: "Nov 25 - Dec 1, 2025" or different: "Nov 25 - Dec 1, 2025"
+            if (startMonth === endMonth) {
+                return `${startMonth} ${startDay} - ${endDay}, ${year}`;
+            } else {
+                return `${startMonth} ${startDay} - ${endMonth} ${endDay}, ${year}`;
+            }
+        } else if (this.state.period === 'last_month') {
+            // Show date range: "Nov 2 - Dec 1, 2025"
+            const endDate = new Date(now);
+            endDate.setDate(endDate.getDate() - 1); // Yesterday
+            const startDate = new Date(endDate);
+            startDate.setDate(startDate.getDate() - 29); // 30 days ago
+
+            const startMonth = startDate.toLocaleDateString('en-US', { month: 'short' });
+            const startDay = startDate.getDate();
+            const endMonth = endDate.toLocaleDateString('en-US', { month: 'short' });
+            const endDay = endDate.getDate();
+            const year = endDate.getFullYear();
+
+            if (startMonth === endMonth) {
+                return `${startMonth} ${startDay} - ${endDay}, ${year}`;
+            } else {
+                return `${startMonth} ${startDay} - ${endMonth} ${endDay}, ${year}`;
+            }
+        }
+
+        return now.toLocaleDateString('en-US', options);
     }
 
     /**
@@ -142,6 +182,7 @@ class Awards {
                         badgeIcon: '\ud83c\udfa2',
                         winner: this.state.longestWaitRide,
                         winnerName: this.state.longestWaitRide?.ride_name,
+                        parkName: this.state.longestWaitRide?.park_name,
                         statText: this.state.longestWaitRide
                             ? `${Math.round(this.state.longestWaitRide.avg_wait_time || 0)} min average wait`
                             : null
@@ -168,6 +209,7 @@ class Awards {
                         badgeIcon: '\ud83d\udcc9',
                         winner: this.state.leastReliableRide,
                         winnerName: this.state.leastReliableRide?.ride_name,
+                        parkName: this.state.leastReliableRide?.park_name,
                         statText: this.state.leastReliableRide
                             ? `${Number(this.state.leastReliableRide.downtime_hours || 0).toFixed(1)}h downtime \u00b7 ${this.state.leastReliableRide.downtime_incidents || 0} outages`
                             : null
@@ -181,8 +223,9 @@ class Awards {
 
     /**
      * Render a single award card matching the mockup design
+     * @param {string} parkName - For ride awards, the park the ride belongs to
      */
-    renderAwardCard({ type, headerTitle, headerSubtitle, badgeText, badgeIcon, winner, winnerName, statText }) {
+    renderAwardCard({ type, headerTitle, headerSubtitle, badgeText, badgeIcon, winner, winnerName, parkName, statText }) {
         const periodLabel = this.getPeriodLabel();
 
         if (!winner) {
@@ -204,6 +247,9 @@ class Awards {
             `;
         }
 
+        // For ride awards, show park name below ride name
+        const parkNameHtml = parkName ? `<div class="award-park-v2">${this.escapeHtml(parkName)}</div>` : '';
+
         return `
             <div class="award-card-v2 award-card-${type}">
                 <div class="award-header-v2">
@@ -217,6 +263,7 @@ class Awards {
                     <div class="award-badge-v2">${badgeIcon} ${badgeText}</div>
                     <div class="award-period-v2">${periodLabel}</div>
                     <div class="award-winner-v2">${this.escapeHtml(winnerName)}</div>
+                    ${parkNameHtml}
                     <div class="award-stat-v2">${statText}</div>
                 </div>
             </div>

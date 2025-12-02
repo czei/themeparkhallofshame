@@ -428,6 +428,11 @@ class ParkStatusSQL:
         1. Use park_schedules if available (actual operating hours from API)
         2. Fall back to park_appears_open heuristic (inferred from ride activity)
 
+        IMPORTANT: Uses time-range check (NOW() between opening/closing) rather than
+        date matching to handle timezone differences correctly. The database is UTC
+        but schedules are stored by local date, so we check if NOW() falls within
+        any schedule's actual opening/closing timestamps.
+
         Args:
             park_id_expr: Expression for the park_id to check
             alias: Column alias for the result
@@ -437,30 +442,18 @@ class ParkStatusSQL:
         """
         return f"""(
             SELECT CASE
-                -- First try schedule-based check (preferred)
+                -- Check if NOW() falls within any OPERATING schedule's time window
+                -- Uses time-range check instead of date match to handle UTC/local timezone correctly
                 WHEN EXISTS (
                     SELECT 1 FROM park_schedules ps
                     WHERE ps.park_id = {park_id_expr}
-                        AND ps.schedule_date = CURDATE()
                         AND ps.schedule_type = 'OPERATING'
                         AND ps.opening_time IS NOT NULL
                         AND ps.closing_time IS NOT NULL
-                ) THEN (
-                    -- Use actual schedule: check if NOW() is within operating hours
-                    SELECT CASE
-                        WHEN NOW() >= ps2.opening_time AND NOW() <= ps2.closing_time THEN 1
-                        ELSE 0
-                    END
-                    FROM park_schedules ps2
-                    WHERE ps2.park_id = {park_id_expr}
-                        AND ps2.schedule_date = CURDATE()
-                        AND ps2.schedule_type = 'OPERATING'
-                        AND ps2.opening_time IS NOT NULL
-                        AND ps2.closing_time IS NOT NULL
-                    ORDER BY ps2.opening_time
-                    LIMIT 1
-                )
-                -- Fall back to heuristic if no schedule available
+                        AND NOW() >= ps.opening_time
+                        AND NOW() <= ps.closing_time
+                ) THEN 1
+                -- Fall back to heuristic if no schedule matches
                 ELSE (
                     SELECT CASE WHEN pas2.park_appears_open = TRUE THEN 1 ELSE 0 END
                     FROM park_activity_snapshots pas2

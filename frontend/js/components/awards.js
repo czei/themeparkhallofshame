@@ -184,7 +184,7 @@ class Awards {
                         winnerName: this.state.leastReliableRide?.ride_name,
                         parkName: this.state.leastReliableRide?.park_name,
                         statText: this.state.leastReliableRide
-                            ? `${Number(this.state.leastReliableRide.downtime_hours || 0).toFixed(1)}h downtime \u00b7 ${this.state.leastReliableRide.downtime_incidents || 0} outages`
+                            ? `${Number(this.state.leastReliableRide.downtime_hours || 0).toFixed(1)}h downtime`
                             : null
                     })}
 

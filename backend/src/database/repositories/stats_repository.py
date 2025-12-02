@@ -3669,6 +3669,10 @@ class StatsRepository:
         if filter_disney_universal:
             filter_clause = "AND (plr.is_disney = TRUE OR plr.is_universal = TRUE)"
 
+        # Only show parks that are currently open (based on schedules)
+        # Parks without schedules or that are closed today are filtered out
+        filter_clause += " AND plr.park_is_open = TRUE"
+
         # Map sort_by to column
         sort_mapping = {
             "shame_score": "plr.shame_score DESC",

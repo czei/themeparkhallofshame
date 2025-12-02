@@ -335,20 +335,23 @@ class ScheduleRepository:
         Returns:
             List of parks with park_id and themeparks_wiki_id
         """
+        # Use subquery to work around MariaDB limitation with column aliases
         query = text("""
-            SELECT
-                p.park_id,
-                p.themeparks_wiki_id,
-                p.name,
-                MAX(ps.fetched_at) as last_fetched
-            FROM parks p
-            LEFT JOIN park_schedules ps ON p.park_id = ps.park_id
-            WHERE p.is_active = TRUE
-                AND p.themeparks_wiki_id IS NOT NULL
-            GROUP BY p.park_id, p.themeparks_wiki_id, p.name
-            HAVING last_fetched IS NULL
+            SELECT * FROM (
+                SELECT
+                    p.park_id,
+                    p.themeparks_wiki_id,
+                    p.name,
+                    MAX(ps.fetched_at) as last_fetched
+                FROM parks p
+                LEFT JOIN park_schedules ps ON p.park_id = ps.park_id
+                WHERE p.is_active = TRUE
+                    AND p.themeparks_wiki_id IS NOT NULL
+                GROUP BY p.park_id, p.themeparks_wiki_id, p.name
+            ) subq
+            WHERE last_fetched IS NULL
                 OR last_fetched < DATE_SUB(NOW(), INTERVAL :hours HOUR)
-            ORDER BY last_fetched ASC NULLS FIRST
+            ORDER BY last_fetched IS NULL DESC, last_fetched ASC
         """)
 
         result = self.conn.execute(query, {"hours": max_age_hours})

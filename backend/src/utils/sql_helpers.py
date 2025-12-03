@@ -65,33 +65,110 @@ class RideStatusSQL:
         """
         return f"({table_alias}.status = 'OPERATING' OR ({table_alias}.status IS NULL AND {table_alias}.computed_is_open = TRUE))"
 
+    # Parks that properly report DOWN status (distinct from CLOSED)
+    # These parks only count status='DOWN' as breakdowns, not CLOSED
+    PARKS_WITH_DOWN_STATUS = "({parks_alias}.is_disney = TRUE OR {parks_alias}.is_universal = TRUE OR {parks_alias}.name = 'Dollywood')"
+
     @staticmethod
-    def is_down(table_alias: str = "rss") -> str:
+    def is_down(table_alias: str = "rss", parks_alias: str = None) -> str:
         """
         Get SQL condition for checking if a ride is down (not operating).
 
-        Includes both DOWN and CLOSED status because many non-Disney/Universal
-        parks report all non-operating rides as CLOSED (no breakdown distinction).
-        The has_operated_subquery filter ensures we only count rides that were
-        operating at some point, filtering out true seasonal closures.
+        PARK-TYPE AWARE LOGIC:
+        - Disney/Universal/Dollywood parks: Only count DOWN status (not CLOSED)
+          because they properly distinguish between breakdowns (DOWN) and
+          scheduled closures (CLOSED)
+        - Other parks: Include both DOWN and CLOSED because many parks
+          (Busch Gardens, SeaWorld, etc.) only report CLOSED for all
+          non-operating rides. The has_operated_subquery filter ensures
+          we only count rides that were operating at some point.
 
         Note: REFURBISHMENT is excluded as it indicates long-term scheduled maintenance.
 
         Args:
             table_alias: The alias used for ride_status_snapshots table
+            parks_alias: Optional alias for parks table. If provided, uses
+                        park-type-aware logic. If None, uses legacy behavior.
 
         Returns:
             SQL condition that is TRUE when ride is down
         """
-        return f"({table_alias}.status IN ('DOWN', 'CLOSED') OR ({table_alias}.status IS NULL AND {table_alias}.computed_is_open = FALSE))"
+        if parks_alias:
+            parks_with_down = RideStatusSQL.PARKS_WITH_DOWN_STATUS.format(parks_alias=parks_alias)
+            # Park-type aware logic
+            return f"""(
+                CASE
+                    WHEN {parks_with_down} THEN
+                        -- Disney/Universal/Dollywood: Only count explicit DOWN status
+                        {table_alias}.status = 'DOWN'
+                    ELSE
+                        -- Other parks: Count DOWN, CLOSED, or computed_is_open=FALSE
+                        ({table_alias}.status IN ('DOWN', 'CLOSED') OR ({table_alias}.status IS NULL AND {table_alias}.computed_is_open = FALSE))
+                END
+            )"""
+        else:
+            # Legacy behavior (backwards compatibility)
+            return f"({table_alias}.status IN ('DOWN', 'CLOSED') OR ({table_alias}.status IS NULL AND {table_alias}.computed_is_open = FALSE))"
 
     @staticmethod
-    def has_operated_subquery(ride_id_expr: str, start_param: str = ":start_utc", end_param: str = ":end_utc") -> str:
+    def is_down_disney_universal(table_alias: str = "rss") -> str:
+        """
+        Get SQL condition for checking if a ride is down at a Disney/Universal park.
+
+        Disney and Universal parks properly distinguish between:
+        - DOWN: Unexpected breakdown (counts as downtime)
+        - CLOSED: Scheduled closure (does NOT count as downtime)
+
+        Args:
+            table_alias: The alias used for ride_status_snapshots table
+
+        Returns:
+            SQL condition that is TRUE when ride is DOWN (broken)
+        """
+        return f"{table_alias}.status = 'DOWN'"
+
+    @staticmethod
+    def is_down_other_parks(table_alias: str = "rss") -> str:
+        """
+        Get SQL condition for checking if a ride is down at non-Disney/Universal parks.
+
+        Most other parks (Dollywood, Busch Gardens, SeaWorld, etc.) only report
+        CLOSED status for all non-operating rides - they don't distinguish between
+        breakdowns and scheduled closures. We include both DOWN and CLOSED.
+
+        Use with a stricter has_operated filter to avoid counting seasonal closures.
+
+        Args:
+            table_alias: The alias used for ride_status_snapshots table
+
+        Returns:
+            SQL condition that is TRUE when ride is not operating
+        """
+        return f"({table_alias}.status IN ('DOWN', 'CLOSED') OR ({table_alias}.status IS NULL AND {table_alias}.computed_is_open = FALSE))"
+
+    # Minimum operating snapshots required for non-Disney/Universal parks
+    # to count their CLOSED status as downtime (6 snapshots = 30 minutes)
+    MIN_OPERATING_SNAPSHOTS_OTHER_PARKS = 6
+
+    @staticmethod
+    def has_operated_subquery(
+        ride_id_expr: str,
+        park_id_expr: str = None,
+        start_param: str = ":start_utc",
+        end_param: str = ":end_utc"
+    ) -> str:
         """
         Get SQL EXISTS subquery to check if a ride has operated during a period.
 
         SINGLE SOURCE OF TRUTH: This determines if a ride is a "breakdown" vs "seasonal closure".
         A ride that has NEVER operated during the period is a seasonal closure, not a breakdown.
+
+        CRITICAL RULE: A ride can only be considered "operated" if:
+        1. The ride had status='OPERATING' or computed_is_open=TRUE
+        2. AND the park was open at that time (park_appears_open=TRUE)
+
+        If park_id_expr is provided, this enforces the park-open check.
+        If not provided (legacy mode), only ride status is checked.
 
         SQLAlchemy equivalent: StatusExpressions.has_operated_today_subquery()
         in database/queries/builders/expressions.py
@@ -102,11 +179,10 @@ class RideStatusSQL:
         2. Exclude seasonal closures from downtime rankings table
         3. Ensure panel count matches table count for DOWN rides
 
-        A ride is considered to have operated if it had at least one snapshot
-        with status='OPERATING' or computed_is_open=TRUE.
-
         Args:
             ride_id_expr: Expression for the ride_id to check (e.g., "r.ride_id")
+            park_id_expr: Expression for the park_id (e.g., "r.park_id"). If provided,
+                         enforces that park must be open for ride to count as operated.
             start_param: SQL parameter name for start time
             end_param: SQL parameter name for end time
 
@@ -114,16 +190,210 @@ class RideStatusSQL:
             SQL EXISTS clause that is TRUE if ride has operated during period
 
         Example:
-            # Only count downtime for rides that have operated today
-            has_operated = RideStatusSQL.has_operated_subquery("r.ride_id")
+            # Only count downtime for rides that have operated today (with park check)
+            has_operated = RideStatusSQL.has_operated_subquery("r.ride_id", "r.park_id")
             query = f"... AND {has_operated} ..."
         """
-        return f"""EXISTS (
-            SELECT 1 FROM ride_status_snapshots rss_op
+        if park_id_expr:
+            # CORRECT: Check both ride status AND park status
+            return f"""EXISTS (
+                SELECT 1 FROM ride_status_snapshots rss_op
+                INNER JOIN park_activity_snapshots pas_op
+                    ON pas_op.park_id = {park_id_expr}
+                    AND pas_op.recorded_at = rss_op.recorded_at
+                WHERE rss_op.ride_id = {ride_id_expr}
+                AND rss_op.recorded_at >= {start_param}
+                AND rss_op.recorded_at < {end_param}
+                AND (rss_op.status = 'OPERATING' OR (rss_op.status IS NULL AND rss_op.computed_is_open = TRUE))
+                AND pas_op.park_appears_open = TRUE
+            )"""
+        else:
+            # Legacy mode (backwards compatibility) - only checks ride status
+            # WARNING: This does not check if park was open!
+            return f"""EXISTS (
+                SELECT 1 FROM ride_status_snapshots rss_op
+                WHERE rss_op.ride_id = {ride_id_expr}
+                AND rss_op.recorded_at >= {start_param}
+                AND rss_op.recorded_at < {end_param}
+                AND (rss_op.status = 'OPERATING' OR (rss_op.status IS NULL AND rss_op.computed_is_open = TRUE))
+            )"""
+
+    @staticmethod
+    def has_operated_minimum_subquery(
+        ride_id_expr: str,
+        start_param: str = ":start_utc",
+        end_param: str = ":end_utc",
+        min_snapshots: int = None
+    ) -> str:
+        """
+        Get SQL subquery to check if a ride has operated for a minimum duration.
+
+        STRICTER VERSION for non-Disney/Universal parks:
+        Requires at least MIN_OPERATING_SNAPSHOTS_OTHER_PARKS (6) operating snapshots
+        before counting CLOSED as downtime. This filters out rides that only
+        operated briefly (e.g., for testing) before going CLOSED.
+
+        Args:
+            ride_id_expr: Expression for the ride_id to check (e.g., "r.ride_id")
+            start_param: SQL parameter name for start time
+            end_param: SQL parameter name for end time
+            min_snapshots: Minimum number of operating snapshots required
+                          (defaults to MIN_OPERATING_SNAPSHOTS_OTHER_PARKS)
+
+        Returns:
+            SQL subquery that returns TRUE if ride has operated enough
+
+        Example:
+            # Only count downtime for rides that have operated at least 30 min
+            has_min = RideStatusSQL.has_operated_minimum_subquery("r.ride_id")
+            query = f"... AND {has_min} ..."
+        """
+        if min_snapshots is None:
+            min_snapshots = RideStatusSQL.MIN_OPERATING_SNAPSHOTS_OTHER_PARKS
+
+        return f"""(
+            SELECT COUNT(*) >= {min_snapshots}
+            FROM ride_status_snapshots rss_op
             WHERE rss_op.ride_id = {ride_id_expr}
             AND rss_op.recorded_at >= {start_param}
             AND rss_op.recorded_at < {end_param}
             AND (rss_op.status = 'OPERATING' OR (rss_op.status IS NULL AND rss_op.computed_is_open = TRUE))
+        )"""
+
+    @staticmethod
+    def has_operated_for_park_type(
+        ride_id_expr: str,
+        parks_alias: str,
+        start_param: str = ":start_utc",
+        end_param: str = ":end_utc",
+        park_id_expr: str = None
+    ) -> str:
+        """
+        Get park-type-aware "has operated" check.
+
+        - Disney/Universal: Just needs 1 operating snapshot (they have proper DOWN status)
+        - Other parks: Need at least MIN_OPERATING_SNAPSHOTS_OTHER_PARKS (6) snapshots
+          to count CLOSED as downtime (filters out seasonal/weather closures)
+
+        CRITICAL: If park_id_expr is provided, the check also requires that the park
+        was marked as open (park_appears_open=TRUE) at the time of the snapshot.
+        This prevents counting OPERATING snapshots from parks that weren't truly open.
+
+        Args:
+            ride_id_expr: Expression for the ride_id to check
+            parks_alias: Alias for the parks table
+            start_param: SQL parameter name for start time
+            end_param: SQL parameter name for end time
+            park_id_expr: Expression for park_id (e.g., "p.park_id"). If provided,
+                         requires park_appears_open=TRUE for snapshots to count.
+
+        Returns:
+            SQL condition that returns TRUE if ride has operated enough for its park type
+        """
+        min_snaps = RideStatusSQL.MIN_OPERATING_SNAPSHOTS_OTHER_PARKS
+
+        # Build the park open check if park_id_expr is provided
+        if park_id_expr:
+            park_join = f"""INNER JOIN park_activity_snapshots pas_op
+                            ON pas_op.park_id = {park_id_expr}
+                            AND pas_op.recorded_at = rss_op.recorded_at"""
+            park_filter = "AND pas_op.park_appears_open = TRUE"
+        else:
+            park_join = ""
+            park_filter = ""
+
+        parks_with_down = RideStatusSQL.PARKS_WITH_DOWN_STATUS.format(parks_alias=parks_alias)
+
+        return f"""(
+            CASE
+                WHEN {parks_with_down} THEN
+                    -- Disney/Universal/Dollywood: Just need 1 operating snapshot while park is open
+                    EXISTS (
+                        SELECT 1 FROM ride_status_snapshots rss_op
+                        {park_join}
+                        WHERE rss_op.ride_id = {ride_id_expr}
+                        AND rss_op.recorded_at >= {start_param}
+                        AND rss_op.recorded_at < {end_param}
+                        AND (rss_op.status = 'OPERATING' OR (rss_op.status IS NULL AND rss_op.computed_is_open = TRUE))
+                        {park_filter}
+                    )
+                ELSE
+                    -- Other parks: Need at least {min_snaps} operating snapshots (30 min) while park is open
+                    (
+                        SELECT COUNT(*) >= {min_snaps}
+                        FROM ride_status_snapshots rss_op
+                        {park_join}
+                        WHERE rss_op.ride_id = {ride_id_expr}
+                        AND rss_op.recorded_at >= {start_param}
+                        AND rss_op.recorded_at < {end_param}
+                        AND (rss_op.status = 'OPERATING' OR (rss_op.status IS NULL AND rss_op.computed_is_open = TRUE))
+                        {park_filter}
+                    )
+            END
+        )"""
+
+    @staticmethod
+    def rides_that_operated_cte(
+        start_param: str = ":start_utc",
+        end_param: str = ":end_utc",
+        filter_clause: str = "",
+        cte_name: str = "rides_that_operated"
+    ) -> str:
+        """
+        Get SQL CTE for rides that have operated during a period.
+
+        SINGLE SOURCE OF TRUTH for determining which rides should be included
+        in downtime calculations. This CTE enforces the CRITICAL RULE:
+
+        A ride has "operated" if and only if:
+        1. The ride had at least one snapshot with status='OPERATING' or computed_is_open=TRUE
+        2. AND the park was open at that time (park_appears_open=TRUE)
+
+        IMPORTANT: If a park is closed (park_appears_open=FALSE), ALL ride statuses
+        are ignored. Rides cannot be considered "operating" if the park is closed,
+        regardless of what the ride status API reports.
+
+        This prevents false positives from:
+        - Seasonally closed parks with stale/bogus ride status data
+        - Parks with incorrect schedule data
+        - API glitches reporting rides as open when park is closed
+
+        Args:
+            start_param: SQL parameter name for start time
+            end_param: SQL parameter name for end time
+            filter_clause: Optional additional WHERE clause (e.g., "AND p.is_disney = TRUE")
+            cte_name: Name for the CTE (default "rides_that_operated")
+
+        Returns:
+            SQL CTE definition (without WITH keyword) that can be used in queries
+
+        Example:
+            cte = RideStatusSQL.rides_that_operated_cte()
+            query = f'''
+                WITH {cte}
+                SELECT ...
+                FROM rides r
+                LEFT JOIN rides_that_operated rto ON r.ride_id = rto.ride_id
+                WHERE rto.ride_id IS NOT NULL  -- Only rides that operated
+            '''
+        """
+        return f"""{cte_name} AS (
+            -- SINGLE SOURCE OF TRUTH: Rides that operated while park was open
+            -- CRITICAL: Both ride status AND park status must indicate "open"
+            SELECT DISTINCT r.ride_id, r.park_id
+            FROM rides r
+            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
+                AND pas.recorded_at = rss.recorded_at
+            INNER JOIN parks p ON r.park_id = p.park_id
+            WHERE rss.recorded_at >= {start_param}
+                AND rss.recorded_at < {end_param}
+                AND (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = TRUE))
+                AND pas.park_appears_open = TRUE
+                AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+                AND p.is_active = TRUE
+                {filter_clause}
         )"""
 
     @staticmethod
@@ -277,6 +547,11 @@ class ParkStatusSQL:
         1. Use park_schedules if available (actual operating hours from API)
         2. Fall back to park_appears_open heuristic (inferred from ride activity)
 
+        IMPORTANT: Uses time-range check (NOW() between opening/closing) rather than
+        date matching to handle timezone differences correctly. The database is UTC
+        but schedules are stored by local date, so we check if NOW() falls within
+        any schedule's actual opening/closing timestamps.
+
         Args:
             park_id_expr: Expression for the park_id to check
             alias: Column alias for the result
@@ -286,30 +561,18 @@ class ParkStatusSQL:
         """
         return f"""(
             SELECT CASE
-                -- First try schedule-based check (preferred)
+                -- Check if NOW() falls within any OPERATING schedule's time window
+                -- Uses time-range check instead of date match to handle UTC/local timezone correctly
                 WHEN EXISTS (
                     SELECT 1 FROM park_schedules ps
                     WHERE ps.park_id = {park_id_expr}
-                        AND ps.schedule_date = CURDATE()
                         AND ps.schedule_type = 'OPERATING'
                         AND ps.opening_time IS NOT NULL
                         AND ps.closing_time IS NOT NULL
-                ) THEN (
-                    -- Use actual schedule: check if NOW() is within operating hours
-                    SELECT CASE
-                        WHEN NOW() >= ps2.opening_time AND NOW() <= ps2.closing_time THEN 1
-                        ELSE 0
-                    END
-                    FROM park_schedules ps2
-                    WHERE ps2.park_id = {park_id_expr}
-                        AND ps2.schedule_date = CURDATE()
-                        AND ps2.schedule_type = 'OPERATING'
-                        AND ps2.opening_time IS NOT NULL
-                        AND ps2.closing_time IS NOT NULL
-                    ORDER BY ps2.opening_time
-                    LIMIT 1
-                )
-                -- Fall back to heuristic if no schedule available
+                        AND NOW() >= ps.opening_time
+                        AND NOW() <= ps.closing_time
+                ) THEN 1
+                -- Fall back to heuristic if no schedule matches
                 ELSE (
                     SELECT CASE WHEN pas2.park_appears_open = TRUE THEN 1 ELSE 0 END
                     FROM park_activity_snapshots pas2
@@ -348,8 +611,12 @@ class ParkStatusSQL:
         Get SQL condition for checking if park was open at a specific timestamp.
 
         Priority:
-        1. Use park_schedules if available for the date
+        1. Use park_schedules if timestamp falls within ANY OPERATING schedule's time window
         2. Fall back to park_appears_open from park_activity_snapshots
+
+        IMPORTANT: Uses time-range matching (timestamp between opening/closing) rather
+        than date matching. This correctly handles schedules that span midnight UTC,
+        such as a park that opens at 16:00 UTC Dec 1 and closes at 07:00 UTC Dec 2.
 
         This is for historical queries where we check each snapshot timestamp.
 
@@ -362,27 +629,24 @@ class ParkStatusSQL:
             SQL condition that is TRUE when park was open at that time
         """
         return f"""(
-            -- Check if park has schedule for the date
+            -- Check if timestamp falls within ANY OPERATING schedule's time window
+            -- Uses time-range matching (not date matching) to handle midnight-spanning schedules
             CASE WHEN EXISTS (
                 SELECT 1 FROM park_schedules ps
                 WHERE ps.park_id = {park_id_expr}
-                    AND ps.schedule_date = DATE({timestamp_expr})
                     AND ps.schedule_type = 'OPERATING'
                     AND ps.opening_time IS NOT NULL
                     AND ps.closing_time IS NOT NULL
-            ) THEN (
-                -- Use schedule: check if timestamp is within operating hours
-                SELECT {timestamp_expr} >= ps2.opening_time AND {timestamp_expr} <= ps2.closing_time
-                FROM park_schedules ps2
+                    AND {timestamp_expr} >= ps.opening_time
+                    AND {timestamp_expr} <= ps.closing_time
+            ) THEN TRUE
+            -- Check if park has ANY schedule data (to distinguish from parks without schedules)
+            WHEN EXISTS (
+                SELECT 1 FROM park_schedules ps2
                 WHERE ps2.park_id = {park_id_expr}
-                    AND ps2.schedule_date = DATE({timestamp_expr})
                     AND ps2.schedule_type = 'OPERATING'
-                    AND ps2.opening_time IS NOT NULL
-                    AND ps2.closing_time IS NOT NULL
-                ORDER BY ps2.opening_time
-                LIMIT 1
-            )
-            -- Fall back to heuristic
+            ) THEN FALSE  -- Schedule exists but timestamp not in operating window
+            -- Fall back to heuristic for parks without schedule data
             ELSE {pas_alias}.park_appears_open = TRUE
             END
         )"""
@@ -440,7 +704,10 @@ class DowntimeSQL:
     @staticmethod
     def downtime_minutes_sum(
         rss_alias: str = "rss",
-        pas_alias: str = "pas"
+        pas_alias: str = "pas",
+        park_id_expr: str = None,
+        use_schedule: bool = True,
+        parks_alias: str = None
     ) -> str:
         """
         Get SQL expression for summing downtime minutes from snapshots.
@@ -450,12 +717,30 @@ class DowntimeSQL:
         Args:
             rss_alias: Alias for ride_status_snapshots table
             pas_alias: Alias for park_activity_snapshots table
+            park_id_expr: Expression for park_id (e.g., "p.park_id") - required for schedule-based filtering
+            use_schedule: If True and park_id_expr provided, use schedule-based park open check
+                         instead of park_appears_open heuristic. This is more accurate for
+                         parks with schedules (e.g., Disney) where the heuristic may incorrectly
+                         mark the park as open before official opening time.
+            parks_alias: Alias for parks table (e.g., "p") - enables park-type-aware downtime logic.
+                        Disney/Universal: Only count DOWN status (not CLOSED)
+                        Other parks: Count DOWN, CLOSED, or computed_is_open=FALSE
 
         Returns:
             SQL expression that sums to total downtime minutes
         """
-        is_down = RideStatusSQL.is_down(rss_alias)
-        park_open = ParkStatusSQL.park_appears_open_filter(pas_alias)
+        # PARK-TYPE AWARE: Disney/Universal only count DOWN, others count CLOSED too
+        is_down = RideStatusSQL.is_down(rss_alias, parks_alias=parks_alias)
+
+        # Use schedule-based check if park_id is provided, otherwise fall back to heuristic
+        if use_schedule and park_id_expr:
+            park_open = ParkStatusSQL.park_is_open_at_time_filter(
+                park_id_expr=park_id_expr,
+                timestamp_expr=f"{rss_alias}.recorded_at",
+                pas_alias=pas_alias
+            )
+        else:
+            park_open = ParkStatusSQL.park_appears_open_filter(pas_alias)
 
         return f"""SUM(CASE
             WHEN {park_open} AND {is_down}
@@ -467,7 +752,10 @@ class DowntimeSQL:
     def downtime_hours_rounded(
         rss_alias: str = "rss",
         pas_alias: str = "pas",
-        decimal_places: int = 2
+        decimal_places: int = 2,
+        park_id_expr: str = None,
+        use_schedule: bool = True,
+        parks_alias: str = None
     ) -> str:
         """
         Get SQL expression for downtime hours (rounded).
@@ -476,11 +764,14 @@ class DowntimeSQL:
             rss_alias: Alias for ride_status_snapshots table
             pas_alias: Alias for park_activity_snapshots table
             decimal_places: Number of decimal places to round to
+            park_id_expr: Expression for park_id - enables schedule-based filtering
+            use_schedule: If True and park_id_expr provided, use schedule-based park open check
+            parks_alias: Alias for parks table - enables park-type-aware downtime logic
 
         Returns:
             SQL expression for downtime hours
         """
-        minutes = DowntimeSQL.downtime_minutes_sum(rss_alias, pas_alias)
+        minutes = DowntimeSQL.downtime_minutes_sum(rss_alias, pas_alias, park_id_expr, use_schedule, parks_alias)
         return f"ROUND({minutes} / 60.0, {decimal_places})"
 
     @staticmethod

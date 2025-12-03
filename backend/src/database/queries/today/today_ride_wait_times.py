@@ -65,9 +65,38 @@ class TodayRideWaitTimesQuery:
         # Use centralized SQL helpers for consistent logic
         filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
-        park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
 
+        # PERFORMANCE: Use CTE to get latest snapshot per ride once,
+        # avoiding correlated subqueries that run per-row
         query = text(f"""
+            WITH latest_snapshots AS (
+                -- Get the most recent snapshot for each ride (runs once, not per-row)
+                SELECT
+                    rss_inner.ride_id,
+                    rss_inner.wait_time AS current_wait_time,
+                    rss_inner.status AS current_status,
+                    rss_inner.computed_is_open AS current_is_open
+                FROM ride_status_snapshots rss_inner
+                INNER JOIN (
+                    SELECT ride_id, MAX(recorded_at) AS max_recorded_at
+                    FROM ride_status_snapshots
+                    GROUP BY ride_id
+                ) latest ON rss_inner.ride_id = latest.ride_id
+                    AND rss_inner.recorded_at = latest.max_recorded_at
+            ),
+            latest_park_status AS (
+                -- Get the most recent park status for each park (runs once)
+                SELECT
+                    pas_inner.park_id,
+                    pas_inner.park_appears_open AS park_is_open
+                FROM park_activity_snapshots pas_inner
+                INNER JOIN (
+                    SELECT park_id, MAX(recorded_at) AS max_recorded_at
+                    FROM park_activity_snapshots
+                    GROUP BY park_id
+                ) latest_pas ON pas_inner.park_id = latest_pas.park_id
+                    AND pas_inner.recorded_at = latest_pas.max_recorded_at
+            )
             SELECT
                 r.ride_id,
                 r.queue_times_id,
@@ -79,29 +108,27 @@ class TodayRideWaitTimesQuery:
                 rc.tier,
 
                 -- Average wait time (only when park is open and wait > 0)
+                -- IMPORTANT: Use avg_wait_minutes (not avg_wait_time) for frontend compatibility
                 ROUND(
                     AVG(CASE
                         WHEN {park_open} AND rss.wait_time > 0
                         THEN rss.wait_time
                     END),
                     1
-                ) AS avg_wait_time,
+                ) AS avg_wait_minutes,
 
                 -- Peak wait time today
+                -- IMPORTANT: Use peak_wait_minutes (not peak_wait_time) for frontend compatibility
                 MAX(CASE
                     WHEN {park_open}
                     THEN rss.wait_time
-                END) AS peak_wait_time,
+                END) AS peak_wait_minutes,
 
-                -- Current wait time (most recent snapshot)
-                (SELECT rss2.wait_time
-                 FROM ride_status_snapshots rss2
-                 WHERE rss2.ride_id = r.ride_id
-                 ORDER BY rss2.recorded_at DESC
-                 LIMIT 1) AS current_wait_time,
-
-                -- Park operating status (current)
-                {park_is_open_sq}
+                -- Current values from pre-computed CTE (no correlated subqueries)
+                ls.current_wait_time,
+                ls.current_status,
+                ls.current_is_open,
+                lps.park_is_open
 
             FROM rides r
             INNER JOIN parks p ON r.park_id = p.park_id
@@ -109,14 +136,17 @@ class TodayRideWaitTimesQuery:
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
                 AND pas.recorded_at = rss.recorded_at
+            LEFT JOIN latest_snapshots ls ON r.ride_id = ls.ride_id
+            LEFT JOIN latest_park_status lps ON p.park_id = lps.park_id
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :now_utc
                 AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'
                 AND p.is_active = TRUE
                 {filter_clause}
-            GROUP BY r.ride_id, r.name, p.name, p.park_id, p.city, p.state_province, rc.tier
-            HAVING avg_wait_time IS NOT NULL
-            ORDER BY avg_wait_time DESC
+            GROUP BY r.ride_id, r.name, p.name, p.park_id, p.city, p.state_province, rc.tier,
+                     ls.current_wait_time, ls.current_status, ls.current_is_open, lps.park_is_open
+            HAVING avg_wait_minutes IS NOT NULL
+            ORDER BY avg_wait_minutes DESC
             LIMIT :limit
         """)
 

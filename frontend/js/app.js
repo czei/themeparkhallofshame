@@ -6,7 +6,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Global application state
     const globalState = {
         filter: 'all-parks',  // Global filter: 'all-parks' or 'disney-universal'
-        period: 'live'        // Time period: 'live', 'today', '7days', '30days'
+        period: 'live',       // Time period: 'live', 'today', 'yesterday', 'last_week', 'last_month'
+        currentView: 'downtime',  // Track current view for filter visibility
+        entity: 'parks'       // Entity type: 'parks' or 'rides'
     };
 
     // Tab switching logic
@@ -39,6 +41,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Load appropriate view
             const view = item.dataset.view;
+            globalState.currentView = view;
+
+            // Update filter visibility based on view
+            updateFilterVisibility();
+
+            // If switching to awards and currently on 'live', switch to 'today'
+            if (view === 'awards' && globalState.period === 'live') {
+                globalState.period = 'today';
+                updateTimePeriodUI();
+            }
+
+            // Save current entity selection before switching views
+            if (currentComponent && currentComponent.state && currentComponent.state.entityType) {
+                globalState.entity = currentComponent.state.entityType;
+            }
+
             loadView(view);
         });
     });
@@ -59,6 +77,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     // Update UI
                     updateGlobalFilterUI();
+
+                    // Clear cache and prefetch with new filter
+                    apiClient.clearCache();
+                    apiClient.prefetch(globalState.period, globalState.filter);
 
                     // Update current component if it exists and has updateFilter method
                     if (currentComponent && typeof currentComponent.updateFilter === 'function') {
@@ -87,36 +109,46 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * Initialize time period selector
+     * Initialize time period selector (including History dropdown)
      */
     function initTimePeriodSelector() {
         const timeBtns = document.querySelectorAll('.time-btn');
+        const historyDropdown = document.querySelector('.history-dropdown');
+        const historyBtn = document.getElementById('history-dropdown-btn');
+        const dropdownItems = document.querySelectorAll('.dropdown-item');
 
+        // Handle primary time buttons (Live, Today, Yesterday)
         timeBtns.forEach(btn => {
             btn.addEventListener('click', () => {
                 const newPeriod = btn.dataset.period;
-
-                if (newPeriod !== globalState.period) {
-                    // Update global state
-                    globalState.period = newPeriod;
-
-                    // Update UI
-                    updateTimePeriodUI();
-
-                    // Update current component if it exists and has updatePeriod method
-                    if (currentComponent && typeof currentComponent.updatePeriod === 'function') {
-                        currentComponent.updatePeriod(globalState.period);
-                    } else if (currentComponent && currentComponent.state) {
-                        // Fallback: directly update state and refetch
-                        currentComponent.state.period = globalState.period;
-                        if (typeof currentComponent.fetchRankings === 'function') {
-                            currentComponent.fetchRankings();
-                        } else if (typeof currentComponent.fetchData === 'function') {
-                            currentComponent.fetchData();
-                        }
-                    }
-                }
+                selectPeriod(newPeriod);
             });
+        });
+
+        // Handle History dropdown toggle
+        if (historyBtn) {
+            historyBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                historyDropdown.classList.toggle('open');
+            });
+        }
+
+        // Handle dropdown items (Last Week, Last Month)
+        dropdownItems.forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const newPeriod = item.dataset.period;
+                selectPeriod(newPeriod);
+                // Close dropdown
+                historyDropdown.classList.remove('open');
+            });
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (historyDropdown && !historyDropdown.contains(e.target)) {
+                historyDropdown.classList.remove('open');
+            }
         });
 
         // Set initial UI state
@@ -124,17 +156,102 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
+     * Select a time period and update the view
+     */
+    function selectPeriod(newPeriod) {
+        if (newPeriod !== globalState.period) {
+            // Update global state
+            globalState.period = newPeriod;
+
+            // Update UI
+            updateTimePeriodUI();
+
+            // Clear cache and prefetch with new period
+            apiClient.clearCache();
+            apiClient.prefetch(globalState.period, globalState.filter);
+
+            // Update current component if it exists and has updatePeriod method
+            if (currentComponent && typeof currentComponent.updatePeriod === 'function') {
+                currentComponent.updatePeriod(globalState.period);
+            } else if (currentComponent && currentComponent.state) {
+                // Fallback: directly update state and refetch
+                currentComponent.state.period = globalState.period;
+                if (typeof currentComponent.fetchRankings === 'function') {
+                    currentComponent.fetchRankings();
+                } else if (typeof currentComponent.fetchData === 'function') {
+                    currentComponent.fetchData();
+                }
+            }
+        }
+    }
+
+    /**
      * Update time period UI to reflect current state
      */
     function updateTimePeriodUI() {
         const timeBtns = document.querySelectorAll('.time-btn');
+        const historyBtn = document.getElementById('history-dropdown-btn');
+        const dropdownItems = document.querySelectorAll('.dropdown-item');
+        const isAwards = globalState.currentView === 'awards';
+
+        // Check if current period is a "history" period (dropdown item)
+        const isHistoryPeriod = ['last_week', 'last_month'].includes(globalState.period);
+
+        // Update primary time buttons
         timeBtns.forEach(btn => {
+            // Hide/disable LIVE button for Awards tab
+            if (btn.dataset.period === 'live') {
+                if (isAwards) {
+                    btn.classList.add('hidden');
+                } else {
+                    btn.classList.remove('hidden');
+                }
+            }
+
             if (btn.dataset.period === globalState.period) {
                 btn.classList.add('active');
             } else {
                 btn.classList.remove('active');
             }
         });
+
+        // Update History button (active if any dropdown item is selected)
+        if (historyBtn) {
+            if (isHistoryPeriod) {
+                historyBtn.classList.add('active');
+            } else {
+                historyBtn.classList.remove('active');
+            }
+        }
+
+        // Update dropdown items
+        dropdownItems.forEach(item => {
+            if (item.dataset.period === globalState.period) {
+                item.classList.add('active');
+            } else {
+                item.classList.remove('active');
+            }
+        });
+    }
+
+    /**
+     * Update filter visibility based on current view
+     * Awards tab hides the park filter (always shows all parks)
+     */
+    function updateFilterVisibility() {
+        const filterRow = document.querySelector('.park-filter');
+        const isAwards = globalState.currentView === 'awards';
+
+        if (filterRow) {
+            if (isAwards) {
+                filterRow.classList.add('hidden');
+            } else {
+                filterRow.classList.remove('hidden');
+            }
+        }
+
+        // Also update time period UI to hide/show LIVE button
+        updateTimePeriodUI();
     }
 
     async function loadView(viewName) {
@@ -148,8 +265,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'downtime':
                     if (typeof Downtime !== 'undefined') {
                         currentComponent = new Downtime(apiClient, 'view-container', globalState.filter);
-                        // Sync the period before fetching data
+                        // Sync the period and entity before fetching data
                         currentComponent.state.period = globalState.period;
+                        currentComponent.state.entityType = globalState.entity;
                         await currentComponent.init();
                     } else {
                         throw new Error('Downtime component not loaded');
@@ -159,22 +277,36 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'wait-times':
                     if (typeof WaitTimes !== 'undefined') {
                         currentComponent = new WaitTimes(apiClient, 'view-container', globalState.filter);
-                        // Sync the period before fetching data
+                        // Sync the period and entity before fetching data
                         currentComponent.state.period = globalState.period;
+                        currentComponent.state.entityType = globalState.entity;
                         await currentComponent.init();
                     } else {
                         throw new Error('WaitTimes component not loaded');
                     }
                     break;
 
-                case 'trends':
-                    if (typeof Trends !== 'undefined') {
-                        currentComponent = new Trends(apiClient, 'view-container', globalState.filter);
-                        // Respect the current period selection (don't override)
-                        currentComponent.state.period = globalState.period;
+                case 'awards':
+                    if (typeof Awards !== 'undefined') {
+                        currentComponent = new Awards(apiClient, 'view-container', globalState.filter);
+                        // Awards uses 'today' if 'live' is selected
+                        currentComponent.state.period = globalState.period === 'live' ? 'today' : globalState.period;
                         await currentComponent.init();
                     } else {
-                        throw new Error('Trends component not loaded');
+                        throw new Error('Awards component not loaded');
+                    }
+                    break;
+
+                case 'charts':
+                    if (typeof Charts !== 'undefined') {
+                        currentComponent = new Charts(apiClient, 'view-container', globalState.filter);
+                        // Sync the period before fetching data
+                        currentComponent.state.period = globalState.period;
+                        await currentComponent.init();
+                        // Store reference for cleanup
+                        window.chartsComponent = currentComponent;
+                    } else {
+                        throw new Error('Charts component not loaded');
                     }
                     break;
 
@@ -197,4 +329,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Load default view (Downtime)
     loadView('downtime');
+
+    // Prefetch data for all tabs in the background
+    // This makes tab switching instant after initial load
+    apiClient.prefetch(globalState.period, globalState.filter);
 });

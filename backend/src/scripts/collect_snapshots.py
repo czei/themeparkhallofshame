@@ -37,6 +37,7 @@ from database.repositories.ride_repository import RideRepository
 from database.repositories.snapshot_repository import RideStatusSnapshotRepository, ParkActivitySnapshotRepository
 from database.repositories.status_change_repository import RideStatusChangeRepository
 from database.repositories.schedule_repository import ScheduleRepository
+from database.repositories.data_quality_repository import DataQualityRepository
 
 
 class SnapshotCollector:
@@ -46,6 +47,10 @@ class SnapshotCollector:
     Uses ThemeParks.wiki for parks with themeparks_wiki_id mapped.
     Falls back to Queue-Times.com for unmapped parks.
     """
+
+    # Data older than this is considered stale and flagged for reporting
+    # Buzz Lightyear case: data was 5+ months old!
+    STALE_DATA_THRESHOLD_MINUTES = 60
 
     def __init__(self):
         self.queue_times_client = QueueTimesClient()
@@ -79,6 +84,7 @@ class SnapshotCollector:
                 park_activity_repo = ParkActivitySnapshotRepository(conn)
                 status_change_repo = RideStatusChangeRepository(conn)
                 schedule_repo = ScheduleRepository(conn)
+                data_quality_repo = DataQualityRepository(conn)
 
                 parks = park_repo.get_all_active()
                 logger.info(f"Processing {len(parks)} active parks...")
@@ -88,10 +94,13 @@ class SnapshotCollector:
 
                 # Step 2: Process each park
                 for park in parks:
-                    self._process_park(park, park_activity_repo, ride_repo, snapshot_repo, status_change_repo, schedule_repo)
+                    self._process_park(park, park_activity_repo, ride_repo, snapshot_repo, status_change_repo, schedule_repo, data_quality_repo)
 
             # Step 3: Print summary
             self._print_summary()
+
+            # Step 4: Pre-aggregate live rankings for instant API responses
+            self._aggregate_live_rankings()
 
             logger.info("=" * 60)
             logger.info("SNAPSHOT COLLECTION - Complete ✓")
@@ -139,7 +148,8 @@ class SnapshotCollector:
 
     def _process_park(self, park: Dict, park_activity_repo: ParkActivitySnapshotRepository,
                       ride_repo: RideRepository, snapshot_repo: RideStatusSnapshotRepository,
-                      status_change_repo: RideStatusChangeRepository, schedule_repo: ScheduleRepository):
+                      status_change_repo: RideStatusChangeRepository, schedule_repo: ScheduleRepository,
+                      data_quality_repo: DataQualityRepository):
         """
         Process a single park: fetch wait times and store snapshots.
 
@@ -152,6 +162,7 @@ class SnapshotCollector:
             snapshot_repo: Ride status snapshot repository
             status_change_repo: Ride status change repository
             schedule_repo: Schedule repository for checking park hours
+            data_quality_repo: Data quality issue tracking repository
         """
         park_id = park.park_id
         park_name = park.name
@@ -167,7 +178,8 @@ class SnapshotCollector:
                 self.stats['parks_themeparks_wiki'] += 1
                 self._process_park_themeparks_wiki(
                     park, themeparks_wiki_id, park_activity_repo,
-                    ride_repo, snapshot_repo, status_change_repo, schedule_repo
+                    ride_repo, snapshot_repo, status_change_repo, schedule_repo,
+                    data_quality_repo
                 )
             else:
                 logger.info(f"Processing: {park_name} [Queue-Times]")
@@ -186,7 +198,8 @@ class SnapshotCollector:
                                        ride_repo: RideRepository,
                                        snapshot_repo: RideStatusSnapshotRepository,
                                        status_change_repo: RideStatusChangeRepository,
-                                       schedule_repo: ScheduleRepository):
+                                       schedule_repo: ScheduleRepository,
+                                       data_quality_repo: DataQualityRepository):
         """
         Process park using ThemeParks.wiki API.
 
@@ -198,6 +211,7 @@ class SnapshotCollector:
             snapshot_repo: Ride status snapshot repository
             status_change_repo: Ride status change repository
             schedule_repo: Schedule repository for checking park hours
+            data_quality_repo: Data quality issue tracking repository
         """
         park_id = park.park_id
         park_name = park.name
@@ -216,15 +230,14 @@ class SnapshotCollector:
         rides_closed = sum(1 for r in live_data if r.status in ('CLOSED', 'REFURBISHMENT'))
 
         # Use schedule-based park open detection (SINGLE SOURCE OF TRUTH)
-        # Falls back to heuristic if no schedule data available
+        # If no schedule, park is CLOSED - we don't trust API status alone
         park_appears_open = schedule_repo.is_park_open_now(park_id)
-        if not park_appears_open:
-            # Fallback: if no schedule data, use heuristic based on operating rides
-            # This handles parks without schedule data yet
-            if not schedule_repo.has_recent_schedule(park_id, max_age_hours=48):
-                min_rides_for_open = max(3, total_rides // 2)
-                park_appears_open = rides_operating >= min_rides_for_open
-                logger.debug(f"  Using heuristic for {park_name} (no schedule data)")
+        if not park_appears_open and not schedule_repo.has_recent_schedule(park_id, max_age_hours=48):
+            # No schedule data available - log warning but keep park as CLOSED
+            # We can't trust API "OPERATING" status because some parks report
+            # rides as OPERATING even when the park is closed for the season
+            logger.warning(f"  No schedule data for {park_name} - treating as CLOSED")
+            park_appears_open = False
 
         # Calculate wait time statistics
         open_wait_times = [r.wait_time for r in live_data
@@ -239,7 +252,8 @@ class SnapshotCollector:
         # Process each ride
         for ride_data in live_data:
             self._process_ride_themeparks_wiki(
-                ride_data, park_id, ride_repo, snapshot_repo, status_change_repo
+                ride_data, park_id, ride_repo, snapshot_repo, status_change_repo,
+                data_quality_repo
             )
 
         logger.info(f"  ✓ Processed {len(live_data)} rides "
@@ -248,7 +262,8 @@ class SnapshotCollector:
     def _process_ride_themeparks_wiki(self, ride_data, park_id: int,
                                        ride_repo: RideRepository,
                                        snapshot_repo: RideStatusSnapshotRepository,
-                                       status_change_repo: RideStatusChangeRepository):
+                                       status_change_repo: RideStatusChangeRepository,
+                                       data_quality_repo: DataQualityRepository):
         """
         Process a single ride from ThemeParks.wiki data.
 
@@ -258,6 +273,7 @@ class SnapshotCollector:
             ride_repo: Ride repository
             snapshot_repo: Ride status snapshot repository
             status_change_repo: Ride status change repository
+            data_quality_repo: Data quality issue tracking repository
         """
         try:
             # Find ride in database by themeparks_wiki_id
@@ -274,6 +290,41 @@ class SnapshotCollector:
             status = ride_data.status
             is_operating = (status == 'OPERATING')
             wait_time = ride_data.wait_time
+
+            # Check for stale data (data quality issue detection)
+            # This catches issues like Buzz Lightyear where lastUpdated was 5+ months old
+            if ride_data.last_updated:
+                try:
+                    # Parse the lastUpdated timestamp
+                    last_updated_str = ride_data.last_updated
+                    if last_updated_str:
+                        # Handle ISO format with Z suffix
+                        last_updated_str = last_updated_str.replace('Z', '+00:00')
+                        last_updated_dt = datetime.fromisoformat(last_updated_str)
+                        # Make timezone-naive for comparison
+                        if last_updated_dt.tzinfo:
+                            last_updated_dt = last_updated_dt.replace(tzinfo=None)
+
+                        now = datetime.now()
+                        age_minutes = int((now - last_updated_dt).total_seconds() / 60)
+
+                        if age_minutes > self.STALE_DATA_THRESHOLD_MINUTES:
+                            # Log stale data issue for reporting to ThemeParks.wiki
+                            data_quality_repo.log_stale_data(
+                                data_source='themeparks_wiki',
+                                park_id=park_id,
+                                ride_id=ride_id,
+                                themeparks_wiki_id=ride_data.entity_id,
+                                queue_times_id=None,
+                                entity_name=ride_data.name,
+                                last_updated_api=last_updated_dt,
+                                data_age_minutes=age_minutes,
+                                reported_status=status,
+                            )
+                            self.stats['stale_data_issues'] = self.stats.get('stale_data_issues', 0) + 1
+
+                except (ValueError, TypeError) as e:
+                    logger.debug(f"  Could not parse lastUpdated for {ride_data.name}: {e}")
 
             # Store snapshot with rich status
             self._store_snapshot_with_status(
@@ -462,14 +513,12 @@ class SnapshotCollector:
             rides_closed = total_rides - rides_open
 
             # Use schedule-based park open detection (SINGLE SOURCE OF TRUTH)
-            # Falls back to heuristic if no schedule data available
+            # If no schedule, park is CLOSED - we don't trust API status alone
             park_appears_open = schedule_repo.is_park_open_now(park_id)
-            if not park_appears_open:
-                # Fallback: if no schedule data, use heuristic based on wait times
-                # Queue-Times parks don't have ThemeParks.wiki schedule data, so this is the norm
-                if not schedule_repo.has_recent_schedule(park_id, max_age_hours=48):
-                    min_rides_for_open = max(3, total_rides // 2)
-                    park_appears_open = rides_with_wait >= min_rides_for_open
+            if not park_appears_open and not schedule_repo.has_recent_schedule(park_id, max_age_hours=48):
+                # No schedule data available - log warning but keep park as CLOSED
+                logger.warning(f"  No schedule data for {park_name} - treating as CLOSED")
+                park_appears_open = False
 
             # Calculate wait time statistics for open rides
             open_wait_times = [r.get('wait_time', 0) for r in rides_data
@@ -680,7 +729,33 @@ class SnapshotCollector:
         logger.info(f"Snapshots created:   {self.stats['snapshots_created']}")
         logger.info(f"Status changes:      {self.stats['status_changes']}")
         logger.info(f"Schedules refreshed: {self.stats.get('schedules_refreshed', 0)}")
+        logger.info(f"Stale data issues:   {self.stats.get('stale_data_issues', 0)}")
         logger.info(f"Errors:              {self.stats['errors']}")
+
+    def _aggregate_live_rankings(self):
+        """
+        Pre-aggregate live rankings for instant API responses.
+
+        Runs after snapshot collection to populate park_live_rankings
+        and ride_live_rankings tables. Uses atomic table swap for
+        zero-downtime updates.
+        """
+        try:
+            from scripts.aggregate_live_rankings import LiveRankingsAggregator
+
+            logger.info("")
+            logger.info("Pre-aggregating live rankings...")
+            aggregator = LiveRankingsAggregator()
+            stats = aggregator.run()
+
+            self.stats['parks_aggregated'] = stats.get('parks_aggregated', 0)
+            self.stats['rides_aggregated'] = stats.get('rides_aggregated', 0)
+
+        except Exception as e:
+            logger.error(f"Failed to aggregate live rankings: {e}", exc_info=True)
+            # Don't fail the whole collection if aggregation fails
+            # The API will fall back to the old (possibly stale) cached data
+            self.stats['aggregation_error'] = str(e)
 
 
 def main():

@@ -264,3 +264,93 @@ class TestWaitTimesRequiredFields:
 
         # Verify all fields are documented
         assert len(required_fields) == 9, "Expected 9 required fields for park wait times"
+
+
+class TestTodayWaitTimesFieldNames:
+    """
+    Test that TODAY period queries return correct field names.
+
+    BUG FIX: The today queries (TodayRideWaitTimesQuery, TodayParkWaitTimesQuery)
+    were returning different field names than the live queries:
+    - Today returned: avg_wait_time, peak_wait_time, rides_with_waits
+    - Frontend expects: avg_wait_minutes, peak_wait_minutes, rides_reporting
+
+    These tests ensure all periods use consistent field names.
+    """
+
+    def test_today_ride_wait_times_uses_avg_wait_minutes(self):
+        """
+        TODAY period must return 'avg_wait_minutes', not 'avg_wait_time'.
+        """
+        import inspect
+        from database.queries.today.today_ride_wait_times import TodayRideWaitTimesQuery
+        source = inspect.getsource(TodayRideWaitTimesQuery.get_rankings)
+
+        assert 'avg_wait_minutes' in source, \
+            "TodayRideWaitTimesQuery must use 'avg_wait_minutes' (not 'avg_wait_time') for frontend compatibility"
+
+    def test_today_ride_wait_times_uses_peak_wait_minutes(self):
+        """
+        TODAY period must return 'peak_wait_minutes', not 'peak_wait_time'.
+        """
+        import inspect
+        from database.queries.today.today_ride_wait_times import TodayRideWaitTimesQuery
+        source = inspect.getsource(TodayRideWaitTimesQuery.get_rankings)
+
+        assert 'peak_wait_minutes' in source, \
+            "TodayRideWaitTimesQuery must use 'peak_wait_minutes' (not 'peak_wait_time') for frontend compatibility"
+
+    def test_today_ride_wait_times_includes_current_is_open(self):
+        """
+        TODAY period must return 'current_is_open' for ride status badge.
+        """
+        import inspect
+        from database.queries.today.today_ride_wait_times import TodayRideWaitTimesQuery
+        source = inspect.getsource(TodayRideWaitTimesQuery.get_rankings)
+
+        assert 'current_is_open' in source, \
+            "TodayRideWaitTimesQuery must include 'current_is_open' for ride status badge"
+
+    def test_today_ride_wait_times_includes_current_status(self):
+        """
+        TODAY period must return 'current_status' for ride status display.
+        """
+        import inspect
+        from database.queries.today.today_ride_wait_times import TodayRideWaitTimesQuery
+        source = inspect.getsource(TodayRideWaitTimesQuery.get_rankings)
+
+        assert 'current_status' in source, \
+            "TodayRideWaitTimesQuery must include 'current_status' for ride status display"
+
+    def test_today_park_wait_times_uses_avg_wait_minutes(self):
+        """
+        TODAY period must return 'avg_wait_minutes', not 'avg_wait_time'.
+        """
+        import inspect
+        from database.queries.today.today_park_wait_times import TodayParkWaitTimesQuery
+        source = inspect.getsource(TodayParkWaitTimesQuery.get_rankings)
+
+        assert 'avg_wait_minutes' in source, \
+            "TodayParkWaitTimesQuery must use 'avg_wait_minutes' (not 'avg_wait_time') for frontend compatibility"
+
+    def test_today_park_wait_times_uses_peak_wait_minutes(self):
+        """
+        TODAY period must return 'peak_wait_minutes', not 'peak_wait_time'.
+        """
+        import inspect
+        from database.queries.today.today_park_wait_times import TodayParkWaitTimesQuery
+        source = inspect.getsource(TodayParkWaitTimesQuery.get_rankings)
+
+        assert 'peak_wait_minutes' in source, \
+            "TodayParkWaitTimesQuery must use 'peak_wait_minutes' (not 'peak_wait_time') for frontend compatibility"
+
+    def test_today_park_wait_times_uses_rides_reporting(self):
+        """
+        TODAY period must return 'rides_reporting', not 'rides_with_waits'.
+        """
+        import inspect
+        from database.queries.today.today_park_wait_times import TodayParkWaitTimesQuery
+        source = inspect.getsource(TodayParkWaitTimesQuery.get_rankings)
+
+        assert 'rides_reporting' in source, \
+            "TodayParkWaitTimesQuery must use 'rides_reporting' (not 'rides_with_waits') for frontend compatibility"

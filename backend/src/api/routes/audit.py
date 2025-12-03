@@ -22,6 +22,7 @@ from typing import Optional
 from database.connection import get_db_connection
 from database.audit import ValidationChecker, AnomalyDetector, ComputationTracer
 from database.audit.validation_checks import run_hourly_audit
+from database.repositories.data_quality_repository import DataQualityRepository
 from utils.logger import logger
 from utils.timezone import get_today_pacific
 
@@ -389,6 +390,136 @@ def trigger_audit():
 
     except Exception as e:
         logger.error(f"Error triggering audit: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "Internal server error"
+        }), 500
+
+
+# =============================================================================
+# DATA QUALITY ENDPOINTS (for reporting to ThemeParks.wiki)
+# =============================================================================
+
+@audit_bp.route("/audit/data-quality", methods=["GET"])
+def get_data_quality_issues():
+    """
+    Get recent data quality issues for reporting to upstream APIs.
+
+    This endpoint returns stale/invalid data issues detected from ThemeParks.wiki.
+    Useful for reporting issues to ThemeParks.wiki maintainers.
+
+    Query Parameters:
+        hours (int): How far back to look (default: 24)
+        source (str): Filter by source ('themeparks_wiki' or 'queue_times')
+        unresolved (bool): Only show unresolved issues (default: true)
+
+    Returns:
+        {
+            "success": true,
+            "total_issues": 5,
+            "issues": [
+                {
+                    "issue_id": 1,
+                    "data_source": "themeparks_wiki",
+                    "issue_type": "STALE_DATA",
+                    "entity_name": "Buzz Lightyear Astro Blasters",
+                    "themeparks_wiki_id": "88197808-3c56-4198-a5a4-6066541251cf",
+                    "data_age_minutes": 259200,
+                    "reported_status": "CLOSED",
+                    "detected_at": "2025-12-01T10:15:00"
+                }
+            ]
+        }
+    """
+    hours = request.args.get("hours", 24, type=int)
+    data_source = request.args.get("source")
+    unresolved_only = request.args.get("unresolved", "true").lower() == "true"
+
+    try:
+        with get_db_connection() as conn:
+            repo = DataQualityRepository(conn)
+            issues = repo.get_recent_issues(
+                hours=hours,
+                data_source=data_source,
+                unresolved_only=unresolved_only,
+            )
+
+            # Convert datetime objects to ISO strings
+            for issue in issues:
+                if issue.get("detected_at"):
+                    issue["detected_at"] = issue["detected_at"].isoformat()
+                if issue.get("last_updated_api"):
+                    issue["last_updated_api"] = issue["last_updated_api"].isoformat()
+
+            return jsonify({
+                "success": True,
+                "total_issues": len(issues),
+                "issues": issues,
+            }), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching data quality issues: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "Internal server error"
+        }), 500
+
+
+@audit_bp.route("/audit/data-quality/summary", methods=["GET"])
+def get_data_quality_summary():
+    """
+    Get aggregated summary of data quality issues for upstream reporting.
+
+    Groups issues by entity for easy reporting to ThemeParks.wiki.
+
+    Query Parameters:
+        days (int): How far back to look (default: 7)
+        source (str): Filter by source (default: 'themeparks_wiki')
+
+    Returns:
+        {
+            "success": true,
+            "summary": [
+                {
+                    "themeparks_wiki_id": "88197808-3c56-4198-a5a4-6066541251cf",
+                    "entity_name": "Buzz Lightyear Astro Blasters",
+                    "issue_count": 15,
+                    "max_staleness_minutes": 259200,
+                    "avg_staleness_minutes": 180000,
+                    "first_detected": "2025-12-01T08:00:00",
+                    "last_detected": "2025-12-01T14:00:00"
+                }
+            ]
+        }
+    """
+    days = request.args.get("days", 7, type=int)
+    data_source = request.args.get("source", "themeparks_wiki")
+
+    try:
+        with get_db_connection() as conn:
+            repo = DataQualityRepository(conn)
+            summary = repo.get_summary_for_reporting(
+                days=days,
+                data_source=data_source,
+            )
+
+            # Convert datetime objects to ISO strings
+            for item in summary:
+                if item.get("first_detected"):
+                    item["first_detected"] = item["first_detected"].isoformat()
+                if item.get("last_detected"):
+                    item["last_detected"] = item["last_detected"].isoformat()
+
+            return jsonify({
+                "success": True,
+                "days": days,
+                "data_source": data_source,
+                "entities_with_issues": len(summary),
+                "summary": summary,
+            }), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching data quality summary: {e}", exc_info=True)
         return jsonify({
             "success": False,
             "error": "Internal server error"

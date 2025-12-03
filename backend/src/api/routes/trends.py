@@ -12,6 +12,8 @@ GET /trends?category=rides-improving  → database/queries/trends/improving_ride
 GET /trends?category=rides-declining  → database/queries/trends/declining_rides.py
 GET /trends/chart-data?type=parks     → database/queries/charts/park_shame_history.py
 GET /trends/chart-data?type=rides     → database/queries/charts/ride_downtime_history.py
+GET /trends/longest-wait-times        → database/queries/trends/longest_wait_times.py
+GET /trends/least-reliable            → database/queries/trends/least_reliable_rides.py
 """
 
 from flask import Blueprint, request, jsonify
@@ -27,6 +29,8 @@ from database.queries.trends import (
     DecliningParksQuery,
     ImprovingRidesQuery,
     DecliningRidesQuery,
+    LongestWaitTimesQuery,
+    LeastReliableRidesQuery,
 )
 from database.queries.charts import (
     ParkShameHistoryQuery,
@@ -35,7 +39,8 @@ from database.queries.charts import (
 )
 
 from utils.logger import logger
-from utils.timezone import get_today_pacific
+from utils.timezone import get_today_pacific, get_now_pacific, get_last_week_date_range, get_last_month_date_range
+from utils.cache import get_query_cache, generate_cache_key
 
 # Create Blueprint
 trends_bp = Blueprint('trends', __name__)
@@ -56,7 +61,7 @@ def get_trends():
     - rides-declining: database/queries/trends/declining_rides.py
 
     Query Parameters:
-        - period: today | 7days | 30days (default: 7days)
+        - period: today | last_week | last_month (default: last_week)
         - category: parks-improving | parks-declining | rides-improving | rides-declining (required)
         - filter: disney-universal | all-parks (default: all-parks)
         - limit: max results (default: 50, max: 100)
@@ -66,7 +71,7 @@ def get_trends():
     """
     try:
         # Parse query parameters
-        period = request.args.get('period', '7days')
+        period = request.args.get('period', 'last_week')
         category = request.args.get('category')
         park_filter = request.args.get('filter', 'all-parks')
         limit = int(request.args.get('limit', 50))
@@ -81,7 +86,7 @@ def get_trends():
         # Validate parameter values
         # Note: 'live' is intentionally excluded - trends require comparison between periods,
         # which doesn't make sense for instantaneous data. Frontend defaults to 'today' if 'live'.
-        valid_periods = ['today', '7days', '30days']
+        valid_periods = ['today', 'yesterday', 'last_week', 'last_month']
         valid_categories = ['parks-improving', 'parks-declining', 'rides-improving', 'rides-declining']
         valid_filters = ['disney-universal', 'all-parks']
 
@@ -200,9 +205,9 @@ def get_chart_data():
     - type=rides: database/queries/charts/ride_downtime_history.py
 
     Query Parameters:
-        - period: today | 7days | 30days (default: 7days)
+        - period: today | last_week | last_month (default: last_week)
           - today: Returns hourly breakdown (6am-11pm Pacific)
-          - 7days/30days: Returns daily breakdown
+          - last_week/last_month: Returns daily breakdown
         - type: parks | rides (default: parks)
         - filter: disney-universal | all-parks (default: disney-universal)
         - limit: max entities to return (default: 10, max: 20)
@@ -224,15 +229,14 @@ def get_chart_data():
     """
     try:
         # Parse query parameters
-        period = request.args.get('period', '7days')
+        period = request.args.get('period', 'last_week')
         data_type = request.args.get('type', 'parks')
         park_filter = request.args.get('filter', 'disney-universal')
         limit = int(request.args.get('limit', 10))
 
         # Validate parameters
-        # Note: 'live' is intentionally excluded - chart trends require time series data,
-        # which doesn't make sense for instantaneous data. Frontend defaults to 'today' if 'live'.
-        valid_periods = ['today', '7days', '30days']
+        # Note: 'live' is mapped to 'today' since charts need time series data
+        valid_periods = ['live', 'today', 'yesterday', 'last_week', 'last_month']
         valid_types = ['parks', 'rides', 'waittimes']
         valid_filters = ['disney-universal', 'all-parks']
 
@@ -264,8 +268,8 @@ def get_chart_data():
 
         # Get database connection
         with get_db_connection() as conn:
-            if period == 'today':
-                # Hourly data for today
+            if period in ('live', 'today'):
+                # Hourly data for today (live maps to today for charts)
                 granularity = 'hourly'
                 if data_type == 'parks':
                     # See: database/queries/charts/park_shame_history.py
@@ -292,13 +296,50 @@ def get_chart_data():
                         limit=limit
                     )
 
-                # Generate mock hourly data if empty
+                # Generate mock hourly data if empty (for TODAY, limit to current hour)
                 if not chart_data or not chart_data.get('datasets') or len(chart_data.get('datasets', [])) == 0:
                     is_mock = True
-                    chart_data = _generate_mock_hourly_chart_data(data_type, limit)
+                    chart_data = _generate_mock_hourly_chart_data(data_type, limit, for_today=True)
+
+            elif period == 'yesterday':
+                # Hourly data for yesterday (similar to today, but for previous day)
+                granularity = 'hourly'
+                yesterday = today - timedelta(days=1)
+                if data_type == 'parks':
+                    query = ParkShameHistoryQuery(conn)
+                    chart_data = query.get_hourly(
+                        target_date=yesterday,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                elif data_type == 'waittimes':
+                    query = ParkWaitTimeHistoryQuery(conn)
+                    chart_data = query.get_hourly(
+                        target_date=yesterday,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                else:
+                    query = RideDowntimeHistoryQuery(conn)
+                    chart_data = query.get_hourly(
+                        target_date=yesterday,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+
+                # Generate mock hourly data if empty (for YESTERDAY, show full day)
+                if not chart_data or not chart_data.get('datasets') or len(chart_data.get('datasets', [])) == 0:
+                    is_mock = True
+                    chart_data = _generate_mock_hourly_chart_data(data_type, limit, for_today=False)
+
             else:
-                # Daily data for 7days/30days
-                days = 7 if period == '7days' else 30
+                # Daily data for last_week/last_month (calendar-based periods)
+                if period == 'last_week':
+                    start_date, end_date, _ = get_last_week_date_range()
+                    days = (end_date - start_date).days + 1  # Include both start and end
+                else:  # last_month
+                    start_date, end_date, _ = get_last_month_date_range()
+                    days = (end_date - start_date).days + 1
 
                 if data_type == 'parks':
                     # See: database/queries/charts/park_shame_history.py
@@ -351,6 +392,237 @@ def get_chart_data():
 
     except Exception as e:
         logger.error(f"Error in get_chart_data: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "Internal server error"
+        }), 500
+
+
+@trends_bp.route('/trends/longest-wait-times', methods=['GET'])
+def get_longest_wait_times():
+    """
+    GET /api/trends/longest-wait-times
+
+    Returns top 10 parks or rides ranked by average wait time for the Awards section.
+
+    IMPORTANT: Rankings use avg_wait_time to match the Wait Times table.
+    This ensures consistency between Awards and the main rankings.
+
+    Query Files Used:
+    -----------------
+    - database/queries/trends/longest_wait_times.py
+
+    Query Parameters:
+        - period: today | last_week | last_month (default: today)
+        - filter: disney-universal | all-parks (default: all-parks)
+        - entity: parks | rides (default: rides)
+        - limit: max results (default: 10, max: 20)
+
+    Returns:
+        JSON response with top parks/rides by average wait time
+    """
+    try:
+        # Parse query parameters
+        period = request.args.get('period', 'today')
+        park_filter = request.args.get('filter', 'all-parks')
+        entity = request.args.get('entity', 'rides')
+        limit = min(int(request.args.get('limit', 10)), 20)
+
+        # Validate period (LIVE not supported - frontend should convert to TODAY)
+        valid_periods = ['today', 'yesterday', 'last_week', 'last_month']
+        if period not in valid_periods:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid period. Must be one of: {', '.join(valid_periods)}"
+            }), 400
+
+        # Validate filter
+        valid_filters = ['disney-universal', 'all-parks']
+        if park_filter not in valid_filters:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid filter. Must be one of: {', '.join(valid_filters)}"
+            }), 400
+
+        # Validate entity
+        valid_entities = ['parks', 'rides']
+        if entity not in valid_entities:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid entity. Must be one of: {', '.join(valid_entities)}"
+            }), 400
+
+        filter_disney_universal = (park_filter == 'disney-universal')
+
+        # PERFORMANCE: Use 5-minute cache for expensive aggregation queries
+        cache = get_query_cache()
+        cache_key = generate_cache_key(
+            "longest_wait_times",
+            period=period,
+            filter=park_filter,
+            entity=entity,
+            limit=str(limit)
+        )
+
+        def compute_results():
+            with get_db_connection() as conn:
+                query = LongestWaitTimesQuery(conn)
+                if entity == 'parks':
+                    return query.get_park_rankings(
+                        period=period,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                else:
+                    return query.get_rankings(
+                        period=period,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+
+        results = cache.get_or_compute(key=cache_key, compute_fn=compute_results)
+
+        # Add rank to results
+        ranked_results = []
+        for idx, item in enumerate(results, start=1):
+            item['rank'] = idx
+            ranked_results.append(item)
+
+        return jsonify({
+            "success": True,
+            "period": period,
+            "filter": park_filter,
+            "entity": entity,
+            "count": len(ranked_results),
+            "data": ranked_results,
+            "cached": True,
+            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
+            "timestamp": datetime.utcnow().isoformat() + 'Z'
+        }), 200
+
+    except ValueError as e:
+        logger.error(f"Validation error in get_longest_wait_times: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 400
+
+    except Exception as e:
+        logger.error(f"Error in get_longest_wait_times: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "Internal server error"
+        }), 500
+
+
+@trends_bp.route('/trends/least-reliable', methods=['GET'])
+def get_least_reliable():
+    """
+    GET /api/trends/least-reliable
+
+    Returns top 10 parks or rides ranked by total downtime hours for the Awards section.
+
+    Query Files Used:
+    -----------------
+    - database/queries/trends/least_reliable_rides.py
+
+    Query Parameters:
+        - period: today | last_week | last_month (default: today)
+        - filter: disney-universal | all-parks (default: all-parks)
+        - entity: parks | rides (default: rides)
+        - limit: max results (default: 10, max: 20)
+
+    Returns:
+        JSON response with top parks/rides by downtime hours
+    """
+    try:
+        # Parse query parameters
+        period = request.args.get('period', 'today')
+        park_filter = request.args.get('filter', 'all-parks')
+        entity = request.args.get('entity', 'rides')
+        limit = min(int(request.args.get('limit', 10)), 20)
+
+        # Validate period (LIVE not supported - frontend should convert to TODAY)
+        valid_periods = ['today', 'yesterday', 'last_week', 'last_month']
+        if period not in valid_periods:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid period. Must be one of: {', '.join(valid_periods)}"
+            }), 400
+
+        # Validate filter
+        valid_filters = ['disney-universal', 'all-parks']
+        if park_filter not in valid_filters:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid filter. Must be one of: {', '.join(valid_filters)}"
+            }), 400
+
+        # Validate entity
+        valid_entities = ['parks', 'rides']
+        if entity not in valid_entities:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid entity. Must be one of: {', '.join(valid_entities)}"
+            }), 400
+
+        filter_disney_universal = (park_filter == 'disney-universal')
+
+        # PERFORMANCE: Use 5-minute cache for expensive aggregation queries
+        cache = get_query_cache()
+        cache_key = generate_cache_key(
+            "least_reliable",
+            period=period,
+            filter=park_filter,
+            entity=entity,
+            limit=str(limit)
+        )
+
+        def compute_results():
+            with get_db_connection() as conn:
+                query = LeastReliableRidesQuery(conn)
+                if entity == 'parks':
+                    return query.get_park_rankings(
+                        period=period,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                else:
+                    return query.get_rankings(
+                        period=period,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+
+        results = cache.get_or_compute(key=cache_key, compute_fn=compute_results)
+
+        # Add rank to results
+        ranked_results = []
+        for idx, item in enumerate(results, start=1):
+            item['rank'] = idx
+            ranked_results.append(item)
+
+        return jsonify({
+            "success": True,
+            "period": period,
+            "filter": park_filter,
+            "entity": entity,
+            "count": len(ranked_results),
+            "data": ranked_results,
+            "cached": True,
+            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
+            "timestamp": datetime.utcnow().isoformat() + 'Z'
+        }), 200
+
+    except ValueError as e:
+        logger.error(f"Validation error in get_least_reliable: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 400
+
+    except Exception as e:
+        logger.error(f"Error in get_least_reliable: {e}", exc_info=True)
         return jsonify({
             "success": False,
             "error": "Internal server error"
@@ -425,22 +697,41 @@ def _generate_mock_chart_data(data_type: str, days: int, limit: int) -> Dict[str
     }
 
 
-def _generate_mock_hourly_chart_data(data_type: str, limit: int) -> Dict[str, Any]:
+def _generate_mock_hourly_chart_data(data_type: str, limit: int, for_today: bool = True) -> Dict[str, Any]:
     """
-    Generate mock hourly chart data for TODAY when real data is empty.
+    Generate mock hourly chart data when real data is empty.
 
     Args:
         data_type: 'parks', 'rides', or 'waittimes'
         limit: Number of entities
+        for_today: If True, only generate data up to current hour (for TODAY/LIVE).
+                   If False, generate full day data (for YESTERDAY).
 
     Returns:
-        Chart data structure with mock hourly values (6am-11pm)
+        Chart data structure with mock hourly values (6am-11pm or current hour)
     """
     import random
 
-    # Hourly labels from 6am to 11pm
-    labels = [f"{h}:00" for h in range(6, 24)]
-    num_hours = 18  # 6am to 11pm
+    # Get current Pacific hour to limit data for TODAY
+    current_hour = get_now_pacific().hour
+
+    # For TODAY/LIVE: only show hours up to current time
+    # For YESTERDAY: show all hours (6am-11pm = hours 6-23)
+    if for_today:
+        # Start at 6am, end at current hour (or 6am minimum)
+        start_hour = 6
+        end_hour = max(start_hour, min(current_hour, 23))  # Cap at 11pm
+        # If before 6am, show no data
+        if current_hour < 6:
+            return {"labels": [], "datasets": []}
+    else:
+        # Full day for yesterday
+        start_hour = 6
+        end_hour = 23
+
+    # Generate labels for valid hours only
+    labels = [f"{h}:00" for h in range(start_hour, end_hour + 1)]
+    num_hours = len(labels)
 
     if data_type == 'parks':
         park_names = [
@@ -514,7 +805,7 @@ def _calculate_period_dates(period: str) -> Dict[str, str]:
     Calculate current and previous period date ranges.
 
     Args:
-        period: 'today', '7days', or '30days'
+        period: 'today', 'yesterday', 'last_week', or 'last_month'
 
     Returns:
         Dict with current_period_label and previous_period_label
@@ -527,17 +818,27 @@ def _calculate_period_dates(period: str) -> Dict[str, str]:
         previous_start = today - timedelta(days=1)
         previous_end = today - timedelta(days=1)
 
-    elif period == '7days':
-        current_end = today
-        current_start = today - timedelta(days=6)  # Last 7 days including today
+    elif period == 'yesterday':
+        yesterday = today - timedelta(days=1)
+        current_start = yesterday
+        current_end = yesterday
+        previous_start = today - timedelta(days=2)
+        previous_end = today - timedelta(days=2)
+
+    elif period == 'last_week':
+        # Calendar-based: previous complete week (Sunday-Saturday)
+        current_start, current_end, _ = get_last_week_date_range()
+        # Previous week is the week before that
         previous_end = current_start - timedelta(days=1)
         previous_start = previous_end - timedelta(days=6)
 
-    elif period == '30days':
-        current_end = today
-        current_start = today - timedelta(days=29)  # Last 30 days including today
+    elif period == 'last_month':
+        # Calendar-based: previous complete calendar month
+        current_start, current_end, _ = get_last_month_date_range()
+        # Previous month is the month before that
         previous_end = current_start - timedelta(days=1)
-        previous_start = previous_end - timedelta(days=29)
+        # Get first day of that previous month
+        previous_start = previous_end.replace(day=1)
 
     return {
         'current_period_label': f"{current_start} to {current_end}",

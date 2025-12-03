@@ -18,11 +18,12 @@ class ParkDetailsModal {
      * Open modal and fetch park details
      * @param {number} parkId - The park ID
      * @param {string} parkName - The park name for display
-     * @param {string} period - The time period ('live', 'today', '7days', '30days')
+     * @param {string} period - The time period ('live', 'today', 'last_week', 'last_month')
      */
     async open(parkId, parkName, period = 'live') {
-        // Map period to API-supported values (API only supports 'live' or 'today' for details)
-        const apiPeriod = (period === 'today') ? 'today' : 'live';
+        // All periods are now supported by the API
+        const validPeriods = ['live', 'today', 'yesterday', 'last_week', 'last_month'];
+        const apiPeriod = validPeriods.includes(period) ? period : 'live';
 
         this.state = {
             isOpen: true,
@@ -136,18 +137,22 @@ class ParkDetailsModal {
     }
 
     /**
-     * Render shame score breakdown - dispatches to live or today renderer based on breakdown_type
+     * Render shame score breakdown - dispatches to appropriate renderer based on breakdown_type
      */
     renderShameBreakdown(breakdown) {
         if (!breakdown) return '';
 
         // Dispatch based on breakdown_type from API
-        if (breakdown.breakdown_type === 'today') {
-            return this.renderTodayShameBreakdown(breakdown);
+        switch (breakdown.breakdown_type) {
+            case 'today':
+            case 'yesterday':
+                return this.renderTodayShameBreakdown(breakdown);
+            case 'last_week':
+            case 'last_month':
+                return this.renderHistoricalShameBreakdown(breakdown);
+            default:
+                return this.renderLiveShameBreakdown(breakdown);
         }
-
-        // Default to live breakdown rendering
-        return this.renderLiveShameBreakdown(breakdown);
     }
 
     /**
@@ -250,7 +255,7 @@ class ParkDetailsModal {
     }
 
     /**
-     * Render TODAY shame score breakdown - shows CUMULATIVE downtime since midnight
+     * Render TODAY shame score breakdown - shows AVERAGE shame score since midnight
      * This is completely different from live - it shows ALL rides that had ANY downtime today
      */
     renderTodayShameBreakdown(breakdown) {
@@ -273,7 +278,7 @@ class ParkDetailsModal {
                         <span class="breakdown-period-badge today">TODAY</span>
                     </div>
                     <div class="no-rides-down">
-                        <span class="success-icon">✓</span>
+                        <span class="success-icon">&#10003;</span>
                         <p>No downtime data available for today yet.</p>
                     </div>
                 </div>
@@ -296,23 +301,20 @@ class ParkDetailsModal {
                     <div class="shame-score-value ${shame_score > 5 ? 'high' : shame_score > 2 ? 'medium' : 'low'}">
                         ${shame_score.toFixed(1)}
                     </div>
-                    <div class="shame-score-label">Cumulative Shame Score (0-10 scale)</div>
+                    <div class="shame-score-label">Average Shame Score Today (0-10 scale)</div>
                 </div>
 
                 <div class="shame-formula-box today-formula">
                     <div class="formula-title">How Today's Score Is Calculated</div>
                     <div class="formula">
                         <span class="formula-part">Shame Score</span> =
-                        <span class="formula-fraction">
-                            <span class="numerator">Weighted Downtime Hours (${weighted_downtime_hours.toFixed(2)})</span>
-                            <span class="denominator">Total Park Weight (${total_park_weight.toFixed(1)})</span>
-                        </span>
-                        <span class="formula-multiplier">× 10</span>
+                        <span class="formula-text">Average of Snapshot Shame Scores</span>
                     </div>
                     <div class="formula-explanation today-explanation">
-                        <strong>Today's score is cumulative</strong> - it tracks ALL downtime since midnight Pacific time.
-                        Unlike the live score which only shows rides down RIGHT NOW, this accumulates throughout the day.
-                        A ride that was down for 2 hours this morning (but is now running) still contributes to today's score.
+                        <strong>Today's score is an average</strong> of instantaneous shame scores throughout the day.
+                        Every 5 minutes while the park is open, we calculate what % of capacity was down at that moment.
+                        The final score is the average across all these snapshots during operating hours today.
+                        This makes it comparable to the Live score (same 0-10 scale).
                     </div>
                     <div class="cumulative-stats">
                         <div class="stat-item">
@@ -333,7 +335,7 @@ class ParkDetailsModal {
                 ${rides_with_downtime.length > 0 ? `
                     <div class="rides-down-section">
                         <h4>Rides With Downtime Today (${rides_affected_count})</h4>
-                        <p class="rides-section-note">All rides that experienced any downtime since midnight Pacific time, sorted by total downtime.</p>
+                        <p class="rides-section-note">All rides that experienced downtime during operating hours today, sorted by total downtime.</p>
                         <div class="rides-down-list today-list">
                             ${tier1Rides.length > 0 ? this.renderTodayRidesByTier(tier1Rides, 1, 'Flagship Attractions', '5x weight') : ''}
                             ${tier2Rides.length > 0 ? this.renderTodayRidesByTier(tier2Rides, 2, 'Standard Attractions', '2x weight') : ''}
@@ -342,7 +344,7 @@ class ParkDetailsModal {
                     </div>
                 ` : `
                     <div class="no-rides-down">
-                        <span class="success-icon">✓</span>
+                        <span class="success-icon">&#10003;</span>
                         <p>No rides have experienced downtime today!</p>
                     </div>
                 `}
@@ -367,6 +369,158 @@ class ParkDetailsModal {
                         </div>
                     </div>
                 </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render HISTORICAL shame score breakdown - shows average daily shame score for last_week or last_month
+     * This shows ALL rides that had ANY downtime during the period
+     */
+    renderHistoricalShameBreakdown(breakdown) {
+        const {
+            rides_with_downtime,
+            rides_affected_count,
+            total_park_weight,
+            total_downtime_hours,
+            weighted_downtime_hours,
+            shame_score,
+            period_label,
+            days_in_period,
+            breakdown_type
+        } = breakdown;
+
+        const isWeekly = breakdown_type === 'last_week';
+        const periodBadgeText = isWeekly ? 'LAST WEEK' : 'LAST MONTH';
+        const periodBadgeClass = isWeekly ? 'last-week' : 'last-month';
+
+        // If no data available
+        if (!rides_with_downtime || rides_with_downtime.length === 0) {
+            return `
+                <div class="shame-breakdown-section">
+                    <div class="shame-header">
+                        <h3>Shame Score Breakdown</h3>
+                        <span class="breakdown-period-badge ${periodBadgeClass}">${periodBadgeText}</span>
+                    </div>
+                    <div class="period-label">${period_label || ''}</div>
+                    <div class="no-rides-down">
+                        <span class="success-icon">&#10003;</span>
+                        <p>No downtime recorded during this period.</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Group rides by tier
+        const tier1Rides = rides_with_downtime.filter(r => r.tier === 1);
+        const tier2Rides = rides_with_downtime.filter(r => r.tier === 2);
+        const tier3Rides = rides_with_downtime.filter(r => r.tier === 3);
+
+        return `
+            <div class="shame-breakdown-section historical-breakdown">
+                <div class="shame-header">
+                    <h3>Shame Score Breakdown</h3>
+                    <span class="breakdown-period-badge ${periodBadgeClass}">${periodBadgeText}</span>
+                </div>
+                <div class="period-label">${period_label || ''}</div>
+
+                <div class="shame-score-display">
+                    <div class="shame-score-value ${shame_score > 5 ? 'high' : shame_score > 2 ? 'medium' : 'low'}">
+                        ${shame_score.toFixed(1)}
+                    </div>
+                    <div class="shame-score-label">Average Daily Shame Score (0-10 scale)</div>
+                </div>
+
+                <div class="shame-formula-box historical-formula">
+                    <div class="formula-title">How This Score Is Calculated</div>
+                    <div class="formula">
+                        <span class="formula-part">Shame Score</span> =
+                        <span class="formula-text">Average of Daily Shame Scores</span>
+                    </div>
+                    <div class="formula-explanation historical-explanation">
+                        <strong>This is an average</strong> of the daily shame scores during ${period_label || 'this period'}.
+                        Each day's score = (weighted downtime / total park weight) &times; 10.
+                        Days with no downtime contribute 0 to the average.
+                        This makes the score comparable to Live and Today periods.
+                    </div>
+                    <div class="cumulative-stats">
+                        <div class="stat-item">
+                            <span class="stat-value">${total_downtime_hours.toFixed(1)}h</span>
+                            <span class="stat-label">Total Downtime</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">${weighted_downtime_hours.toFixed(1)}h</span>
+                            <span class="stat-label">Weighted Downtime</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">${rides_affected_count}</span>
+                            <span class="stat-label">Rides Affected</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">${days_in_period || '?'}</span>
+                            <span class="stat-label">Days in Period</span>
+                        </div>
+                    </div>
+                </div>
+
+                ${rides_with_downtime.length > 0 ? `
+                    <div class="rides-down-section">
+                        <h4>Rides With Downtime (${rides_affected_count})</h4>
+                        <p class="rides-section-note">All rides that experienced downtime during ${period_label || 'this period'}, sorted by total downtime.</p>
+                        <div class="rides-down-list historical-list">
+                            ${tier1Rides.length > 0 ? this.renderHistoricalRidesByTier(tier1Rides, 1, 'Flagship Attractions', '5x weight') : ''}
+                            ${tier2Rides.length > 0 ? this.renderHistoricalRidesByTier(tier2Rides, 2, 'Standard Attractions', '2x weight') : ''}
+                            ${tier3Rides.length > 0 ? this.renderHistoricalRidesByTier(tier3Rides, 3, 'Minor Attractions', '1x weight') : ''}
+                        </div>
+                    </div>
+                ` : ''}
+
+                <div class="tier-weights-info">
+                    <div class="tier-weights-title">Tier Weight Reference</div>
+                    <div class="tier-weights-grid">
+                        <div class="tier-weight-item tier-1">
+                            <span class="tier-badge">Tier 1</span>
+                            <span class="weight-value">5x</span>
+                            <span class="weight-desc">Flagship E-tickets</span>
+                        </div>
+                        <div class="tier-weight-item tier-2">
+                            <span class="tier-badge">Tier 2</span>
+                            <span class="weight-value">2x</span>
+                            <span class="weight-desc">Standard rides</span>
+                        </div>
+                        <div class="tier-weight-item tier-3">
+                            <span class="tier-badge">Tier 3</span>
+                            <span class="weight-value">1x</span>
+                            <span class="weight-desc">Minor attractions</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render rides grouped by tier for HISTORICAL breakdown (shows downtime hours and days affected)
+     */
+    renderHistoricalRidesByTier(rides, tier, tierName, weightLabel) {
+        return `
+            <div class="tier-group tier-${tier}">
+                <div class="tier-group-header">
+                    <span class="tier-badge">Tier ${tier}</span>
+                    <span class="tier-name">${tierName}</span>
+                    <span class="tier-weight-label">${weightLabel}</span>
+                </div>
+                <ul class="rides-list historical-rides-list">
+                    ${rides.map(ride => `
+                        <li class="ride-item historical-ride-item">
+                            <span class="ride-name">${this.escapeHtml(ride.ride_name)}</span>
+                            <span class="ride-downtime-info">
+                                <span class="ride-downtime">${this.formatDowntimeHours(ride.downtime_hours)} down</span>
+                                <span class="ride-days">${ride.days_with_downtime || '?'} day${(ride.days_with_downtime || 0) !== 1 ? 's' : ''}</span>
+                            </span>
+                        </li>
+                    `).join('')}
+                </ul>
             </div>
         `;
     }

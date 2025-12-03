@@ -17,10 +17,7 @@
 
 const CONFIG = {
     // API Configuration
-    // Change this to your production API URL before deploying
-    API_BASE_URL: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-        ? 'http://localhost:5001/api'  // Local development - Flask on port 5001
-        : '/api', // Production - backend on same origin
+    API_BASE_URL: '/api',
 
     // For production deployment, uncomment and set your backend URL:
     // API_BASE_URL: 'https://your-backend-api.com/api',

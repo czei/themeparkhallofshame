@@ -97,6 +97,11 @@ deploy_frontend() {
         "${PROJECT_ROOT}/frontend/" \
         "${REMOTE_HOST}:${REMOTE_APP_DIR}/frontend/"
 
+    # Ensure all frontend files are readable by Apache
+    # This fixes permission issues from manual scp or restrictive umask
+    log "Setting correct file permissions..."
+    remote_exec "find ${REMOTE_APP_DIR}/frontend -type d -exec chmod 755 {} \; && find ${REMOTE_APP_DIR}/frontend -type f -exec chmod 644 {} \;"
+
     log "Frontend deployed successfully"
 }
 

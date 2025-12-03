@@ -174,8 +174,9 @@ class WaitTimes {
         const periodLabels = {
             'live': 'Live',
             'today': "Today's",
-            '7days': '7 Day',
-            '30days': '30 Day'
+            'yesterday': "Yesterday's",
+            'last_week': 'Last Week',
+            'last_month': 'Last Month'
         };
         return `${periodLabels[this.state.period] || ''} ${baseTitle}`;
     }
@@ -255,8 +256,8 @@ class WaitTimes {
                             <th class="rank-col" title="Position based on average wait time (higher rank = longer waits)">Rank</th>
                             <th class="park-col" title="Theme park name">Park</th>
                             <th class="location-col" title="Geographic location of the park">Location</th>
-                            <th class="wait-col sortable ${this.state.sortBy === 'avg' ? 'sorted' : ''}" data-sort="avg" title="Average wait time across all rides today (click to sort)">Avg Today ${this.state.sortBy === 'avg' ? '▼' : ''}</th>
-                            <th class="wait-col sortable ${this.state.sortBy === 'max' ? 'sorted' : ''}" data-sort="max" title="Longest single ride wait time recorded today (click to sort)">Max Today ${this.state.sortBy === 'max' ? '▼' : ''}</th>
+                            <th class="wait-col sortable ${this.state.sortBy === 'avg' ? 'sorted' : ''}" data-sort="avg" title="Average wait time across all rides (click to sort)">Avg Wait ${this.state.sortBy === 'avg' ? '▼' : ''}</th>
+                            <th class="wait-col sortable ${this.state.sortBy === 'max' ? 'sorted' : ''}" data-sort="max" title="Longest single ride wait time recorded (click to sort)">Max Wait ${this.state.sortBy === 'max' ? '▼' : ''}</th>
                             <th class="rides-col" title="Number of rides currently reporting wait times">Rides</th>
                             <th class="trend-col" title="Change in average wait time compared to previous period. Positive (+) = longer waits">Trend</th>
                         </tr>
@@ -347,6 +348,13 @@ class WaitTimes {
         // Re-assign ranks after sorting
         sortedRides.forEach((ride, idx) => { ride.rank = idx + 1; });
 
+        // Only show status column for live/today (where it makes sense)
+        const showStatusColumn = this.state.period === 'live' || this.state.period === 'today';
+
+        // Dynamic column headers based on period
+        const avgLabel = this.getColumnLabel('Avg');
+        const maxLabel = this.getColumnLabel('Max');
+
         return `
             <div class="data-container">
                 <table class="rankings-table wait-times-table">
@@ -356,14 +364,14 @@ class WaitTimes {
                             <th class="ride-col" title="Ride or attraction name">Ride</th>
                             <th class="tier-col" title="Importance tier: Tier 1 = flagship attractions, Tier 2 = major rides, Tier 3 = standard attractions">Tier</th>
                             <th class="park-col" title="Theme park where the ride is located">Park</th>
-                            <th class="wait-col sortable ${this.state.sortBy === 'avg' ? 'sorted' : ''}" data-sort="avg" title="Average wait time for this ride today (click to sort)">Avg Today ${this.state.sortBy === 'avg' ? '▼' : ''}</th>
-                            <th class="wait-col sortable ${this.state.sortBy === 'max' ? 'sorted' : ''}" data-sort="max" title="Longest wait time recorded for this ride today (click to sort)">Max Today ${this.state.sortBy === 'max' ? '▼' : ''}</th>
-                            <th class="status-col" title="Current operating status: Operating, Down (breakdown), Closed (scheduled), or Refurbishment">Status</th>
+                            <th class="wait-col sortable ${this.state.sortBy === 'avg' ? 'sorted' : ''}" data-sort="avg" title="Average wait time for this ride (click to sort)">${avgLabel} ${this.state.sortBy === 'avg' ? '▼' : ''}</th>
+                            <th class="wait-col sortable ${this.state.sortBy === 'max' ? 'sorted' : ''}" data-sort="max" title="Longest wait time recorded for this ride (click to sort)">${maxLabel} ${this.state.sortBy === 'max' ? '▼' : ''}</th>
+                            ${showStatusColumn ? '<th class="status-col" title="Current operating status: Operating, Down (breakdown), Closed (scheduled), or Refurbishment">Status</th>' : ''}
                             <th class="trend-col" title="Change in average wait time compared to previous period. Positive (+) = longer waits">Trend</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${sortedRides.map(ride => this.renderRideRow(ride)).join('')}
+                        ${sortedRides.map(ride => this.renderRideRow(ride, showStatusColumn)).join('')}
                     </tbody>
                 </table>
             </div>
@@ -371,9 +379,17 @@ class WaitTimes {
     }
 
     /**
+     * Get column label - simplified to avoid redundancy with table title
+     * Table title already shows the period (e.g., "Yesterday's Wait Time Rankings")
+     */
+    getColumnLabel(baseLabel) {
+        return `${baseLabel} Wait`;
+    }
+
+    /**
      * Render a single ride wait time row
      */
-    renderRideRow(ride) {
+    renderRideRow(ride, showStatusColumn = true) {
         const trendPct = ride.trend_percentage !== null && ride.trend_percentage !== undefined
             ? Number(ride.trend_percentage) : null;
         const trendClass = this.getTrendClass(trendPct);
@@ -416,9 +432,7 @@ class WaitTimes {
                 <td class="wait-col">
                     <span class="wait-value">${this.formatWaitTime(ride.peak_wait_minutes || 0)}</span>
                 </td>
-                <td class="status-col">
-                    ${statusBadge}
-                </td>
+                ${showStatusColumn ? `<td class="status-col">${statusBadge}</td>` : ''}
                 <td class="trend-col">
                     <span class="trend-indicator ${trendClass}">
                         ${trendIcon} ${trendText}

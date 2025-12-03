@@ -4,7 +4,51 @@ class APIClient {
     constructor() {
         // Get API base URL from config, fallback to '/api' if not available
         this.baseUrl = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || '/api';
+
+        // Response cache: { url: { data, timestamp } }
+        this._cache = {};
+        this._cacheTTL = 5 * 60 * 1000; // 5 minutes in milliseconds
+
         console.log(`API Client initialized with base URL: ${this.baseUrl}`);
+    }
+
+    /**
+     * Generate cache key from URL
+     * @param {URL} url - Full URL object
+     * @returns {string} Cache key
+     */
+    _getCacheKey(url) {
+        return url.href;
+    }
+
+    /**
+     * Check if cached response is still valid
+     * @param {string} key - Cache key
+     * @returns {Object|null} Cached data or null if expired/missing
+     */
+    _getFromCache(key) {
+        const cached = this._cache[key];
+        if (!cached) return null;
+
+        const age = Date.now() - cached.timestamp;
+        if (age > this._cacheTTL) {
+            delete this._cache[key];
+            return null;
+        }
+
+        return cached.data;
+    }
+
+    /**
+     * Store response in cache
+     * @param {string} key - Cache key
+     * @param {Object} data - Response data
+     */
+    _setCache(key, data) {
+        this._cache[key] = {
+            data: data,
+            timestamp: Date.now()
+        };
     }
 
     /**
@@ -32,6 +76,14 @@ class APIClient {
                 }
             });
 
+            // Check cache first
+            const cacheKey = this._getCacheKey(url);
+            const cached = this._getFromCache(cacheKey);
+            if (cached) {
+                console.log(`API CACHE HIT: ${url.href}`);
+                return cached;
+            }
+
             console.log(`API GET: ${url.href}`);
 
             const response = await fetch(url, {
@@ -50,6 +102,10 @@ class APIClient {
             }
 
             const data = await response.json();
+
+            // Cache successful response
+            this._setCache(cacheKey, data);
+
             return data;
         } catch (error) {
             console.error('API request failed:', error);
@@ -63,6 +119,64 @@ class APIClient {
      */
     getBaseUrl() {
         return this.baseUrl;
+    }
+
+    /**
+     * Clear all cached data
+     * Useful when period or filter changes
+     */
+    clearCache() {
+        this._cache = {};
+        console.log('API cache cleared');
+    }
+
+    /**
+     * Prefetch common API endpoints in the background.
+     * Loads data for all main tabs so tab switching is instant.
+     *
+     * @param {string} period - Time period (live, today, last_week, last_month)
+     * @param {string} filter - Park filter (all-parks, disney-universal)
+     */
+    async prefetch(period = 'live', filter = 'all-parks') {
+        console.log(`Prefetching data for period=${period}, filter=${filter}`);
+
+        // Define all endpoints to prefetch
+        const endpoints = [
+            // Downtime tab
+            { endpoint: '/parks/downtime', params: { period, filter, limit: 50 } },
+            { endpoint: '/rides/downtime', params: { period, filter, limit: 100 } },
+            { endpoint: '/live/status-summary', params: { filter } },
+
+            // WaitTimes tab
+            { endpoint: '/parks/waittimes', params: { period, filter, limit: 50 } },
+            { endpoint: '/rides/waittimes', params: { period, filter, limit: 100 } }
+        ];
+
+        // Prefetch all endpoints in parallel (don't await - fire and forget)
+        const prefetchPromises = endpoints.map(({ endpoint, params }) =>
+            this.get(endpoint, params).catch(err => {
+                console.warn(`Prefetch failed for ${endpoint}:`, err.message);
+            })
+        );
+
+        // Wait for all prefetches to complete
+        await Promise.all(prefetchPromises);
+        console.log('Prefetch complete');
+    }
+
+    /**
+     * Get cache statistics for debugging
+     * @returns {Object} Cache stats
+     */
+    getCacheStats() {
+        const now = Date.now();
+        const entries = Object.entries(this._cache);
+        const validEntries = entries.filter(([_, v]) => (now - v.timestamp) < this._cacheTTL);
+        return {
+            totalEntries: entries.length,
+            validEntries: validEntries.length,
+            ttlSeconds: this._cacheTTL / 1000
+        };
     }
 }
 

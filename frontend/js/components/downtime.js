@@ -8,7 +8,7 @@ class Downtime {
         this.apiClient = apiClient;
         this.container = document.getElementById(containerId);
         this.state = {
-            period: '7days',  // Default to 7 days for more meaningful data (especially early in UTC day)
+            period: 'last_week',  // Default to last week for calendar-based reporting
             filter: initialFilter,
             entityType: 'parks',  // 'parks' or 'rides'
             parkLimit: 50,
@@ -112,8 +112,8 @@ class Downtime {
         const periodLabels = {
             'live': 'Live',
             'today': 'Today',
-            '7days': '7 Day',
-            '30days': '30 Day'
+            'last_week': 'Last Week',
+            'last_month': 'Last Month'
         };
         return `${periodLabels[this.state.period] || ''} ${baseTitle}`;
     }
@@ -234,7 +234,7 @@ class Downtime {
                                 Shame Score ${this.getSortIndicator('shame_score')}
                             </th>
                             <th class="location-col" title="Geographic location of the park">Location</th>
-                            <th class="status-col" title="Whether the park is currently open or closed">Status</th>
+                            ${this.state.period === 'live' ? '<th class="status-col" title="Whether the park is currently open or closed">Status</th>' : ''}
                             <th class="downtime-col sortable ${this.state.sortBy === 'total_downtime_hours' ? 'sorted' : ''}"
                                 data-sort="total_downtime_hours"
                                 title="Total accumulated ride downtime hours during the selected period. Click to sort.">
@@ -309,9 +309,7 @@ class Downtime {
                     <span class="shame-score ${this.getShameClass(park.shame_score)}">${park.shame_score !== null && park.shame_score !== undefined ? Number(park.shame_score).toFixed(2) : 'N/A'}</span>
                 </td>
                 <td class="location-col">${this.escapeHtml(park.location || 'Unknown')}</td>
-                <td class="status-col">
-                    ${parkStatusBadge}
-                </td>
+                ${this.state.period === 'live' ? `<td class="status-col">${parkStatusBadge}</td>` : ''}
                 <td class="downtime-col">
                     <span class="downtime-value">
                         ${this.formatHours(park.total_downtime_hours || 0)}
@@ -363,11 +361,12 @@ class Downtime {
                             <th class="ride-col" title="Ride or attraction name">Ride</th>
                             <th class="tier-col" title="Importance tier: Tier 1 = flagship attractions (3x weight), Tier 2 = major rides (2x weight), Tier 3 = standard attractions (1x weight)">Tier</th>
                             <th class="park-col" title="Theme park where the ride is located">Park</th>
+                            ${this.state.period === 'live' ? `
                             <th class="status-col sortable ${this.state.rideSortBy === 'current_is_open' ? 'sorted' : ''}"
                                 data-ride-sort="current_is_open"
                                 title="Current operating status. Click to sort (Down first).">
                                 Status ${this.getRideSortIndicator('current_is_open')}
-                            </th>
+                            </th>` : ''}
                             <th class="downtime-col sortable ${this.state.rideSortBy === 'downtime_hours' ? 'sorted' : ''}"
                                 data-ride-sort="downtime_hours"
                                 title="Total time the ride was non-operational. Click to sort (most downtime first).">
@@ -405,7 +404,9 @@ class Downtime {
             ? `${trendPct > 0 ? '+' : ''}${trendPct.toFixed(1)}%`
             : 'N/A';
 
-        const statusBadge = this.getStatusBadge(ride.current_is_open, ride.park_is_open);
+        // Handle both LIVE (is_down) and TODAY (current_is_open) field names
+        const isOpen = ride.current_is_open !== undefined ? ride.current_is_open : (ride.is_down !== undefined ? !ride.is_down : null);
+        const statusBadge = this.getStatusBadge(isOpen, ride.park_is_open);
         const tierBadge = this.getTierBadge(ride.tier);
 
         return `
@@ -440,12 +441,10 @@ class Downtime {
                         <div class="park-location">${this.escapeHtml(ride.location || '')}</div>
                     </div>
                 </td>
-                <td class="status-col">
-                    ${statusBadge}
-                </td>
+                ${this.state.period === 'live' ? `<td class="status-col">${statusBadge}</td>` : ''}
                 <td class="downtime-col">
                     <span class="downtime-value">
-                        ${this.formatHours(ride.downtime_hours || 0)}
+                        ${this.formatHours(ride.downtime_hours || ride.total_downtime_hours || 0)}
                     </span>
                 </td>
                 <td class="uptime-col">

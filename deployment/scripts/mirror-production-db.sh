@@ -1,0 +1,320 @@
+#!/bin/bash
+# Theme Park Hall of Shame - Production Database Mirror Script
+# Purpose: Mirror production database to local development environment
+# Usage: ./mirror-production-db.sh [options]
+#
+# Options:
+#   --days=N        Only mirror last N days of snapshot data (default: 7)
+#   --full          Mirror entire database (all historical data)
+#   --schema-only   Mirror schema only, no data
+#   --dry-run       Show what would be done without executing
+#   --yes           Skip confirmation prompt
+#   --help          Show this help message
+
+set -euo pipefail
+
+# Configuration
+REMOTE_HOST="ec2-user@webperformance.com"
+SSH_KEY="${SSH_KEY:-$HOME/.ssh/michael-2.pem}"
+REMOTE_DB_NAME="themepark_tracker"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+log() { echo -e "${GREEN}[MIRROR]${NC} $1"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+
+# Default options
+DAYS=7
+FULL=false
+SCHEMA_ONLY=false
+DRY_RUN=false
+SKIP_CONFIRM=false
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --days=*)
+            DAYS="${1#*=}"
+            ;;
+        --full)
+            FULL=true
+            ;;
+        --schema-only)
+            SCHEMA_ONLY=true
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            ;;
+        --yes|-y)
+            SKIP_CONFIRM=true
+            ;;
+        --help|-h)
+            head -15 "$0" | tail -14
+            exit 0
+            ;;
+        *)
+            error "Unknown option: $1. Use --help for usage."
+            ;;
+    esac
+    shift
+done
+
+# Tables that should always be fully copied (small reference data)
+FULL_TABLES=(
+    "parks"
+    "rides"
+    "ride_classifications"
+    "park_schedules"
+    "park_live_rankings"
+    "park_live_rankings_staging"
+    "ride_live_rankings"
+    "ride_live_rankings_staging"
+)
+
+# Tables that should be filtered by date (large snapshot data)
+DATE_FILTERED_TABLES=(
+    "ride_status_snapshots"
+    "park_activity_snapshots"
+    "ride_status_changes"
+    "ride_daily_stats"
+    "park_daily_stats"
+    "ride_weekly_stats"
+    "park_weekly_stats"
+    "ride_monthly_stats"
+    "park_monthly_stats"
+    "data_quality_issues"
+)
+
+echo -e "${GREEN}======================================${NC}"
+echo -e "${GREEN}Theme Park Hall of Shame${NC}"
+echo -e "${GREEN}Production Database Mirror${NC}"
+echo -e "${GREEN}======================================${NC}"
+echo ""
+
+# Show mode
+if [ "$SCHEMA_ONLY" = true ]; then
+    info "Mode: Schema only (no data)"
+elif [ "$FULL" = true ]; then
+    info "Mode: Full mirror (all data)"
+else
+    info "Mode: Partial mirror (last $DAYS days of snapshots)"
+fi
+
+if [ "$DRY_RUN" = true ]; then
+    warn "DRY RUN - No changes will be made"
+fi
+echo ""
+
+# Load local environment
+ENV_FILE="${PROJECT_ROOT}/backend/.env"
+if [ ! -f "${ENV_FILE}" ]; then
+    error ".env file not found at ${ENV_FILE}. Please create it first."
+fi
+source "${ENV_FILE}"
+
+LOCAL_DB_NAME="${DB_NAME:-themepark_tracker_dev}"
+LOCAL_DB_HOST="${DB_HOST:-localhost}"
+LOCAL_DB_USER="${DB_USER:-root}"
+LOCAL_DB_PASS="${DB_PASSWORD:-}"
+
+# Safety check - refuse to overwrite production
+if [[ "$LOCAL_DB_NAME" == *"prod"* ]] || [[ "$LOCAL_DB_NAME" == "theme_park_tracker" ]]; then
+    error "SAFETY: Refusing to overwrite database '$LOCAL_DB_NAME' - looks like production!"
+fi
+
+info "Local database: $LOCAL_DB_NAME @ $LOCAL_DB_HOST"
+echo ""
+
+# Check prerequisites
+log "Checking prerequisites..."
+
+# Check mysql client
+if ! command -v mysql &> /dev/null; then
+    error "mysql command not found. Please install MySQL/MariaDB client."
+fi
+echo "  mysql client: OK"
+
+# Check SSH key
+if [ ! -f "$SSH_KEY" ]; then
+    error "SSH key not found at $SSH_KEY. Set SSH_KEY env var."
+fi
+echo "  SSH key: OK"
+
+# Test SSH connection
+if ! ssh -i "$SSH_KEY" -o ConnectTimeout=10 "$REMOTE_HOST" "echo 'ok'" &>/dev/null; then
+    error "Cannot connect to $REMOTE_HOST"
+fi
+echo "  SSH connection: OK"
+
+# Test local MySQL connection
+if ! mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} -e "SELECT 1;" &>/dev/null; then
+    error "Cannot connect to local MySQL server"
+fi
+echo "  Local MySQL: OK"
+echo ""
+
+# Confirmation
+if [ "$SKIP_CONFIRM" = false ] && [ "$DRY_RUN" = false ]; then
+    warn "This will DROP and recreate database '$LOCAL_DB_NAME'"
+    read -p "Continue? [y/N] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        log "Aborted."
+        exit 0
+    fi
+    echo ""
+fi
+
+if [ "$DRY_RUN" = true ]; then
+    log "DRY RUN: Would execute the following:"
+    echo ""
+    echo "1. SSH to $REMOTE_HOST"
+    echo "2. Run mysqldump on $REMOTE_DB_NAME"
+    if [ "$SCHEMA_ONLY" = true ]; then
+        echo "   - Schema only, no data"
+    elif [ "$FULL" = true ]; then
+        echo "   - Full data export"
+    else
+        echo "   - Full tables: ${FULL_TABLES[*]}"
+        echo "   - Filtered tables (last $DAYS days): ${DATE_FILTERED_TABLES[*]}"
+    fi
+    echo "3. Drop and recreate $LOCAL_DB_NAME"
+    echo "4. Import data"
+    echo ""
+    log "DRY RUN complete. Use without --dry-run to execute."
+    exit 0
+fi
+
+# Start timer
+START_TIME=$(date +%s)
+
+# Drop and recreate local database
+log "Recreating local database..."
+mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} <<EOF
+DROP DATABASE IF EXISTS \`${LOCAL_DB_NAME}\`;
+CREATE DATABASE \`${LOCAL_DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+EOF
+echo "  Database recreated: $LOCAL_DB_NAME"
+
+# Calculate date filter
+if [ "$FULL" = false ] && [ "$SCHEMA_ONLY" = false ]; then
+    DATE_FILTER=$(date -v-${DAYS}d +%Y-%m-%d 2>/dev/null || date -d "-${DAYS} days" +%Y-%m-%d)
+    info "Date filter: >= $DATE_FILTER"
+fi
+
+# Build and execute mysqldump
+log "Exporting from production..."
+
+if [ "$SCHEMA_ONLY" = true ]; then
+    # Schema only (filter MariaDB-specific constraint syntax for MySQL compatibility)
+    ssh -i "$SSH_KEY" "$REMOTE_HOST" \
+        "sudo mysqldump -u root --no-data --routines --triggers $REMOTE_DB_NAME" \
+        | sed 's/CONSTRAINT `CONSTRAINT_[0-9]*` //g' \
+        | mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
+    echo "  Schema imported"
+
+elif [ "$FULL" = true ]; then
+    # Full export (filter MariaDB-specific constraint syntax for MySQL compatibility)
+    ssh -i "$SSH_KEY" "$REMOTE_HOST" \
+        "sudo mysqldump -u root --routines --triggers --single-transaction $REMOTE_DB_NAME" \
+        | sed 's/CONSTRAINT `CONSTRAINT_[0-9]*` //g' \
+        | pv -N "Importing" \
+        | mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
+    echo "  Full database imported"
+
+else
+    # Partial export - schema first, then data
+
+    # 1. Export schema only (filter MariaDB-specific constraint syntax for MySQL compatibility)
+    log "  Exporting schema..."
+    ssh -i "$SSH_KEY" "$REMOTE_HOST" \
+        "sudo mysqldump -u root --no-data --routines --triggers $REMOTE_DB_NAME" \
+        | sed 's/CONSTRAINT `CONSTRAINT_[0-9]*` //g' \
+        | mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
+
+    # 2. Export full tables (small reference data)
+    log "  Exporting reference tables..."
+    FULL_TABLES_STR="${FULL_TABLES[*]}"
+    ssh -i "$SSH_KEY" "$REMOTE_HOST" \
+        "sudo mysqldump -u root --no-create-info --single-transaction $REMOTE_DB_NAME $FULL_TABLES_STR 2>/dev/null || true" \
+        | mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
+
+    # 3. Export filtered tables (last N days)
+    log "  Exporting snapshot data (last $DAYS days)..."
+    for TABLE in "${DATE_FILTERED_TABLES[@]}"; do
+        # Determine the date column for this table
+        case $TABLE in
+            ride_status_snapshots|park_activity_snapshots)
+                DATE_COL="recorded_at"
+                ;;
+            ride_status_changes)
+                DATE_COL="changed_at"
+                ;;
+            ride_daily_stats|park_daily_stats)
+                DATE_COL="stat_date"
+                ;;
+            ride_weekly_stats|park_weekly_stats|ride_monthly_stats|park_monthly_stats)
+                DATE_COL="period_start"
+                ;;
+            data_quality_issues)
+                DATE_COL="detected_at"
+                ;;
+            *)
+                DATE_COL="created_at"
+                ;;
+        esac
+
+        echo -n "    $TABLE... "
+
+        # Export with WHERE clause
+        QUERY="SELECT * FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER'"
+        ROW_COUNT=$(ssh -i "$SSH_KEY" "$REMOTE_HOST" \
+            "sudo mysql -u root -N -e \"SELECT COUNT(*) FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER'\" $REMOTE_DB_NAME 2>/dev/null || echo 0")
+
+        if [ "$ROW_COUNT" -gt 0 ]; then
+            ssh -i "$SSH_KEY" "$REMOTE_HOST" \
+                "sudo mysqldump -u root --no-create-info --single-transaction --where=\"$DATE_COL >= '$DATE_FILTER'\" $REMOTE_DB_NAME $TABLE 2>/dev/null" \
+                | mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
+            echo "$ROW_COUNT rows"
+        else
+            echo "0 rows (skipped)"
+        fi
+    done
+fi
+
+# Calculate elapsed time
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
+MINUTES=$((ELAPSED / 60))
+SECONDS=$((ELAPSED % 60))
+
+echo ""
+log "Verifying import..."
+
+# Show table counts
+echo ""
+echo "Table row counts:"
+mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME" -e "
+SELECT
+    table_name AS 'Table',
+    table_rows AS 'Rows'
+FROM information_schema.tables
+WHERE table_schema = '$LOCAL_DB_NAME'
+ORDER BY table_rows DESC;
+" 2>/dev/null || true
+
+echo ""
+echo -e "${GREEN}======================================${NC}"
+echo -e "${GREEN}Mirror complete!${NC}"
+echo -e "${GREEN}Time: ${MINUTES}m ${SECONDS}s${NC}"
+echo -e "${GREEN}======================================${NC}"

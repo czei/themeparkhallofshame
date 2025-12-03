@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>US Theme Park Hall of Shame</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=9">
+    <link rel="stylesheet" href="css/styles.css?v=15">
     <!-- Chart.js for Trends visualization -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
@@ -13,8 +13,8 @@
     <!-- Geometric Top Bar -->
     <div class="geometric-bar"></div>
 
-    <!-- Sponsorship Section -->
-    <div class="sponsor-section">
+    <!-- Beta Warning Banner - Mary Blair Collage Style -->
+    <div class="beta-section">
         <!-- Base color blocks -->
         <div class="geo-base-1"></div>
         <div class="geo-base-2"></div>
@@ -39,21 +39,9 @@
         <div class="geo-bar-1"></div>
         <div class="geo-bar-2"></div>
 
-        <div class="sponsor-content-expanded">
-            <div class="sponsor-led-display">
-                <img src="https://themeparkwaits.com/cdn/shop/files/disney-furniture-brick-square-small3.gif?v=1738711333&width=600"
-                     alt="ThemeParkWaits LED Display"
-                     class="led-gif">
-            </div>
-            <div class="sponsor-text-content">
-                <div class="sponsor-tagline">Powered by the same live data you love</div>
-                <div class="sponsor-brand">
-                    <a href="https://www.themeparkwaits.com" target="_blank">ThemeParkWaits.com</a>
-                </div>
-                <div class="sponsor-description">
-                    Track your favorite parks in real-time with our scrolling LED display
-                </div>
-            </div>
+        <div class="beta-content">
+            <span class="beta-badge">BETA</span>
+            <span class="beta-message">Data accuracy under review. Some metrics may be incorrect.</span>
         </div>
     </div>
 
@@ -72,10 +60,11 @@
 
     <!-- Navigation -->
     <div class="nav-container">
-        <div class="nav-grid">
+        <div class="nav-grid nav-grid-4">
             <button class="nav-item active" data-view="downtime"><span>Downtime</span></button>
             <button class="nav-item" data-view="wait-times"><span>Wait Times</span></button>
-            <button class="nav-item" data-view="trends"><span>Trends</span></button>
+            <button class="nav-item" data-view="awards"><span>Awards</span></button>
+            <button class="nav-item" data-view="charts"><span>Charts</span></button>
         </div>
     </div>
 
@@ -91,9 +80,15 @@
 
         <div class="time-selector">
             <button class="time-btn active" data-period="live" title="Current snapshot - rides down right now">Live</button>
-            <button class="time-btn" data-period="today" title="Cumulative stats from midnight (Pacific time) to now">Today</button>
-            <button class="time-btn" data-period="7days" title="Rolling 7-day average statistics">7 Days</button>
-            <button class="time-btn" data-period="30days" title="Rolling 30-day average statistics">30 Days</button>
+            <button class="time-btn" data-period="today" title="Average stats during operating hours today (Pacific time)">Today</button>
+            <button class="time-btn" data-period="yesterday" title="Full previous day (Pacific time)">Yesterday</button>
+            <div class="history-dropdown">
+                <button class="history-btn" id="history-dropdown-btn">History <span class="chevron">▼</span></button>
+                <div class="dropdown-menu" id="history-dropdown-menu">
+                    <button class="dropdown-item" data-period="last_week" title="Previous complete week (Sunday-Saturday)">Last Week</button>
+                    <button class="dropdown-item" data-period="last_month" title="Previous complete calendar month">Last Month</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -172,11 +167,12 @@
     <!-- Scripts -->
     <script src="js/config.js?v=3"></script>
     <script src="js/api-client.js?v=3"></script>
-    <script src="js/components/downtime.js?v=4"></script>
+    <script src="js/components/downtime.js?v=5"></script>
     <script src="js/components/wait-times.js?v=8"></script>
-    <script src="js/components/trends.js?v=12"></script>
+    <script src="js/components/awards.js?v=2"></script>
+    <script src="js/components/charts.js?v=1"></script>
     <script src="js/components/about-modal.js?v=3"></script>
-    <script src="js/components/park-details-modal.js?v=5"></script>
-    <script src="js/app.js?v=7"></script>
+    <script src="js/components/park-details-modal.js?v=6"></script>
+    <script src="js/app.js?v=10"></script>
 </body>
 </html>

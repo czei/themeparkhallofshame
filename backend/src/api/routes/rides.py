@@ -6,15 +6,17 @@ Endpoints for ride-level downtime rankings, wait times, and live status.
 
 Query File Mapping
 ------------------
-GET /live/status-summary             → database/queries/live/status_summary.py
-GET /rides/downtime?period=live      → database/queries/live/live_ride_rankings.py (instantaneous)
-GET /rides/downtime?period=today     → database/queries/today/today_ride_rankings.py (cumulative)
-GET /rides/downtime?period=7days     → database/queries/rankings/ride_downtime_rankings.py
-GET /rides/downtime?period=30days    → database/queries/rankings/ride_downtime_rankings.py
-GET /rides/waittimes?period=live     → StatsRepository.get_ride_live_wait_time_rankings()
-GET /rides/waittimes?period=today    → database/queries/today/today_ride_wait_times.py (cumulative)
-GET /rides/waittimes?period=7days    → database/queries/rankings/ride_wait_time_rankings.py
-GET /rides/waittimes?period=30days   → database/queries/rankings/ride_wait_time_rankings.py
+GET /live/status-summary               → database/queries/live/status_summary.py
+GET /rides/downtime?period=live        → database/queries/live/live_ride_rankings.py (instantaneous)
+GET /rides/downtime?period=today       → database/queries/today/today_ride_rankings.py (cumulative)
+GET /rides/downtime?period=yesterday   → database/queries/yesterday/yesterday_ride_rankings.py (full prev day)
+GET /rides/downtime?period=last_week   → database/queries/rankings/ride_downtime_rankings.py
+GET /rides/downtime?period=last_month  → database/queries/rankings/ride_downtime_rankings.py
+GET /rides/waittimes?period=live       → StatsRepository.get_ride_live_wait_time_rankings()
+GET /rides/waittimes?period=today      → database/queries/today/today_ride_wait_times.py (cumulative)
+GET /rides/waittimes?period=yesterday  → database/queries/yesterday/yesterday_ride_wait_times.py (full prev day)
+GET /rides/waittimes?period=last_week  → database/queries/rankings/ride_wait_time_rankings.py
+GET /rides/waittimes?period=last_month → database/queries/rankings/ride_wait_time_rankings.py
 """
 
 from flask import Blueprint, request, jsonify
@@ -24,11 +26,13 @@ from datetime import date, datetime
 from database.connection import get_db_connection
 from database.repositories.ride_repository import RideRepository
 from database.repositories.stats_repository import StatsRepository
+from utils.cache import get_query_cache, generate_cache_key
 
 # New query imports - each file handles one specific data source
 from database.queries.live import LiveRideRankingsQuery, StatusSummaryQuery
 from database.queries.rankings import RideDowntimeRankingsQuery, RideWaitTimeRankingsQuery
 from database.queries.today import TodayRideRankingsQuery, TodayRideWaitTimesQuery
+from database.queries.yesterday import YesterdayRideRankingsQuery, YesterdayRideWaitTimesQuery
 
 from utils.logger import logger
 from utils.timezone import get_today_pacific
@@ -59,7 +63,7 @@ def get_live_status_summary():
     Returns:
         JSON response with status counts
 
-    Performance: <50ms
+    Performance: ~2.5s uncached, ~8ms cached
     """
     filter_type = request.args.get('filter', 'all-parks')
     park_id = request.args.get('park_id', type=int)
@@ -72,6 +76,18 @@ def get_live_status_summary():
         }), 400
 
     try:
+        # Generate cache key
+        cache_key = generate_cache_key(
+            "live_status_summary",
+            filter=filter_type,
+            park_id=str(park_id) if park_id else "none"
+        )
+        cache = get_query_cache()
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"Cache HIT for live status summary: filter={filter_type}")
+            return jsonify(cached_result), 200
+
         with get_db_connection() as conn:
             # See: database/queries/live/status_summary.py
             query = StatusSummaryQuery(conn)
@@ -93,7 +109,9 @@ def get_live_status_summary():
             if park_id:
                 response["park_id"] = park_id
 
-            logger.info(f"Live status summary requested: filter={filter_type}, park_id={park_id}")
+            # Cache the result (5-minute TTL)
+            cache.set(cache_key, response)
+            logger.info(f"Cache STORE for live status summary: filter={filter_type}")
 
             return jsonify(response), 200
 
@@ -118,11 +136,11 @@ def get_ride_downtime_rankings():
     - period=today: database/queries/today/today_ride_rankings.py
       Uses snapshot data aggregated from midnight Pacific to now (cumulative)
 
-    - period=7days/30days: database/queries/rankings/ride_downtime_rankings.py
-      Uses pre-aggregated data from ride_weekly_stats/ride_monthly_stats
+    - period=last_week/last_month: database/queries/rankings/ride_downtime_rankings.py
+      Uses pre-aggregated data from ride_daily_stats (calendar-based periods)
 
     Query Parameters:
-        period (str): Time period - 'live', 'today', '7days', '30days' (default: 'live')
+        period (str): Time period - 'live', 'today', 'last_week', 'last_month' (default: 'live')
         filter (str): Park filter - 'disney-universal', 'all-parks' (default: 'all-parks')
         limit (int): Maximum results (default: 100, max: 200)
         sort_by (str): Sort column - 'current_is_open', 'downtime_hours', 'uptime_percentage', 'trend_percentage' (default: 'downtime_hours')
@@ -139,10 +157,10 @@ def get_ride_downtime_rankings():
     sort_by = request.args.get('sort_by', 'downtime_hours')
 
     # Validate period
-    if period not in ['live', 'today', '7days', '30days']:
+    if period not in ['live', 'today', 'yesterday', 'last_week', 'last_month']:
         return jsonify({
             "success": False,
-            "error": "Invalid period. Must be 'live', 'today', '7days', or '30days'"
+            "error": "Invalid period. Must be 'live', 'today', 'yesterday', 'last_week', or 'last_month'"
         }), 400
 
     # Validate filter
@@ -161,38 +179,67 @@ def get_ride_downtime_rankings():
         }), 400
 
     try:
+        # Generate cache key - all periods are cached (live data only updates every 5 min anyway)
+        cache_key = generate_cache_key(
+            "rides_downtime",
+            period=period,
+            filter=filter_type,
+            limit=str(limit),
+            sort_by=sort_by
+        )
+        cache = get_query_cache()
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"Cache HIT for ride downtime: period={period}, filter={filter_type}")
+            return jsonify(cached_result), 200
+
         with get_db_connection() as conn:
             filter_disney_universal = (filter_type == 'disney-universal')
             stats_repo = StatsRepository(conn)
 
             # Route to appropriate query class based on period
             if period == 'live':
-                # LIVE data - instantaneous snapshot (rides down RIGHT NOW)
-                # Uses stats_repo for optimized raw SQL query (not SQLAlchemy ORM)
-                rankings = stats_repo.get_ride_live_downtime_rankings(
+                # LIVE: Try pre-aggregated cache first (instant ~10ms)
+                # Falls back to raw query (~7s) if cache is empty/stale
+                rankings = stats_repo.get_ride_live_rankings_cached(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit,
                     sort_by=sort_by
                 )
+
+                # If cache miss, fall back to computing from raw snapshots
+                if not rankings:
+                    logger.warning(f"Ride live rankings cache miss, falling back to raw query")
+                    rankings = stats_repo.get_ride_live_downtime_rankings(
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit,
+                        sort_by=sort_by
+                    )
             elif period == 'today':
-                # TODAY data - cumulative from midnight Pacific to now
-                # See: database/queries/today/today_ride_rankings.py
+                # TODAY: Cumulative data from midnight Pacific to now
                 query = TodayRideRankingsQuery(conn)
                 rankings = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
+            elif period == 'yesterday':
+                # YESTERDAY: Full previous Pacific day (immutable, highly cacheable)
+                query = YesterdayRideRankingsQuery(conn)
+                rankings = query.get_rankings(
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit
+                )
             else:
-                # Historical data from aggregated stats
+                # Historical data from aggregated stats (calendar-based periods)
                 # See: database/queries/rankings/ride_downtime_rankings.py
                 query = RideDowntimeRankingsQuery(conn)
-                if period == '7days':
+                if period == 'last_week':
                     rankings = query.get_weekly(
                         filter_disney_universal=filter_disney_universal,
                         limit=limit,
                         sort_by=sort_by
                     )
-                else:  # 30days
+                else:  # last_month
                     rankings = query.get_monthly(
                         filter_disney_universal=filter_disney_universal,
                         limit=limit,
@@ -225,6 +272,10 @@ def get_ride_downtime_rankings():
 
             logger.info(f"Ride rankings requested: period={period}, filter={filter_type}, results={len(rankings_with_urls)}")
 
+            # Cache the result (5-minute TTL)
+            cache.set(cache_key, response)
+            logger.info(f"Cache STORE for ride downtime: period={period}, filter={filter_type}")
+
             return jsonify(response), 200
 
     except Exception as e:
@@ -248,11 +299,11 @@ def get_ride_wait_times():
     - period=today: database/queries/today/today_ride_wait_times.py
       Uses snapshot data aggregated from midnight Pacific to now (cumulative)
 
-    - period=7days/30days: database/queries/rankings/ride_wait_time_rankings.py
-      Uses pre-aggregated data from ride_daily_stats
+    - period=last_week/last_month: database/queries/rankings/ride_wait_time_rankings.py
+      Uses pre-aggregated data from ride_daily_stats (calendar-based periods)
 
     Query Parameters:
-        period (str): Time period - 'live', 'today', '7days', '30days' (default: 'live')
+        period (str): Time period - 'live', 'today', 'last_week', 'last_month' (default: 'live')
         filter (str): Park filter - 'disney-universal', 'all-parks' (default: 'all-parks')
         limit (int): Maximum results (default: 100, max: 200)
 
@@ -267,10 +318,10 @@ def get_ride_wait_times():
     limit = min(int(request.args.get('limit', 100)), 200)
 
     # Validate period
-    if period not in ['live', 'today', '7days', '30days']:
+    if period not in ['live', 'today', 'yesterday', 'last_week', 'last_month']:
         return jsonify({
             "success": False,
-            "error": "Invalid period. Must be 'live', 'today', '7days', or '30days'"
+            "error": "Invalid period. Must be 'live', 'today', 'yesterday', 'last_week', or 'last_month'"
         }), 400
 
     # Validate filter
@@ -281,6 +332,19 @@ def get_ride_wait_times():
         }), 400
 
     try:
+        # Generate cache key - all periods are cached (live data only updates every 5 min anyway)
+        cache_key = generate_cache_key(
+            "rides_waittimes",
+            period=period,
+            filter=filter_type,
+            limit=str(limit)
+        )
+        cache = get_query_cache()
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"Cache HIT for ride waittimes: period={period}, filter={filter_type}")
+            return jsonify(cached_result), 200
+
         with get_db_connection() as conn:
             filter_disney_universal = (filter_type == 'disney-universal')
 
@@ -300,15 +364,28 @@ def get_ride_wait_times():
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
-            else:
-                # Historical data from aggregated stats
-                # See: database/queries/rankings/ride_wait_time_rankings.py
-                query = RideWaitTimeRankingsQuery(conn)
-                wait_times = query.get_by_period(
-                    period=period,
+            elif period == 'yesterday':
+                # YESTERDAY data - full previous Pacific day
+                # See: database/queries/yesterday/yesterday_ride_wait_times.py
+                query = YesterdayRideWaitTimesQuery(conn)
+                wait_times = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
+            else:
+                # Historical data from aggregated stats (calendar-based periods)
+                # See: database/queries/rankings/ride_wait_time_rankings.py
+                query = RideWaitTimeRankingsQuery(conn)
+                if period == 'last_week':
+                    wait_times = query.get_weekly(
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                else:  # last_month
+                    wait_times = query.get_monthly(
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
 
             # Add Queue-Times.com URLs and rank to wait times
             wait_times_with_urls = []
@@ -335,6 +412,10 @@ def get_ride_wait_times():
             }
 
             logger.info(f"Wait times requested: period={period}, filter={filter_type}, results={len(wait_times_with_urls)}")
+
+            # Cache the result (5-minute TTL)
+            cache.set(cache_key, response)
+            logger.info(f"Cache STORE for ride waittimes: period={period}, filter={filter_type}")
 
             return jsonify(response), 200
 

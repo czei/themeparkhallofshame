@@ -1,46 +1,31 @@
 /**
  * Theme Park Hall of Shame - Trends Component
- * Displays performance trends showing parks/rides with ≥5% uptime changes
- * Includes line charts for shame score and downtime visualization
+ * Displays Awards (Longest Wait Times, Least Reliable Rides) and
+ * performance trends showing parks/rides with uptime changes
  */
-
-// Mary Blair inspired color palette for charts
-const MARY_BLAIR_COLORS = [
-    '#FF6B5A',  // Coral
-    '#00B8C5',  // Turquoise
-    '#FFB627',  // Gold
-    '#FF9BAA',  // Soft Pink
-    '#9B59B6',  // Purple
-    '#A8E6CF',  // Lime/Mint
-    '#FF8C42',  // Orange
-    '#87CEEB',  // Sky Blue
-    '#E91E63',  // Magenta
-    '#00CED1',  // Dark Cyan
-];
 
 class Trends {
     constructor(apiClient, containerId, initialFilter = 'all-parks') {
         this.apiClient = apiClient;
         this.container = document.getElementById(containerId);
-        this.parksChart = null;  // Chart.js instance for parks shame score
-        this.waitTimesChart = null;  // Chart.js instance for park wait times
         this.state = {
-            period: '7days',
+            period: 'last_week',
             filter: initialFilter,
             entityType: 'parks',  // 'parks' or 'rides'
             limit: 20,
             loading: false,
             error: null,
+            // Trends data
             parksImproving: null,
             parksDeclining: null,
             ridesImproving: null,
             ridesDeclining: null,
+            // Awards data
+            longestWaitTimes: null,
+            leastReliable: null,
+            // Stats
             aggregateStats: null,
-            statusSummary: null,
-            parksChartData: null,
-            waitTimesChartData: null,
-            chartsMock: false,
-            chartsGranularity: 'daily'  // 'hourly' for today, 'daily' for 7/30 days
+            statusSummary: null
         };
     }
 
@@ -52,42 +37,39 @@ class Trends {
         await Promise.all([
             this.fetchAllTrends(),
             this.fetchAggregateStats(),
-            this.fetchChartData()
+            this.fetchAwardsData()
         ]);
     }
 
     /**
-     * Fetch chart data for parks shame score and park wait times
+     * Fetch Awards data (Longest Wait Times, Least Reliable)
+     * Now supports both parks and rides based on entityType
      */
-    async fetchChartData() {
+    async fetchAwardsData() {
         try {
-            // Pass the effective period - trends don't support 'live', use 'today' instead
             const params = {
                 period: this.getEffectivePeriod(),
                 filter: this.state.filter,
-                limit: 4  // Top 4 performers for cleaner charts
+                entity: this.state.entityType,
+                limit: 10  // Top 10 for awards
             };
 
-            // Fetch parks shame scores and park wait times in parallel
-            const [parksResponse, waitTimesResponse] = await Promise.all([
-                this.apiClient.get('/trends/chart-data', { ...params, type: 'parks' }),
-                this.apiClient.get('/trends/chart-data', { ...params, type: 'waittimes' })
+            const [waitTimesResponse, reliableResponse] = await Promise.all([
+                this.apiClient.get('/trends/longest-wait-times', params),
+                this.apiClient.get('/trends/least-reliable', params)
             ]);
 
             const newState = {};
-            if (parksResponse.success) {
-                newState.parksChartData = parksResponse.chart_data;
-                newState.chartsMock = parksResponse.mock;
-                newState.chartsGranularity = parksResponse.granularity || 'daily';
-            }
             if (waitTimesResponse.success) {
-                newState.waitTimesChartData = waitTimesResponse.chart_data;
+                newState.longestWaitTimes = waitTimesResponse.data;
+            }
+            if (reliableResponse.success) {
+                newState.leastReliable = reliableResponse.data;
             }
 
             this.setState(newState);
-            this.renderCharts();
         } catch (error) {
-            console.error('Failed to fetch chart data:', error);
+            console.error('Failed to fetch awards data:', error);
         }
     }
 
@@ -215,242 +197,324 @@ class Trends {
         this.container.innerHTML = `
             <div class="trends-view">
                 ${this.renderAggregateStats()}
-                ${this.renderChartsSection()}
-                ${this.renderContent()}
+                ${this.renderEntityToggle()}
+                ${this.renderAwardsSection()}
+                ${this.renderUptimeTrends()}
             </div>
         `;
 
         this.attachEventListeners();
-        // Re-render charts after DOM is updated
-        setTimeout(() => this.renderCharts(), 0);
     }
 
     /**
-     * Render the charts section with canvas elements
+     * Render the Parks/Rides toggle at the top
      */
-    renderChartsSection() {
-        const mockIndicator = this.state.chartsMock
-            ? '<span class="mock-data-indicator">Sample data shown - real data accumulating</span>'
-            : '';
-
+    renderEntityToggle() {
         return `
-            <div class="trends-charts">
-                <div class="chart-container">
-                    <h3>Park Shame Scores (${this.getPeriodLabel()})</h3>
-                    ${mockIndicator}
-                    <div class="chart-wrapper">
-                        <canvas id="parks-shame-chart"></canvas>
-                    </div>
-                </div>
-                <div class="chart-container">
-                    <h3>Park Avg Wait Times (${this.getPeriodLabel()})</h3>
-                    <div class="chart-wrapper">
-                        <canvas id="parks-waittimes-chart"></canvas>
-                    </div>
+            <div class="entity-toggle-section">
+                <div class="entity-toggle">
+                    <button class="entity-btn ${this.state.entityType === 'parks' ? 'active' : ''}"
+                            data-entity="parks">Parks</button>
+                    <button class="entity-btn ${this.state.entityType === 'rides' ? 'active' : ''}"
+                            data-entity="rides">Rides</button>
                 </div>
             </div>
         `;
     }
 
     /**
-     * Get period label for chart titles
-     * Today shows hourly breakdown, other periods show daily trends
+     * Render the Awards section (Longest Wait Times + Least Reliable)
+     */
+    renderAwardsSection() {
+        const entityLabel = this.state.entityType === 'parks' ? 'Parks' : 'Rides';
+        return `
+            <div class="awards-section">
+                <div class="section-header">
+                    <h2 class="section-title">${entityLabel} Awards - ${this.getPeriodLabel()}</h2>
+                </div>
+                <div class="awards-grid">
+                    ${this.renderLongestWaitTimesTable()}
+                    ${this.renderLeastReliableTable()}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Get period label for section titles
      */
     getPeriodLabel() {
-        // Note: 'live' is not supported for trends - frontend defaults to 'today'
         const labels = {
-            'live': 'Today (Hourly)',  // Fallback display if 'live' somehow gets here
-            'today': 'Today (Hourly)',
-            '7days': 'Last 7 Days',
-            '30days': 'Last 30 Days'
+            'live': 'Today',
+            'today': 'Today',
+            'last_week': 'Last Week',
+            'last_month': 'Last Month'
         };
-        return labels[this.state.period] || 'Last 7 Days';
+        return labels[this.state.period] || 'Last Week';
     }
 
     /**
-     * Render Chart.js charts
+     * Render Longest Wait Times awards table
      */
-    renderCharts() {
-        if (typeof Chart === 'undefined') {
-            console.warn('Chart.js not loaded');
-            return;
+    renderLongestWaitTimesTable() {
+        const data = this.state.longestWaitTimes;
+        const isParks = this.state.entityType === 'parks';
+
+        if (!data || data.length === 0) {
+            return `
+                <div class="awards-table-container">
+                    <div class="awards-table-header">
+                        <span class="awards-icon">⏱️</span>
+                        Longest Wait Times
+                    </div>
+                    <div class="empty-state">
+                        <p>No wait time data available for this period</p>
+                    </div>
+                </div>
+            `;
         }
 
-        this.renderParksChart();
-        this.renderWaitTimesChart();
-    }
-
-    /**
-     * Render parks shame score chart
-     */
-    renderParksChart() {
-        const canvas = document.getElementById('parks-shame-chart');
-        if (!canvas || !this.state.parksChartData) return;
-
-        // Destroy existing chart if any
-        if (this.parksChart) {
-            this.parksChart.destroy();
+        if (isParks) {
+            return `
+                <div class="awards-table-container">
+                    <div class="awards-table-header">
+                        <span class="awards-icon">⏱️</span>
+                        Longest Wait Times
+                    </div>
+                    <table class="rankings-table awards-table">
+                        <thead>
+                            <tr>
+                                <th class="rank-col">#</th>
+                                <th class="park-col">Park</th>
+                                <th class="location-col">Location</th>
+                                <th class="metric-col">Wait Hours</th>
+                                <th class="metric-col">Avg Wait</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.map((park, index) => this.renderWaitTimeParkRow(park, index + 1)).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
         }
 
-        const ctx = canvas.getContext('2d');
-        const chartData = this.state.parksChartData;
-
-        // Add colors to datasets
-        const datasets = chartData.datasets.map((dataset, index) => ({
-            ...dataset,
-            borderColor: MARY_BLAIR_COLORS[index % MARY_BLAIR_COLORS.length],
-            backgroundColor: MARY_BLAIR_COLORS[index % MARY_BLAIR_COLORS.length] + '20',
-            tension: 0.3,
-            borderWidth: 3,
-            pointRadius: 4,
-            pointHoverRadius: 6,
-            fill: false
-        }));
-
-        this.parksChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: chartData.labels,
-                datasets: datasets
-            },
-            options: this.getChartOptions('Shame Score')
-        });
+        return `
+            <div class="awards-table-container">
+                <div class="awards-table-header">
+                    <span class="awards-icon">⏱️</span>
+                    Longest Wait Times
+                </div>
+                <table class="rankings-table awards-table">
+                    <thead>
+                        <tr>
+                            <th class="rank-col">#</th>
+                            <th class="ride-col">Ride</th>
+                            <th class="park-col">Park</th>
+                            <th class="metric-col">Wait Hours</th>
+                            <th class="metric-col">Avg Wait</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.map((ride, index) => this.renderWaitTimeRideRow(ride, index + 1)).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
     }
 
     /**
-     * Render park wait times chart
+     * Render a single wait time row for PARKS
      */
-    renderWaitTimesChart() {
-        const canvas = document.getElementById('parks-waittimes-chart');
-        if (!canvas || !this.state.waitTimesChartData) return;
+    renderWaitTimeParkRow(park, rank) {
+        const medalClass = rank <= 3 ? `medal-${rank}` : '';
+        const waitHours = Number(park.cumulative_wait_hours || 0).toFixed(1);
+        const avgWait = Math.round(park.avg_wait_time || 0);
 
-        // Destroy existing chart if any
-        if (this.waitTimesChart) {
-            this.waitTimesChart.destroy();
+        return `
+            <tr class="awards-row ${medalClass}">
+                <td class="rank-col">
+                    <span class="rank-badge ${medalClass}">${rank}</span>
+                </td>
+                <td class="park-col">
+                    <span class="park-name">${this.escapeHtml(park.park_name || 'Unknown')}</span>
+                </td>
+                <td class="location-col">
+                    <span class="location">${this.escapeHtml(park.location || 'Unknown')}</span>
+                </td>
+                <td class="metric-col">
+                    <span class="metric-value">${waitHours}h</span>
+                </td>
+                <td class="metric-col">
+                    <span class="metric-value">${avgWait}m</span>
+                </td>
+            </tr>
+        `;
+    }
+
+    /**
+     * Render a single wait time row for RIDES
+     */
+    renderWaitTimeRideRow(ride, rank) {
+        const medalClass = rank <= 3 ? `medal-${rank}` : '';
+        const waitHours = Number(ride.cumulative_wait_hours || 0).toFixed(1);
+        const avgWait = Math.round(ride.avg_wait_time || 0);
+
+        return `
+            <tr class="awards-row ${medalClass}">
+                <td class="rank-col">
+                    <span class="rank-badge ${medalClass}">${rank}</span>
+                </td>
+                <td class="ride-col">
+                    <span class="ride-name">${this.escapeHtml(ride.ride_name || 'Unknown')}</span>
+                </td>
+                <td class="park-col">
+                    <span class="park-name">${this.escapeHtml(ride.park_name || 'Unknown')}</span>
+                </td>
+                <td class="metric-col">
+                    <span class="metric-value">${waitHours}h</span>
+                </td>
+                <td class="metric-col">
+                    <span class="metric-value">${avgWait}m</span>
+                </td>
+            </tr>
+        `;
+    }
+
+    /**
+     * Render Least Reliable awards table (Parks or Rides)
+     */
+    renderLeastReliableTable() {
+        const data = this.state.leastReliable;
+        const isParks = this.state.entityType === 'parks';
+        const title = isParks ? 'Least Reliable Parks' : 'Least Reliable Rides';
+
+        if (!data || data.length === 0) {
+            return `
+                <div class="awards-table-container">
+                    <div class="awards-table-header">
+                        <span class="awards-icon">🔧</span>
+                        ${title}
+                    </div>
+                    <div class="empty-state">
+                        <p>No reliability data available for this period</p>
+                    </div>
+                </div>
+            `;
         }
 
-        const ctx = canvas.getContext('2d');
-        const chartData = this.state.waitTimesChartData;
+        if (isParks) {
+            return `
+                <div class="awards-table-container">
+                    <div class="awards-table-header">
+                        <span class="awards-icon">🔧</span>
+                        ${title}
+                    </div>
+                    <table class="rankings-table awards-table">
+                        <thead>
+                            <tr>
+                                <th class="rank-col">#</th>
+                                <th class="park-col">Park</th>
+                                <th class="location-col">Location</th>
+                                <th class="metric-col">Down Time</th>
+                                <th class="metric-col">Uptime</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.map((park, index) => this.renderReliabilityParkRow(park, index + 1)).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
 
-        // Add colors to datasets
-        const datasets = chartData.datasets.map((dataset, index) => ({
-            ...dataset,
-            borderColor: MARY_BLAIR_COLORS[index % MARY_BLAIR_COLORS.length],
-            backgroundColor: MARY_BLAIR_COLORS[index % MARY_BLAIR_COLORS.length] + '20',
-            tension: 0.3,
-            borderWidth: 3,
-            pointRadius: 4,
-            pointHoverRadius: 6,
-            fill: false
-        }));
-
-        this.waitTimesChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: chartData.labels,
-                datasets: datasets
-            },
-            options: this.getChartOptions('Avg Wait (min)')
-        });
+        return `
+            <div class="awards-table-container">
+                <div class="awards-table-header">
+                    <span class="awards-icon">🔧</span>
+                    ${title}
+                </div>
+                <table class="rankings-table awards-table">
+                    <thead>
+                        <tr>
+                            <th class="rank-col">#</th>
+                            <th class="ride-col">Ride</th>
+                            <th class="park-col">Park</th>
+                            <th class="metric-col">Down Time</th>
+                            <th class="metric-col">Uptime</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.map((ride, index) => this.renderReliabilityRideRow(ride, index + 1)).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
     }
 
     /**
-     * Get common chart options with Mary Blair styling
+     * Render a single reliability row for PARKS
      */
-    getChartOptions(yAxisLabel) {
-        return {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-                mode: 'index',
-                intersect: false
-            },
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: {
-                        font: {
-                            family: 'Inter',
-                            size: 11
-                        },
-                        usePointStyle: true,
-                        padding: 16,
-                        boxWidth: 8
-                    }
-                },
-                tooltip: {
-                    backgroundColor: 'rgba(42, 42, 42, 0.95)',
-                    titleFont: {
-                        family: 'Space Grotesk',
-                        size: 13
-                    },
-                    bodyFont: {
-                        family: 'Inter',
-                        size: 12
-                    },
-                    padding: 12,
-                    cornerRadius: 8,
-                    displayColors: true,
-                    callbacks: {
-                        label: function(context) {
-                            const label = context.dataset.label || '';
-                            const value = context.parsed.y;
-                            if (yAxisLabel === 'Avg Wait (min)') {
-                                return `${label}: ${value} min`;
-                            }
-                            return `${label}: ${value}`;
-                        }
-                    }
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    grid: {
-                        color: 'rgba(0, 0, 0, 0.05)'
-                    },
-                    ticks: {
-                        font: {
-                            family: 'Inter',
-                            size: 11
-                        },
-                        callback: function(value) {
-                            if (yAxisLabel === 'Avg Wait (min)') {
-                                return value + ' min';
-                            }
-                            return value;
-                        }
-                    },
-                    title: {
-                        display: true,
-                        text: yAxisLabel,
-                        font: {
-                            family: 'Space Grotesk',
-                            size: 12,
-                            weight: 600
-                        },
-                        color: '#007B8A'
-                    }
-                },
-                x: {
-                    grid: {
-                        display: false
-                    },
-                    ticks: {
-                        font: {
-                            family: 'Inter',
-                            size: 11
-                        }
-                    }
-                }
-            }
-        };
+    renderReliabilityParkRow(park, rank) {
+        const medalClass = rank <= 3 ? `medal-${rank}` : '';
+        const downtime = Number(park.downtime_hours || 0).toFixed(1);
+        const uptime = Number(park.uptime_percentage || 0).toFixed(1);
+
+        return `
+            <tr class="awards-row ${medalClass}">
+                <td class="rank-col">
+                    <span class="rank-badge ${medalClass}">${rank}</span>
+                </td>
+                <td class="park-col">
+                    <span class="park-name">${this.escapeHtml(park.park_name || 'Unknown')}</span>
+                </td>
+                <td class="location-col">
+                    <span class="location">${this.escapeHtml(park.location || 'Unknown')}</span>
+                </td>
+                <td class="metric-col">
+                    <span class="metric-value metric-bad">${downtime}h</span>
+                </td>
+                <td class="metric-col">
+                    <span class="metric-value">${uptime}%</span>
+                </td>
+            </tr>
+        `;
     }
 
     /**
-     * Render main content (loading, error, or toggle + trends tables)
+     * Render a single reliability row for RIDES
      */
-    renderContent() {
+    renderReliabilityRideRow(ride, rank) {
+        const medalClass = rank <= 3 ? `medal-${rank}` : '';
+        const downtime = Number(ride.downtime_hours || 0).toFixed(1);
+        const uptime = Number(ride.uptime_percentage || 0).toFixed(1);
+
+        return `
+            <tr class="awards-row ${medalClass}">
+                <td class="rank-col">
+                    <span class="rank-badge ${medalClass}">${rank}</span>
+                </td>
+                <td class="ride-col">
+                    <span class="ride-name">${this.escapeHtml(ride.ride_name || 'Unknown')}</span>
+                </td>
+                <td class="park-col">
+                    <span class="park-name">${this.escapeHtml(ride.park_name || 'Unknown')}</span>
+                </td>
+                <td class="metric-col">
+                    <span class="metric-value metric-bad">${downtime}h</span>
+                </td>
+                <td class="metric-col">
+                    <span class="metric-value">${uptime}%</span>
+                </td>
+            </tr>
+        `;
+    }
+
+    /**
+     * Render Uptime Trends section (loading, error, or trends tables)
+     * Uses the entity toggle from renderEntityToggle() at the top level
+     */
+    renderUptimeTrends() {
         if (this.state.loading) {
             return `
                 <div class="loading-state">
@@ -469,15 +533,9 @@ class Trends {
             `;
         }
 
-        // Render toggle + selected entity type trends
+        // Render section title + selected entity type trends (toggle is at top level)
         return `
             <div class="section-header">
-                <div class="entity-toggle">
-                    <button class="entity-btn ${this.state.entityType === 'parks' ? 'active' : ''}"
-                            data-entity="parks">Parks</button>
-                    <button class="entity-btn ${this.state.entityType === 'rides' ? 'active' : ''}"
-                            data-entity="rides">Rides</button>
-                </div>
                 <h2 class="section-title">${this.getPeriodTitle('Uptime Trends')}</h2>
             </div>
             ${this.state.entityType === 'parks'
@@ -513,7 +571,7 @@ class Trends {
         if (!data || data.length === 0) {
             // Show time-aware message for "today" period
             let emptyMessage = 'No significant trends found for the selected period';
-            if (this.state.period === 'today') {
+            if (this.state.period === 'today' || this.state.period === 'live') {
                 const hour = new Date().getHours();
                 if (hour < 12) {
                     emptyMessage = "Today's data is still being collected. Check back later or try 7 Days view.";
@@ -639,40 +697,12 @@ class Trends {
      */
     getPeriodTitle(baseTitle) {
         const periodLabels = {
+            'live': "Today's",
             'today': "Today's",
-            '7days': '7 Day',
-            '30days': '30 Day'
+            'last_week': 'Last Week',
+            'last_month': 'Last Month'
         };
         return `${periodLabels[this.state.period] || ''} ${baseTitle}`;
-    }
-
-    /**
-     * Format hours into readable string
-     */
-    formatHours(hours) {
-        const numHours = Number(hours);
-        if (hours === null || hours === undefined || isNaN(numHours) || numHours === 0) return '0h 0m';
-
-        const wholeHours = Math.floor(numHours);
-        const minutes = Math.round((numHours - wholeHours) * 60);
-
-        if (wholeHours === 0) return `${minutes}m`;
-        if (minutes === 0) return `${wholeHours}h`;
-        return `${wholeHours}h ${minutes}m`;
-    }
-
-    /**
-     * Format minutes into readable string
-     */
-    formatMinutes(minutes) {
-        if (minutes === null || minutes === undefined || minutes === 0) return '0m';
-
-        const hours = Math.floor(minutes / 60);
-        const mins = Math.round(minutes % 60);
-
-        if (hours === 0) return `${mins}m`;
-        if (mins === 0) return `${hours}h`;
-        return `${hours}h ${mins}m`;
     }
 
     /**
@@ -702,7 +732,7 @@ class Trends {
         if (newFilter !== this.state.filter) {
             this.state.filter = newFilter;
             this.fetchAllTrends();
-            this.fetchChartData();  // Also refetch chart data
+            this.fetchAwardsData();
         }
     }
 
@@ -713,7 +743,7 @@ class Trends {
         if (newPeriod !== this.state.period) {
             this.state.period = newPeriod;
             this.fetchAllTrends();
-            this.fetchChartData();  // Also refetch chart data
+            this.fetchAwardsData();
         }
     }
 
@@ -721,13 +751,15 @@ class Trends {
      * Attach event listeners to controls
      */
     attachEventListeners() {
-        // Entity toggle buttons
+        // Entity toggle buttons - controls both Awards and Uptime Trends
         const entityBtns = this.container.querySelectorAll('.entity-btn');
         entityBtns.forEach(btn => {
             btn.addEventListener('click', () => {
                 const newEntityType = btn.dataset.entity;
                 if (newEntityType !== this.state.entityType) {
-                    this.setState({ entityType: newEntityType });
+                    this.state.entityType = newEntityType;
+                    // Refetch Awards data with new entity type, then re-render
+                    this.fetchAwardsData();
                 }
             });
         });

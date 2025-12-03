@@ -270,3 +270,52 @@ class TestYesterdayQueryClasses:
             assert YesterdayRideRankingsQuery is not None
         except ImportError:
             pytest.fail("YesterdayRideRankingsQuery class does not exist yet")
+
+
+class TestTrendsYesterdaySupport:
+    """
+    Tests for YESTERDAY period support in trends API endpoints.
+    """
+
+    def test_chart_data_endpoint_accepts_yesterday(self):
+        """
+        The /trends/chart-data endpoint should accept period=yesterday.
+        """
+        from pathlib import Path
+        trends_path = Path(__file__).parent.parent.parent / "src" / "api" / "routes" / "trends.py"
+        source_code = trends_path.read_text()
+
+        # Find the chart-data endpoint's valid_periods
+        # It should include 'yesterday'
+        assert "'yesterday'" in source_code, \
+            "trends.py should include 'yesterday' in valid periods"
+
+        # Count occurrences of the valid_periods pattern without yesterday
+        old_pattern = "valid_periods = ['today', 'last_week', 'last_month']"
+        assert old_pattern not in source_code, \
+            f"trends.py still has valid_periods without 'yesterday': {old_pattern}"
+
+    def test_longest_wait_times_endpoint_accepts_yesterday(self):
+        """
+        The /trends/longest-wait-times endpoint should accept period=yesterday.
+        """
+        from pathlib import Path
+        trends_path = Path(__file__).parent.parent.parent / "src" / "api" / "routes" / "trends.py"
+        source_code = trends_path.read_text()
+
+        # Check that the old pattern without 'yesterday' is NOT present
+        old_pattern = "valid_periods = ['today', 'last_week', 'last_month']"
+        assert old_pattern not in source_code, \
+            "trends.py should have 'yesterday' in all valid_periods lists"
+
+    def test_least_reliable_rides_endpoint_accepts_yesterday(self):
+        """
+        The /trends/least-reliable-rides endpoint should accept period=yesterday.
+        """
+        from pathlib import Path
+        trends_path = Path(__file__).parent.parent.parent / "src" / "api" / "routes" / "trends.py"
+        source_code = trends_path.read_text()
+
+        old_pattern = "valid_periods = ['today', 'last_week', 'last_month']"
+        assert old_pattern not in source_code, \
+            "trends.py should have 'yesterday' in all valid_periods lists"

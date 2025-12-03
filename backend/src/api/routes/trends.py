@@ -86,7 +86,7 @@ def get_trends():
         # Validate parameter values
         # Note: 'live' is intentionally excluded - trends require comparison between periods,
         # which doesn't make sense for instantaneous data. Frontend defaults to 'today' if 'live'.
-        valid_periods = ['today', 'last_week', 'last_month']
+        valid_periods = ['today', 'yesterday', 'last_week', 'last_month']
         valid_categories = ['parks-improving', 'parks-declining', 'rides-improving', 'rides-declining']
         valid_filters = ['disney-universal', 'all-parks']
 
@@ -237,7 +237,7 @@ def get_chart_data():
         # Validate parameters
         # Note: 'live' is intentionally excluded - chart trends require time series data,
         # which doesn't make sense for instantaneous data. Frontend defaults to 'today' if 'live'.
-        valid_periods = ['today', 'last_week', 'last_month']
+        valid_periods = ['today', 'yesterday', 'last_week', 'last_month']
         valid_types = ['parks', 'rides', 'waittimes']
         valid_filters = ['disney-universal', 'all-parks']
 
@@ -301,6 +301,38 @@ def get_chart_data():
                 if not chart_data or not chart_data.get('datasets') or len(chart_data.get('datasets', [])) == 0:
                     is_mock = True
                     chart_data = _generate_mock_hourly_chart_data(data_type, limit)
+
+            elif period == 'yesterday':
+                # Hourly data for yesterday (similar to today, but for previous day)
+                granularity = 'hourly'
+                yesterday = today - timedelta(days=1)
+                if data_type == 'parks':
+                    query = ParkShameHistoryQuery(conn)
+                    chart_data = query.get_hourly(
+                        target_date=yesterday,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                elif data_type == 'waittimes':
+                    query = ParkWaitTimeHistoryQuery(conn)
+                    chart_data = query.get_hourly(
+                        target_date=yesterday,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                else:
+                    query = RideDowntimeHistoryQuery(conn)
+                    chart_data = query.get_hourly(
+                        target_date=yesterday,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+
+                # Generate mock hourly data if empty
+                if not chart_data or not chart_data.get('datasets') or len(chart_data.get('datasets', [])) == 0:
+                    is_mock = True
+                    chart_data = _generate_mock_hourly_chart_data(data_type, limit)
+
             else:
                 # Daily data for last_week/last_month (calendar-based periods)
                 if period == 'last_week':
@@ -398,7 +430,7 @@ def get_longest_wait_times():
         limit = min(int(request.args.get('limit', 10)), 20)
 
         # Validate period (LIVE not supported - frontend should convert to TODAY)
-        valid_periods = ['today', 'last_week', 'last_month']
+        valid_periods = ['today', 'yesterday', 'last_week', 'last_month']
         if period not in valid_periods:
             return jsonify({
                 "success": False,
@@ -512,7 +544,7 @@ def get_least_reliable():
         limit = min(int(request.args.get('limit', 10)), 20)
 
         # Validate period (LIVE not supported - frontend should convert to TODAY)
-        valid_periods = ['today', 'last_week', 'last_month']
+        valid_periods = ['today', 'yesterday', 'last_week', 'last_month']
         if period not in valid_periods:
             return jsonify({
                 "success": False,
@@ -755,7 +787,7 @@ def _calculate_period_dates(period: str) -> Dict[str, str]:
     Calculate current and previous period date ranges.
 
     Args:
-        period: 'today', 'last_week', or 'last_month'
+        period: 'today', 'yesterday', 'last_week', or 'last_month'
 
     Returns:
         Dict with current_period_label and previous_period_label
@@ -767,6 +799,13 @@ def _calculate_period_dates(period: str) -> Dict[str, str]:
         current_end = today
         previous_start = today - timedelta(days=1)
         previous_end = today - timedelta(days=1)
+
+    elif period == 'yesterday':
+        yesterday = today - timedelta(days=1)
+        current_start = yesterday
+        current_end = yesterday
+        previous_start = today - timedelta(days=2)
+        previous_end = today - timedelta(days=2)
 
     elif period == 'last_week':
         # Calendar-based: previous complete week (Sunday-Saturday)

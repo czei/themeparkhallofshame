@@ -7,7 +7,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const globalState = {
         filter: 'all-parks',  // Global filter: 'all-parks' or 'disney-universal'
         period: 'live',       // Time period: 'live', 'today', 'yesterday', 'last_week', 'last_month'
-        currentView: 'downtime'  // Track current view for filter visibility
+        currentView: 'downtime',  // Track current view for filter visibility
+        entity: 'parks'       // Entity type: 'parks' or 'rides'
     };
 
     // Tab switching logic
@@ -49,6 +50,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (view === 'awards' && globalState.period === 'live') {
                 globalState.period = 'today';
                 updateTimePeriodUI();
+            }
+
+            // Save current entity selection before switching views
+            if (currentComponent && currentComponent.state && currentComponent.state.entityType) {
+                globalState.entity = currentComponent.state.entityType;
             }
 
             loadView(view);
@@ -259,8 +265,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'downtime':
                     if (typeof Downtime !== 'undefined') {
                         currentComponent = new Downtime(apiClient, 'view-container', globalState.filter);
-                        // Sync the period before fetching data
+                        // Sync the period and entity before fetching data
                         currentComponent.state.period = globalState.period;
+                        currentComponent.state.entityType = globalState.entity;
                         await currentComponent.init();
                     } else {
                         throw new Error('Downtime component not loaded');
@@ -270,8 +277,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'wait-times':
                     if (typeof WaitTimes !== 'undefined') {
                         currentComponent = new WaitTimes(apiClient, 'view-container', globalState.filter);
-                        // Sync the period before fetching data
+                        // Sync the period and entity before fetching data
                         currentComponent.state.period = globalState.period;
+                        currentComponent.state.entityType = globalState.entity;
                         await currentComponent.init();
                     } else {
                         throw new Error('WaitTimes component not loaded');

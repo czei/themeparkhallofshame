@@ -17,7 +17,6 @@
 
 const CONFIG = {
     // API Configuration
-    // Always use production API path - no dev mode detection
     API_BASE_URL: '/api',
 
     // For production deployment, uncomment and set your backend URL:

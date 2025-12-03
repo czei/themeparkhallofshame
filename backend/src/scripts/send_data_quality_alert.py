@@ -3,7 +3,10 @@
 Data Quality Alert Script
 =========================
 
-Sends daily email alerts about stale data issues from ThemeParks.wiki.
+Sends daily email alerts about data quality issues including:
+1. Stale data from ThemeParks.wiki
+2. Awards validation (checking yesterday's awards for anomalies)
+
 Run via cron once daily (e.g., 8am Pacific).
 
 Usage:
@@ -16,6 +19,7 @@ Environment Variables:
 import os
 import sys
 from datetime import datetime  # noqa: F401 - used in f-string
+from typing import List, Dict, Any
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,6 +29,8 @@ from sendgrid.helpers.mail import Mail, Email, To, Content
 
 from database.connection import get_db_connection
 from database.repositories.data_quality_repository import DataQualityRepository
+from database.queries.trends.least_reliable_rides import LeastReliableRidesQuery
+from database.queries.trends.longest_wait_times import LongestWaitTimesQuery
 from utils.logger import logger
 
 # Configuration
@@ -35,6 +41,13 @@ TO_EMAIL = "michael@czei.org"
 # Alert thresholds
 MIN_STALENESS_HOURS = 24  # Only alert on data older than 24 hours
 MIN_ISSUES_TO_ALERT = 5   # Only send email if at least this many issues
+
+# Awards validation bounds
+MAX_DOWNTIME_HOURS_YESTERDAY = 24  # A single day has max 24 hours
+MAX_DOWNTIME_HOURS_LAST_WEEK = 168  # 7 days × 24 hours
+MAX_DOWNTIME_HOURS_LAST_MONTH = 744  # 31 days × 24 hours
+MAX_AVG_WAIT_TIME_MINUTES = 300  # 5 hours - extremely high but possible on peak days
+MIN_WAIT_TIME_MINUTES = 0  # Can't be negative
 
 
 def get_significant_issues(hours: int = 24) -> list:
@@ -87,7 +100,194 @@ def get_summary_stats() -> dict:
         }
 
 
-def format_email_html(issues: list, stats: dict) -> str:
+# ============================================================================
+# Awards Validation Functions
+# ============================================================================
+
+def validate_downtime_bounds(
+    rides: List[Dict[str, Any]],
+    period: str = "yesterday"
+) -> List[Dict[str, Any]]:
+    """
+    Validate that downtime values are within physical bounds for the period.
+
+    Args:
+        rides: List of ride dicts with 'ride_name' and 'downtime_hours'
+        period: 'yesterday', 'last_week', or 'last_month'
+
+    Returns:
+        List of issue dicts with category, severity, message, details
+    """
+    issues = []
+
+    # Determine max allowed hours based on period
+    if period in ("yesterday", "today"):
+        max_hours = MAX_DOWNTIME_HOURS_YESTERDAY
+    elif period in ("last_week", "7days"):
+        max_hours = MAX_DOWNTIME_HOURS_LAST_WEEK
+    elif period in ("last_month", "30days"):
+        max_hours = MAX_DOWNTIME_HOURS_LAST_MONTH
+    else:
+        max_hours = MAX_DOWNTIME_HOURS_YESTERDAY  # Default to strictest
+
+    for ride in rides:
+        downtime = ride.get("downtime_hours", 0)
+        ride_name = ride.get("ride_name", "Unknown")
+
+        if downtime is None:
+            continue
+
+        if downtime > max_hours:
+            issues.append({
+                "category": "awards_downtime",
+                "severity": "critical",
+                "message": f"Downtime exceeds {max_hours}h for {period} period (impossible)",
+                "details": f"{ride_name}: {downtime:.2f}h downtime (max possible: {max_hours}h)"
+            })
+        elif downtime < 0:
+            issues.append({
+                "category": "awards_downtime",
+                "severity": "critical",
+                "message": "Negative downtime detected (data error)",
+                "details": f"{ride_name}: {downtime:.2f}h"
+            })
+
+    return issues
+
+
+def validate_wait_time_bounds(rides: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Validate that wait time values are within reasonable bounds.
+
+    Args:
+        rides: List of ride dicts with 'ride_name' and 'avg_wait_time'
+
+    Returns:
+        List of issue dicts with category, severity, message, details
+    """
+    issues = []
+
+    for ride in rides:
+        avg_wait = ride.get("avg_wait_time", 0)
+        ride_name = ride.get("ride_name", "Unknown")
+
+        if avg_wait is None:
+            continue
+
+        if avg_wait > MAX_AVG_WAIT_TIME_MINUTES:
+            issues.append({
+                "category": "awards_wait_time",
+                "severity": "high",
+                "message": f"Average wait time exceeds {MAX_AVG_WAIT_TIME_MINUTES} minutes",
+                "details": f"{ride_name}: {avg_wait} min average wait (suspiciously high)"
+            })
+        elif avg_wait < MIN_WAIT_TIME_MINUTES:
+            issues.append({
+                "category": "awards_wait_time",
+                "severity": "critical",
+                "message": "Negative wait time detected (data error)",
+                "details": f"{ride_name}: {avg_wait} min"
+            })
+
+    return issues
+
+
+def validate_awards_existence(
+    rides: List[Dict[str, Any]],
+    parks: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    Validate that awards data exists (not empty).
+
+    Args:
+        rides: List of ride award data
+        parks: List of park award data
+
+    Returns:
+        List of issue dicts if data is missing
+    """
+    issues = []
+
+    if not rides and not parks:
+        issues.append({
+            "category": "awards_existence",
+            "severity": "medium",
+            "message": "No awards data found for yesterday",
+            "details": "Both ride and park awards are empty (may indicate all parks closed)"
+        })
+    elif not rides:
+        issues.append({
+            "category": "awards_existence",
+            "severity": "low",
+            "message": "No ride awards data found",
+            "details": "Ride awards list is empty"
+        })
+    elif not parks:
+        issues.append({
+            "category": "awards_existence",
+            "severity": "low",
+            "message": "No park awards data found",
+            "details": "Park awards list is empty"
+        })
+
+    return issues
+
+
+def get_awards_issues() -> List[Dict[str, Any]]:
+    """
+    Main function to collect all awards validation issues.
+
+    Queries yesterday's awards data and validates:
+    1. Downtime values are within physical bounds
+    2. Wait times are reasonable
+    3. Data exists
+
+    Returns:
+        List of all issues found
+    """
+    all_issues = []
+
+    try:
+        with get_db_connection() as conn:
+            # Query yesterday's awards data
+            downtime_query = LeastReliableRidesQuery(conn)
+            wait_time_query = LongestWaitTimesQuery(conn)
+
+            # Get ride-level awards for yesterday
+            downtime_rides = downtime_query.get_rankings(period="yesterday", limit=20)
+            wait_time_rides = wait_time_query.get_rankings(period="yesterday", limit=20)
+
+            # Get park-level awards for yesterday
+            downtime_parks = downtime_query.get_park_rankings(period="yesterday", limit=20)
+            wait_time_parks = wait_time_query.get_park_rankings(period="yesterday", limit=20)
+
+            # Validate downtime bounds
+            all_issues.extend(validate_downtime_bounds(downtime_rides, period="yesterday"))
+            all_issues.extend(validate_downtime_bounds(downtime_parks, period="yesterday"))
+
+            # Validate wait time bounds
+            all_issues.extend(validate_wait_time_bounds(wait_time_rides))
+            all_issues.extend(validate_wait_time_bounds(wait_time_parks))
+
+            # Validate data existence
+            all_issues.extend(validate_awards_existence(
+                rides=downtime_rides + wait_time_rides,
+                parks=downtime_parks + wait_time_parks
+            ))
+
+    except Exception as e:
+        logger.error(f"Error validating awards: {e}")
+        all_issues.append({
+            "category": "awards_error",
+            "severity": "high",
+            "message": "Failed to validate awards data",
+            "details": str(e)
+        })
+
+    return all_issues
+
+
+def format_email_html(issues: list, stats: dict, awards_issues: list = None) -> str:
     """Format the alert email as HTML."""
 
     html = f"""
@@ -163,9 +363,52 @@ def format_email_html(issues: list, stats: dict) -> str:
 
     html += """
         </table>
+    """
 
+    # Add Awards Validation section if there are any issues
+    if awards_issues:
+        html += """
+        <h2 style="color: #d32f2f;">Awards Validation Issues</h2>
+        <p style="color: #666; font-size: 13px;">
+            Issues detected in yesterday's awards data. These may indicate bugs in
+            the awards calculation or data anomalies.
+        </p>
+        <table>
+            <tr>
+                <th>Severity</th>
+                <th>Category</th>
+                <th>Message</th>
+                <th>Details</th>
+            </tr>
+        """
+        for issue in awards_issues:
+            severity = issue.get('severity', 'unknown')
+            severity_color = {
+                'critical': '#d32f2f',
+                'high': '#f57c00',
+                'medium': '#fbc02d',
+                'low': '#388e3c'
+            }.get(severity, '#666')
+
+            html += f"""
+            <tr>
+                <td style="color: {severity_color}; font-weight: bold;">{severity.upper()}</td>
+                <td>{issue.get('category', 'unknown')}</td>
+                <td>{issue.get('message', '')}</td>
+                <td style="font-size: 12px;">{issue.get('details', '')}</td>
+            </tr>
+            """
+
+        html += "</table>"
+    else:
+        html += """
+        <h2 style="color: #388e3c;">Awards Validation</h2>
+        <p style="color: #388e3c;">All awards data for yesterday passed validation checks.</p>
+        """
+
+    html += """
         <h2>How to Report</h2>
-        <p>You can report these issues to the ThemeParks.wiki project:</p>
+        <p>You can report stale data issues to the ThemeParks.wiki project:</p>
         <ul>
             <li>GitHub: <a href="https://github.com/ThemeParks/parksapi/issues">ThemeParks/parksapi Issues</a></li>
             <li>Include the ThemeParks.wiki ID when reporting</li>
@@ -223,20 +466,33 @@ def main():
     """Main entry point."""
     logger.info("Starting data quality alert check...")
 
-    # Get issues and stats
+    # Get stale data issues and stats
     issues = get_significant_issues(hours=24)
     stats = get_summary_stats()
 
-    logger.info(f"Found {len(issues)} significant issues in last 24h")
+    logger.info(f"Found {len(issues)} significant stale data issues in last 24h")
     logger.info(f"Total entities with issues (7 days): {stats['total_entities_with_issues']}")
 
-    # Only send if there are enough issues
-    if len(issues) < MIN_ISSUES_TO_ALERT and stats['total_entities_with_issues'] < 10:
+    # Get awards validation issues
+    awards_issues = get_awards_issues()
+    logger.info(f"Found {len(awards_issues)} awards validation issues")
+
+    # Count critical awards issues
+    critical_awards = [i for i in awards_issues if i.get('severity') == 'critical']
+
+    # Send if there are enough stale data issues OR any critical awards issues
+    should_send = (
+        len(issues) >= MIN_ISSUES_TO_ALERT or
+        stats['total_entities_with_issues'] >= 10 or
+        len(critical_awards) > 0
+    )
+
+    if not should_send:
         logger.info("Not enough issues to warrant an alert, skipping email")
         return
 
     # Format and send email
-    html = format_email_html(issues, stats)
+    html = format_email_html(issues, stats, awards_issues=awards_issues)
     success = send_alert(html, len(issues))
 
     if success:

@@ -29,7 +29,7 @@ from typing import List, Dict, Any
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from utils.timezone import get_today_range_to_now_utc, get_today_pacific
+from utils.timezone import get_today_range_to_now_utc, get_today_pacific, get_yesterday_range_utc
 from utils.sql_helpers import RideFilterSQL, ParkStatusSQL
 
 
@@ -57,7 +57,7 @@ class LongestWaitTimesQuery:
         Get rides ranked by average wait time.
 
         Args:
-            period: 'today', 'last_week', or 'last_month'
+            period: 'today', 'yesterday', 'last_week', or 'last_month'
             filter_disney_universal: Only Disney/Universal parks
             limit: Maximum results (default 10)
 
@@ -66,10 +66,14 @@ class LongestWaitTimesQuery:
         """
         if period == 'today':
             return self._get_today(filter_disney_universal, limit)
-        elif period == 'last_week':
+        elif period == 'yesterday':
+            return self._get_yesterday(filter_disney_universal, limit)
+        elif period == 'last_week' or period == '7days':
             return self._get_daily_aggregate(7, filter_disney_universal, limit)
-        else:  # last_month
+        elif period == 'last_month' or period == '30days':
             return self._get_daily_aggregate(30, filter_disney_universal, limit)
+        else:
+            raise ValueError(f"Invalid period: {period}. Must be 'today', 'yesterday', 'last_week', or 'last_month'")
 
     def _get_today(
         self,
@@ -145,6 +149,76 @@ class LongestWaitTimesQuery:
 
         return [dict(row._mapping) for row in result]
 
+    def _get_yesterday(
+        self,
+        filter_disney_universal: bool = False,
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get average wait times from YESTERDAY (snapshot data).
+
+        Same logic as _get_today() but for yesterday's full day UTC range.
+        """
+        start_utc, end_utc, _ = get_yesterday_range_utc()
+
+        filter_clause = ""
+        if filter_disney_universal:
+            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"
+
+        # Use centralized helper for park open check
+        park_open = ParkStatusSQL.park_appears_open_filter("pas")
+
+        sql = text(f"""
+            WITH active_rides AS (
+                -- PERFORMANCE: Pre-filter active attraction rides
+                SELECT r.ride_id, r.name AS ride_name, p.park_id, p.name AS park_name
+                FROM rides r
+                INNER JOIN parks p ON r.park_id = p.park_id
+                WHERE r.is_active = TRUE
+                  AND r.category = 'ATTRACTION'
+                  AND p.is_active = TRUE
+                  {filter_clause}
+            ),
+            wait_time_snapshots AS (
+                -- PERFORMANCE: Only select snapshots with wait times for active rides
+                SELECT
+                    ar.ride_id,
+                    ar.ride_name,
+                    ar.park_id,
+                    ar.park_name,
+                    rss.wait_time
+                FROM ride_status_snapshots rss
+                INNER JOIN active_rides ar ON rss.ride_id = ar.ride_id
+                INNER JOIN park_activity_snapshots pas
+                    ON ar.park_id = pas.park_id
+                    AND pas.recorded_at = rss.recorded_at
+                WHERE rss.recorded_at >= :start_utc
+                  AND rss.recorded_at < :end_utc
+                  AND rss.wait_time > 0
+                  AND {park_open}
+            )
+            SELECT
+                ride_id,
+                ride_name,
+                park_id,
+                park_name,
+                ROUND(AVG(wait_time), 0) AS avg_wait_time,
+                MAX(wait_time) AS peak_wait_time,
+                COUNT(*) AS snapshot_count
+            FROM wait_time_snapshots
+            GROUP BY ride_id, ride_name, park_id, park_name
+            ORDER BY avg_wait_time DESC
+            LIMIT :limit
+        """)
+
+        result = self.conn.execute(sql, {
+            'start_utc': start_utc,
+            'end_utc': end_utc,
+            'limit': limit,
+        })
+
+        return [dict(row._mapping) for row in result]
+
     def _get_daily_aggregate(
         self,
         days: int,
@@ -209,7 +283,7 @@ class LongestWaitTimesQuery:
         Get parks ranked by average wait time.
 
         Args:
-            period: 'today', 'last_week', or 'last_month'
+            period: 'today', 'yesterday', 'last_week', or 'last_month'
             filter_disney_universal: Only Disney/Universal parks
             limit: Maximum results (default 10)
 
@@ -218,10 +292,14 @@ class LongestWaitTimesQuery:
         """
         if period == 'today':
             return self._get_parks_today(filter_disney_universal, limit)
-        elif period == 'last_week':
+        elif period == 'yesterday':
+            return self._get_parks_yesterday(filter_disney_universal, limit)
+        elif period == 'last_week' or period == '7days':
             return self._get_parks_daily_aggregate(7, filter_disney_universal, limit)
-        else:  # last_month
+        elif period == 'last_month' or period == '30days':
             return self._get_parks_daily_aggregate(30, filter_disney_universal, limit)
+        else:
+            raise ValueError(f"Invalid period: {period}. Must be 'today', 'yesterday', 'last_week', or 'last_month'")
 
     def _get_parks_today(
         self,
@@ -290,6 +368,75 @@ class LongestWaitTimesQuery:
         result = self.conn.execute(sql, {
             'start_utc': start_utc,
             'now_utc': now_utc,
+            'limit': limit,
+        })
+
+        return [dict(row._mapping) for row in result]
+
+    def _get_parks_yesterday(
+        self,
+        filter_disney_universal: bool = False,
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get park-level wait time rankings from YESTERDAY (snapshot data).
+
+        Same logic as _get_parks_today() but for yesterday's full day UTC range.
+        """
+        start_utc, end_utc, _ = get_yesterday_range_utc()
+
+        filter_clause = ""
+        if filter_disney_universal:
+            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"
+
+        # Use centralized helper for park open check
+        park_open = ParkStatusSQL.park_appears_open_filter("pas")
+
+        sql = text(f"""
+            WITH active_rides AS (
+                -- PERFORMANCE: Pre-filter active attraction rides
+                SELECT r.ride_id, p.park_id, p.name AS park_name, p.city, p.state_province
+                FROM rides r
+                INNER JOIN parks p ON r.park_id = p.park_id
+                WHERE r.is_active = TRUE
+                  AND r.category = 'ATTRACTION'
+                  AND p.is_active = TRUE
+                  {filter_clause}
+            ),
+            wait_time_snapshots AS (
+                -- PERFORMANCE: Only select snapshots with wait times for active rides
+                SELECT
+                    ar.park_id,
+                    ar.park_name,
+                    ar.city,
+                    ar.state_province,
+                    ar.ride_id,
+                    rss.wait_time
+                FROM ride_status_snapshots rss
+                INNER JOIN active_rides ar ON rss.ride_id = ar.ride_id
+                INNER JOIN park_activity_snapshots pas
+                    ON ar.park_id = pas.park_id
+                    AND pas.recorded_at = rss.recorded_at
+                WHERE rss.recorded_at >= :start_utc
+                  AND rss.recorded_at < :end_utc
+                  AND rss.wait_time > 0
+                  AND {park_open}
+            )
+            SELECT
+                park_id,
+                park_name,
+                CONCAT(city, ', ', COALESCE(state_province, '')) AS location,
+                ROUND(AVG(wait_time), 0) AS avg_wait_time,
+                COUNT(DISTINCT ride_id) AS rides_with_waits
+            FROM wait_time_snapshots
+            GROUP BY park_id, park_name, city, state_province
+            ORDER BY avg_wait_time DESC
+            LIMIT :limit
+        """)
+
+        result = self.conn.execute(sql, {
+            'start_utc': start_utc,
+            'end_utc': end_utc,
             'limit': limit,
         })
 

@@ -199,14 +199,16 @@ class TodayParkRankingsQuery:
                     1
                 ) AS shame_score,
 
-                -- Uptime percentage = (total - down) / total * 100
+                -- Uptime percentage = (operating snapshots) / (total ride-snapshots) * 100
+                -- Must divide by total (rides × snapshots), not just snapshots
                 ROUND(
-                    100.0 - (
-                        SUM(CASE
-                            WHEN {is_down} AND {park_open} AND rto.ride_id IS NOT NULL
-                            THEN 1
-                            ELSE 0
-                        END) * 100.0 / NULLIF(pos.total_snapshots, 0)
+                    100.0 * SUM(CASE
+                        WHEN {park_open} AND rto.ride_id IS NOT NULL AND NOT ({is_down})
+                        THEN 1
+                        ELSE 0
+                    END) / NULLIF(
+                        SUM(CASE WHEN {park_open} AND rto.ride_id IS NOT NULL THEN 1 ELSE 0 END),
+                        0
                     ),
                     1
                 ) AS uptime_percentage,

@@ -46,7 +46,8 @@ from database.schema import (
     park_activity_snapshots,
 )
 from database.queries.builders import Filters, ParkWeightsCTE, WeightedDowntimeCTE
-from utils.timezone import get_pacific_day_range_utc
+from database.calculators.shame_score import ShameScoreCalculator
+from utils.timezone import get_pacific_day_range_utc, get_today_range_to_now_utc
 from utils.sql_helpers import ParkStatusSQL
 
 
@@ -191,6 +192,57 @@ class ParkShameHistoryQuery:
             })
 
         return {"labels": labels, "datasets": datasets}
+
+    def get_single_park_hourly(
+        self,
+        park_id: int,
+        target_date: date,
+        is_today: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Get hourly shame score data for a single park.
+
+        Uses ShameScoreCalculator for consistent calculations that match
+        the rankings table and breakdown panel.
+
+        Args:
+            park_id: The park ID to get data for
+            target_date: The date to get hourly data for
+            is_today: If True, uses get_today_range_to_now_utc for time range
+
+        Returns:
+            Chart.js compatible dict with hourly labels and single dataset
+        """
+        # Generate hourly labels (6am to 11pm = 18 hours)
+        labels = [f"{h}:00" for h in range(6, 24)]
+
+        # Use ShameScoreCalculator for consistent hourly breakdown
+        calc = ShameScoreCalculator(self.conn)
+        hourly_data = calc.get_hourly_breakdown(park_id, target_date)
+
+        # Align data to labels (6am to 11pm)
+        data_by_hour = {row["hour"]: row["shame_score"] for row in hourly_data}
+        aligned_data = [data_by_hour.get(h) for h in range(6, 24)]
+
+        # Get the average from the calculator for consistency with rankings
+        # For TODAY, use the time range to now; for other days, use full day
+        if is_today:
+            start_utc, end_utc = get_today_range_to_now_utc()
+        else:
+            start_utc, end_utc = get_pacific_day_range_utc(target_date)
+
+        avg_score = calc.get_average(park_id, start_utc, end_utc)
+
+        # Default to 0 if no average (for display purposes)
+        if avg_score is None:
+            avg_score = 0
+
+        return {
+            "labels": labels,
+            "data": aligned_data,
+            "average": avg_score,
+            "granularity": "hourly"
+        }
 
     def _get_park_hourly_data(
         self,

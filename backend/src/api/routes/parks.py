@@ -33,6 +33,7 @@ from database.queries.live import LiveParkRankingsQuery
 from database.queries.rankings import ParkDowntimeRankingsQuery, ParkWaitTimeRankingsQuery
 from database.queries.today import TodayParkRankingsQuery, TodayParkWaitTimesQuery
 from database.queries.yesterday import YesterdayParkRankingsQuery, YesterdayParkWaitTimesQuery
+from database.queries.charts import ParkShameHistoryQuery
 
 from utils.logger import logger
 from utils.timezone import get_today_pacific
@@ -415,6 +416,25 @@ def get_park_details(park_id: int):
             else:  # live
                 shame_breakdown = stats_repo.get_park_shame_breakdown(park_id)
 
+            # Get hourly chart data for non-LIVE periods (TODAY, YESTERDAY)
+            # Shows shame score over time with average indicator
+            chart_data = None
+            if period in ('today', 'yesterday'):
+                chart_query = ParkShameHistoryQuery(conn)
+                today = get_today_pacific()
+                if period == 'today':
+                    chart_data = chart_query.get_single_park_hourly(park_id, today)
+                elif period == 'yesterday':
+                    from datetime import timedelta
+                    yesterday = today - timedelta(days=1)
+                    chart_data = chart_query.get_single_park_hourly(park_id, yesterday)
+
+                # Override chart average with breakdown's shame_score for consistency
+                # The hourly chart query uses different filtering logic which can show 0
+                # when rides haven't "operated" yet, but the breakdown correctly counts downtime
+                if chart_data and shame_breakdown:
+                    chart_data['average'] = shame_breakdown.get('shame_score', chart_data.get('average', 0))
+
             # Build response
             response = {
                 "success": True,
@@ -431,6 +451,7 @@ def get_park_details(park_id: int):
                 "operating_sessions": operating_sessions,
                 "current_status": current_status,
                 "shame_breakdown": shame_breakdown,
+                "chart_data": chart_data,  # Hourly shame scores for TODAY/YESTERDAY periods
                 "attribution": {
                     "data_source": "ThemeParks.wiki",
                     "url": "https://themeparks.wiki"

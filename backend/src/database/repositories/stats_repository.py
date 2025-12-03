@@ -1307,7 +1307,7 @@ class StatsRepository:
             "park_is_open": park_is_open,
             "breakdown_type": "live",
             "tier_weights": {
-                1: 5,  # Tier 1 (Flagship) = 5x weight
+                1: 3,  # Tier 1 (Flagship) = 3x weight
                 2: 2,  # Tier 2 (Standard) = 2x weight
                 3: 1   # Tier 3 (Minor) = 1x weight
             }
@@ -1337,12 +1337,13 @@ class StatsRepository:
             - shame_score: Cumulative shame score
             - park_is_open: Whether park is currently open
         """
-        from utils.timezone import get_today_pacific, get_pacific_day_range_utc
+        from utils.timezone import get_today_range_to_now_utc
         from utils.sql_helpers import RideStatusSQL, ParkStatusSQL
-        from utils.metrics import SHAME_SCORE_MULTIPLIER, SHAME_SCORE_PRECISION
+        from database.calculators.shame_score import ShameScoreCalculator
 
-        today = get_today_pacific()
-        start_utc, end_utc = get_pacific_day_range_utc(today)
+        # Use get_today_range_to_now_utc() to match TodayParkRankingsQuery
+        # This returns midnight to NOW, not the full 24-hour day
+        start_utc, end_utc = get_today_range_to_now_utc()
 
         # Snapshot interval in minutes
         SNAPSHOT_INTERVAL_MINUTES = 5
@@ -1468,13 +1469,12 @@ class StatsRepository:
             total_downtime_hours += float(row.downtime_hours)
             total_weighted_downtime += float(row.weighted_downtime_hours)
 
-        # Calculate CUMULATIVE shame score = weighted downtime / total weight * 10
-        # This is different from instantaneous shame score
-        shame_score = round(
-            (total_weighted_downtime / total_park_weight * SHAME_SCORE_MULTIPLIER)
-            if total_park_weight > 0 else 0,
-            SHAME_SCORE_PRECISION
-        )
+        # Calculate AVERAGE shame score using ShameScoreCalculator
+        # This uses AVG(per-snapshot instantaneous shame) to match rankings table
+        calc = ShameScoreCalculator(self.conn)
+        shame_score = calc.get_average(park_id, start_utc, end_utc)
+        if shame_score is None:
+            shame_score = 0
 
         return {
             "rides_with_downtime": rides_with_downtime,
@@ -1487,7 +1487,7 @@ class StatsRepository:
             "breakdown_type": "today",
             "explanation": "Average shame score during operating hours today. Shows all rides that experienced downtime while the park was open.",
             "tier_weights": {
-                1: 5,  # Tier 1 (Flagship) = 5x weight
+                1: 3,  # Tier 1 (Flagship) = 3x weight
                 2: 2,  # Tier 2 (Standard) = 2x weight
                 3: 1   # Tier 3 (Minor) = 1x weight
             }
@@ -1517,7 +1517,7 @@ class StatsRepository:
         """
         from utils.timezone import get_yesterday_range_utc
         from utils.sql_helpers import RideStatusSQL, ParkStatusSQL
-        from utils.metrics import SHAME_SCORE_MULTIPLIER, SHAME_SCORE_PRECISION
+        from database.calculators.shame_score import ShameScoreCalculator
 
         start_utc, end_utc, period_label = get_yesterday_range_utc()
 
@@ -1613,12 +1613,12 @@ class StatsRepository:
             total_downtime_hours += float(row.downtime_hours)
             total_weighted_downtime += float(row.weighted_downtime_hours)
 
-        # Calculate CUMULATIVE shame score = weighted downtime / total weight * 10
-        shame_score = round(
-            (total_weighted_downtime / total_park_weight * SHAME_SCORE_MULTIPLIER)
-            if total_park_weight > 0 else 0,
-            SHAME_SCORE_PRECISION
-        )
+        # Calculate AVERAGE shame score using ShameScoreCalculator
+        # This ensures consistency with rankings and chart displays
+        calc = ShameScoreCalculator(self.conn)
+        shame_score = calc.get_average(park_id, start_utc, end_utc)
+        if shame_score is None:
+            shame_score = 0
 
         return {
             "rides_with_downtime": rides_with_downtime,
@@ -1631,7 +1631,7 @@ class StatsRepository:
             "period_label": period_label,
             "explanation": "Average shame score during operating hours yesterday. Shows all rides that experienced downtime while the park was open.",
             "tier_weights": {
-                1: 5,  # Tier 1 (Flagship) = 5x weight
+                1: 3,  # Tier 1 (Flagship) = 3x weight
                 2: 2,  # Tier 2 (Standard) = 2x weight
                 3: 1   # Tier 3 (Minor) = 1x weight
             }
@@ -1822,7 +1822,7 @@ class StatsRepository:
             "breakdown_type": period_type,
             "explanation": f"Average daily shame score for {period_label}. Shows all rides that experienced downtime during this period.",
             "tier_weights": {
-                1: 5,  # Tier 1 (Flagship) = 5x weight
+                1: 3,  # Tier 1 (Flagship) = 3x weight
                 2: 2,  # Tier 2 (Standard) = 2x weight
                 3: 1   # Tier 3 (Minor) = 1x weight
             }

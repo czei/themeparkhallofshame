@@ -32,7 +32,7 @@ from utils.cache import get_query_cache, generate_cache_key
 from database.queries.live import LiveParkRankingsQuery
 from database.queries.rankings import ParkDowntimeRankingsQuery, ParkWaitTimeRankingsQuery
 from database.queries.today import TodayParkRankingsQuery, TodayParkWaitTimesQuery
-from database.queries.yesterday import YesterdayParkRankingsQuery
+from database.queries.yesterday import YesterdayParkRankingsQuery, YesterdayParkWaitTimesQuery
 
 from utils.logger import logger
 from utils.timezone import get_today_pacific
@@ -285,6 +285,14 @@ def get_park_wait_times():
                 # TODAY data - cumulative from midnight Pacific to now
                 # See: database/queries/today/today_park_wait_times.py
                 query = TodayParkWaitTimesQuery(conn)
+                wait_times = query.get_rankings(
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit
+                )
+            elif period == 'yesterday':
+                # YESTERDAY data - full previous Pacific day
+                # See: database/queries/yesterday/yesterday_park_wait_times.py
+                query = YesterdayParkWaitTimesQuery(conn)
                 wait_times = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit

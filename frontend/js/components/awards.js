@@ -85,6 +85,11 @@ class Awards {
         if (this.state.period === 'today') {
             // Show today's date: "Dec 2, 2025"
             return now.toLocaleDateString('en-US', options);
+        } else if (this.state.period === 'yesterday') {
+            // Show yesterday's date: "Dec 1, 2025"
+            const yesterday = new Date(now);
+            yesterday.setDate(yesterday.getDate() - 1);
+            return yesterday.toLocaleDateString('en-US', options);
         } else if (this.state.period === 'last_week') {
             // Show date range: "Nov 25 - Dec 1, 2025"
             const endDate = new Date(now);

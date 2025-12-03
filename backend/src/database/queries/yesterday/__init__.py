@@ -11,8 +11,12 @@ and highly cacheable.
 
 from .yesterday_park_rankings import YesterdayParkRankingsQuery
 from .yesterday_ride_rankings import YesterdayRideRankingsQuery
+from .yesterday_park_wait_times import YesterdayParkWaitTimesQuery
+from .yesterday_ride_wait_times import YesterdayRideWaitTimesQuery
 
 __all__ = [
     'YesterdayParkRankingsQuery',
     'YesterdayRideRankingsQuery',
+    'YesterdayParkWaitTimesQuery',
+    'YesterdayRideWaitTimesQuery',
 ]

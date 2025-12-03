@@ -174,6 +174,7 @@ class WaitTimes {
         const periodLabels = {
             'live': 'Live',
             'today': "Today's",
+            'yesterday': "Yesterday's",
             'last_week': 'Last Week',
             'last_month': 'Last Month'
         };
@@ -255,8 +256,8 @@ class WaitTimes {
                             <th class="rank-col" title="Position based on average wait time (higher rank = longer waits)">Rank</th>
                             <th class="park-col" title="Theme park name">Park</th>
                             <th class="location-col" title="Geographic location of the park">Location</th>
-                            <th class="wait-col sortable ${this.state.sortBy === 'avg' ? 'sorted' : ''}" data-sort="avg" title="Average wait time across all rides today (click to sort)">Avg Today ${this.state.sortBy === 'avg' ? '▼' : ''}</th>
-                            <th class="wait-col sortable ${this.state.sortBy === 'max' ? 'sorted' : ''}" data-sort="max" title="Longest single ride wait time recorded today (click to sort)">Max Today ${this.state.sortBy === 'max' ? '▼' : ''}</th>
+                            <th class="wait-col sortable ${this.state.sortBy === 'avg' ? 'sorted' : ''}" data-sort="avg" title="Average wait time across all rides (click to sort)">Avg Wait ${this.state.sortBy === 'avg' ? '▼' : ''}</th>
+                            <th class="wait-col sortable ${this.state.sortBy === 'max' ? 'sorted' : ''}" data-sort="max" title="Longest single ride wait time recorded (click to sort)">Max Wait ${this.state.sortBy === 'max' ? '▼' : ''}</th>
                             <th class="rides-col" title="Number of rides currently reporting wait times">Rides</th>
                             <th class="trend-col" title="Change in average wait time compared to previous period. Positive (+) = longer waits">Trend</th>
                         </tr>
@@ -378,16 +379,11 @@ class WaitTimes {
     }
 
     /**
-     * Get dynamic column label based on period
+     * Get column label - simplified to avoid redundancy with table title
+     * Table title already shows the period (e.g., "Yesterday's Wait Time Rankings")
      */
     getColumnLabel(baseLabel) {
-        const periodLabels = {
-            'live': 'Now',
-            'today': 'Today',
-            'last_week': 'Last Week',
-            'last_month': 'Last Month'
-        };
-        return `${baseLabel} ${periodLabels[this.state.period] || ''}`;
+        return `${baseLabel} Wait`;
     }
 
     /**

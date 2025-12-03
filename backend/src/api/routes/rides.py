@@ -32,7 +32,7 @@ from utils.cache import get_query_cache, generate_cache_key
 from database.queries.live import LiveRideRankingsQuery, StatusSummaryQuery
 from database.queries.rankings import RideDowntimeRankingsQuery, RideWaitTimeRankingsQuery
 from database.queries.today import TodayRideRankingsQuery, TodayRideWaitTimesQuery
-from database.queries.yesterday import YesterdayRideRankingsQuery
+from database.queries.yesterday import YesterdayRideRankingsQuery, YesterdayRideWaitTimesQuery
 
 from utils.logger import logger
 from utils.timezone import get_today_pacific
@@ -360,6 +360,14 @@ def get_ride_wait_times():
                 # TODAY data - cumulative from midnight Pacific to now
                 # See: database/queries/today/today_ride_wait_times.py
                 query = TodayRideWaitTimesQuery(conn)
+                wait_times = query.get_rankings(
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit
+                )
+            elif period == 'yesterday':
+                # YESTERDAY data - full previous Pacific day
+                # See: database/queries/yesterday/yesterday_ride_wait_times.py
+                query = YesterdayRideWaitTimesQuery(conn)
                 wait_times = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit

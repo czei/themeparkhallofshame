@@ -83,10 +83,10 @@ class Charts {
 
     /**
      * Get effective period for API calls.
-     * Charts don't support 'live' period - use 'today' instead.
+     * Now supports all periods including 'live' with 5-minute granularity.
      */
     getEffectivePeriod() {
-        return this.state.period === 'live' ? 'today' : this.state.period;
+        return this.state.period;
     }
 
     /**
@@ -170,11 +170,11 @@ class Charts {
 
     /**
      * Get period label for chart titles
-     * Today shows hourly breakdown, other periods show daily trends
+     * Live shows 5-minute breakdown, today shows hourly breakdown, other periods show daily trends
      */
     getPeriodLabel() {
         const labels = {
-            'live': 'Today',
+            'live': 'Live',
             'today': 'Today',
             'yesterday': 'Yesterday',
             'last_week': 'Last Week',

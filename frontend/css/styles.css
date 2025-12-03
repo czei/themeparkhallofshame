@@ -2376,6 +2376,66 @@ td {
     font-size: 0.75rem;
 }
 
+/* Shame Score Chart Section */
+.shame-chart-section {
+    margin: 1.5rem 0;
+    background: white;
+    border: 3px solid var(--charcoal);
+    padding: 1rem;
+}
+
+.shame-chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.shame-chart-header h4 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--charcoal);
+    margin: 0;
+}
+
+.chart-average-badge {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 700;
+    padding: 0.25rem 0.75rem;
+    border: 2px solid var(--charcoal);
+}
+
+.chart-average-badge.low {
+    background: var(--mint);
+    color: var(--charcoal);
+}
+
+.chart-average-badge.medium {
+    background: var(--gold);
+    color: var(--charcoal);
+}
+
+.chart-average-badge.high {
+    background: var(--coral);
+    color: white;
+}
+
+.shame-chart-container {
+    position: relative;
+    height: 200px;
+    width: 100%;
+}
+
+.chart-description {
+    font-size: 0.8rem;
+    color: #666;
+    margin: 0.75rem 0 0 0;
+    font-style: italic;
+    text-align: center;
+}
+
 /* Park Details - Current Status Section */
 .current-status-section {
     margin-bottom: 1.5rem;

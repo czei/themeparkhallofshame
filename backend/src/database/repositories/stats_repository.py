@@ -1473,8 +1473,8 @@ class StatsRepository:
         # This uses AVG(per-snapshot instantaneous shame) to match rankings table
         calc = ShameScoreCalculator(self.conn)
         shame_score = calc.get_average(park_id, start_utc, end_utc)
-        if shame_score is None:
-            shame_score = 0
+        # Convert Decimal to float for JSON serialization (Decimal becomes string)
+        shame_score = float(shame_score) if shame_score is not None else 0.0
 
         return {
             "rides_with_downtime": rides_with_downtime,
@@ -1617,8 +1617,8 @@ class StatsRepository:
         # This ensures consistency with rankings and chart displays
         calc = ShameScoreCalculator(self.conn)
         shame_score = calc.get_average(park_id, start_utc, end_utc)
-        if shame_score is None:
-            shame_score = 0
+        # Convert Decimal to float for JSON serialization (Decimal becomes string)
+        shame_score = float(shame_score) if shame_score is not None else 0.0
 
         return {
             "rides_with_downtime": rides_with_downtime,

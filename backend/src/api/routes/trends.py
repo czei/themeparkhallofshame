@@ -268,8 +268,43 @@ def get_chart_data():
 
         # Get database connection
         with get_db_connection() as conn:
-            if period in ('live', 'today'):
-                # Hourly data for today (live maps to today for charts)
+            if period == 'live':
+                # LIVE: 5-minute granularity for recent data (last 60 minutes)
+                granularity = 'minutes'
+                if data_type == 'parks':
+                    # See: database/queries/charts/park_shame_history.py
+                    query = ParkShameHistoryQuery(conn)
+                    chart_data = query.get_live(
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit,
+                        minutes=60
+                    )
+                elif data_type == 'waittimes':
+                    # Wait times don't have LIVE granularity yet, fall back to hourly
+                    granularity = 'hourly'
+                    query = ParkWaitTimeHistoryQuery(conn)
+                    chart_data = query.get_hourly(
+                        target_date=today,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                else:
+                    # Rides don't have LIVE granularity yet, fall back to hourly
+                    granularity = 'hourly'
+                    query = RideDowntimeHistoryQuery(conn)
+                    chart_data = query.get_hourly(
+                        target_date=today,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+
+                # Generate mock data if empty for LIVE
+                if not chart_data or not chart_data.get('datasets') or len(chart_data.get('datasets', [])) == 0:
+                    is_mock = True
+                    chart_data = _generate_mock_live_chart_data(data_type, limit)
+
+            elif period == 'today':
+                # TODAY: Hourly data for the full day
                 granularity = 'hourly'
                 if data_type == 'parks':
                     # See: database/queries/charts/park_shame_history.py
@@ -790,6 +825,84 @@ def _generate_mock_hourly_chart_data(data_type: str, limit: int, for_today: bool
                 # Random chance of downtime each hour
                 if random.random() < 0.3:  # 30% chance of some downtime
                     data.append(round(random.uniform(10, 80), 1))
+                else:
+                    data.append(0)
+            datasets.append({"label": ride, "park": park, "data": data})
+
+    return {
+        "labels": labels,
+        "datasets": datasets
+    }
+
+
+def _generate_mock_live_chart_data(data_type: str, limit: int) -> Dict[str, Any]:
+    """
+    Generate mock 5-minute granularity chart data for LIVE period when real data is empty.
+
+    Args:
+        data_type: 'parks', 'rides', or 'waittimes'
+        limit: Number of entities
+
+    Returns:
+        Chart data structure with mock values at 5-minute intervals
+    """
+    import random
+
+    # Generate 5-minute interval labels for the last 60 minutes
+    # Example: ['10:05', '10:10', '10:15', ..., '11:00']
+    now = get_now_pacific()
+    labels = []
+    for i in range(12, 0, -1):  # 12 intervals of 5 minutes = 60 minutes
+        minutes_ago = i * 5
+        t = now - timedelta(minutes=minutes_ago)
+        labels.append(t.strftime("%H:%M"))
+
+    num_intervals = len(labels)
+
+    if data_type == 'parks':
+        park_names = [
+            "Disney Magic Kingdom", "Universal Studios Florida", "Disney Hollywood Studios",
+            "Universal Islands of Adventure", "Disney EPCOT", "Disney Animal Kingdom",
+            "SeaWorld Orlando", "Busch Gardens Tampa", "Universal Volcano Bay", "LEGOLAND Florida"
+        ]
+        datasets = []
+        for i, name in enumerate(park_names[:limit]):
+            # Generate realistic shame scores (0.5 to 3.0 range)
+            base = random.uniform(0.8, 2.0)
+            data = [round(base + random.uniform(-0.3, 0.5), 1) for _ in range(num_intervals)]
+            datasets.append({"label": name, "data": data})
+    elif data_type == 'waittimes':
+        park_names = [
+            "Disney Magic Kingdom", "Universal Studios Florida", "Disney Hollywood Studios",
+            "Universal Islands of Adventure", "Disney EPCOT", "Disney Animal Kingdom",
+            "SeaWorld Orlando", "Busch Gardens Tampa"
+        ]
+        datasets = []
+        for i, name in enumerate(park_names[:limit]):
+            # Generate realistic wait times (20-60 minutes range)
+            base = random.uniform(30, 45)
+            data = [round(max(10, base + random.uniform(-10, 15)), 0) for _ in range(num_intervals)]
+            datasets.append({"label": name, "data": data})
+    else:
+        ride_names = [
+            ("Hagrid's Motorbike Adventure", "Universal Islands of Adventure"),
+            ("Tron Lightcycle Run", "Disney Magic Kingdom"),
+            ("Guardians of the Galaxy", "Disney EPCOT"),
+            ("VelociCoaster", "Universal Islands of Adventure"),
+            ("Rise of the Resistance", "Disney Hollywood Studios"),
+            ("Flight of Passage", "Disney Animal Kingdom"),
+            ("Expedition Everest", "Disney Animal Kingdom"),
+            ("Space Mountain", "Disney Magic Kingdom"),
+            ("Test Track", "Disney EPCOT"),
+            ("Mako", "SeaWorld Orlando")
+        ]
+        datasets = []
+        for i, (ride, park) in enumerate(ride_names[:limit]):
+            # Generate realistic downtime percentages
+            data = []
+            for _ in range(num_intervals):
+                if random.random() < 0.2:  # 20% chance of downtime
+                    data.append(round(random.uniform(5, 50), 1))
                 else:
                     data.append(0)
             datasets.append({"label": ride, "park": park, "data": data})

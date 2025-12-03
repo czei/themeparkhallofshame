@@ -12,6 +12,7 @@ class ParkDetailsModal {
             error: null,
             parkDetails: null
         };
+        this.chartInstance = null;  // Store Chart.js instance for cleanup
     }
 
     /**
@@ -58,6 +59,11 @@ class ParkDetailsModal {
      * Close modal
      */
     close() {
+        // Cleanup chart instance
+        if (this.chartInstance) {
+            this.chartInstance.destroy();
+            this.chartInstance = null;
+        }
         this.state.isOpen = false;
         this.render();
     }
@@ -124,14 +130,14 @@ class ParkDetailsModal {
             return '<div class="empty-state"><p>No park details available</p></div>';
         }
 
-        const { park, tier_distribution, operating_sessions, current_status, shame_breakdown } = this.state.parkDetails;
+        const { park, tier_distribution, operating_sessions, current_status, shame_breakdown, chart_data } = this.state.parkDetails;
 
         // Only show current status for LIVE period
         const showCurrentStatus = this.state.period === 'live';
 
         return `
             <div class="park-details-content">
-                ${this.renderShameBreakdown(shame_breakdown)}
+                ${this.renderShameBreakdown(shame_breakdown, chart_data)}
                 ${showCurrentStatus ? this.renderCurrentStatus(current_status) : ''}
                 ${this.renderTierDistribution(tier_distribution)}
                 ${this.renderParkInfo(park)}
@@ -142,26 +148,27 @@ class ParkDetailsModal {
     /**
      * Render shame score breakdown - dispatches to appropriate renderer based on breakdown_type
      */
-    renderShameBreakdown(breakdown) {
+    renderShameBreakdown(breakdown, chartData = null) {
         if (!breakdown) return '';
 
         // Dispatch based on breakdown_type from API
         switch (breakdown.breakdown_type) {
             case 'today':
             case 'yesterday':
-                return this.renderTodayShameBreakdown(breakdown);
+                return this.renderTodayShameBreakdown(breakdown, chartData);
             case 'last_week':
             case 'last_month':
                 return this.renderHistoricalShameBreakdown(breakdown);
             default:
-                return this.renderLiveShameBreakdown(breakdown);
+                return this.renderLiveShameBreakdown(breakdown, chartData);
         }
     }
 
     /**
      * Render LIVE shame score breakdown - shows rides currently down RIGHT NOW
+     * When chartData is provided with granularity='minutes', shows recent snapshot trend
      */
-    renderLiveShameBreakdown(breakdown) {
+    renderLiveShameBreakdown(breakdown, chartData = null) {
         const { rides_down, total_park_weight, total_weighted_down, shame_score, park_is_open } = breakdown;
 
         // If park is closed, show that instead
@@ -221,6 +228,8 @@ class ParkDetailsModal {
                     </div>
                 </div>
 
+                ${chartData && chartData.granularity === 'minutes' ? this.renderLiveChart(chartData) : ''}
+
                 ${rides_down.length > 0 ? `
                     <div class="rides-down-section">
                         <h4>Rides Currently Down (${rides_down.length})</h4>
@@ -263,7 +272,7 @@ class ParkDetailsModal {
      * Render TODAY/YESTERDAY shame score breakdown - shows AVERAGE shame score
      * This is completely different from live - it shows ALL rides that had ANY downtime
      */
-    renderTodayShameBreakdown(breakdown) {
+    renderTodayShameBreakdown(breakdown, chartData = null) {
         const {
             rides_with_downtime,
             rides_affected_count,
@@ -344,6 +353,8 @@ class ParkDetailsModal {
                         </div>
                     </div>
                 </div>
+
+                ${chartData ? this.renderShameChart(chartData, isYesterday) : ''}
 
                 ${rides_with_downtime.length > 0 ? `
                     <div class="rides-down-section">
@@ -562,6 +573,193 @@ class ParkDetailsModal {
                 </ul>
             </div>
         `;
+    }
+
+    /**
+     * Render shame score chart HTML container
+     * Chart will be initialized after DOM render in attachEventListeners
+     */
+    renderShameChart(chartData, isYesterday = false) {
+        if (!chartData || !chartData.data) return '';
+
+        const periodLabel = isYesterday ? 'Yesterday' : 'Today';
+        // API returns average as string (MariaDB ROUND() returns Decimal) - convert to number
+        const avgScore = parseFloat(chartData.average) || 0;
+
+        return `
+            <div class="shame-chart-section">
+                <div class="shame-chart-header">
+                    <h4>Shame Score Throughout the Day</h4>
+                    <div class="chart-average-badge ${avgScore > 5 ? 'high' : avgScore > 2 ? 'medium' : 'low'}">
+                        Avg: ${avgScore.toFixed(1)}
+                    </div>
+                </div>
+                <div class="shame-chart-container">
+                    <canvas id="shame-score-chart"></canvas>
+                </div>
+                <p class="chart-description">
+                    Hourly shame score snapshots ${isYesterday ? 'from yesterday' : 'throughout today'}.
+                    The dashed line shows the average score (${avgScore.toFixed(1)}).
+                </p>
+            </div>
+        `;
+    }
+
+    /**
+     * Render LIVE shame score chart HTML container (minute granularity)
+     * Chart will be initialized after DOM render in attachEventListeners
+     */
+    renderLiveChart(chartData) {
+        if (!chartData || !chartData.data || chartData.data.length === 0) return '';
+
+        // API returns 'current' (the most recent value from chart data) for LIVE period
+        const currentScore = parseFloat(chartData.current) || 0;
+        const dataPoints = chartData.data.filter(v => v !== null).length;
+
+        return `
+            <div class="shame-chart-section live-chart">
+                <div class="shame-chart-header">
+                    <h4>Shame Score Trend (Last 60 Minutes)</h4>
+                    <div class="chart-average-badge ${currentScore > 5 ? 'high' : currentScore > 2 ? 'medium' : 'low'}">
+                        Current: ${currentScore.toFixed(1)}
+                    </div>
+                </div>
+                <div class="shame-chart-container">
+                    <canvas id="shame-score-chart"></canvas>
+                </div>
+                <p class="chart-description">
+                    Real-time shame scores at 5-minute intervals (${dataPoints} data points).
+                    Shows instantaneous values, not averages.
+                </p>
+            </div>
+        `;
+    }
+
+    /**
+     * Initialize Chart.js instance for shame score chart
+     * Called from attachEventListeners after DOM is rendered
+     * Handles both hourly (TODAY/YESTERDAY) and minute (LIVE) granularity
+     */
+    initializeShameChart(chartData) {
+        if (!chartData || !chartData.data) return;
+
+        const canvas = document.getElementById('shame-score-chart');
+        if (!canvas) return;
+
+        // Destroy existing chart if any
+        if (this.chartInstance) {
+            this.chartInstance.destroy();
+        }
+
+        const ctx = canvas.getContext('2d');
+        const isLive = chartData.granularity === 'minutes';
+        // For LIVE charts, use 'current' (last value); for others use 'average'
+        const displayValue = isLive
+            ? (parseFloat(chartData.current) || 0)
+            : (parseFloat(chartData.average) || 0);
+
+        // Filter out null values for gradient calculation
+        const validValues = chartData.data.filter(v => v !== null);
+        const maxValue = Math.max(...validValues, displayValue, 5); // At least 5 for scale
+
+        // Create gradient for the line
+        const gradient = ctx.createLinearGradient(0, 0, 0, 200);
+        gradient.addColorStop(0, 'rgba(220, 53, 69, 0.3)');   // Red at top
+        gradient.addColorStop(0.5, 'rgba(255, 193, 7, 0.2)'); // Yellow middle
+        gradient.addColorStop(1, 'rgba(40, 167, 69, 0.1)');   // Green at bottom
+
+        // Build datasets - LIVE charts don't show average line (instantaneous values)
+        const datasets = [
+            {
+                label: isLive ? 'Instantaneous Score' : 'Shame Score',
+                data: chartData.data,
+                borderColor: 'rgb(220, 53, 69)',
+                backgroundColor: gradient,
+                borderWidth: 2,
+                fill: true,
+                tension: 0.3,
+                pointRadius: isLive ? 2 : 3,  // Smaller points for more frequent data
+                pointHoverRadius: 5,
+                pointBackgroundColor: 'rgb(220, 53, 69)',
+                spanGaps: true // Connect points across null values
+            }
+        ];
+
+        // Only add average line for hourly charts (TODAY/YESTERDAY)
+        if (!isLive) {
+            datasets.push({
+                label: 'Average',
+                data: chartData.labels.map(() => avgScore),
+                borderColor: 'rgba(108, 117, 125, 0.7)',
+                borderWidth: 2,
+                borderDash: [5, 5],
+                fill: false,
+                pointRadius: 0,
+                pointHoverRadius: 0
+            });
+        }
+
+        this.chartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: chartData.labels,
+                datasets: datasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            label: function(context) {
+                                if (context.dataset.label === 'Average') {
+                                    return `Average: ${context.raw.toFixed(1)}`;
+                                }
+                                if (context.raw === null) {
+                                    return 'No data';
+                                }
+                                const label = isLive ? 'Score' : 'Shame Score';
+                                return `${label}: ${context.raw.toFixed(1)}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            display: false
+                        },
+                        ticks: {
+                            maxRotation: 0,
+                            autoSkip: true,
+                            maxTicksLimit: isLive ? 6 : 9  // Fewer labels for minute granularity
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        max: Math.ceil(maxValue * 1.2), // 20% headroom
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.1)'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return value.toFixed(1);
+                            }
+                        }
+                    }
+                },
+                interaction: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
+                }
+            }
+        });
     }
 
     /**
@@ -916,6 +1114,14 @@ class ParkDetailsModal {
             }
         };
         document.addEventListener('keydown', handleEscape);
+
+        // Initialize chart if chart_data is present (for TODAY/YESTERDAY periods)
+        if (this.state.parkDetails && this.state.parkDetails.chart_data) {
+            // Use setTimeout to ensure DOM is fully rendered
+            setTimeout(() => {
+                this.initializeShameChart(this.state.parkDetails.chart_data);
+            }, 50);
+        }
     }
 }
 

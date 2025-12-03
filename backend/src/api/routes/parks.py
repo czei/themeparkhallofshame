@@ -34,6 +34,7 @@ from database.queries.rankings import ParkDowntimeRankingsQuery, ParkWaitTimeRan
 from database.queries.today import TodayParkRankingsQuery, TodayParkWaitTimesQuery
 from database.queries.yesterday import YesterdayParkRankingsQuery, YesterdayParkWaitTimesQuery
 from database.queries.charts import ParkShameHistoryQuery
+from database.calculators.shame_score import ShameScoreCalculator
 
 from utils.logger import logger
 from utils.timezone import get_today_pacific
@@ -416,10 +417,25 @@ def get_park_details(park_id: int):
             else:  # live
                 shame_breakdown = stats_repo.get_park_shame_breakdown(park_id)
 
-            # Get hourly chart data for non-LIVE periods (TODAY, YESTERDAY)
-            # Shows shame score over time with average indicator
+            # Get chart data for LIVE, TODAY, YESTERDAY periods
+            # - LIVE: 5-minute granularity for last 60 minutes (recent snapshots)
+            # - TODAY/YESTERDAY: Hourly averages for full day
             chart_data = None
-            if period in ('today', 'yesterday'):
+            if period == 'live':
+                # LIVE: Get recent 60 minutes of data at 5-minute granularity
+                calc = ShameScoreCalculator(conn)
+                chart_data = calc.get_recent_snapshots(park_id=park_id, minutes=60)
+                # For LIVE, set 'current' to the last non-null value from the chart data
+                # This ensures the badge matches the rightmost point on the chart
+                if chart_data and chart_data.get('data'):
+                    # Find last non-null value from data array
+                    last_value = None
+                    for val in reversed(chart_data['data']):
+                        if val is not None:
+                            last_value = val
+                            break
+                    chart_data['current'] = float(last_value) if last_value is not None else 0.0
+            elif period in ('today', 'yesterday'):
                 chart_query = ParkShameHistoryQuery(conn)
                 today = get_today_pacific()
                 if period == 'today':

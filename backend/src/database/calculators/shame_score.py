@@ -370,3 +370,133 @@ class ShameScoreCalculator:
         })
 
         return [dict(row._mapping) for row in result]
+
+    def get_recent_snapshots(
+        self,
+        park_id: int,
+        minutes: int = 60
+    ) -> Dict[str, Any]:
+        """
+        Get recent instantaneous shame scores for LIVE chart display.
+
+        Returns granular 5-minute interval data for the specified duration,
+        showing instantaneous (not averaged) shame scores at each snapshot.
+
+        This is different from get_hourly_breakdown() which returns hourly averages.
+        LIVE charts need real-time granular data to show current conditions.
+
+        Args:
+            park_id: The park to get data for
+            minutes: How many minutes of recent data (default 60)
+
+        Returns:
+            Dict with:
+                - labels: List of time strings in "HH:MM" format
+                - data: List of instantaneous shame scores at each interval
+                - granularity: "minutes" to distinguish from hourly charts
+        """
+        from datetime import datetime, timedelta, timezone
+
+        # Calculate time range: now back to (now - minutes)
+        now_utc = datetime.now(timezone.utc)
+        start_utc = now_utc - timedelta(minutes=minutes)
+
+        query = text("""
+            WITH rides_that_operated AS (
+                -- Rides that operated at any point in this window
+                SELECT DISTINCT r.ride_id
+                FROM rides r
+                INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+                INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
+                    AND pas.recorded_at = rss.recorded_at
+                WHERE r.park_id = :park_id
+                    AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'
+                    AND rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
+                    AND pas.park_appears_open = TRUE
+                    AND (rss.status = 'OPERATING'
+                         OR (rss.status IS NULL AND rss.computed_is_open = 1))
+            ),
+            park_weight AS (
+                -- Total park weight (using only rides that operated)
+                SELECT SUM(COALESCE(rc.tier_weight, 2)) AS total_weight
+                FROM rides r
+                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                WHERE r.park_id = :park_id
+                    AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'
+                    AND r.ride_id IN (SELECT ride_id FROM rides_that_operated)
+            ),
+            snapshot_data AS (
+                -- Get instantaneous shame for each 5-minute snapshot
+                SELECT
+                    rss.recorded_at,
+                    DATE_FORMAT(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR), '%H:%i') AS time_label,
+                    SUM(CASE
+                        WHEN r.ride_id IN (SELECT ride_id FROM rides_that_operated)
+                            AND (
+                                ((p.is_disney = TRUE OR p.is_universal = TRUE)
+                                    AND rss.status = 'DOWN')
+                                OR
+                                ((p.is_disney = FALSE AND p.is_universal = FALSE)
+                                    AND (rss.status = 'DOWN' OR rss.status = 'CLOSED'
+                                         OR (rss.status IS NULL AND rss.computed_is_open = 0)))
+                            )
+                        THEN COALESCE(rc.tier_weight, 2)
+                        ELSE 0
+                    END) AS down_weight
+                FROM rides r
+                INNER JOIN parks p ON r.park_id = p.park_id
+                INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+                INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
+                    AND pas.recorded_at = rss.recorded_at
+                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                WHERE r.park_id = :park_id
+                    AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'
+                    AND rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
+                    AND pas.park_appears_open = TRUE
+                GROUP BY rss.recorded_at
+                ORDER BY rss.recorded_at
+            )
+            SELECT
+                sd.recorded_at,
+                sd.time_label,
+                CASE
+                    WHEN pw.total_weight IS NULL OR pw.total_weight = 0 THEN NULL
+                    ELSE ROUND(
+                        (sd.down_weight / pw.total_weight) * :multiplier,
+                        :precision
+                    )
+                END AS shame_score
+            FROM snapshot_data sd
+            CROSS JOIN park_weight pw
+            ORDER BY sd.recorded_at
+        """)
+
+        result = self.db.execute(query, {
+            "park_id": park_id,
+            "start_utc": start_utc,
+            "end_utc": now_utc,
+            "multiplier": SHAME_SCORE_MULTIPLIER,
+            "precision": SHAME_SCORE_PRECISION
+        })
+
+        rows = [dict(row._mapping) for row in result]
+
+        # Build labels and data arrays
+        labels = []
+        data = []
+        for row in rows:
+            labels.append(row['time_label'])
+            # Convert Decimal to float for JSON serialization
+            score = row['shame_score']
+            data.append(float(score) if score is not None else None)
+
+        # If we have fewer points than expected, that's OK - it means
+        # the park wasn't open for the full duration or data is sparse
+        return {
+            "labels": labels,
+            "data": data,
+            "granularity": "minutes"
+        }

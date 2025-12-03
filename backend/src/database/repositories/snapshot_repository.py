@@ -11,7 +11,7 @@ from sqlalchemy.engine import Connection
 try:
     from ...utils.logger import logger, log_database_error
 except ImportError:
-    from utils.logger import logger, log_database_error
+    from utils.logger import log_database_error
 
 
 class RideStatusSnapshotRepository:

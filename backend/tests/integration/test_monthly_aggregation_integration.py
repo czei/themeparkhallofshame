@@ -9,8 +9,7 @@ Tests monthly aggregation FROM daily stats with:
 """
 
 import pytest
-from datetime import date, datetime, time, timedelta
-from zoneinfo import ZoneInfo
+from datetime import date
 from sqlalchemy import text
 
 from processor.aggregation_service import AggregationService

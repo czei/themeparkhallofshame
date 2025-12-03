@@ -18,7 +18,6 @@ The cache provides:
 
 import pytest
 import time
-from unittest.mock import MagicMock
 
 
 class TestQueryCache:

@@ -13,7 +13,6 @@ Note: Health endpoint tests requiring database are deferred to integration tests
 Priority: P1 - Core API functionality
 """
 
-import pytest
 from api.app import create_app
 
 

@@ -27,9 +27,8 @@ How to Modify:
 """
 
 from datetime import date
-from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_
 from sqlalchemy.sql.selectable import CTE
 
 from database.schema import (
@@ -37,7 +36,6 @@ from database.schema import (
     rides,
     ride_classifications,
     ride_daily_stats,
-    park_daily_stats,
 )
 from .filters import Filters
 

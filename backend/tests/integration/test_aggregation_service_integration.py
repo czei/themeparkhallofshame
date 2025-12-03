@@ -16,13 +16,11 @@ import sys
 from pathlib import Path
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
-from decimal import Decimal
 
 backend_src = Path(__file__).parent.parent.parent / 'src'
 sys.path.insert(0, str(backend_src.absolute()))
 
 from processor.aggregation_service import AggregationService
-from processor.operating_hours_detector import OperatingHoursDetector
 from sqlalchemy import text
 
 

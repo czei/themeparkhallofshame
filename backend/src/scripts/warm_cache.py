@@ -101,7 +101,7 @@ def main():
     total_time = time.time() - start_time
     success_count = sum(1 for _, _, s in results if s)
 
-    print(f"\nCache warming complete:")
+    print("\nCache warming complete:")
     print(f"  Endpoints: {success_count}/{len(ENDPOINTS)} succeeded")
     print(f"  Total time: {total_time:.2f}s")
 

@@ -12,7 +12,6 @@ Tests Ride dataclass:
 Priority: P1 - Quick win for coverage increase (77% → 100%)
 """
 
-import pytest
 from datetime import datetime
 from models.ride import Ride
 

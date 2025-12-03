@@ -18,12 +18,8 @@ If a test fails, it means either:
 - A bug was introduced (fix the calculation)
 """
 
-import pytest
 import json
 from pathlib import Path
-from datetime import date
-from decimal import Decimal
-from unittest.mock import MagicMock, patch
 
 # Path to golden data
 GOLDEN_DATA_DIR = Path(__file__).parent.parent / "golden_data"

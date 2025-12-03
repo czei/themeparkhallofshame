@@ -38,12 +38,7 @@ from sqlalchemy.engine import Connection
 
 from database.schema import (
     parks,
-    rides,
-    ride_classifications,
     park_daily_stats,
-    ride_daily_stats,
-    ride_status_snapshots,
-    park_activity_snapshots,
 )
 from database.queries.builders import Filters, ParkWeightsCTE, WeightedDowntimeCTE
 from database.calculators.shame_score import ShameScoreCalculator

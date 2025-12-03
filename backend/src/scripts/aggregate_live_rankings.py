@@ -28,7 +28,7 @@ from sqlalchemy import text
 from database.connection import get_db_connection
 from utils.logger import logger
 from utils.timezone import get_today_pacific, get_pacific_day_range_utc
-from utils.sql_helpers import RideStatusSQL, ParkStatusSQL, DowntimeSQL
+from utils.sql_helpers import RideStatusSQL, ParkStatusSQL
 
 
 class LiveRankingsAggregator:

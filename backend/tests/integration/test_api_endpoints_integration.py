@@ -13,7 +13,6 @@ Run with: pytest backend/tests/integration/test_api_endpoints_integration.py -v
 
 import pytest
 from datetime import date, datetime, timedelta
-from decimal import Decimal
 from sqlalchemy import text
 import sys
 from pathlib import Path

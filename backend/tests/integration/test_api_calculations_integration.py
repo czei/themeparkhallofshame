@@ -506,7 +506,7 @@ def test_park_daily_rankings_weighted_calculations(mysql_connection, comprehensi
             f"Park {park['park_name']} WEIGHTED calculation WRONG! Expected {expected_weighted}h, got {actual_weighted}h"
 
     print(f"\n✓ VERIFIED: Weighted scoring calculation is CORRECT: {expected_weighted} hours per park")
-    print(f"  Breakdown: 2×180×3 + 5×60×2 + 3×30×1 = 1080 + 600 + 90 = 1770 min = 29.5 hrs")
+    print("  Breakdown: 2×180×3 + 5×60×2 + 3×30×1 = 1080 + 600 + 90 = 1770 min = 29.5 hrs")
 
 
 def test_park_weekly_rankings_calculations(mysql_connection, comprehensive_api_test_data):
@@ -630,7 +630,7 @@ def test_ride_weekly_rankings_calculations(mysql_connection, comprehensive_api_t
         elif ride['tier'] == 3:
             assert abs(actual_downtime - 3.5) < 0.1
 
-    print(f"\n✓ VERIFIED: Weekly ride downtime calculations correct for all tiers")
+    print("\n✓ VERIFIED: Weekly ride downtime calculations correct for all tiers")
 
 
 def test_ride_monthly_rankings_calculations(mysql_connection, comprehensive_api_test_data):
@@ -664,7 +664,7 @@ def test_ride_monthly_rankings_calculations(mysql_connection, comprehensive_api_
         elif ride['tier'] == 3:
             assert abs(actual_downtime - 15.0) < 0.1
 
-    print(f"\n✓ VERIFIED: Monthly ride downtime calculations correct for all tiers")
+    print("\n✓ VERIFIED: Monthly ride downtime calculations correct for all tiers")
 
 
 # ============================================================================
@@ -734,7 +734,7 @@ def test_average_wait_times_calculations(mysql_connection, comprehensive_api_tes
         elif ride['tier'] == 3:
             assert actual_avg == 15
 
-    print(f"\n✓ VERIFIED: Average wait times correct for all tiers")
+    print("\n✓ VERIFIED: Average wait times correct for all tiers")
 
 
 def test_peak_wait_times_calculations(mysql_connection, comprehensive_api_test_data):
@@ -766,7 +766,7 @@ def test_peak_wait_times_calculations(mysql_connection, comprehensive_api_test_d
         elif ride['tier'] == 3:
             assert actual_peak == 35
 
-    print(f"\n✓ VERIFIED: Peak wait times correct for all tiers")
+    print("\n✓ VERIFIED: Peak wait times correct for all tiers")
 
 
 # ============================================================================

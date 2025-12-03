@@ -18,7 +18,7 @@ import sys
 import re
 import argparse
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Optional, Tuple
 from difflib import SequenceMatcher
 
 # Add src to path

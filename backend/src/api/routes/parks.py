@@ -20,8 +20,6 @@ GET /parks/<id>/details               → (uses multiple repositories)
 """
 
 from flask import Blueprint, request, jsonify
-from typing import Dict, Any, List
-from datetime import date, datetime
 
 from database.connection import get_db_connection
 from database.repositories.park_repository import ParkRepository
@@ -29,7 +27,6 @@ from database.repositories.stats_repository import StatsRepository
 from utils.cache import get_query_cache, generate_cache_key
 
 # New query imports - each file handles one specific data source
-from database.queries.live import LiveParkRankingsQuery
 from database.queries.rankings import ParkDowntimeRankingsQuery, ParkWaitTimeRankingsQuery
 from database.queries.today import TodayParkRankingsQuery, TodayParkWaitTimesQuery
 from database.queries.yesterday import YesterdayParkRankingsQuery, YesterdayParkWaitTimesQuery
@@ -63,7 +60,8 @@ def get_park_downtime_rankings():
         filter (str): Park filter - 'disney-universal', 'all-parks' (default: 'all-parks')
         limit (int): Maximum results (default: 50, max: 100)
         weighted (bool): Use weighted scoring by ride tier (default: false)
-        sort_by (str): Sort column - 'shame_score', 'total_downtime_hours', 'uptime_percentage', 'rides_down' (default: 'shame_score')
+        sort_by (str): Sort column - shame_score, total_downtime_hours, uptime_percentage,
+            rides_down (default: shame_score)
 
     Returns:
         JSON response with park rankings and aggregate statistics
@@ -130,7 +128,7 @@ def get_park_downtime_rankings():
 
                 # If cache miss, fall back to computing from raw snapshots
                 if not rankings:
-                    logger.warning(f"Park live rankings cache miss, falling back to raw query")
+                    logger.warning("Park live rankings cache miss, falling back to raw query")
                     rankings = stats_repo.get_park_live_downtime_rankings(
                         filter_disney_universal=filter_disney_universal,
                         limit=limit,

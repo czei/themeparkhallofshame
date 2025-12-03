@@ -10,7 +10,7 @@ Note: Database connection fixtures are in tests/integration/conftest.py
 """
 
 import pytest
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 from unittest.mock import Mock

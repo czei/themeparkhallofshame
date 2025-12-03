@@ -23,14 +23,14 @@ Database Tables:
 - ride_daily_stats (last_week/last_month periods)
 """
 
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import List, Dict, Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from utils.timezone import get_today_range_to_now_utc, get_today_pacific, get_yesterday_range_utc
-from utils.sql_helpers import RideFilterSQL, ParkStatusSQL
+from utils.sql_helpers import ParkStatusSQL
 
 
 class LongestWaitTimesQuery:

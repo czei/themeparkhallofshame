@@ -8,9 +8,6 @@ zero shame score when the rankings table shows a value.
 
 BUG 2: tier_weights hardcoded as 5/2/1 instead of 3/2/1.
 """
-import pytest
-from unittest.mock import patch, MagicMock
-from datetime import datetime, timezone
 
 
 class TestTodayShameBreakdownTimeRange:

@@ -30,7 +30,6 @@ Single Source of Truth:
 Performance: Uses raw SQL with centralized helpers for consistency.
 """
 
-from datetime import date, datetime
 from typing import List, Dict, Any
 
 from sqlalchemy import text

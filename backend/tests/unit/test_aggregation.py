@@ -13,9 +13,8 @@ Priority: P1 - Tests aggregation core logic (T146)
 """
 
 import pytest
-from datetime import datetime, date, timedelta
-from unittest.mock import Mock, MagicMock, patch, PropertyMock
-from zoneinfo import ZoneInfo
+from datetime import date
+from unittest.mock import Mock, patch
 
 from processor.aggregation_service import AggregationService
 

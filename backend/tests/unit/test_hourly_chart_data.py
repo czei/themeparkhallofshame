@@ -30,7 +30,6 @@ Both should return Chart.js format:
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
 
 
 class TestParkShameHistoryQueryHourly:

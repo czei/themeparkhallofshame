@@ -16,8 +16,6 @@ live data from ride_status_snapshots, these tests will fail because:
 2. Wait times won't match real-time snapshot values
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
 
 
 class TestRideLiveWaitTimesResponse:

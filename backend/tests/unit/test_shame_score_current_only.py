@@ -24,8 +24,6 @@ Single Source of Truth:
 - Filter by has_operated (ride must have operated at least once)
 """
 
-import pytest
-from unittest.mock import MagicMock
 
 
 class TestShameScoreCurrentOnly:

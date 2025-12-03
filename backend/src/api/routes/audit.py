@@ -16,11 +16,10 @@ and see the complete trace from raw data to final number.
 """
 
 from flask import Blueprint, request, jsonify
-from datetime import date, datetime, timedelta
-from typing import Optional
+from datetime import datetime, timedelta
 
 from database.connection import get_db_connection
-from database.audit import ValidationChecker, AnomalyDetector, ComputationTracer
+from database.audit import AnomalyDetector, ComputationTracer
 from database.audit.validation_checks import run_hourly_audit
 from database.repositories.data_quality_repository import DataQualityRepository
 from utils.logger import logger

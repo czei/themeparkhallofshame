@@ -18,10 +18,9 @@ GET /trends/least-reliable            → database/queries/trends/least_reliable
 
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any
 
 from database.connection import get_db_connection
-from database.repositories.stats_repository import StatsRepository
 
 # New query imports - each file handles one specific data source
 from database.queries.trends import (
@@ -677,7 +676,7 @@ def _generate_mock_chart_data(data_type: str, days: int, limit: int) -> Dict[str
         Chart data structure with mock values
     """
     import random
-    from datetime import date, timedelta
+    from datetime import timedelta
 
     today = get_today_pacific()
     labels = [(today - timedelta(days=i)).strftime('%b %d') for i in range(days - 1, -1, -1)]

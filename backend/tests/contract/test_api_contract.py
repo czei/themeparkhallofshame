@@ -17,7 +17,6 @@ import json
 import yaml
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
-from flask import Flask
 
 # Load OpenAPI spec
 SPEC_PATH = Path(__file__).parent.parent.parent.parent / ".development" / "specs" / "001-theme-park-tracker" / "contracts" / "api.yaml"

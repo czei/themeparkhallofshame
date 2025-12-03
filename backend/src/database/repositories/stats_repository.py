@@ -64,7 +64,7 @@ except ImportError:
     from utils.timezone import get_today_pacific, get_pacific_day_range_utc
     from utils.sql_helpers import (
         RideStatusSQL, ParkStatusSQL, DowntimeSQL, UptimeSQL,
-        RideFilterSQL, AffectedRidesSQL, ShameScoreSQL
+        RideFilterSQL, ShameScoreSQL
     )
     from utils.metrics import (
         SNAPSHOT_INTERVAL_MINUTES,
@@ -2199,7 +2199,7 @@ class StatsRepository:
         ))
 
         # Calculate current and previous week
-        from datetime import datetime, timedelta
+        from datetime import timedelta
         current_date = datetime.now()
         year = current_date.year
         week_number = current_date.isocalendar()[1]
@@ -2278,7 +2278,7 @@ class StatsRepository:
         ))
 
         # Calculate current and previous week
-        from datetime import datetime, timedelta
+        from datetime import timedelta
         current_date = datetime.now()
         year = current_date.year
         week_number = current_date.isocalendar()[1]
@@ -2314,7 +2314,7 @@ class StatsRepository:
         Returns:
             List of rides sorted by longest average wait times descending
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
 
@@ -2553,7 +2553,7 @@ class StatsRepository:
         Returns:
             List of parks sorted by longest average wait times descending
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
 
@@ -2739,7 +2739,7 @@ class StatsRepository:
         Returns:
             List of parks with improvement metrics
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         today = datetime.now().date()
 
@@ -2941,7 +2941,7 @@ class StatsRepository:
         Returns:
             List of parks with decline metrics
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         today = datetime.now().date()
 
@@ -3143,7 +3143,7 @@ class StatsRepository:
         Returns:
             List of rides with improvement metrics
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         today = datetime.now().date()
 
@@ -3363,7 +3363,7 @@ class StatsRepository:
         Returns:
             List of rides with decline metrics
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         today = datetime.now().date()
 

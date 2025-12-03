@@ -16,7 +16,6 @@ Options:
 import sys
 import argparse
 from pathlib import Path
-from datetime import datetime
 from typing import List, Dict, Optional
 
 # Add src to path
@@ -437,13 +436,13 @@ class ParkCollector:
         logger.info("=" * 60)
         logger.info("COLLECTION SUMMARY")
         logger.info("=" * 60)
-        logger.info(f"Parks:")
+        logger.info("Parks:")
         logger.info(f"  - Processed: {self.stats['parks_processed']}")
         logger.info(f"  - Inserted:  {self.stats['parks_inserted']}")
         logger.info(f"  - Updated:   {self.stats['parks_updated']}")
         logger.info(f"  - Skipped:   {self.stats['parks_skipped']}")
         logger.info("")
-        logger.info(f"Rides:")
+        logger.info("Rides:")
         logger.info(f"  - Processed:  {self.stats['rides_processed']}")
         logger.info(f"  - Inserted:   {self.stats['rides_inserted']}")
         logger.info(f"  - Updated:    {self.stats['rides_updated']}")

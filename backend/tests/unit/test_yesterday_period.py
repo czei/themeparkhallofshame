@@ -15,7 +15,6 @@ Key difference from TODAY:
 - YESTERDAY = full previous day (complete, immutable)
 """
 
-import pytest
 from datetime import datetime, date, timedelta
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -148,7 +147,7 @@ class TestYesterdayTimezoneHandling:
         """
         At exactly midnight Pacific, "yesterday" is the day that just ended.
         """
-        from utils.timezone import get_yesterday_range_utc, PACIFIC_TZ, UTC_TZ
+        from utils.timezone import PACIFIC_TZ, UTC_TZ
 
         # Simulate midnight Pacific on Dec 2, 2025
         fake_now_pacific = datetime(2025, 12, 2, 0, 0, 0, tzinfo=PACIFIC_TZ)

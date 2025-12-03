@@ -25,7 +25,7 @@ How to Modify:
 3. After changes: Verify sql_helpers.py has matching logic (for compatibility)
 """
 
-from sqlalchemy import and_, or_, case, func, select
+from sqlalchemy import and_, or_, case, select
 from sqlalchemy.sql import ColumnElement
 from sqlalchemy.sql.expression import BinaryExpression
 from sqlalchemy.sql.selectable import Subquery

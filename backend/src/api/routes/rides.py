@@ -20,22 +20,18 @@ GET /rides/waittimes?period=last_month → database/queries/rankings/ride_wait_t
 """
 
 from flask import Blueprint, request, jsonify
-from typing import Dict, Any, List
-from datetime import date, datetime
 
 from database.connection import get_db_connection
-from database.repositories.ride_repository import RideRepository
 from database.repositories.stats_repository import StatsRepository
 from utils.cache import get_query_cache, generate_cache_key
 
 # New query imports - each file handles one specific data source
-from database.queries.live import LiveRideRankingsQuery, StatusSummaryQuery
+from database.queries.live import StatusSummaryQuery
 from database.queries.rankings import RideDowntimeRankingsQuery, RideWaitTimeRankingsQuery
 from database.queries.today import TodayRideRankingsQuery, TodayRideWaitTimesQuery
 from database.queries.yesterday import YesterdayRideRankingsQuery, YesterdayRideWaitTimesQuery
 
 from utils.logger import logger
-from utils.timezone import get_today_pacific
 
 rides_bp = Blueprint('rides', __name__)
 
@@ -209,7 +205,7 @@ def get_ride_downtime_rankings():
 
                 # If cache miss, fall back to computing from raw snapshots
                 if not rankings:
-                    logger.warning(f"Ride live rankings cache miss, falling back to raw query")
+                    logger.warning("Ride live rankings cache miss, falling back to raw query")
                     rankings = stats_repo.get_ride_live_downtime_rankings(
                         filter_disney_universal=filter_disney_universal,
                         limit=limit,

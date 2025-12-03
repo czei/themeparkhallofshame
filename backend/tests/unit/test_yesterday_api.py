@@ -12,7 +12,6 @@ These tests verify:
 """
 
 import pytest
-from unittest.mock import Mock, patch
 
 
 class TestParksDowntimeYesterday:

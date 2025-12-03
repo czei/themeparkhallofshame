@@ -9,9 +9,8 @@ Tests OperatingHoursDetector:
 Priority: P1 - Tests operating hours detection logic (T145)
 """
 
-import pytest
-from datetime import datetime, date, time, timedelta
-from unittest.mock import Mock, MagicMock, patch
+from datetime import datetime, date
+from unittest.mock import Mock
 from zoneinfo import ZoneInfo
 
 from processor.operating_hours_detector import OperatingHoursDetector

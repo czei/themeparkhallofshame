@@ -104,7 +104,7 @@ def backfill_locations(dry_run: bool = False):
                     stats['updated'] += 1
                     logger.info(f"  ✓ {'Would update' if dry_run else 'Updated'}")
                 else:
-                    logger.warning(f"  ✗ No location found")
+                    logger.warning("  ✗ No location found")
                     stats['failed'] += 1
 
                 logger.info("")

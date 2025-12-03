@@ -10,7 +10,6 @@ Tests all statistics dataclasses:
 Priority: P1 - Quick win for coverage increase
 """
 
-import pytest
 from datetime import date, datetime
 from models.statistics import (
     RideDailyStats,

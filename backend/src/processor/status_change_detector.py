@@ -3,7 +3,7 @@ Theme Park Downtime Tracker - Status Change Detector
 Detects ride status transitions (open ↔ closed) and calculates downtime duration.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Dict, Any, Optional
 from sqlalchemy import text
 from sqlalchemy.engine import Connection

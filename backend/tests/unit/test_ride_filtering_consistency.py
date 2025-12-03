@@ -29,8 +29,6 @@ Single Source of Truth:
 - All queries should use these helpers for consistency
 """
 
-import pytest
-from unittest.mock import MagicMock
 
 
 class TestDowntimeWaitTimeConsistency:

@@ -14,7 +14,7 @@ Scheduled execution (cron) - Run at 5 AM UTC (1 AM Pacific, after PT day ends):
 
 import sys
 import argparse
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # Add backend/src to Python path

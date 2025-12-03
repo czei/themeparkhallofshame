@@ -35,8 +35,6 @@ Join only the LATEST park_activity_snapshot per park, similar to
 how we get the latest ride snapshot.
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
 
 
 class TestStatusSummaryTotalCount:

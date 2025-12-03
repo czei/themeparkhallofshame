@@ -22,7 +22,6 @@ sys.modules['sendgrid'] = MagicMock()
 sys.modules['sendgrid.helpers'] = MagicMock()
 sys.modules['sendgrid.helpers.mail'] = MagicMock()
 
-import pytest
 from pathlib import Path
 
 

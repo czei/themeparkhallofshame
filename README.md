@@ -98,12 +98,432 @@ Visit `http://localhost:8000` to see the dashboard.
 
 ```bash
 cd backend
-./run-all-tests.sh
-
-# Or manually:
-pytest tests/unit/ -v
-pytest tests/integration/ -v
+pytest tests/ -v
 ```
+
+---
+
+## Development Workflow
+
+This section covers the complete development lifecycle, from writing code to deploying to production.
+
+### TDD Cycle: Red-Green-Refactor
+
+This project follows Test-Driven Development. Every code change follows this cycle:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                                                         │
+│   1. RED     →   Write a failing test first             │
+│                                                         │
+│   2. GREEN   →   Write minimal code to pass             │
+│                                                         │
+│   3. REFACTOR →  Clean up, keeping tests green          │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Before writing any code**: Write the test first and verify it fails for the right reason.
+
+---
+
+### Daily Development Workflow
+
+#### Scenario 1: Starting a New Feature
+
+```bash
+# 1. Create feature branch
+git checkout -b feature/add-ride-alerts
+
+# 2. Mirror production data for realistic testing (optional but recommended)
+./deployment/scripts/mirror-production-db.sh --days=7
+
+# 3. Start the local API server
+cd backend
+source venv/bin/activate
+python -m flask --app src.api.app run --port 5001
+
+# 4. In another terminal, serve the frontend
+cd frontend
+python3 -m http.server 8000
+
+# 5. Write tests first (TDD!)
+# Create tests/unit/test_ride_alerts.py
+
+# 6. Run tests (they should fail - RED)
+pytest tests/unit/test_ride_alerts.py -v
+
+# 7. Implement the feature (GREEN)
+# Edit src/api/... or src/processor/...
+
+# 8. Run tests again (should pass)
+pytest tests/unit/test_ride_alerts.py -v
+
+# 9. Run full test suite before committing
+pytest tests/ -v
+
+# 10. Commit and push
+git add .
+git commit -m "Add ride alert feature"
+git push -u origin feature/add-ride-alerts
+```
+
+#### Scenario 2: Fixing a Bug
+
+```bash
+# 1. Reproduce the bug locally with production data
+./deployment/scripts/mirror-production-db.sh --days=7
+
+# 2. Start local servers
+cd backend && source venv/bin/activate
+python -m flask --app src.api.app run --port 5001
+# (In another terminal)
+cd frontend && python3 -m http.server 8000
+
+# 3. Confirm you can reproduce the bug at http://localhost:8000
+
+# 4. Write a failing test that captures the bug
+# tests/unit/test_shame_score_calculation.py
+def test_shame_score_not_negative():
+    """Parks should never have negative shame scores."""
+    ...
+
+# 5. Run the test - it should FAIL (reproducing the bug)
+pytest tests/unit/test_shame_score_calculation.py::test_shame_score_not_negative -v
+
+# 6. Fix the bug in the code
+
+# 7. Run the test again - should PASS
+pytest tests/unit/test_shame_score_calculation.py::test_shame_score_not_negative -v
+
+# 8. Run full test suite to ensure no regressions
+pytest tests/ -v
+
+# 9. Manually verify the fix in browser
+
+# 10. Commit with descriptive message
+git commit -m "Fix negative shame scores for parks with no operating hours"
+```
+
+#### Scenario 3: Refactoring Existing Code
+
+```bash
+# 1. Ensure all tests pass BEFORE refactoring
+pytest tests/ -v
+
+# 2. Make refactoring changes (small incremental steps)
+
+# 3. Run tests after EACH change
+pytest tests/ -v
+
+# 4. If tests fail, undo and try smaller changes
+
+# 5. Once complete, run full suite
+pytest tests/ -v && ruff check .
+
+# 6. Commit
+git commit -m "Refactor status calculator for clarity"
+```
+
+---
+
+### Running Tests
+
+#### Test Categories
+
+| Directory | Purpose | Speed | Requires DB |
+|-----------|---------|-------|-------------|
+| `tests/unit/` | Business logic, calculations | Fast | No |
+| `tests/integration/` | Database, API endpoints | Medium | Yes |
+| `tests/contract/` | API response format validation | Fast | No |
+| `tests/performance/` | Query timing, load testing | Slow | Yes |
+
+#### Common Test Commands
+
+```bash
+cd backend
+source venv/bin/activate
+
+# Run all tests
+pytest tests/ -v
+
+# Run only unit tests (fast, no DB needed)
+pytest tests/unit/ -v
+
+# Run integration tests (needs local database)
+pytest tests/integration/ -v
+
+# Run a specific test file
+pytest tests/unit/test_shame_score_calculation.py -v
+
+# Run tests matching a pattern
+pytest -k "shame_score" -v
+
+# Run with coverage report
+pytest --cov=src --cov-report=term-missing
+
+# Run and stop on first failure
+pytest -x
+
+# Run last failed tests only
+pytest --lf
+
+# Verbose output with print statements
+pytest -v -s
+```
+
+#### Pre-Commit Checklist
+
+Before every commit:
+
+```bash
+# 1. All tests pass
+pytest tests/ -v
+
+# 2. Linting passes
+ruff check .
+
+# 3. No debug code left behind
+grep -r "print(" src/ --include="*.py" | grep -v "logger"
+```
+
+---
+
+### Manual Testing with Production Data
+
+The database mirror script lets you test with real production data locally.
+
+#### Mirror Production Database
+
+```bash
+# Default: Last 7 days of data (recommended for daily work)
+./deployment/scripts/mirror-production-db.sh
+
+# More historical data for trend analysis
+./deployment/scripts/mirror-production-db.sh --days=30
+
+# Full database (large, use sparingly)
+./deployment/scripts/mirror-production-db.sh --full
+
+# Schema only (for testing migrations)
+./deployment/scripts/mirror-production-db.sh --schema-only
+
+# Preview what would happen
+./deployment/scripts/mirror-production-db.sh --dry-run
+```
+
+**What gets mirrored:**
+
+| Table Type | Examples | Strategy |
+|------------|----------|----------|
+| Reference (small) | parks, rides, schedules | Full copy |
+| Snapshots (large) | ride_status_snapshots | Filtered by `--days` |
+| Aggregates | daily_stats, weekly_stats | Filtered by `--days` |
+
+#### Local Testing Checklist
+
+After mirroring, verify the application works:
+
+```bash
+# 1. Start the API server
+cd backend && source venv/bin/activate
+python -m flask --app src.api.app run --port 5001
+
+# 2. Test API endpoints directly
+curl http://localhost:5001/api/health
+curl http://localhost:5001/api/parks/downtime?period=live
+curl http://localhost:5001/api/parks/downtime?period=today
+
+# 3. Start frontend
+cd frontend && python3 -m http.server 8000
+
+# 4. Open browser and test each view:
+#    - http://localhost:8000 (Downtime - Live)
+#    - Switch to Today, Last Week, Last Month
+#    - Check Wait Times tab
+#    - Check Awards tab
+#    - Check Charts tab
+#    - Click on a park to see details modal
+```
+
+---
+
+### Deployment
+
+#### Deployment Options
+
+```bash
+cd deployment
+
+# Deploy everything (backend + frontend + restart services)
+./deploy.sh all
+
+# Deploy only backend (Python code)
+./deploy.sh backend
+
+# Deploy only frontend (HTML/CSS/JS)
+./deploy.sh frontend
+
+# Run database migrations only
+./deploy.sh migrations
+
+# Restart services without deploying code
+./deploy.sh restart
+
+# Check production health
+./deploy.sh health
+```
+
+#### Scenario: Deploy a Bug Fix
+
+```bash
+# 1. Ensure all tests pass
+cd backend
+pytest tests/ -v
+
+# 2. Commit your changes
+git add .
+git commit -m "Fix calculation error in weekly aggregation"
+
+# 3. Push to remote
+git push
+
+# 4. Deploy to production
+cd deployment
+./deploy.sh backend
+
+# 5. Verify the fix in production
+./deploy.sh health
+curl https://themeparkhallofshame.com/api/health
+```
+
+#### Scenario: Deploy Frontend-Only Changes
+
+For CSS, JavaScript, or HTML changes:
+
+```bash
+# 1. Test locally first
+cd frontend && python3 -m http.server 8000
+# Verify at http://localhost:8000
+
+# 2. Commit changes
+git add .
+git commit -m "Improve mobile responsiveness on park details modal"
+git push
+
+# 3. Deploy frontend only (faster than full deploy)
+cd deployment
+./deploy.sh frontend
+
+# 4. Hard refresh production site to see changes
+# (Ctrl+Shift+R or Cmd+Shift+R)
+```
+
+#### Scenario: Database Schema Migration
+
+```bash
+# 1. Create migration file
+# backend/src/database/migrations/XXX_add_alerts_table.sql
+
+# 2. Test migration locally first
+mysql -u root -p themepark_tracker_dev < backend/src/database/migrations/XXX_add_alerts_table.sql
+
+# 3. Verify it worked
+mysql -u root -p themepark_tracker_dev -e "DESCRIBE alerts;"
+
+# 4. Commit migration
+git add .
+git commit -m "Add alerts table for ride notifications"
+git push
+
+# 5. Deploy migration to production
+cd deployment
+./deploy.sh migrations
+
+# 6. Restart backend to pick up schema changes
+./deploy.sh restart
+```
+
+#### Scenario: Full Production Deploy
+
+For major releases or when unsure:
+
+```bash
+# 1. Final test suite
+cd backend
+pytest tests/ -v
+ruff check .
+
+# 2. Commit everything
+git add .
+git commit -m "Release v1.2.0: Add weekly awards feature"
+git push
+
+# 3. Full deployment
+cd deployment
+./deploy.sh all
+
+# 4. Comprehensive health check
+./deploy.sh health
+curl https://themeparkhallofshame.com/api/parks/downtime?period=live
+curl https://themeparkhallofshame.com/api/rides/downtime?period=live
+```
+
+---
+
+### Troubleshooting
+
+#### Tests Failing After Database Mirror
+
+```bash
+# Reset local database and re-mirror
+./deployment/scripts/mirror-production-db.sh --yes
+
+# Or just get fresh schema
+./deployment/scripts/mirror-production-db.sh --schema-only
+```
+
+#### API Returns 500 Error Locally
+
+```bash
+# Check Flask logs
+cd backend
+python -m flask --app src.api.app run --port 5001 --debug
+
+# Verify database connection
+mysql -u root -p -e "SELECT 1"
+
+# Check .env file exists
+cat backend/.env
+```
+
+#### Production Deploy Failed
+
+```bash
+# Check remote service status
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com \
+    "sudo systemctl status themepark-api"
+
+# View remote logs
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com \
+    "sudo journalctl -u themepark-api -n 50"
+
+# Manual restart
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com \
+    "sudo systemctl restart themepark-api"
+```
+
+#### Frontend Changes Not Showing
+
+```bash
+# Increment version query string in index.html
+# Change: js/app.js?v=9
+# To:     js/app.js?v=10
+
+# Or hard refresh in browser: Ctrl+Shift+R
+```
+
+---
 
 ## Data Collection
 

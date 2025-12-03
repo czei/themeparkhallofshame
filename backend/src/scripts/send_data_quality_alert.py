@@ -31,6 +31,9 @@ from database.connection import get_db_connection
 from database.repositories.data_quality_repository import DataQualityRepository
 from database.queries.trends.least_reliable_rides import LeastReliableRidesQuery
 from database.queries.trends.longest_wait_times import LongestWaitTimesQuery
+from database.queries.today import TodayParkWaitTimesQuery, TodayRideWaitTimesQuery
+from database.queries.yesterday import YesterdayParkWaitTimesQuery, YesterdayRideWaitTimesQuery
+from database.queries.rankings import ParkWaitTimeRankingsQuery, RideWaitTimeRankingsQuery
 from utils.logger import logger
 
 # Configuration
@@ -233,6 +236,94 @@ def validate_awards_existence(
     return issues
 
 
+def validate_wait_times_not_all_zeros(conn) -> List[Dict[str, Any]]:
+    """
+    Validate that wait times are not ALL zeros for each period.
+
+    This catches bugs where the API route falls through to wrong query
+    (e.g., 'yesterday' routing to 30-day aggregate returning zeros).
+
+    Periods checked:
+    - today: TodayParkWaitTimesQuery, TodayRideWaitTimesQuery
+    - yesterday: YesterdayParkWaitTimesQuery, YesterdayRideWaitTimesQuery
+    - last_week: ParkWaitTimeRankingsQuery.get_weekly()
+    - last_month: ParkWaitTimeRankingsQuery.get_monthly()
+
+    Returns:
+        List of issue dicts if any period returns all-zero data
+    """
+    issues = []
+
+    # Define period configurations with their query classes
+    period_checks = [
+        {
+            "period": "today",
+            "park_query": lambda: TodayParkWaitTimesQuery(conn).get_rankings(limit=20),
+            "ride_query": lambda: TodayRideWaitTimesQuery(conn).get_rankings(limit=20),
+        },
+        {
+            "period": "yesterday",
+            "park_query": lambda: YesterdayParkWaitTimesQuery(conn).get_rankings(limit=20),
+            "ride_query": lambda: YesterdayRideWaitTimesQuery(conn).get_rankings(limit=20),
+        },
+        {
+            "period": "last_week",
+            "park_query": lambda: ParkWaitTimeRankingsQuery(conn).get_weekly(limit=20),
+            "ride_query": lambda: RideWaitTimeRankingsQuery(conn).get_weekly(limit=20),
+        },
+        {
+            "period": "last_month",
+            "park_query": lambda: ParkWaitTimeRankingsQuery(conn).get_monthly(limit=20),
+            "ride_query": lambda: RideWaitTimeRankingsQuery(conn).get_monthly(limit=20),
+        },
+    ]
+
+    for check in period_checks:
+        period = check["period"]
+
+        try:
+            # Check park wait times
+            park_data = check["park_query"]()
+            if park_data:
+                # Get avg wait time field (could be avg_wait_minutes or avg_wait_time)
+                avg_waits = [
+                    p.get("avg_wait_minutes") or p.get("avg_wait_time") or 0
+                    for p in park_data
+                ]
+                non_zero_count = sum(1 for w in avg_waits if w and w > 0)
+
+                if non_zero_count == 0 and len(park_data) > 0:
+                    issues.append({
+                        "category": "wait_times_all_zeros",
+                        "severity": "high",
+                        "message": f"Park wait times ALL ZEROS for period={period}",
+                        "details": f"{len(park_data)} parks returned, all with 0 avg wait time (likely routing bug)"
+                    })
+
+            # Check ride wait times
+            ride_data = check["ride_query"]()
+            if ride_data:
+                avg_waits = [
+                    r.get("avg_wait_minutes") or r.get("avg_wait_time") or 0
+                    for r in ride_data
+                ]
+                non_zero_count = sum(1 for w in avg_waits if w and w > 0)
+
+                if non_zero_count == 0 and len(ride_data) > 0:
+                    issues.append({
+                        "category": "wait_times_all_zeros",
+                        "severity": "high",
+                        "message": f"Ride wait times ALL ZEROS for period={period}",
+                        "details": f"{len(ride_data)} rides returned, all with 0 avg wait time (likely routing bug)"
+                    })
+
+        except Exception as e:
+            logger.warning(f"Error checking wait times for period={period}: {e}")
+            # Don't add as issue - query errors are handled elsewhere
+
+    return issues
+
+
 def get_awards_issues() -> List[Dict[str, Any]]:
     """
     Main function to collect all awards validation issues.
@@ -241,6 +332,7 @@ def get_awards_issues() -> List[Dict[str, Any]]:
     1. Downtime values are within physical bounds
     2. Wait times are reasonable
     3. Data exists
+    4. Wait times are not ALL zeros for any period
 
     Returns:
         List of all issues found
@@ -274,6 +366,10 @@ def get_awards_issues() -> List[Dict[str, Any]]:
                 rides=downtime_rides + wait_time_rides,
                 parks=downtime_parks + wait_time_parks
             ))
+
+            # Validate wait times are not ALL zeros for any period
+            # This catches routing bugs where queries fall through to wrong data source
+            all_issues.extend(validate_wait_times_not_all_zeros(conn))
 
     except Exception as e:
         logger.error(f"Error validating awards: {e}")

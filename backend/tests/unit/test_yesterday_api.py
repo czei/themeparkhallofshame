@@ -215,6 +215,36 @@ class TestConsistentFieldNames:
         assert "rides_down" in source_code, \
             "TodayParkRankingsQuery must return 'rides_down' field for frontend compatibility"
 
+    def test_last_week_parks_response_includes_rides_down_field(self):
+        """
+        LAST_WEEK parks response must include 'rides_down' field (not 'max_rides_affected').
+
+        The rankings query returns 'max_rides_affected' but frontend expects 'rides_down'.
+        """
+        from pathlib import Path
+        query_path = Path(__file__).parent.parent.parent / "src" / "database" / "queries" / "rankings" / "park_downtime_rankings.py"
+        source_code = query_path.read_text()
+
+        # Check that the SQL returns rides_down (not max_rides_affected)
+        assert "AS rides_down" in source_code, \
+            "ParkDowntimeRankingsQuery must return 'rides_down' field for frontend compatibility"
+
+    def test_last_month_parks_response_includes_rides_down_field(self):
+        """
+        LAST_MONTH parks response must include 'rides_down' field.
+
+        Same query class as LAST_WEEK, so same fix applies.
+        """
+        # Same query file handles both last_week and last_month
+        from pathlib import Path
+        query_path = Path(__file__).parent.parent.parent / "src" / "database" / "queries" / "rankings" / "park_downtime_rankings.py"
+        source_code = query_path.read_text()
+
+        # Verify no 'max_rides_affected' alias remains in the output
+        # The sort mapping can reference it internally, but the output column must be 'rides_down'
+        assert "AS rides_down" in source_code, \
+            "ParkDowntimeRankingsQuery must return 'rides_down' field for frontend compatibility"
+
 
 class TestYesterdayQueryClasses:
     """

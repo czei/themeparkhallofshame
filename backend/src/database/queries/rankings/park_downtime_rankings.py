@@ -195,7 +195,7 @@ class ParkDowntimeRankingsQuery:
         sort_column = {
             "total_downtime_hours": "total_downtime_hours",
             "uptime_percentage": "uptime_percentage",  # Will use ASC for this
-            "rides_down": "max_rides_affected",
+            "rides_down": "rides_down",
         }.get(sort_by, "shame_score")
 
         # Sort direction - lower uptime is worse, so ASC for that column
@@ -261,8 +261,8 @@ class ParkDowntimeRankingsQuery:
                     1
                 ) AS shame_score,
 
-                -- Max rides affected on any day
-                MAX(pds.rides_with_downtime) AS max_rides_affected,
+                -- Max rides affected on any day (named rides_down for frontend compatibility)
+                MAX(pds.rides_with_downtime) AS rides_down,
 
                 -- Average uptime percentage across days
                 ROUND(AVG(pds.avg_uptime_percentage), 2) AS uptime_percentage,

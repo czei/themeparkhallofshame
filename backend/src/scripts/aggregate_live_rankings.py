@@ -154,6 +154,15 @@ class LiveRankingsAggregator:
                 LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
                 WHERE p.is_active = TRUE
                 GROUP BY p.park_id
+            ),
+            current_down_weights AS (
+                -- Sum of tier_weights for rides CURRENTLY down (for instantaneous shame score)
+                SELECT
+                    rcd.park_id,
+                    SUM(COALESCE(rc.tier_weight, 2)) AS sum_down_weight
+                FROM rides_currently_down rcd
+                LEFT JOIN ride_classifications rc ON rcd.ride_id = rc.ride_id
+                GROUP BY rcd.park_id
             )
             SELECT
                 p.park_id,
@@ -170,13 +179,9 @@ class LiveRankingsAggregator:
                 -- Total rides
                 pw.total_rides,
 
-                -- Shame Score (only for rides CURRENTLY down)
+                -- Shame Score (INSTANTANEOUS - based on rides currently down)
                 ROUND(
-                    (SUM(CASE
-                        WHEN rcd.ride_id IS NOT NULL AND {park_open} AND {is_down}
-                        THEN 5 * COALESCE(rc.tier_weight, 2)
-                        ELSE 0
-                    END) / 60.0
+                    (COALESCE(cdw.sum_down_weight, 0)
                     / NULLIF(pw.total_park_weight, 0)) * 10,
                     1
                 ) AS shame_score,
@@ -210,11 +215,12 @@ class LiveRankingsAggregator:
                 AND pas.recorded_at = rss.recorded_at
             INNER JOIN park_weights pw ON p.park_id = pw.park_id
             LEFT JOIN rides_currently_down rcd ON r.ride_id = rcd.ride_id
+            LEFT JOIN current_down_weights cdw ON p.park_id = cdw.park_id
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND p.is_active = TRUE
             GROUP BY p.park_id, p.name, p.city, p.state_province, p.timezone,
                      p.queue_times_id, p.is_disney, p.is_universal,
-                     pw.total_park_weight, pw.total_rides
+                     pw.total_park_weight, pw.total_rides, cdw.sum_down_weight
         """)
 
         conn.execute(insert_query, {

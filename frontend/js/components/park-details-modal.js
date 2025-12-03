@@ -181,11 +181,6 @@ class ParkDetailsModal {
             `;
         }
 
-        // Group rides by tier
-        const tier1Rides = rides_down.filter(r => r.tier === 1);
-        const tier2Rides = rides_down.filter(r => r.tier === 2);
-        const tier3Rides = rides_down.filter(r => r.tier === 3);
-
         return `
             <div class="shame-breakdown-section">
                 <div class="shame-header">
@@ -205,14 +200,23 @@ class ParkDetailsModal {
                     <div class="formula">
                         <span class="formula-part">Shame Score</span> =
                         <span class="formula-fraction">
-                            <span class="numerator">Sum of Down Ride Weights (${total_weighted_down.toFixed(1)})</span>
-                            <span class="denominator">Total Park Weight (${total_park_weight.toFixed(1)})</span>
+                            <span class="numerator">Sum of Down Ride Weights</span>
+                            <span class="denominator">Total Park Weight</span>
                         </span>
                         <span class="formula-multiplier">× 10</span>
                     </div>
+                    <div class="formula-calculation">
+                        <span class="calc-fraction">
+                            <span class="calc-numerator">${total_weighted_down.toFixed(1)}</span>
+                            <span class="calc-denominator">${total_park_weight.toFixed(1)}</span>
+                        </span>
+                        <span class="calc-multiply">× 10</span>
+                        <span class="calc-equals">=</span>
+                        <span class="calc-result">${shame_score.toFixed(2)}</span>
+                    </div>
                     <div class="formula-explanation">
                         The shame score measures how much of a park's ride capacity is currently unavailable,
-                        weighted by ride importance. Flagship attractions (Tier 1) count 5x more than minor rides (Tier 3).
+                        weighted by ride importance. Flagship attractions (Tier 1) count 3x more than minor rides (Tier 3).
                         Scores typically range from 0 (perfect) to 10+ (severe problems).
                     </div>
                 </div>
@@ -221,9 +225,7 @@ class ParkDetailsModal {
                     <div class="rides-down-section">
                         <h4>Rides Currently Down (${rides_down.length})</h4>
                         <div class="rides-down-list">
-                            ${tier1Rides.length > 0 ? this.renderRidesByTier(tier1Rides, 1, 'Flagship Attractions', '5x weight') : ''}
-                            ${tier2Rides.length > 0 ? this.renderRidesByTier(tier2Rides, 2, 'Standard Attractions', '2x weight') : ''}
-                            ${tier3Rides.length > 0 ? this.renderRidesByTier(tier3Rides, 3, 'Minor Attractions', '1x weight') : ''}
+                            ${this.renderRidesByWeight(rides_down)}
                         </div>
                     </div>
                 ` : `
@@ -238,7 +240,7 @@ class ParkDetailsModal {
                     <div class="tier-weights-grid">
                         <div class="tier-weight-item tier-1">
                             <span class="tier-badge">Tier 1</span>
-                            <span class="weight-value">5x</span>
+                            <span class="weight-value">3x</span>
                             <span class="weight-desc">Flagship E-tickets</span>
                         </div>
                         <div class="tier-weight-item tier-2">
@@ -348,7 +350,7 @@ class ParkDetailsModal {
                         <h4>Rides With Downtime ${isYesterday ? 'Yesterday' : 'Today'} (${rides_affected_count})</h4>
                         <p class="rides-section-note">All rides that experienced downtime during operating hours ${periodText}, sorted by total downtime.</p>
                         <div class="rides-down-list today-list">
-                            ${tier1Rides.length > 0 ? this.renderTodayRidesByTier(tier1Rides, 1, 'Flagship Attractions', '5x weight') : ''}
+                            ${tier1Rides.length > 0 ? this.renderTodayRidesByTier(tier1Rides, 1, 'Flagship Attractions', '3x weight') : ''}
                             ${tier2Rides.length > 0 ? this.renderTodayRidesByTier(tier2Rides, 2, 'Standard Attractions', '2x weight') : ''}
                             ${tier3Rides.length > 0 ? this.renderTodayRidesByTier(tier3Rides, 3, 'Minor Attractions', '1x weight') : ''}
                         </div>
@@ -365,7 +367,7 @@ class ParkDetailsModal {
                     <div class="tier-weights-grid">
                         <div class="tier-weight-item tier-1">
                             <span class="tier-badge">Tier 1</span>
-                            <span class="weight-value">5x</span>
+                            <span class="weight-value">3x</span>
                             <span class="weight-desc">Flagship E-tickets</span>
                         </div>
                         <div class="tier-weight-item tier-2">
@@ -479,7 +481,7 @@ class ParkDetailsModal {
                         <h4>Rides With Downtime (${rides_affected_count})</h4>
                         <p class="rides-section-note">All rides that experienced downtime during ${period_label || 'this period'}, sorted by total downtime.</p>
                         <div class="rides-down-list historical-list">
-                            ${tier1Rides.length > 0 ? this.renderHistoricalRidesByTier(tier1Rides, 1, 'Flagship Attractions', '5x weight') : ''}
+                            ${tier1Rides.length > 0 ? this.renderHistoricalRidesByTier(tier1Rides, 1, 'Flagship Attractions', '3x weight') : ''}
                             ${tier2Rides.length > 0 ? this.renderHistoricalRidesByTier(tier2Rides, 2, 'Standard Attractions', '2x weight') : ''}
                             ${tier3Rides.length > 0 ? this.renderHistoricalRidesByTier(tier3Rides, 3, 'Minor Attractions', '1x weight') : ''}
                         </div>
@@ -491,7 +493,7 @@ class ParkDetailsModal {
                     <div class="tier-weights-grid">
                         <div class="tier-weight-item tier-1">
                             <span class="tier-badge">Tier 1</span>
-                            <span class="weight-value">5x</span>
+                            <span class="weight-value">3x</span>
                             <span class="weight-desc">Flagship E-tickets</span>
                         </div>
                         <div class="tier-weight-item tier-2">
@@ -577,7 +579,57 @@ class ParkDetailsModal {
     }
 
     /**
-     * Render rides grouped by tier
+     * Render rides grouped by their actual tier_weight value (for LIVE breakdown)
+     * Dynamically creates groups based on actual weight values in the data
+     */
+    renderRidesByWeight(rides) {
+        // Group rides by their actual tier_weight
+        const groupedByWeight = {};
+        rides.forEach(ride => {
+            const weight = ride.tier_weight || 2; // Default to 2 if missing
+            if (!groupedByWeight[weight]) {
+                groupedByWeight[weight] = [];
+            }
+            groupedByWeight[weight].push(ride);
+        });
+
+        // Sort weights descending (highest weight first)
+        const sortedWeights = Object.keys(groupedByWeight)
+            .map(Number)
+            .sort((a, b) => b - a);
+
+        // Get tier name based on weight (3x/2x/1x system)
+        const getTierInfo = (weight) => {
+            if (weight >= 3) return { tier: 1, name: 'Flagship Attractions' };
+            if (weight >= 2) return { tier: 2, name: 'Standard Attractions' };
+            return { tier: 3, name: 'Minor Attractions' };
+        };
+
+        return sortedWeights.map(weight => {
+            const ridesInGroup = groupedByWeight[weight];
+            const tierInfo = getTierInfo(weight);
+            return `
+                <div class="tier-group tier-${tierInfo.tier}">
+                    <div class="tier-group-header">
+                        <span class="tier-badge">Tier ${tierInfo.tier}</span>
+                        <span class="tier-name">${tierInfo.name}</span>
+                        <span class="tier-weight-label">${weight}x weight</span>
+                    </div>
+                    <ul class="rides-list">
+                        ${ridesInGroup.map(ride => `
+                            <li class="ride-item">
+                                <span class="ride-name">${this.escapeHtml(ride.ride_name)}</span>
+                                <span class="ride-weight">+${ride.tier_weight}</span>
+                            </li>
+                        `).join('')}
+                    </ul>
+                </div>
+            `;
+        }).join('');
+    }
+
+    /**
+     * Render rides grouped by tier (legacy - used by historical breakdowns)
      */
     renderRidesByTier(rides, tier, tierName, weightLabel) {
         return `

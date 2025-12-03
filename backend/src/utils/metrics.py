@@ -348,14 +348,14 @@ def calculate_instantaneous_shame_score(
     Worked Example
     --------------
     A park with 3 rides and currently 1 down:
-    - Space Mountain (Tier 1, weight=5): DOWN → contributes 5 weight
+    - Space Mountain (Tier 1, weight=3): DOWN → contributes 3 weight
     - Pirates (Tier 2, weight=2): OPERATING → contributes 0
     - Carousel (Tier 3, weight=1): OPERATING → contributes 0
 
     Calculations:
-    - total_weighted_down = 5
-    - total_park_weight = 5 + 2 + 1 = 8
-    - shame_score = (5 / 8) × 10 = 6.25 → rounds to 6.3
+    - total_weighted_down = 3
+    - total_park_weight = 3 + 2 + 1 = 6
+    - shame_score = (3 / 6) × 10 = 5.0
 
     When to Use This vs calculate_shame_score
     ------------------------------------------

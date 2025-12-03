@@ -22,7 +22,7 @@ class ParkDetailsModal {
      */
     async open(parkId, parkName, period = 'live') {
         // All periods are now supported by the API
-        const validPeriods = ['live', 'today', 'last_week', 'last_month'];
+        const validPeriods = ['live', 'today', 'yesterday', 'last_week', 'last_month'];
         const apiPeriod = validPeriods.includes(period) ? period : 'live';
 
         this.state = {
@@ -145,6 +145,7 @@ class ParkDetailsModal {
         // Dispatch based on breakdown_type from API
         switch (breakdown.breakdown_type) {
             case 'today':
+            case 'yesterday':
                 return this.renderTodayShameBreakdown(breakdown);
             case 'last_week':
             case 'last_month':

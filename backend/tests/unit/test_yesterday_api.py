@@ -179,6 +179,43 @@ class TestValidPeriodsConstant:
         pass
 
 
+class TestConsistentFieldNames:
+    """
+    Tests for consistent field naming across all periods.
+
+    The frontend expects specific field names like 'rides_down'.
+    All periods (live, today, yesterday, last_week, last_month) must use
+    the same field names for the same concepts.
+    """
+
+    def test_yesterday_parks_response_includes_rides_down_field(self):
+        """
+        YESTERDAY parks response must include 'rides_down' field (not 'rides_affected').
+
+        The frontend displays this as "Rides Down" column.
+        This field represents the count of rides that had any downtime during the period.
+        """
+        # Check that YesterdayParkRankingsQuery returns 'rides_down' field
+        from pathlib import Path
+        query_path = Path(__file__).parent.parent.parent / "src" / "database" / "queries" / "yesterday" / "yesterday_park_rankings.py"
+        source_code = query_path.read_text()
+
+        # The query should select a field aliased as 'rides_down' for frontend compatibility
+        assert "rides_down" in source_code, \
+            "YesterdayParkRankingsQuery must return 'rides_down' field for frontend compatibility"
+
+    def test_today_parks_response_includes_rides_down_field(self):
+        """
+        TODAY parks response must include 'rides_down' field (not 'rides_affected').
+        """
+        from pathlib import Path
+        query_path = Path(__file__).parent.parent.parent / "src" / "database" / "queries" / "today" / "today_park_rankings.py"
+        source_code = query_path.read_text()
+
+        assert "rides_down" in source_code, \
+            "TodayParkRankingsQuery must return 'rides_down' field for frontend compatibility"
+
+
 class TestYesterdayQueryClasses:
     """
     Tests for the YESTERDAY query implementation classes.

@@ -218,7 +218,7 @@ class YesterdayParkRankingsQuery:
                 COUNT(DISTINCT CASE
                     WHEN {is_down} AND {park_open} AND rto.ride_id IS NOT NULL
                     THEN r.ride_id
-                END) AS rides_affected,
+                END) AS rides_down,
 
                 -- Park operating status (current - may differ from yesterday's status)
                 {park_is_open_sq}

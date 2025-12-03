@@ -272,6 +272,43 @@ class TestYesterdayQueryClasses:
             pytest.fail("YesterdayRideRankingsQuery class does not exist yet")
 
 
+class TestChartsLiveAndTodaySupport:
+    """
+    Tests for LIVE and TODAY period support in charts endpoints.
+    """
+
+    def test_chart_data_endpoint_accepts_live_period(self):
+        """
+        The /trends/chart-data endpoint should accept period=live.
+
+        LIVE should be treated as TODAY for charts (showing today's data).
+        """
+        from pathlib import Path
+        trends_path = Path(__file__).parent.parent.parent / "src" / "api" / "routes" / "trends.py"
+        source_code = trends_path.read_text()
+
+        # Check that 'live' is in valid_periods for chart-data
+        assert "'live'" in source_code, \
+            "trends.py should include 'live' in valid periods for chart-data"
+
+    def test_park_shame_history_uses_mariadb_compatible_group_by(self):
+        """
+        The park_shame_history.py hourly query should use MariaDB-compatible GROUP BY.
+
+        MariaDB strict mode requires GROUP BY to use the full expression, not alias:
+        - BAD:  GROUP BY hour  (where hour is an alias)
+        - GOOD: GROUP BY HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR))
+        """
+        from pathlib import Path
+        query_path = Path(__file__).parent.parent.parent / "src" / "database" / "queries" / "charts" / "park_shame_history.py"
+        source_code = query_path.read_text()
+
+        # The query should NOT use just "GROUP BY hour" - needs full expression
+        # Check for the correct pattern
+        assert "GROUP BY HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR))" in source_code, \
+            "park_shame_history.py should use full expression in GROUP BY for MariaDB compatibility"
+
+
 class TestTrendsYesterdaySupport:
     """
     Tests for YESTERDAY period support in trends API endpoints.

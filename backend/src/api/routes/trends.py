@@ -235,9 +235,8 @@ def get_chart_data():
         limit = int(request.args.get('limit', 10))
 
         # Validate parameters
-        # Note: 'live' is intentionally excluded - chart trends require time series data,
-        # which doesn't make sense for instantaneous data. Frontend defaults to 'today' if 'live'.
-        valid_periods = ['today', 'yesterday', 'last_week', 'last_month']
+        # Note: 'live' is mapped to 'today' since charts need time series data
+        valid_periods = ['live', 'today', 'yesterday', 'last_week', 'last_month']
         valid_types = ['parks', 'rides', 'waittimes']
         valid_filters = ['disney-universal', 'all-parks']
 
@@ -269,8 +268,8 @@ def get_chart_data():
 
         # Get database connection
         with get_db_connection() as conn:
-            if period == 'today':
-                # Hourly data for today
+            if period in ('live', 'today'):
+                # Hourly data for today (live maps to today for charts)
                 granularity = 'hourly'
                 if data_type == 'parks':
                     # See: database/queries/charts/park_shame_history.py

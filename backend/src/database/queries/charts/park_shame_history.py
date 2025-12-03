@@ -227,13 +227,14 @@ class ParkShameHistoryQuery:
             ),
             park_hourly_open AS (
                 -- Check if park was open during each hour
+                -- NOTE: Must use full expression in GROUP BY for MariaDB strict mode
                 SELECT
                     HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR)) as hour,
                     MAX(pas.park_appears_open) as park_open
                 FROM park_activity_snapshots pas
                 WHERE pas.park_id = :park_id
                     AND pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
-                GROUP BY hour
+                GROUP BY HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR))
             )
             SELECT
                 HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) AS hour,
@@ -276,7 +277,7 @@ class ParkShameHistoryQuery:
                 AND r.category = 'ATTRACTION'
                 AND rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND pho.park_open = 1  -- Only include hours when park is open
-            GROUP BY hour
+            GROUP BY HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR))
             HAVING total_rides > 0  -- Only show hours with rides that have operated
             ORDER BY hour
         """)

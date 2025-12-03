@@ -126,10 +126,13 @@ class ParkDetailsModal {
 
         const { park, tier_distribution, operating_sessions, current_status, shame_breakdown } = this.state.parkDetails;
 
+        // Only show current status for LIVE period
+        const showCurrentStatus = this.state.period === 'live';
+
         return `
             <div class="park-details-content">
                 ${this.renderShameBreakdown(shame_breakdown)}
-                ${this.renderCurrentStatus(current_status)}
+                ${showCurrentStatus ? this.renderCurrentStatus(current_status) : ''}
                 ${this.renderTierDistribution(tier_distribution)}
                 ${this.renderParkInfo(park)}
             </div>
@@ -255,8 +258,8 @@ class ParkDetailsModal {
     }
 
     /**
-     * Render TODAY shame score breakdown - shows AVERAGE shame score since midnight
-     * This is completely different from live - it shows ALL rides that had ANY downtime today
+     * Render TODAY/YESTERDAY shame score breakdown - shows AVERAGE shame score
+     * This is completely different from live - it shows ALL rides that had ANY downtime
      */
     renderTodayShameBreakdown(breakdown) {
         const {
@@ -266,20 +269,28 @@ class ParkDetailsModal {
             total_downtime_hours,
             weighted_downtime_hours,
             shame_score,
-            park_is_open
+            park_is_open,
+            breakdown_type
         } = breakdown;
+
+        // Determine display text based on breakdown_type
+        const isYesterday = breakdown_type === 'yesterday';
+        const periodTitle = isYesterday ? "Yesterday's" : "Today's";
+        const periodBadge = isYesterday ? 'YESTERDAY' : 'TODAY';
+        const periodClass = isYesterday ? 'yesterday' : 'today';
+        const periodText = isYesterday ? 'yesterday' : 'today';
 
         // If no data available
         if (!rides_with_downtime) {
             return `
                 <div class="shame-breakdown-section">
                     <div class="shame-header">
-                        <h3>Today's Shame Score Breakdown</h3>
-                        <span class="breakdown-period-badge today">TODAY</span>
+                        <h3>${periodTitle} Shame Score Breakdown</h3>
+                        <span class="breakdown-period-badge ${periodClass}">${periodBadge}</span>
                     </div>
                     <div class="no-rides-down">
                         <span class="success-icon">&#10003;</span>
-                        <p>No downtime data available for today yet.</p>
+                        <p>No downtime data available for ${periodText} yet.</p>
                     </div>
                 </div>
             `;
@@ -293,27 +304,27 @@ class ParkDetailsModal {
         return `
             <div class="shame-breakdown-section today-breakdown">
                 <div class="shame-header">
-                    <h3>Today's Shame Score Breakdown</h3>
-                    <span class="breakdown-period-badge today">TODAY</span>
+                    <h3>${periodTitle} Shame Score Breakdown</h3>
+                    <span class="breakdown-period-badge ${periodClass}">${periodBadge}</span>
                 </div>
 
                 <div class="shame-score-display">
                     <div class="shame-score-value ${shame_score > 5 ? 'high' : shame_score > 2 ? 'medium' : 'low'}">
                         ${shame_score.toFixed(1)}
                     </div>
-                    <div class="shame-score-label">Average Shame Score Today (0-10 scale)</div>
+                    <div class="shame-score-label">Average Shame Score ${isYesterday ? 'Yesterday' : 'Today'} (0-10 scale)</div>
                 </div>
 
                 <div class="shame-formula-box today-formula">
-                    <div class="formula-title">How Today's Score Is Calculated</div>
+                    <div class="formula-title">How ${periodTitle} Score Is Calculated</div>
                     <div class="formula">
                         <span class="formula-part">Shame Score</span> =
                         <span class="formula-text">Average of Snapshot Shame Scores</span>
                     </div>
                     <div class="formula-explanation today-explanation">
-                        <strong>Today's score is an average</strong> of instantaneous shame scores throughout the day.
+                        <strong>${periodTitle} score is an average</strong> of instantaneous shame scores throughout the day.
                         Every 5 minutes while the park is open, we calculate what % of capacity was down at that moment.
-                        The final score is the average across all these snapshots during operating hours today.
+                        The final score is the average across all these snapshots during operating hours ${periodText}.
                         This makes it comparable to the Live score (same 0-10 scale).
                     </div>
                     <div class="cumulative-stats">
@@ -334,8 +345,8 @@ class ParkDetailsModal {
 
                 ${rides_with_downtime.length > 0 ? `
                     <div class="rides-down-section">
-                        <h4>Rides With Downtime Today (${rides_affected_count})</h4>
-                        <p class="rides-section-note">All rides that experienced downtime during operating hours today, sorted by total downtime.</p>
+                        <h4>Rides With Downtime ${isYesterday ? 'Yesterday' : 'Today'} (${rides_affected_count})</h4>
+                        <p class="rides-section-note">All rides that experienced downtime during operating hours ${periodText}, sorted by total downtime.</p>
                         <div class="rides-down-list today-list">
                             ${tier1Rides.length > 0 ? this.renderTodayRidesByTier(tier1Rides, 1, 'Flagship Attractions', '5x weight') : ''}
                             ${tier2Rides.length > 0 ? this.renderTodayRidesByTier(tier2Rides, 2, 'Standard Attractions', '2x weight') : ''}
@@ -345,7 +356,7 @@ class ParkDetailsModal {
                 ` : `
                     <div class="no-rides-down">
                         <span class="success-icon">&#10003;</span>
-                        <p>No rides have experienced downtime today!</p>
+                        <p>No rides have experienced downtime ${periodText}!</p>
                     </div>
                 `}
 

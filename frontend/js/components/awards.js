@@ -10,7 +10,7 @@ class Awards {
         this.apiClient = apiClient;
         this.container = document.getElementById(containerId);
         this.state = {
-            period: 'today',  // Awards default to 'today' (no 'live' option)
+            period: 'yesterday',  // Awards default to 'yesterday' (first complete period)
             filter: 'all-parks',  // Awards always show all parks
             loading: false,
             error: null,
@@ -20,6 +20,9 @@ class Awards {
             leastReliablePark: null,
             leastReliableRide: null
         };
+
+        // Valid periods for awards (only completed time periods - no live/today)
+        this.validPeriods = ['yesterday', 'last_week', 'last_month'];
     }
 
     /**
@@ -165,6 +168,7 @@ class Awards {
 
         this.container.innerHTML = `
             <div class="awards-view">
+                ${this.renderPeriodToggle()}
                 <div class="awards-grid-2x2">
                     ${this.renderAwardCard({
                         type: 'reliable-park',
@@ -276,6 +280,29 @@ class Awards {
     }
 
     /**
+     * Render the period toggle for awards
+     * Only shows completed periods: Yesterday, Last Week, Last Month
+     */
+    renderPeriodToggle() {
+        const periodLabels = {
+            'yesterday': 'Yesterday',
+            'last_week': 'Last Week',
+            'last_month': 'Last Month'
+        };
+
+        const buttons = this.validPeriods.map(period => {
+            const isActive = this.state.period === period;
+            return `<button class="awards-period-btn${isActive ? ' active' : ''}" data-period="${period}">${periodLabels[period]}</button>`;
+        }).join('');
+
+        return `
+            <div class="awards-period-toggle">
+                ${buttons}
+            </div>
+        `;
+    }
+
+    /**
      * Escape HTML to prevent XSS
      */
     escapeHtml(text) {
@@ -305,10 +332,14 @@ class Awards {
 
     /**
      * Update period (called by app.js global period selector)
+     * Awards only support completed periods: yesterday, last_week, last_month
      */
     updatePeriod(newPeriod) {
-        // Awards don't support 'live' - use 'today' instead
-        const effectivePeriod = newPeriod === 'live' ? 'today' : newPeriod;
+        // Awards only support completed periods - map invalid periods to 'yesterday'
+        let effectivePeriod = newPeriod;
+        if (!this.validPeriods.includes(newPeriod)) {
+            effectivePeriod = 'yesterday';
+        }
 
         if (effectivePeriod !== this.state.period) {
             this.state.period = effectivePeriod;
@@ -327,6 +358,18 @@ class Awards {
                 this.fetchAwardsData();
             });
         }
+
+        // Period toggle buttons
+        const periodBtns = this.container.querySelectorAll('.awards-period-btn');
+        periodBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const newPeriod = btn.dataset.period;
+                if (newPeriod !== this.state.period) {
+                    this.state.period = newPeriod;
+                    this.fetchAwardsData();
+                }
+            });
+        });
     }
 }
 

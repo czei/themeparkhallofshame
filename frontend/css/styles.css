@@ -3055,6 +3055,63 @@ footer a:hover,
     padding: 20px 0;
 }
 
+/* Awards Period Toggle - inline period selector specific to Awards tab */
+.awards-period-toggle {
+    display: flex;
+    justify-content: center;
+    gap: 0;
+    margin-bottom: 24px;
+}
+
+.awards-period-btn {
+    padding: 10px 20px;
+    background: white;
+    border: none;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    color: var(--charcoal);
+    border-top: 2px solid var(--charcoal);
+    border-bottom: 2px solid var(--charcoal);
+    border-left: 1px solid var(--charcoal);
+    border-right: 1px solid var(--charcoal);
+}
+
+.awards-period-btn:first-child {
+    border-radius: 6px 0 0 6px;
+    border-left: 2px solid var(--charcoal);
+}
+
+.awards-period-btn:last-child {
+    border-radius: 0 6px 6px 0;
+    border-right: 2px solid var(--charcoal);
+}
+
+.awards-period-btn:hover {
+    background: var(--light-gray);
+}
+
+.awards-period-btn.active {
+    background: var(--charcoal);
+    color: white;
+}
+
+@media (max-width: 480px) {
+    .awards-period-toggle {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .awards-period-btn {
+        padding: 8px 14px;
+        font-size: 13px;
+        border-radius: 6px !important;
+        border: 2px solid var(--charcoal) !important;
+    }
+}
+
 /* Awards Grid - 2x2 layout */
 .awards-grid-2x2 {
     display: grid;

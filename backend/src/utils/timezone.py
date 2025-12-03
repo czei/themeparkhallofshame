@@ -107,6 +107,58 @@ def get_today_range_to_now_utc() -> tuple[datetime, datetime]:
     return (start_utc, now_utc)
 
 
+def get_yesterday_range_utc() -> tuple[datetime, datetime, str]:
+    """
+    Get UTC datetime range for yesterday (previous complete Pacific day).
+
+    YESTERDAY is the complete 24-hour period before today in Pacific Time.
+    Unlike TODAY which is partial, YESTERDAY is immutable and cacheable.
+
+    Returns:
+        tuple: (start_utc, end_utc, label) where:
+            - start_utc = midnight Pacific yesterday, in UTC
+            - end_utc = midnight Pacific today (end of yesterday), in UTC
+            - label = Human-readable date (e.g., "Dec 1, 2025")
+
+    Example:
+        On Dec 2, 2025 (Pacific):
+        - Returns Dec 1, 2025 00:00:00 to Dec 2, 2025 00:00:00 Pacific
+        - label = "Dec 1, 2025"
+    """
+    today = get_today_pacific()
+    yesterday = today - timedelta(days=1)
+
+    # Get UTC ranges for yesterday
+    start_utc, end_utc = get_pacific_day_range_utc(yesterday)
+
+    # Format label: "Dec 1, 2025"
+    label = yesterday.strftime("%b %-d, %Y")
+
+    return (start_utc, end_utc, label)
+
+
+def get_yesterday_date_range() -> tuple[date, date, str]:
+    """
+    Get Pacific date for yesterday (previous complete day).
+
+    Returns:
+        tuple: (yesterday_date, yesterday_date, label) where:
+            - yesterday_date = Yesterday's date in Pacific Time
+            - end_date = Same as yesterday_date (single day)
+            - label = Human-readable date (e.g., "Dec 1, 2025")
+
+    Note: Both start and end are the same since YESTERDAY is a single day.
+    This matches the signature of get_last_week_date_range() for consistency.
+    """
+    today = get_today_pacific()
+    yesterday = today - timedelta(days=1)
+
+    # Format label: "Dec 1, 2025"
+    label = yesterday.strftime("%b %-d, %Y")
+
+    return (yesterday, yesterday, label)
+
+
 def date_to_pacific(utc_datetime: datetime) -> date:
     """
     Convert a UTC datetime to a Pacific date.
@@ -277,19 +329,27 @@ def get_calendar_period_info(period: str) -> dict:
     Get information about a calendar period for API responses.
 
     Args:
-        period: 'last_week' or 'last_month'
+        period: 'yesterday', 'last_week', or 'last_month'
 
     Returns:
         dict with:
             - start_date: ISO date string (YYYY-MM-DD)
             - end_date: ISO date string (YYYY-MM-DD)
             - label: Human-readable label for display
-            - period_type: 'week' or 'month'
+            - period_type: 'day', 'week', or 'month'
 
     Raises:
         ValueError: If period is not recognized
     """
-    if period == 'last_week':
+    if period == 'yesterday':
+        yesterday_date, _, label = get_yesterday_date_range()
+        return {
+            'start_date': yesterday_date.isoformat(),
+            'end_date': yesterday_date.isoformat(),
+            'label': label,
+            'period_type': 'day'
+        }
+    elif period == 'last_week':
         start_utc, end_utc, label = get_last_week_range_utc()
         # Convert back to Pacific dates for the response
         start_date = date_to_pacific(start_utc)
@@ -311,4 +371,4 @@ def get_calendar_period_info(period: str) -> dict:
             'period_type': 'month'
         }
     else:
-        raise ValueError(f"Unknown period: {period}. Must be 'last_week' or 'last_month'")
+        raise ValueError(f"Unknown period: {period}. Must be 'yesterday', 'last_week', or 'last_month'")

@@ -6,7 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Global application state
     const globalState = {
         filter: 'all-parks',  // Global filter: 'all-parks' or 'disney-universal'
-        period: 'live',       // Time period: 'live', 'today', 'last_week', 'last_month'
+        period: 'live',       // Time period: 'live', 'today', 'yesterday', 'last_week', 'last_month'
         currentView: 'downtime'  // Track current view for filter visibility
     };
 
@@ -103,40 +103,46 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * Initialize time period selector
+     * Initialize time period selector (including History dropdown)
      */
     function initTimePeriodSelector() {
         const timeBtns = document.querySelectorAll('.time-btn');
+        const historyDropdown = document.querySelector('.history-dropdown');
+        const historyBtn = document.getElementById('history-dropdown-btn');
+        const dropdownItems = document.querySelectorAll('.dropdown-item');
 
+        // Handle primary time buttons (Live, Today, Yesterday)
         timeBtns.forEach(btn => {
             btn.addEventListener('click', () => {
                 const newPeriod = btn.dataset.period;
-
-                if (newPeriod !== globalState.period) {
-                    // Update global state
-                    globalState.period = newPeriod;
-
-                    // Update UI
-                    updateTimePeriodUI();
-
-                    // Clear cache and prefetch with new period
-                    apiClient.clearCache();
-                    apiClient.prefetch(globalState.period, globalState.filter);
-
-                    // Update current component if it exists and has updatePeriod method
-                    if (currentComponent && typeof currentComponent.updatePeriod === 'function') {
-                        currentComponent.updatePeriod(globalState.period);
-                    } else if (currentComponent && currentComponent.state) {
-                        // Fallback: directly update state and refetch
-                        currentComponent.state.period = globalState.period;
-                        if (typeof currentComponent.fetchRankings === 'function') {
-                            currentComponent.fetchRankings();
-                        } else if (typeof currentComponent.fetchData === 'function') {
-                            currentComponent.fetchData();
-                        }
-                    }
-                }
+                selectPeriod(newPeriod);
             });
+        });
+
+        // Handle History dropdown toggle
+        if (historyBtn) {
+            historyBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                historyDropdown.classList.toggle('open');
+            });
+        }
+
+        // Handle dropdown items (Last Week, Last Month)
+        dropdownItems.forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const newPeriod = item.dataset.period;
+                selectPeriod(newPeriod);
+                // Close dropdown
+                historyDropdown.classList.remove('open');
+            });
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (historyDropdown && !historyDropdown.contains(e.target)) {
+                historyDropdown.classList.remove('open');
+            }
         });
 
         // Set initial UI state
@@ -144,12 +150,48 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
+     * Select a time period and update the view
+     */
+    function selectPeriod(newPeriod) {
+        if (newPeriod !== globalState.period) {
+            // Update global state
+            globalState.period = newPeriod;
+
+            // Update UI
+            updateTimePeriodUI();
+
+            // Clear cache and prefetch with new period
+            apiClient.clearCache();
+            apiClient.prefetch(globalState.period, globalState.filter);
+
+            // Update current component if it exists and has updatePeriod method
+            if (currentComponent && typeof currentComponent.updatePeriod === 'function') {
+                currentComponent.updatePeriod(globalState.period);
+            } else if (currentComponent && currentComponent.state) {
+                // Fallback: directly update state and refetch
+                currentComponent.state.period = globalState.period;
+                if (typeof currentComponent.fetchRankings === 'function') {
+                    currentComponent.fetchRankings();
+                } else if (typeof currentComponent.fetchData === 'function') {
+                    currentComponent.fetchData();
+                }
+            }
+        }
+    }
+
+    /**
      * Update time period UI to reflect current state
      */
     function updateTimePeriodUI() {
         const timeBtns = document.querySelectorAll('.time-btn');
+        const historyBtn = document.getElementById('history-dropdown-btn');
+        const dropdownItems = document.querySelectorAll('.dropdown-item');
         const isAwards = globalState.currentView === 'awards';
 
+        // Check if current period is a "history" period (dropdown item)
+        const isHistoryPeriod = ['last_week', 'last_month'].includes(globalState.period);
+
+        // Update primary time buttons
         timeBtns.forEach(btn => {
             // Hide/disable LIVE button for Awards tab
             if (btn.dataset.period === 'live') {
@@ -164,6 +206,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 btn.classList.add('active');
             } else {
                 btn.classList.remove('active');
+            }
+        });
+
+        // Update History button (active if any dropdown item is selected)
+        if (historyBtn) {
+            if (isHistoryPeriod) {
+                historyBtn.classList.add('active');
+            } else {
+                historyBtn.classList.remove('active');
+            }
+        }
+
+        // Update dropdown items
+        dropdownItems.forEach(item => {
+            if (item.dataset.period === globalState.period) {
+                item.classList.add('active');
+            } else {
+                item.classList.remove('active');
             }
         });
     }

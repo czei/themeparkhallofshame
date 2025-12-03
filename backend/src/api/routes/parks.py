@@ -6,15 +6,17 @@ Endpoints for park-level downtime rankings and statistics.
 
 Query File Mapping
 ------------------
-GET /parks/downtime?period=live     → database/queries/live/live_park_rankings.py (instantaneous)
-GET /parks/downtime?period=today    → database/queries/today/today_park_rankings.py (cumulative)
+GET /parks/downtime?period=live       → database/queries/live/live_park_rankings.py (instantaneous)
+GET /parks/downtime?period=today      → database/queries/today/today_park_rankings.py (cumulative)
+GET /parks/downtime?period=yesterday  → database/queries/yesterday/yesterday_park_rankings.py (full prev day)
 GET /parks/downtime?period=last_week  → database/queries/rankings/park_downtime_rankings.py
 GET /parks/downtime?period=last_month → database/queries/rankings/park_downtime_rankings.py
-GET /parks/waittimes?period=live    → StatsRepository.get_park_live_wait_time_rankings()
-GET /parks/waittimes?period=today   → database/queries/today/today_park_wait_times.py (cumulative)
-GET /parks/waittimes?period=last_week  → database/queries/rankings/park_wait_time_rankings.py
-GET /parks/waittimes?period=last_month → database/queries/rankings/park_wait_time_rankings.py
-GET /parks/<id>/details             → (uses multiple repositories)
+GET /parks/waittimes?period=live      → StatsRepository.get_park_live_wait_time_rankings()
+GET /parks/waittimes?period=today     → database/queries/today/today_park_wait_times.py (cumulative)
+GET /parks/waittimes?period=yesterday → database/queries/yesterday/yesterday_park_wait_times.py (full prev day)
+GET /parks/waittimes?period=last_week   → database/queries/rankings/park_wait_time_rankings.py
+GET /parks/waittimes?period=last_month  → database/queries/rankings/park_wait_time_rankings.py
+GET /parks/<id>/details               → (uses multiple repositories)
 """
 
 from flask import Blueprint, request, jsonify
@@ -30,6 +32,7 @@ from utils.cache import get_query_cache, generate_cache_key
 from database.queries.live import LiveParkRankingsQuery
 from database.queries.rankings import ParkDowntimeRankingsQuery, ParkWaitTimeRankingsQuery
 from database.queries.today import TodayParkRankingsQuery, TodayParkWaitTimesQuery
+from database.queries.yesterday import YesterdayParkRankingsQuery
 
 from utils.logger import logger
 from utils.timezone import get_today_pacific
@@ -73,10 +76,10 @@ def get_park_downtime_rankings():
     sort_by = request.args.get('sort_by', 'shame_score')
 
     # Validate period
-    if period not in ['live', 'today', 'last_week', 'last_month']:
+    if period not in ['live', 'today', 'yesterday', 'last_week', 'last_month']:
         return jsonify({
             "success": False,
-            "error": "Invalid period. Must be 'live', 'today', 'last_week', or 'last_month'"
+            "error": "Invalid period. Must be 'live', 'today', 'yesterday', 'last_week', or 'last_month'"
         }), 400
 
     # Validate filter
@@ -134,6 +137,14 @@ def get_park_downtime_rankings():
             elif period == 'today':
                 # TODAY: Cumulative data from midnight Pacific to now
                 query = TodayParkRankingsQuery(conn)
+                rankings = query.get_rankings(
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit,
+                    sort_by=sort_by
+                )
+            elif period == 'yesterday':
+                # YESTERDAY: Full previous Pacific day (immutable, highly cacheable)
+                query = YesterdayParkRankingsQuery(conn)
                 rankings = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit,
@@ -232,10 +243,10 @@ def get_park_wait_times():
     limit = min(int(request.args.get('limit', 50)), 100)
 
     # Validate period
-    if period not in ['live', 'today', 'last_week', 'last_month']:
+    if period not in ['live', 'today', 'yesterday', 'last_week', 'last_month']:
         return jsonify({
             "success": False,
-            "error": "Invalid period. Must be 'live', 'today', 'last_week', or 'last_month'"
+            "error": "Invalid period. Must be 'live', 'today', 'yesterday', 'last_week', or 'last_month'"
         }), 400
 
     # Validate filter
@@ -355,7 +366,7 @@ def get_park_details(park_id: int):
     """
     # Get period parameter (defaults to 'live' for backwards compatibility)
     period = request.args.get('period', 'live')
-    if period not in ('live', 'today', 'last_week', 'last_month'):
+    if period not in ('live', 'today', 'yesterday', 'last_week', 'last_month'):
         period = 'live'
 
     try:

@@ -6,13 +6,15 @@ Endpoints for ride-level downtime rankings, wait times, and live status.
 
 Query File Mapping
 ------------------
-GET /live/status-summary             → database/queries/live/status_summary.py
-GET /rides/downtime?period=live      → database/queries/live/live_ride_rankings.py (instantaneous)
-GET /rides/downtime?period=today     → database/queries/today/today_ride_rankings.py (cumulative)
-GET /rides/downtime?period=last_week  → database/queries/rankings/ride_downtime_rankings.py
-GET /rides/downtime?period=last_month → database/queries/rankings/ride_downtime_rankings.py
-GET /rides/waittimes?period=live     → StatsRepository.get_ride_live_wait_time_rankings()
-GET /rides/waittimes?period=today    → database/queries/today/today_ride_wait_times.py (cumulative)
+GET /live/status-summary               → database/queries/live/status_summary.py
+GET /rides/downtime?period=live        → database/queries/live/live_ride_rankings.py (instantaneous)
+GET /rides/downtime?period=today       → database/queries/today/today_ride_rankings.py (cumulative)
+GET /rides/downtime?period=yesterday   → database/queries/yesterday/yesterday_ride_rankings.py (full prev day)
+GET /rides/downtime?period=last_week   → database/queries/rankings/ride_downtime_rankings.py
+GET /rides/downtime?period=last_month  → database/queries/rankings/ride_downtime_rankings.py
+GET /rides/waittimes?period=live       → StatsRepository.get_ride_live_wait_time_rankings()
+GET /rides/waittimes?period=today      → database/queries/today/today_ride_wait_times.py (cumulative)
+GET /rides/waittimes?period=yesterday  → database/queries/yesterday/yesterday_ride_wait_times.py (full prev day)
 GET /rides/waittimes?period=last_week  → database/queries/rankings/ride_wait_time_rankings.py
 GET /rides/waittimes?period=last_month → database/queries/rankings/ride_wait_time_rankings.py
 """
@@ -30,6 +32,7 @@ from utils.cache import get_query_cache, generate_cache_key
 from database.queries.live import LiveRideRankingsQuery, StatusSummaryQuery
 from database.queries.rankings import RideDowntimeRankingsQuery, RideWaitTimeRankingsQuery
 from database.queries.today import TodayRideRankingsQuery, TodayRideWaitTimesQuery
+from database.queries.yesterday import YesterdayRideRankingsQuery
 
 from utils.logger import logger
 from utils.timezone import get_today_pacific
@@ -154,10 +157,10 @@ def get_ride_downtime_rankings():
     sort_by = request.args.get('sort_by', 'downtime_hours')
 
     # Validate period
-    if period not in ['live', 'today', 'last_week', 'last_month']:
+    if period not in ['live', 'today', 'yesterday', 'last_week', 'last_month']:
         return jsonify({
             "success": False,
-            "error": "Invalid period. Must be 'live', 'today', 'last_week', or 'last_month'"
+            "error": "Invalid period. Must be 'live', 'today', 'yesterday', 'last_week', or 'last_month'"
         }), 400
 
     # Validate filter
@@ -215,6 +218,13 @@ def get_ride_downtime_rankings():
             elif period == 'today':
                 # TODAY: Cumulative data from midnight Pacific to now
                 query = TodayRideRankingsQuery(conn)
+                rankings = query.get_rankings(
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit
+                )
+            elif period == 'yesterday':
+                # YESTERDAY: Full previous Pacific day (immutable, highly cacheable)
+                query = YesterdayRideRankingsQuery(conn)
                 rankings = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
@@ -308,10 +318,10 @@ def get_ride_wait_times():
     limit = min(int(request.args.get('limit', 100)), 200)
 
     # Validate period
-    if period not in ['live', 'today', 'last_week', 'last_month']:
+    if period not in ['live', 'today', 'yesterday', 'last_week', 'last_month']:
         return jsonify({
             "success": False,
-            "error": "Invalid period. Must be 'live', 'today', 'last_week', or 'last_month'"
+            "error": "Invalid period. Must be 'live', 'today', 'yesterday', 'last_week', or 'last_month'"
         }), 400
 
     # Validate filter

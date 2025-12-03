@@ -481,6 +481,7 @@ body {
 .time-selector {
     display: flex;
     gap: 0;
+    align-items: stretch;
 }
 
 .time-btn,
@@ -498,12 +499,10 @@ body {
     color: var(--charcoal);
 }
 
-.time-btn:first-child,
-.period-btn:first-child { border-left: 3px solid var(--coral); }
-.time-btn:nth-child(2),
-.period-btn:nth-child(2) { border-left: 3px solid var(--turquoise); border-right: 3px solid var(--turquoise); }
-.time-btn:last-child,
-.period-btn:last-child { border-right: 3px solid var(--gold); }
+/* Primary time buttons with colored left borders */
+.time-btn:nth-child(1) { border-left: 3px solid var(--coral); }
+.time-btn:nth-child(2) { border-left: 3px solid var(--turquoise); }
+.time-btn:nth-child(3) { border-left: 3px solid var(--gold); }
 
 .time-btn:hover,
 .period-btn:hover {
@@ -512,6 +511,101 @@ body {
 
 .time-btn.active,
 .period-btn.active {
+    background: var(--charcoal);
+    color: white;
+}
+
+/* History Dropdown */
+.history-dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+.history-btn {
+    padding: 12px 25px;
+    background: white;
+    border: none;
+    border-left: 3px solid var(--soft-pink);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    color: var(--charcoal);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 100%;
+}
+
+.history-btn .chevron {
+    font-size: 0.7rem;
+    transition: transform 0.3s ease;
+}
+
+.history-dropdown.open .history-btn .chevron {
+    transform: rotate(180deg);
+}
+
+.history-btn:hover {
+    background: var(--light-gray);
+}
+
+.history-btn.active {
+    background: var(--charcoal);
+    color: white;
+}
+
+.dropdown-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: white;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    min-width: 150px;
+    border-top: 3px solid var(--soft-pink);
+}
+
+.history-dropdown.open .dropdown-menu {
+    display: block;
+}
+
+.dropdown-item {
+    display: block;
+    width: 100%;
+    padding: 12px 20px;
+    background: white;
+    border: none;
+    border-left: 3px solid transparent;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    color: var(--charcoal);
+    text-align: left;
+}
+
+.dropdown-item:first-child {
+    border-left-color: var(--deep-teal);
+}
+
+.dropdown-item:last-child {
+    border-left-color: var(--coral);
+}
+
+.dropdown-item:hover {
+    background: var(--light-gray);
+}
+
+.dropdown-item.active {
     background: var(--charcoal);
     color: white;
 }

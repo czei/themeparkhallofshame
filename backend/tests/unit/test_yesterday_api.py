@@ -309,6 +309,69 @@ class TestChartsLiveAndTodaySupport:
             "park_shame_history.py should use full expression in GROUP BY for MariaDB compatibility"
 
 
+class TestChartsPeriodLabels:
+    """
+    Tests for correct period labels in frontend charts.
+
+    The frontend charts.js getPeriodLabel() method must return the
+    correct label for ALL supported periods including 'yesterday'.
+    """
+
+    def test_frontend_charts_get_period_label_includes_yesterday(self):
+        """
+        Frontend charts.js getPeriodLabel() must include 'yesterday' case.
+
+        BUG: When 'yesterday' is selected, the chart title shows 'Last Week'
+        because getPeriodLabel() defaults to 'Last Week' for unknown periods.
+
+        Fix: Add 'yesterday': 'Yesterday (Hourly)' to the labels map.
+        """
+        from pathlib import Path
+        charts_path = Path(__file__).parent.parent.parent.parent / "frontend" / "js" / "components" / "charts.js"
+        source_code = charts_path.read_text()
+
+        # The getPeriodLabel method should have 'yesterday' in its labels object
+        assert "'yesterday':" in source_code or '"yesterday":' in source_code, \
+            "charts.js getPeriodLabel() must include 'yesterday' period label"
+
+        # Verify it maps to something with 'Yesterday' (not 'Last Week')
+        assert "Yesterday" in source_code, \
+            "charts.js must have a 'Yesterday' label for the yesterday period"
+
+
+class TestMockDataTimeLimits:
+    """
+    Tests for mock data generation respecting current time.
+
+    When generating mock hourly data for TODAY/LIVE, the data should
+    only include hours up to the current hour, not all 18 hours.
+    """
+
+    def test_mock_hourly_data_respects_current_hour(self):
+        """
+        Mock hourly chart data should only include hours up to current time.
+
+        BUG: At 9am, mock data shows all 18 hours (6am-11pm) with full data.
+        This is impossible - we can't have data for hours that haven't happened.
+
+        Fix: _generate_mock_hourly_chart_data() should check current Pacific
+        time and only generate data for hours that have passed.
+        """
+        from pathlib import Path
+        trends_path = Path(__file__).parent.parent.parent / "src" / "api" / "routes" / "trends.py"
+        source_code = trends_path.read_text()
+
+        # The mock data generator should reference current time
+        # Look for Pacific timezone handling in the mock generator
+        assert "get_now_pacific" in source_code or "datetime.now" in source_code, \
+            "_generate_mock_hourly_chart_data should check current time"
+
+        # Check that the function limits data based on current hour
+        # This is a heuristic - look for hour comparison logic
+        assert "current_hour" in source_code.lower() or "now_hour" in source_code.lower(), \
+            "_generate_mock_hourly_chart_data should limit data to current hour"
+
+
 class TestTrendsYesterdaySupport:
     """
     Tests for YESTERDAY period support in trends API endpoints.

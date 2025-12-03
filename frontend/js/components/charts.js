@@ -174,8 +174,9 @@ class Charts {
      */
     getPeriodLabel() {
         const labels = {
-            'live': 'Today (Hourly)',
-            'today': 'Today (Hourly)',
+            'live': 'Today',
+            'today': 'Today',
+            'yesterday': 'Yesterday',
             'last_week': 'Last Week',
             'last_month': 'Last Month'
         };

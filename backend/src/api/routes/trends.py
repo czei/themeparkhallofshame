@@ -39,7 +39,7 @@ from database.queries.charts import (
 )
 
 from utils.logger import logger
-from utils.timezone import get_today_pacific, get_last_week_date_range, get_last_month_date_range
+from utils.timezone import get_today_pacific, get_now_pacific, get_last_week_date_range, get_last_month_date_range
 from utils.cache import get_query_cache, generate_cache_key
 
 # Create Blueprint
@@ -296,10 +296,10 @@ def get_chart_data():
                         limit=limit
                     )
 
-                # Generate mock hourly data if empty
+                # Generate mock hourly data if empty (for TODAY, limit to current hour)
                 if not chart_data or not chart_data.get('datasets') or len(chart_data.get('datasets', [])) == 0:
                     is_mock = True
-                    chart_data = _generate_mock_hourly_chart_data(data_type, limit)
+                    chart_data = _generate_mock_hourly_chart_data(data_type, limit, for_today=True)
 
             elif period == 'yesterday':
                 # Hourly data for yesterday (similar to today, but for previous day)
@@ -327,10 +327,10 @@ def get_chart_data():
                         limit=limit
                     )
 
-                # Generate mock hourly data if empty
+                # Generate mock hourly data if empty (for YESTERDAY, show full day)
                 if not chart_data or not chart_data.get('datasets') or len(chart_data.get('datasets', [])) == 0:
                     is_mock = True
-                    chart_data = _generate_mock_hourly_chart_data(data_type, limit)
+                    chart_data = _generate_mock_hourly_chart_data(data_type, limit, for_today=False)
 
             else:
                 # Daily data for last_week/last_month (calendar-based periods)
@@ -697,22 +697,41 @@ def _generate_mock_chart_data(data_type: str, days: int, limit: int) -> Dict[str
     }
 
 
-def _generate_mock_hourly_chart_data(data_type: str, limit: int) -> Dict[str, Any]:
+def _generate_mock_hourly_chart_data(data_type: str, limit: int, for_today: bool = True) -> Dict[str, Any]:
     """
-    Generate mock hourly chart data for TODAY when real data is empty.
+    Generate mock hourly chart data when real data is empty.
 
     Args:
         data_type: 'parks', 'rides', or 'waittimes'
         limit: Number of entities
+        for_today: If True, only generate data up to current hour (for TODAY/LIVE).
+                   If False, generate full day data (for YESTERDAY).
 
     Returns:
-        Chart data structure with mock hourly values (6am-11pm)
+        Chart data structure with mock hourly values (6am-11pm or current hour)
     """
     import random
 
-    # Hourly labels from 6am to 11pm
-    labels = [f"{h}:00" for h in range(6, 24)]
-    num_hours = 18  # 6am to 11pm
+    # Get current Pacific hour to limit data for TODAY
+    current_hour = get_now_pacific().hour
+
+    # For TODAY/LIVE: only show hours up to current time
+    # For YESTERDAY: show all hours (6am-11pm = hours 6-23)
+    if for_today:
+        # Start at 6am, end at current hour (or 6am minimum)
+        start_hour = 6
+        end_hour = max(start_hour, min(current_hour, 23))  # Cap at 11pm
+        # If before 6am, show no data
+        if current_hour < 6:
+            return {"labels": [], "datasets": []}
+    else:
+        # Full day for yesterday
+        start_hour = 6
+        end_hour = 23
+
+    # Generate labels for valid hours only
+    labels = [f"{h}:00" for h in range(start_hour, end_hour + 1)]
+    num_hours = len(labels)
 
     if data_type == 'parks':
         park_names = [

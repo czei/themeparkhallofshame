@@ -46,6 +46,69 @@ body {
 }
 
 /* ============================================
+   BETA WARNING BANNER - Mary Blair Collage Style
+   ============================================ */
+.beta-section {
+    background: var(--warm-white);
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    min-height: 120px;
+}
+
+.beta-content {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    background: rgba(255, 255, 255, 0.92);
+    padding: 16px 32px;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    font-family: 'Space Grotesk', sans-serif;
+}
+
+.beta-badge {
+    background: var(--coral);
+    color: white;
+    padding: 6px 14px;
+    border-radius: 4px;
+    font-weight: 700;
+    font-size: 0.9rem;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+}
+
+.beta-message {
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--charcoal);
+}
+
+@media (max-width: 600px) {
+    .beta-section {
+        min-height: 100px;
+    }
+
+    .beta-content {
+        flex-direction: column;
+        gap: 10px;
+        padding: 14px 20px;
+        margin: 0 10px;
+    }
+
+    .beta-message {
+        font-size: 0.9rem;
+        text-align: center;
+    }
+}
+
+/* ============================================
    SPONSORSHIP SECTION - Mary Blair Collage Style
    ============================================ */
 .sponsor-section {

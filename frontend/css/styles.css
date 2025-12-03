@@ -1994,6 +1994,61 @@ td {
     margin-left: 0.5rem;
 }
 
+/* Actual calculation display with numbers */
+.formula-calculation {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 8px;
+    border: 2px solid var(--charcoal);
+    font-family: 'Space Grotesk', monospace;
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.calc-fraction {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    background: white;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+}
+
+.calc-numerator {
+    color: var(--coral);
+    padding-bottom: 0.15rem;
+    border-bottom: 2px solid var(--charcoal);
+}
+
+.calc-denominator {
+    color: var(--deep-teal);
+    padding-top: 0.15rem;
+}
+
+.calc-multiply {
+    color: var(--charcoal);
+}
+
+.calc-equals {
+    color: var(--charcoal);
+    font-weight: 800;
+}
+
+.calc-result {
+    color: var(--coral);
+    font-weight: 800;
+    font-size: 1.4rem;
+    background: white;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    border: 2px solid var(--coral);
+}
+
 .formula-explanation {
     font-size: 0.85rem;
     color: #666;
@@ -2319,6 +2374,66 @@ td {
     color: var(--deep-teal);
     font-weight: 600;
     font-size: 0.75rem;
+}
+
+/* Shame Score Chart Section */
+.shame-chart-section {
+    margin: 1.5rem 0;
+    background: white;
+    border: 3px solid var(--charcoal);
+    padding: 1rem;
+}
+
+.shame-chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.shame-chart-header h4 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--charcoal);
+    margin: 0;
+}
+
+.chart-average-badge {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 700;
+    padding: 0.25rem 0.75rem;
+    border: 2px solid var(--charcoal);
+}
+
+.chart-average-badge.low {
+    background: var(--mint);
+    color: var(--charcoal);
+}
+
+.chart-average-badge.medium {
+    background: var(--gold);
+    color: var(--charcoal);
+}
+
+.chart-average-badge.high {
+    background: var(--coral);
+    color: white;
+}
+
+.shame-chart-container {
+    position: relative;
+    height: 200px;
+    width: 100%;
+}
+
+.chart-description {
+    font-size: 0.8rem;
+    color: #666;
+    margin: 0.75rem 0 0 0;
+    font-style: italic;
+    text-align: center;
 }
 
 /* Park Details - Current Status Section */
@@ -3055,6 +3170,63 @@ footer a:hover,
     padding: 20px 0;
 }
 
+/* Awards Period Toggle - inline period selector specific to Awards tab */
+.awards-period-toggle {
+    display: flex;
+    justify-content: center;
+    gap: 0;
+    margin-bottom: 24px;
+}
+
+.awards-period-btn {
+    padding: 10px 20px;
+    background: white;
+    border: none;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    color: var(--charcoal);
+    border-top: 2px solid var(--charcoal);
+    border-bottom: 2px solid var(--charcoal);
+    border-left: 1px solid var(--charcoal);
+    border-right: 1px solid var(--charcoal);
+}
+
+.awards-period-btn:first-child {
+    border-radius: 6px 0 0 6px;
+    border-left: 2px solid var(--charcoal);
+}
+
+.awards-period-btn:last-child {
+    border-radius: 0 6px 6px 0;
+    border-right: 2px solid var(--charcoal);
+}
+
+.awards-period-btn:hover {
+    background: var(--light-gray);
+}
+
+.awards-period-btn.active {
+    background: var(--charcoal);
+    color: white;
+}
+
+@media (max-width: 480px) {
+    .awards-period-toggle {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .awards-period-btn {
+        padding: 8px 14px;
+        font-size: 13px;
+        border-radius: 6px !important;
+        border: 2px solid var(--charcoal) !important;
+    }
+}
+
 /* Awards Grid - 2x2 layout */
 .awards-grid-2x2 {
     display: grid;
@@ -3071,210 +3243,236 @@ footer a:hover,
     }
 }
 
-/* Award Card V2 - Dark body with colored header */
-.award-card-v2 {
-    border-radius: 12px;
+/* =====================================================
+   Award Card V3 - Branded Social Media Ready Cards
+   Matching website header style with dark frame
+   ===================================================== */
+
+.award-card-v3 {
+    position: relative;
+    border-radius: 8px;
     overflow: hidden;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    background: var(--charcoal);
+    padding: 16px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.25);
     transition: transform 0.2s, box-shadow 0.2s;
 }
 
-.award-card-v2:hover {
+.award-card-v3:hover {
     transform: translateY(-4px);
-    box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
 }
 
-/* Header - colored section */
-.award-header-v2 {
-    padding: 16px 20px;
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
+/* Inner container with geometric background - fills the card */
+.award-geo-bg {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--cream);
 }
 
-.award-header-icon {
-    font-size: 28px;
-    line-height: 1;
+/* Geometric shapes - matching website header style */
+.award-geo-bg .geo-block {
+    position: absolute;
 }
 
-.award-header-text {
-    flex: 1;
+/* Block positions - mirroring the header's geometric bar pattern */
+.award-card-v3 .geo-block-1 { background: var(--coral); width: 30%; height: 100%; left: 0; top: 0; }
+.award-card-v3 .geo-block-2 { background: var(--soft-pink); width: 18%; height: 70%; left: 15%; top: 15%; }
+.award-card-v3 .geo-block-3 { background: var(--turquoise); width: 25%; height: 100%; left: 35%; top: 0; }
+.award-card-v3 .geo-block-4 { background: var(--gold); width: 40%; height: 100%; right: 0; top: 0; }
+
+/* Main content area - white card overlaid on geometric bg */
+.award-content-v3 {
+    position: relative;
+    z-index: 1;
+    margin: 56px 40px;
+    background: white;
+    border: 1px solid #e0e0e0;
+    padding: 24px 28px 28px;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
 
-.award-header-title {
+/* Branded logo header - text with colored bars */
+.award-brand-logo {
+    display: block;
+    margin-bottom: 20px;
+}
+
+.award-brand-logo .logo-top-text {
     font-family: 'Space Grotesk', sans-serif;
-    font-size: 1.1rem;
+    font-size: 0.85rem;
     font-weight: 700;
-    color: white;
+    color: var(--coral);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    display: block;
     margin-bottom: 2px;
 }
 
-.award-header-subtitle {
-    font-size: 0.8rem;
-    color: rgba(255,255,255,0.85);
-    line-height: 1.3;
+.award-brand-logo .logo-bottom-text {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: var(--turquoise);
+    letter-spacing: 2px;
+    display: block;
+    margin-bottom: 10px;
 }
 
-/* Header colors per award type */
-.award-card-wait-park .award-header-v2 {
-    background: var(--gold);
-}
-.award-card-wait-park .award-header-title,
-.award-card-wait-park .award-header-subtitle {
-    color: var(--charcoal);
-}
-.award-card-wait-park .award-header-subtitle {
-    color: rgba(42,42,42,0.75);
-}
-
-.award-card-wait-ride .award-header-v2 {
-    background: var(--turquoise);
-}
-
-.award-card-reliable-park .award-header-v2 {
-    background: var(--coral);
-}
-
-.award-card-reliable-ride .award-header-v2 {
-    background: var(--soft-pink);
-}
-.award-card-reliable-ride .award-header-title,
-.award-card-reliable-ride .award-header-subtitle {
-    color: var(--charcoal);
-}
-.award-card-reliable-ride .award-header-subtitle {
-    color: rgba(42,42,42,0.75);
-}
-
-/* Body - dark section */
-.award-body-v2 {
-    background: #2A2A2A;
-    padding: 24px 20px;
-    text-align: center;
-    min-height: 180px;
+/* Colored bars under logo text */
+.award-brand-logo .logo-bars {
     display: flex;
-    flex-direction: column;
     justify-content: center;
+    gap: 8px;
 }
 
-/* Award Badge */
-.award-badge-v2 {
-    display: inline-block;
-    background: rgba(255,255,255,0.1);
-    color: white;
-    font-size: 0.7rem;
-    font-weight: 700;
-    padding: 6px 14px;
-    border-radius: 20px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 12px;
+.award-brand-logo .logo-bar {
+    height: 4px;
+    width: 60px;
 }
 
-/* Badge colors match header */
-.award-card-wait-park .award-badge-v2 {
-    background: var(--gold);
-    color: var(--charcoal);
-}
+.award-brand-logo .logo-bar-coral { background: var(--coral); }
+.award-brand-logo .logo-bar-turquoise { background: var(--turquoise); }
+.award-brand-logo .logo-bar-gold { background: var(--gold); }
+.award-brand-logo .logo-bar-pink { background: var(--soft-pink); }
 
-.award-card-wait-ride .award-badge-v2 {
-    background: var(--turquoise);
-    color: white;
-}
-
-.award-card-reliable-park .award-badge-v2 {
-    background: var(--coral);
-    color: white;
-}
-
-.award-card-reliable-ride .award-badge-v2 {
-    background: var(--soft-pink);
-    color: var(--charcoal);
-}
-
-/* Period label */
-.award-period-v2 {
+/* Category label */
+.award-category-v3 {
+    font-family: 'Inter', sans-serif;
     font-size: 0.75rem;
     font-weight: 600;
+    color: var(--charcoal);
+    letter-spacing: 2px;
     text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 8px;
+    margin-bottom: 4px;
 }
 
-.award-card-wait-park .award-period-v2 {
-    color: var(--gold);
-}
-
-.award-card-wait-ride .award-period-v2 {
-    color: var(--turquoise);
-}
-
-.award-card-reliable-park .award-period-v2 {
-    color: var(--coral);
-}
-
-.award-card-reliable-ride .award-period-v2 {
-    color: var(--soft-pink);
+/* Period/date */
+.award-period-v3 {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.9rem;
+    color: #666;
+    margin-bottom: 16px;
 }
 
 /* Winner name */
-.award-winner-v2 {
+.award-winner-v3 {
     font-family: 'Space Grotesk', sans-serif;
-    font-size: 1.4rem;
+    font-size: 1.6rem;
     font-weight: 700;
-    color: white;
-    margin-bottom: 4px;
+    color: var(--coral);
     line-height: 1.2;
+    margin-bottom: 4px;
 }
 
-/* Park name (for ride awards) */
-.award-park-v2 {
+/* Location/park name */
+.award-location-v3 {
+    font-family: 'Inter', sans-serif;
     font-size: 0.95rem;
-    color: rgba(255,255,255,0.6);
-    margin-bottom: 6px;
-    font-style: italic;
+    color: #555;
+    margin-bottom: 16px;
 }
 
-/* Stat text */
-.award-stat-v2 {
-    font-size: 0.9rem;
-    color: rgba(255,255,255,0.7);
+/* Social handle */
+.award-handle-v3 {
+    display: inline-block;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.8rem;
+    color: #666;
+    border: 1px solid #ddd;
+    padding: 6px 16px;
+    border-radius: 20px;
+    margin-bottom: 20px;
+}
+
+/* Stats row */
+.award-stats-v3 {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+}
+
+.award-stat-box {
+    background: var(--gold);
+    border: 2px solid var(--charcoal);
+    padding: 10px 20px;
+    min-width: 90px;
+}
+
+.award-stat-value {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--charcoal);
+    line-height: 1;
+}
+
+.award-stat-label {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--charcoal);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 4px;
+}
+
+/* Data source attribution */
+.award-data-source {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.6rem;
+    color: #888;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid #e0e0e0;
 }
 
 /* Empty state */
-.award-empty-v2 {
-    color: rgba(255,255,255,0.5);
+.award-empty-v3 {
+    padding: 40px 20px;
+    color: #999;
     font-size: 0.9rem;
 }
 
 /* Responsive adjustments */
-@media (max-width: 480px) {
-    .award-header-v2 {
-        padding: 14px 16px;
+@media (max-width: 600px) {
+    .award-card-v3 {
+        padding: 12px;
     }
 
-    .award-header-icon {
-        font-size: 24px;
+    .award-content-v3 {
+        margin: 30px 16px;
+        padding: 20px 20px 24px;
     }
 
-    .award-header-title {
-        font-size: 1rem;
-    }
-
-    .award-header-subtitle {
+    .award-brand-logo .logo-top-text {
         font-size: 0.75rem;
     }
 
-    .award-body-v2 {
-        padding: 20px 16px;
-        min-height: 160px;
+    .award-brand-logo .logo-bottom-text {
+        font-size: 1.1rem;
     }
 
-    .award-winner-v2 {
-        font-size: 1.2rem;
+    .award-brand-logo .logo-bar {
+        width: 45px;
     }
 
-    .award-stat-v2 {
-        font-size: 0.85rem;
+    .award-winner-v3 {
+        font-size: 1.25rem;
+    }
+
+    .award-stat-box {
+        padding: 6px 12px;
+        min-width: 70px;
+    }
+
+    .award-stat-value {
+        font-size: 1.1rem;
     }
 }

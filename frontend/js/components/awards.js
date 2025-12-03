@@ -10,7 +10,7 @@ class Awards {
         this.apiClient = apiClient;
         this.container = document.getElementById(containerId);
         this.state = {
-            period: 'today',  // Awards default to 'today' (no 'live' option)
+            period: 'yesterday',  // Awards default to 'yesterday' (first complete period)
             filter: 'all-parks',  // Awards always show all parks
             loading: false,
             error: null,
@@ -20,6 +20,9 @@ class Awards {
             leastReliablePark: null,
             leastReliableRide: null
         };
+
+        // Valid periods for awards (only completed time periods - no live/today)
+        this.validPeriods = ['yesterday', 'last_week', 'last_month'];
     }
 
     /**
@@ -110,23 +113,9 @@ class Awards {
                 return `${startMonth} ${startDay} - ${endMonth} ${endDay}, ${year}`;
             }
         } else if (this.state.period === 'last_month') {
-            // Show date range: "Nov 2 - Dec 1, 2025"
-            const endDate = new Date(now);
-            endDate.setDate(endDate.getDate() - 1); // Yesterday
-            const startDate = new Date(endDate);
-            startDate.setDate(startDate.getDate() - 29); // 30 days ago
-
-            const startMonth = startDate.toLocaleDateString('en-US', { month: 'short' });
-            const startDay = startDate.getDate();
-            const endMonth = endDate.toLocaleDateString('en-US', { month: 'short' });
-            const endDay = endDate.getDate();
-            const year = endDate.getFullYear();
-
-            if (startMonth === endMonth) {
-                return `${startMonth} ${startDay} - ${endDay}, ${year}`;
-            } else {
-                return `${startMonth} ${startDay} - ${endMonth} ${endDay}, ${year}`;
-            }
+            // Show previous calendar month name: "November 2025"
+            const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            return lastMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
         }
 
         return now.toLocaleDateString('en-US', options);
@@ -165,59 +154,51 @@ class Awards {
 
         this.container.innerHTML = `
             <div class="awards-view">
+                ${this.renderPeriodToggle()}
                 <div class="awards-grid-2x2">
                     ${this.renderAwardCard({
                         type: 'reliable-park',
-                        headerTitle: 'Least Reliable \u00b7 Park',
-                        headerSubtitle: 'Park with highest cumulative downtime / shame score',
-                        badgeText: 'RELIABILITY AWARD',
-                        badgeIcon: '\ud83d\udd27',
+                        category: 'LEAST RELIABLE PARK',
                         winner: this.state.leastReliablePark,
                         winnerName: this.state.leastReliablePark?.park_name,
-                        statText: this.state.leastReliablePark
-                            ? `${Number(this.state.leastReliablePark.avg_shame_score || 0).toFixed(2)} shame score \u00b7 ${Number(this.state.leastReliablePark.uptime_percentage || 0).toFixed(1)}% uptime`
-                            : null
+                        location: this.state.leastReliablePark?.location,
+                        stats: this.state.leastReliablePark ? [
+                            { value: Number(this.state.leastReliablePark.avg_shame_score || 0).toFixed(2), label: 'SHAME' },
+                            { value: `${Number(this.state.leastReliablePark.uptime_percentage || 0).toFixed(1)}%`, label: 'UPTIME' }
+                        ] : []
                     })}
 
                     ${this.renderAwardCard({
                         type: 'reliable-ride',
-                        headerTitle: 'Least Reliable \u00b7 Ride',
-                        headerSubtitle: 'Individual ride with most downtime / outages',
-                        badgeText: 'RELIABILITY AWARD',
-                        badgeIcon: '\ud83d\udcc9',
+                        category: 'LEAST RELIABLE RIDE',
                         winner: this.state.leastReliableRide,
                         winnerName: this.state.leastReliableRide?.ride_name,
-                        parkName: this.state.leastReliableRide?.park_name,
-                        statText: this.state.leastReliableRide
-                            ? `${Number(this.state.leastReliableRide.downtime_hours || 0).toFixed(1)}h downtime`
-                            : null
+                        location: this.state.leastReliableRide?.park_name,
+                        stats: this.state.leastReliableRide ? [
+                            { value: `${Number(this.state.leastReliableRide.downtime_hours || 0).toFixed(1)}h`, label: 'DOWNTIME' }
+                        ] : []
                     })}
 
                     ${this.renderAwardCard({
                         type: 'wait-park',
-                        headerTitle: 'Longest Wait Time \u00b7 Park',
-                        headerSubtitle: 'Park with highest average wait across all rides',
-                        badgeText: 'WAIT TIME AWARD',
-                        badgeIcon: '\u23f1',
+                        category: 'LONGEST AVG WAIT - PARK',
                         winner: this.state.longestWaitPark,
                         winnerName: this.state.longestWaitPark?.park_name,
-                        statText: this.state.longestWaitPark
-                            ? `${Math.round(this.state.longestWaitPark.avg_wait_time || 0)} min average wait`
-                            : null
+                        location: this.state.longestWaitPark?.location,
+                        stats: this.state.longestWaitPark ? [
+                            { value: `${Math.round(this.state.longestWaitPark.avg_wait_time || 0)}`, label: 'AVG MINS' }
+                        ] : []
                     })}
 
                     ${this.renderAwardCard({
                         type: 'wait-ride',
-                        headerTitle: 'Longest Wait Time \u00b7 Ride',
-                        headerSubtitle: 'Individual ride with highest average queue',
-                        badgeText: 'WAIT TIME AWARD',
-                        badgeIcon: '\ud83c\udfa2',
+                        category: 'LONGEST AVG WAIT - RIDE',
                         winner: this.state.longestWaitRide,
                         winnerName: this.state.longestWaitRide?.ride_name,
-                        parkName: this.state.longestWaitRide?.park_name,
-                        statText: this.state.longestWaitRide
-                            ? `${Math.round(this.state.longestWaitRide.avg_wait_time || 0)} min average wait`
-                            : null
+                        location: this.state.longestWaitRide?.park_name,
+                        stats: this.state.longestWaitRide ? [
+                            { value: `${Math.round(this.state.longestWaitRide.avg_wait_time || 0)}`, label: 'AVG MINS' }
+                        ] : []
                     })}
                 </div>
             </div>
@@ -227,50 +208,103 @@ class Awards {
     }
 
     /**
-     * Render a single award card matching the mockup design
-     * @param {string} parkName - For ride awards, the park the ride belongs to
+     * Render branded logo for award card
      */
-    renderAwardCard({ type, headerTitle, headerSubtitle, badgeText, badgeIcon, winner, winnerName, parkName, statText }) {
+    renderBrandLogo() {
+        return `
+            <div class="award-brand-logo">
+                <span class="logo-top-text">THEME PARK</span>
+                <span class="logo-bottom-text">HALL OF SHAME</span>
+                <div class="logo-bars">
+                    <div class="logo-bar logo-bar-coral"></div>
+                    <div class="logo-bar logo-bar-turquoise"></div>
+                    <div class="logo-bar logo-bar-gold"></div>
+                    <div class="logo-bar logo-bar-pink"></div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render a single branded award card with Mary Blair geometric background
+     */
+    renderAwardCard({ type, category, winner, winnerName, location, stats }) {
         const periodLabel = this.getPeriodLabel();
 
         if (!winner) {
             return `
-                <div class="award-card-v2 award-card-${type}">
-                    <div class="award-header-v2">
-                        <div class="award-header-icon">${badgeIcon}</div>
-                        <div class="award-header-text">
-                            <div class="award-header-title">${headerTitle}</div>
-                            <div class="award-header-subtitle">${headerSubtitle}</div>
-                        </div>
+                <div class="award-card-v3 award-card-${type}">
+                    <div class="award-geo-bg">
+                        <div class="geo-block geo-block-1"></div>
+                        <div class="geo-block geo-block-2"></div>
+                        <div class="geo-block geo-block-3"></div>
+                        <div class="geo-block geo-block-4"></div>
                     </div>
-                    <div class="award-body-v2">
-                        <div class="award-empty-v2">
-                            <p>No data available for this period</p>
+                    <div class="award-content-v3">
+                        ${this.renderBrandLogo()}
+                        <div class="award-category-v3">${category}</div>
+                        <div class="award-period-v3">${periodLabel}</div>
+                        <div class="award-empty-v3">
+                            <p>No data available</p>
                         </div>
                     </div>
                 </div>
             `;
         }
 
-        // For ride awards, show park name below ride name
-        const parkNameHtml = parkName ? `<div class="award-park-v2">${this.escapeHtml(parkName)}</div>` : '';
+        // Render stats boxes
+        const statsHtml = stats.length > 0 ? `
+            <div class="award-stats-v3">
+                ${stats.map(stat => `
+                    <div class="award-stat-box">
+                        <div class="award-stat-value">${stat.value}</div>
+                        <div class="award-stat-label">${stat.label}</div>
+                    </div>
+                `).join('')}
+            </div>
+        ` : '';
 
         return `
-            <div class="award-card-v2 award-card-${type}">
-                <div class="award-header-v2">
-                    <div class="award-header-icon">${badgeIcon}</div>
-                    <div class="award-header-text">
-                        <div class="award-header-title">${headerTitle}</div>
-                        <div class="award-header-subtitle">${headerSubtitle}</div>
-                    </div>
+            <div class="award-card-v3 award-card-${type}">
+                <div class="award-geo-bg">
+                    <div class="geo-block geo-block-1"></div>
+                    <div class="geo-block geo-block-2"></div>
+                    <div class="geo-block geo-block-3"></div>
+                    <div class="geo-block geo-block-4"></div>
                 </div>
-                <div class="award-body-v2">
-                    <div class="award-badge-v2">${badgeIcon} ${badgeText}</div>
-                    <div class="award-period-v2">${periodLabel}</div>
-                    <div class="award-winner-v2">${this.escapeHtml(winnerName)}</div>
-                    ${parkNameHtml}
-                    <div class="award-stat-v2">${statText}</div>
+                <div class="award-content-v3">
+                    ${this.renderBrandLogo()}
+                    <div class="award-category-v3">${category}</div>
+                    <div class="award-period-v3">${periodLabel}</div>
+                    <div class="award-winner-v3">${this.escapeHtml(winnerName)}</div>
+                    <div class="award-location-v3">${this.escapeHtml(location || '')}</div>
+                    <div class="award-handle-v3">@ThemeParkShame</div>
+                    ${statsHtml}
+                    <div class="award-data-source">Data provided by ThemeParks.wiki</div>
                 </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render the period toggle for awards
+     * Only shows completed periods: Yesterday, Last Week, Last Month
+     */
+    renderPeriodToggle() {
+        const periodLabels = {
+            'yesterday': 'Yesterday',
+            'last_week': 'Last Week',
+            'last_month': 'Last Month'
+        };
+
+        const buttons = this.validPeriods.map(period => {
+            const isActive = this.state.period === period;
+            return `<button class="awards-period-btn${isActive ? ' active' : ''}" data-period="${period}">${periodLabels[period]}</button>`;
+        }).join('');
+
+        return `
+            <div class="awards-period-toggle">
+                ${buttons}
             </div>
         `;
     }
@@ -305,10 +339,14 @@ class Awards {
 
     /**
      * Update period (called by app.js global period selector)
+     * Awards only support completed periods: yesterday, last_week, last_month
      */
     updatePeriod(newPeriod) {
-        // Awards don't support 'live' - use 'today' instead
-        const effectivePeriod = newPeriod === 'live' ? 'today' : newPeriod;
+        // Awards only support completed periods - map invalid periods to 'yesterday'
+        let effectivePeriod = newPeriod;
+        if (!this.validPeriods.includes(newPeriod)) {
+            effectivePeriod = 'yesterday';
+        }
 
         if (effectivePeriod !== this.state.period) {
             this.state.period = effectivePeriod;
@@ -327,6 +365,18 @@ class Awards {
                 this.fetchAwardsData();
             });
         }
+
+        // Period toggle buttons
+        const periodBtns = this.container.querySelectorAll('.awards-period-btn');
+        periodBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const newPeriod = btn.dataset.period;
+                if (newPeriod !== this.state.period) {
+                    this.state.period = newPeriod;
+                    this.fetchAwardsData();
+                }
+            });
+        });
     }
 }
 

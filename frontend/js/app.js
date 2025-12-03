@@ -46,9 +46,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // Update filter visibility based on view
             updateFilterVisibility();
 
-            // If switching to awards and currently on 'live', switch to 'today'
-            if (view === 'awards' && globalState.period === 'live') {
-                globalState.period = 'today';
+            // If switching to awards and currently on 'live' or 'today', switch to 'yesterday'
+            // Awards only show completed periods (yesterday, last_week, last_month)
+            if (view === 'awards' && (globalState.period === 'live' || globalState.period === 'today')) {
+                globalState.period = 'yesterday';
                 updateTimePeriodUI();
             }
 
@@ -236,10 +237,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /**
      * Update filter visibility based on current view
-     * Awards tab hides the park filter (always shows all parks)
+     * Awards tab hides the park filter AND time selector (has its own inline toggle)
      */
     function updateFilterVisibility() {
         const filterRow = document.querySelector('.park-filter');
+        const timeSelector = document.querySelector('.time-selector');
         const isAwards = globalState.currentView === 'awards';
 
         if (filterRow) {
@@ -247,6 +249,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 filterRow.classList.add('hidden');
             } else {
                 filterRow.classList.remove('hidden');
+            }
+        }
+
+        // Hide global time selector for Awards (it has its own inline period toggle)
+        if (timeSelector) {
+            if (isAwards) {
+                timeSelector.classList.add('hidden');
+            } else {
+                timeSelector.classList.remove('hidden');
             }
         }
 
@@ -289,8 +300,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'awards':
                     if (typeof Awards !== 'undefined') {
                         currentComponent = new Awards(apiClient, 'view-container', globalState.filter);
-                        // Awards uses 'today' if 'live' is selected
-                        currentComponent.state.period = globalState.period === 'live' ? 'today' : globalState.period;
+                        // Awards only supports completed periods (yesterday, last_week, last_month)
+                        // Map 'live' and 'today' to 'yesterday'
+                        const validAwardsPeriods = ['yesterday', 'last_week', 'last_month'];
+                        currentComponent.state.period = validAwardsPeriods.includes(globalState.period)
+                            ? globalState.period
+                            : 'yesterday';
                         await currentComponent.init();
                     } else {
                         throw new Error('Awards component not loaded');

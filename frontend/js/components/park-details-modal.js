@@ -12,6 +12,7 @@ class ParkDetailsModal {
             error: null,
             parkDetails: null
         };
+        this.chartInstance = null;  // Store Chart.js instance for cleanup
     }
 
     /**
@@ -58,6 +59,11 @@ class ParkDetailsModal {
      * Close modal
      */
     close() {
+        // Cleanup chart instance
+        if (this.chartInstance) {
+            this.chartInstance.destroy();
+            this.chartInstance = null;
+        }
         this.state.isOpen = false;
         this.render();
     }
@@ -124,12 +130,15 @@ class ParkDetailsModal {
             return '<div class="empty-state"><p>No park details available</p></div>';
         }
 
-        const { park, tier_distribution, operating_sessions, current_status, shame_breakdown } = this.state.parkDetails;
+        const { park, tier_distribution, operating_sessions, current_status, shame_breakdown, chart_data } = this.state.parkDetails;
+
+        // Only show current status for LIVE period
+        const showCurrentStatus = this.state.period === 'live';
 
         return `
             <div class="park-details-content">
-                ${this.renderShameBreakdown(shame_breakdown)}
-                ${this.renderCurrentStatus(current_status)}
+                ${this.renderShameBreakdown(shame_breakdown, chart_data)}
+                ${showCurrentStatus ? this.renderCurrentStatus(current_status) : ''}
                 ${this.renderTierDistribution(tier_distribution)}
                 ${this.renderParkInfo(park)}
             </div>
@@ -139,26 +148,27 @@ class ParkDetailsModal {
     /**
      * Render shame score breakdown - dispatches to appropriate renderer based on breakdown_type
      */
-    renderShameBreakdown(breakdown) {
+    renderShameBreakdown(breakdown, chartData = null) {
         if (!breakdown) return '';
 
         // Dispatch based on breakdown_type from API
         switch (breakdown.breakdown_type) {
             case 'today':
             case 'yesterday':
-                return this.renderTodayShameBreakdown(breakdown);
+                return this.renderTodayShameBreakdown(breakdown, chartData);
             case 'last_week':
             case 'last_month':
                 return this.renderHistoricalShameBreakdown(breakdown);
             default:
-                return this.renderLiveShameBreakdown(breakdown);
+                return this.renderLiveShameBreakdown(breakdown, chartData);
         }
     }
 
     /**
      * Render LIVE shame score breakdown - shows rides currently down RIGHT NOW
+     * When chartData is provided with granularity='minutes', shows recent snapshot trend
      */
-    renderLiveShameBreakdown(breakdown) {
+    renderLiveShameBreakdown(breakdown, chartData = null) {
         const { rides_down, total_park_weight, total_weighted_down, shame_score, park_is_open } = breakdown;
 
         // If park is closed, show that instead
@@ -177,11 +187,6 @@ class ParkDetailsModal {
                 </div>
             `;
         }
-
-        // Group rides by tier
-        const tier1Rides = rides_down.filter(r => r.tier === 1);
-        const tier2Rides = rides_down.filter(r => r.tier === 2);
-        const tier3Rides = rides_down.filter(r => r.tier === 3);
 
         return `
             <div class="shame-breakdown-section">
@@ -202,25 +207,34 @@ class ParkDetailsModal {
                     <div class="formula">
                         <span class="formula-part">Shame Score</span> =
                         <span class="formula-fraction">
-                            <span class="numerator">Sum of Down Ride Weights (${total_weighted_down.toFixed(1)})</span>
-                            <span class="denominator">Total Park Weight (${total_park_weight.toFixed(1)})</span>
+                            <span class="numerator">Sum of Down Ride Weights</span>
+                            <span class="denominator">Total Park Weight</span>
                         </span>
                         <span class="formula-multiplier">× 10</span>
                     </div>
+                    <div class="formula-calculation">
+                        <span class="calc-fraction">
+                            <span class="calc-numerator">${total_weighted_down.toFixed(1)}</span>
+                            <span class="calc-denominator">${total_park_weight.toFixed(1)}</span>
+                        </span>
+                        <span class="calc-multiply">× 10</span>
+                        <span class="calc-equals">=</span>
+                        <span class="calc-result">${shame_score.toFixed(2)}</span>
+                    </div>
                     <div class="formula-explanation">
                         The shame score measures how much of a park's ride capacity is currently unavailable,
-                        weighted by ride importance. Flagship attractions (Tier 1) count 5x more than minor rides (Tier 3).
+                        weighted by ride importance. Flagship attractions (Tier 1) count 3x more than minor rides (Tier 3).
                         Scores typically range from 0 (perfect) to 10+ (severe problems).
                     </div>
                 </div>
+
+                ${chartData && chartData.granularity === 'minutes' ? this.renderLiveChart(chartData) : ''}
 
                 ${rides_down.length > 0 ? `
                     <div class="rides-down-section">
                         <h4>Rides Currently Down (${rides_down.length})</h4>
                         <div class="rides-down-list">
-                            ${tier1Rides.length > 0 ? this.renderRidesByTier(tier1Rides, 1, 'Flagship Attractions', '5x weight') : ''}
-                            ${tier2Rides.length > 0 ? this.renderRidesByTier(tier2Rides, 2, 'Standard Attractions', '2x weight') : ''}
-                            ${tier3Rides.length > 0 ? this.renderRidesByTier(tier3Rides, 3, 'Minor Attractions', '1x weight') : ''}
+                            ${this.renderRidesByWeight(rides_down)}
                         </div>
                     </div>
                 ` : `
@@ -235,7 +249,7 @@ class ParkDetailsModal {
                     <div class="tier-weights-grid">
                         <div class="tier-weight-item tier-1">
                             <span class="tier-badge">Tier 1</span>
-                            <span class="weight-value">5x</span>
+                            <span class="weight-value">3x</span>
                             <span class="weight-desc">Flagship E-tickets</span>
                         </div>
                         <div class="tier-weight-item tier-2">
@@ -255,10 +269,10 @@ class ParkDetailsModal {
     }
 
     /**
-     * Render TODAY shame score breakdown - shows AVERAGE shame score since midnight
-     * This is completely different from live - it shows ALL rides that had ANY downtime today
+     * Render TODAY/YESTERDAY shame score breakdown - shows AVERAGE shame score
+     * This is completely different from live - it shows ALL rides that had ANY downtime
      */
-    renderTodayShameBreakdown(breakdown) {
+    renderTodayShameBreakdown(breakdown, chartData = null) {
         const {
             rides_with_downtime,
             rides_affected_count,
@@ -266,20 +280,28 @@ class ParkDetailsModal {
             total_downtime_hours,
             weighted_downtime_hours,
             shame_score,
-            park_is_open
+            park_is_open,
+            breakdown_type
         } = breakdown;
+
+        // Determine display text based on breakdown_type
+        const isYesterday = breakdown_type === 'yesterday';
+        const periodTitle = isYesterday ? "Yesterday's" : "Today's";
+        const periodBadge = isYesterday ? 'YESTERDAY' : 'TODAY';
+        const periodClass = isYesterday ? 'yesterday' : 'today';
+        const periodText = isYesterday ? 'yesterday' : 'today';
 
         // If no data available
         if (!rides_with_downtime) {
             return `
                 <div class="shame-breakdown-section">
                     <div class="shame-header">
-                        <h3>Today's Shame Score Breakdown</h3>
-                        <span class="breakdown-period-badge today">TODAY</span>
+                        <h3>${periodTitle} Shame Score Breakdown</h3>
+                        <span class="breakdown-period-badge ${periodClass}">${periodBadge}</span>
                     </div>
                     <div class="no-rides-down">
                         <span class="success-icon">&#10003;</span>
-                        <p>No downtime data available for today yet.</p>
+                        <p>No downtime data available for ${periodText} yet.</p>
                     </div>
                 </div>
             `;
@@ -293,27 +315,27 @@ class ParkDetailsModal {
         return `
             <div class="shame-breakdown-section today-breakdown">
                 <div class="shame-header">
-                    <h3>Today's Shame Score Breakdown</h3>
-                    <span class="breakdown-period-badge today">TODAY</span>
+                    <h3>${periodTitle} Shame Score Breakdown</h3>
+                    <span class="breakdown-period-badge ${periodClass}">${periodBadge}</span>
                 </div>
 
                 <div class="shame-score-display">
                     <div class="shame-score-value ${shame_score > 5 ? 'high' : shame_score > 2 ? 'medium' : 'low'}">
                         ${shame_score.toFixed(1)}
                     </div>
-                    <div class="shame-score-label">Average Shame Score Today (0-10 scale)</div>
+                    <div class="shame-score-label">Average Shame Score ${isYesterday ? 'Yesterday' : 'Today'} (0-10 scale)</div>
                 </div>
 
                 <div class="shame-formula-box today-formula">
-                    <div class="formula-title">How Today's Score Is Calculated</div>
+                    <div class="formula-title">How ${periodTitle} Score Is Calculated</div>
                     <div class="formula">
                         <span class="formula-part">Shame Score</span> =
                         <span class="formula-text">Average of Snapshot Shame Scores</span>
                     </div>
                     <div class="formula-explanation today-explanation">
-                        <strong>Today's score is an average</strong> of instantaneous shame scores throughout the day.
+                        <strong>${periodTitle} score is an average</strong> of instantaneous shame scores throughout the day.
                         Every 5 minutes while the park is open, we calculate what % of capacity was down at that moment.
-                        The final score is the average across all these snapshots during operating hours today.
+                        The final score is the average across all these snapshots during operating hours ${periodText}.
                         This makes it comparable to the Live score (same 0-10 scale).
                     </div>
                     <div class="cumulative-stats">
@@ -332,12 +354,14 @@ class ParkDetailsModal {
                     </div>
                 </div>
 
+                ${chartData ? this.renderShameChart(chartData, isYesterday) : ''}
+
                 ${rides_with_downtime.length > 0 ? `
                     <div class="rides-down-section">
-                        <h4>Rides With Downtime Today (${rides_affected_count})</h4>
-                        <p class="rides-section-note">All rides that experienced downtime during operating hours today, sorted by total downtime.</p>
+                        <h4>Rides With Downtime ${isYesterday ? 'Yesterday' : 'Today'} (${rides_affected_count})</h4>
+                        <p class="rides-section-note">All rides that experienced downtime during operating hours ${periodText}, sorted by total downtime.</p>
                         <div class="rides-down-list today-list">
-                            ${tier1Rides.length > 0 ? this.renderTodayRidesByTier(tier1Rides, 1, 'Flagship Attractions', '5x weight') : ''}
+                            ${tier1Rides.length > 0 ? this.renderTodayRidesByTier(tier1Rides, 1, 'Flagship Attractions', '3x weight') : ''}
                             ${tier2Rides.length > 0 ? this.renderTodayRidesByTier(tier2Rides, 2, 'Standard Attractions', '2x weight') : ''}
                             ${tier3Rides.length > 0 ? this.renderTodayRidesByTier(tier3Rides, 3, 'Minor Attractions', '1x weight') : ''}
                         </div>
@@ -345,7 +369,7 @@ class ParkDetailsModal {
                 ` : `
                     <div class="no-rides-down">
                         <span class="success-icon">&#10003;</span>
-                        <p>No rides have experienced downtime today!</p>
+                        <p>No rides have experienced downtime ${periodText}!</p>
                     </div>
                 `}
 
@@ -354,7 +378,7 @@ class ParkDetailsModal {
                     <div class="tier-weights-grid">
                         <div class="tier-weight-item tier-1">
                             <span class="tier-badge">Tier 1</span>
-                            <span class="weight-value">5x</span>
+                            <span class="weight-value">3x</span>
                             <span class="weight-desc">Flagship E-tickets</span>
                         </div>
                         <div class="tier-weight-item tier-2">
@@ -468,7 +492,7 @@ class ParkDetailsModal {
                         <h4>Rides With Downtime (${rides_affected_count})</h4>
                         <p class="rides-section-note">All rides that experienced downtime during ${period_label || 'this period'}, sorted by total downtime.</p>
                         <div class="rides-down-list historical-list">
-                            ${tier1Rides.length > 0 ? this.renderHistoricalRidesByTier(tier1Rides, 1, 'Flagship Attractions', '5x weight') : ''}
+                            ${tier1Rides.length > 0 ? this.renderHistoricalRidesByTier(tier1Rides, 1, 'Flagship Attractions', '3x weight') : ''}
                             ${tier2Rides.length > 0 ? this.renderHistoricalRidesByTier(tier2Rides, 2, 'Standard Attractions', '2x weight') : ''}
                             ${tier3Rides.length > 0 ? this.renderHistoricalRidesByTier(tier3Rides, 3, 'Minor Attractions', '1x weight') : ''}
                         </div>
@@ -480,7 +504,7 @@ class ParkDetailsModal {
                     <div class="tier-weights-grid">
                         <div class="tier-weight-item tier-1">
                             <span class="tier-badge">Tier 1</span>
-                            <span class="weight-value">5x</span>
+                            <span class="weight-value">3x</span>
                             <span class="weight-desc">Flagship E-tickets</span>
                         </div>
                         <div class="tier-weight-item tier-2">
@@ -552,6 +576,193 @@ class ParkDetailsModal {
     }
 
     /**
+     * Render shame score chart HTML container
+     * Chart will be initialized after DOM render in attachEventListeners
+     */
+    renderShameChart(chartData, isYesterday = false) {
+        if (!chartData || !chartData.data) return '';
+
+        const periodLabel = isYesterday ? 'Yesterday' : 'Today';
+        // API returns average as string (MariaDB ROUND() returns Decimal) - convert to number
+        const avgScore = parseFloat(chartData.average) || 0;
+
+        return `
+            <div class="shame-chart-section">
+                <div class="shame-chart-header">
+                    <h4>Shame Score Throughout the Day</h4>
+                    <div class="chart-average-badge ${avgScore > 5 ? 'high' : avgScore > 2 ? 'medium' : 'low'}">
+                        Avg: ${avgScore.toFixed(1)}
+                    </div>
+                </div>
+                <div class="shame-chart-container">
+                    <canvas id="shame-score-chart"></canvas>
+                </div>
+                <p class="chart-description">
+                    Hourly shame score snapshots ${isYesterday ? 'from yesterday' : 'throughout today'}.
+                    The dashed line shows the average score (${avgScore.toFixed(1)}).
+                </p>
+            </div>
+        `;
+    }
+
+    /**
+     * Render LIVE shame score chart HTML container (minute granularity)
+     * Chart will be initialized after DOM render in attachEventListeners
+     */
+    renderLiveChart(chartData) {
+        if (!chartData || !chartData.data || chartData.data.length === 0) return '';
+
+        // API returns 'current' (the most recent value from chart data) for LIVE period
+        const currentScore = parseFloat(chartData.current) || 0;
+        const dataPoints = chartData.data.filter(v => v !== null).length;
+
+        return `
+            <div class="shame-chart-section live-chart">
+                <div class="shame-chart-header">
+                    <h4>Shame Score Trend (Last 60 Minutes)</h4>
+                    <div class="chart-average-badge ${currentScore > 5 ? 'high' : currentScore > 2 ? 'medium' : 'low'}">
+                        Current: ${currentScore.toFixed(1)}
+                    </div>
+                </div>
+                <div class="shame-chart-container">
+                    <canvas id="shame-score-chart"></canvas>
+                </div>
+                <p class="chart-description">
+                    Real-time shame scores at 5-minute intervals (${dataPoints} data points).
+                    Shows instantaneous values, not averages.
+                </p>
+            </div>
+        `;
+    }
+
+    /**
+     * Initialize Chart.js instance for shame score chart
+     * Called from attachEventListeners after DOM is rendered
+     * Handles both hourly (TODAY/YESTERDAY) and minute (LIVE) granularity
+     */
+    initializeShameChart(chartData) {
+        if (!chartData || !chartData.data) return;
+
+        const canvas = document.getElementById('shame-score-chart');
+        if (!canvas) return;
+
+        // Destroy existing chart if any
+        if (this.chartInstance) {
+            this.chartInstance.destroy();
+        }
+
+        const ctx = canvas.getContext('2d');
+        const isLive = chartData.granularity === 'minutes';
+        // For LIVE charts, use 'current' (last value); for others use 'average'
+        const displayValue = isLive
+            ? (parseFloat(chartData.current) || 0)
+            : (parseFloat(chartData.average) || 0);
+
+        // Filter out null values for gradient calculation
+        const validValues = chartData.data.filter(v => v !== null);
+        const maxValue = Math.max(...validValues, displayValue, 5); // At least 5 for scale
+
+        // Create gradient for the line
+        const gradient = ctx.createLinearGradient(0, 0, 0, 200);
+        gradient.addColorStop(0, 'rgba(220, 53, 69, 0.3)');   // Red at top
+        gradient.addColorStop(0.5, 'rgba(255, 193, 7, 0.2)'); // Yellow middle
+        gradient.addColorStop(1, 'rgba(40, 167, 69, 0.1)');   // Green at bottom
+
+        // Build datasets - LIVE charts don't show average line (instantaneous values)
+        const datasets = [
+            {
+                label: isLive ? 'Instantaneous Score' : 'Shame Score',
+                data: chartData.data,
+                borderColor: 'rgb(220, 53, 69)',
+                backgroundColor: gradient,
+                borderWidth: 2,
+                fill: true,
+                tension: 0.3,
+                pointRadius: isLive ? 2 : 3,  // Smaller points for more frequent data
+                pointHoverRadius: 5,
+                pointBackgroundColor: 'rgb(220, 53, 69)',
+                spanGaps: true // Connect points across null values
+            }
+        ];
+
+        // Only add average line for hourly charts (TODAY/YESTERDAY)
+        if (!isLive) {
+            datasets.push({
+                label: 'Average',
+                data: chartData.labels.map(() => avgScore),
+                borderColor: 'rgba(108, 117, 125, 0.7)',
+                borderWidth: 2,
+                borderDash: [5, 5],
+                fill: false,
+                pointRadius: 0,
+                pointHoverRadius: 0
+            });
+        }
+
+        this.chartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: chartData.labels,
+                datasets: datasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            label: function(context) {
+                                if (context.dataset.label === 'Average') {
+                                    return `Average: ${context.raw.toFixed(1)}`;
+                                }
+                                if (context.raw === null) {
+                                    return 'No data';
+                                }
+                                const label = isLive ? 'Score' : 'Shame Score';
+                                return `${label}: ${context.raw.toFixed(1)}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            display: false
+                        },
+                        ticks: {
+                            maxRotation: 0,
+                            autoSkip: true,
+                            maxTicksLimit: isLive ? 6 : 9  // Fewer labels for minute granularity
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        max: Math.ceil(maxValue * 1.2), // 20% headroom
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.1)'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return value.toFixed(1);
+                            }
+                        }
+                    }
+                },
+                interaction: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
+                }
+            }
+        });
+    }
+
+    /**
      * Format downtime hours to readable string
      */
     formatDowntimeHours(hours) {
@@ -566,7 +777,57 @@ class ParkDetailsModal {
     }
 
     /**
-     * Render rides grouped by tier
+     * Render rides grouped by their actual tier_weight value (for LIVE breakdown)
+     * Dynamically creates groups based on actual weight values in the data
+     */
+    renderRidesByWeight(rides) {
+        // Group rides by their actual tier_weight
+        const groupedByWeight = {};
+        rides.forEach(ride => {
+            const weight = ride.tier_weight || 2; // Default to 2 if missing
+            if (!groupedByWeight[weight]) {
+                groupedByWeight[weight] = [];
+            }
+            groupedByWeight[weight].push(ride);
+        });
+
+        // Sort weights descending (highest weight first)
+        const sortedWeights = Object.keys(groupedByWeight)
+            .map(Number)
+            .sort((a, b) => b - a);
+
+        // Get tier name based on weight (3x/2x/1x system)
+        const getTierInfo = (weight) => {
+            if (weight >= 3) return { tier: 1, name: 'Flagship Attractions' };
+            if (weight >= 2) return { tier: 2, name: 'Standard Attractions' };
+            return { tier: 3, name: 'Minor Attractions' };
+        };
+
+        return sortedWeights.map(weight => {
+            const ridesInGroup = groupedByWeight[weight];
+            const tierInfo = getTierInfo(weight);
+            return `
+                <div class="tier-group tier-${tierInfo.tier}">
+                    <div class="tier-group-header">
+                        <span class="tier-badge">Tier ${tierInfo.tier}</span>
+                        <span class="tier-name">${tierInfo.name}</span>
+                        <span class="tier-weight-label">${weight}x weight</span>
+                    </div>
+                    <ul class="rides-list">
+                        ${ridesInGroup.map(ride => `
+                            <li class="ride-item">
+                                <span class="ride-name">${this.escapeHtml(ride.ride_name)}</span>
+                                <span class="ride-weight">+${ride.tier_weight}</span>
+                            </li>
+                        `).join('')}
+                    </ul>
+                </div>
+            `;
+        }).join('');
+    }
+
+    /**
+     * Render rides grouped by tier (legacy - used by historical breakdowns)
      */
     renderRidesByTier(rides, tier, tierName, weightLabel) {
         return `
@@ -853,6 +1114,14 @@ class ParkDetailsModal {
             }
         };
         document.addEventListener('keydown', handleEscape);
+
+        // Initialize chart if chart_data is present (for TODAY/YESTERDAY periods)
+        if (this.state.parkDetails && this.state.parkDetails.chart_data) {
+            // Use setTimeout to ensure DOM is fully rendered
+            setTimeout(() => {
+                this.initializeShameChart(this.state.parkDetails.chart_data);
+            }, 50);
+        }
     }
 }
 

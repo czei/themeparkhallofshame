@@ -46,7 +46,8 @@ from database.schema import (
     park_activity_snapshots,
 )
 from database.queries.builders import Filters, ParkWeightsCTE, WeightedDowntimeCTE
-from utils.timezone import get_pacific_day_range_utc
+from database.calculators.shame_score import ShameScoreCalculator
+from utils.timezone import get_pacific_day_range_utc, get_today_range_to_now_utc
 from utils.sql_helpers import ParkStatusSQL
 
 
@@ -191,6 +192,145 @@ class ParkShameHistoryQuery:
             })
 
         return {"labels": labels, "datasets": datasets}
+
+    def get_single_park_hourly(
+        self,
+        park_id: int,
+        target_date: date,
+        is_today: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Get hourly shame score data for a single park.
+
+        Uses ShameScoreCalculator for consistent calculations that match
+        the rankings table and breakdown panel.
+
+        Args:
+            park_id: The park ID to get data for
+            target_date: The date to get hourly data for
+            is_today: If True, uses get_today_range_to_now_utc for time range
+
+        Returns:
+            Chart.js compatible dict with hourly labels and single dataset
+        """
+        # Generate hourly labels (6am to 11pm = 18 hours)
+        labels = [f"{h}:00" for h in range(6, 24)]
+
+        # Use ShameScoreCalculator for consistent hourly breakdown
+        calc = ShameScoreCalculator(self.conn)
+        hourly_data = calc.get_hourly_breakdown(park_id, target_date)
+
+        # Align data to labels (6am to 11pm)
+        data_by_hour = {row["hour"]: row["shame_score"] for row in hourly_data}
+        aligned_data = [data_by_hour.get(h) for h in range(6, 24)]
+
+        # Get the average from the calculator for consistency with rankings
+        # For TODAY, use the time range to now; for other days, use full day
+        if is_today:
+            start_utc, end_utc = get_today_range_to_now_utc()
+        else:
+            start_utc, end_utc = get_pacific_day_range_utc(target_date)
+
+        avg_score = calc.get_average(park_id, start_utc, end_utc)
+
+        # Convert Decimal to float for JSON serialization (Decimal becomes string)
+        # Default to 0.0 if no average (for display purposes)
+        avg_score = float(avg_score) if avg_score is not None else 0.0
+
+        return {
+            "labels": labels,
+            "data": aligned_data,
+            "average": avg_score,
+            "granularity": "hourly"
+        }
+
+    def get_live(
+        self,
+        filter_disney_universal: bool = False,
+        limit: int = 5,
+        minutes: int = 60,
+    ) -> Dict[str, Any]:
+        """
+        Get live 5-minute granularity shame score data for multiple parks.
+
+        Returns real-time data at 5-minute intervals for the Charts tab LIVE period,
+        showing instantaneous shame scores (not hourly averages like TODAY).
+
+        Args:
+            filter_disney_universal: Only Disney/Universal parks
+            limit: Number of parks to include
+            minutes: How many minutes of recent data (default 60)
+
+        Returns:
+            Chart.js compatible dict with labels and datasets at minute granularity
+        """
+        from datetime import datetime, timedelta, timezone
+
+        # Get top parks with current downtime using live rankings
+        calc = ShameScoreCalculator(self.conn)
+        now_utc = datetime.now(timezone.utc)
+        start_utc = now_utc - timedelta(minutes=minutes)
+
+        # Build filter clause
+        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+
+        # Get top parks by recent downtime (last 60 minutes)
+        top_parks_query = text(f"""
+            SELECT
+                p.park_id,
+                p.name AS park_name
+            FROM parks p
+            INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
+                AND pas.recorded_at = rss.recorded_at
+            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
+                AND p.is_active = TRUE
+                AND pas.park_appears_open = TRUE
+                {disney_filter}
+            GROUP BY p.park_id, p.name
+            HAVING SUM(CASE
+                WHEN rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0)
+                THEN 1 ELSE 0
+            END) > 0
+            ORDER BY SUM(CASE
+                WHEN rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0)
+                THEN 1 ELSE 0
+            END) DESC
+            LIMIT :limit
+        """)
+
+        result = self.conn.execute(top_parks_query, {
+            "start_utc": start_utc,
+            "end_utc": now_utc,
+            "limit": limit
+        })
+        top_parks = [dict(row._mapping) for row in result]
+
+        if not top_parks:
+            return {"labels": [], "datasets": []}
+
+        # Get recent snapshots for each park using ShameScoreCalculator
+        datasets = []
+        labels = None
+
+        for park in top_parks:
+            park_data = calc.get_recent_snapshots(park_id=park["park_id"], minutes=minutes)
+
+            # Use the first park's labels as the shared labels
+            if labels is None:
+                labels = park_data.get("labels", [])
+
+            # Convert data to strings for consistency with other chart responses
+            data = [str(v) if v is not None else None for v in park_data.get("data", [])]
+
+            datasets.append({
+                "label": park["park_name"],
+                "data": data,
+            })
+
+        return {"labels": labels or [], "datasets": datasets}
 
     def _get_park_hourly_data(
         self,

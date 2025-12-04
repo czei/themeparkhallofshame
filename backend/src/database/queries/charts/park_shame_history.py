@@ -216,8 +216,12 @@ class ParkShameHistoryQuery:
         hourly_data = calc.get_hourly_breakdown(park_id, target_date)
 
         # Align data to labels (6am to 11pm)
+        # Convert Decimal to float for JSON serialization (Decimal becomes string in JSON)
         data_by_hour = {row["hour"]: row["shame_score"] for row in hourly_data}
-        aligned_data = [data_by_hour.get(h) for h in range(6, 24)]
+        aligned_data = [
+            float(data_by_hour[h]) if data_by_hour.get(h) is not None else None
+            for h in range(6, 24)
+        ]
 
         # Get the average from the calculator for consistency with rankings
         # For TODAY, use the time range to now; for other days, use full day

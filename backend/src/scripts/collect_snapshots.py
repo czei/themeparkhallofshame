@@ -291,6 +291,10 @@ class SnapshotCollector:
             is_operating = (status == 'OPERATING')
             wait_time = ride_data.wait_time
 
+            # Update last_operated_at for 7-day hybrid denominator calculation
+            if is_operating:
+                self._update_last_operated_at(ride_id, ride_repo)
+
             # Check for stale data (data quality issue detection)
             # This catches issues like Buzz Lightyear where lastUpdated was 5+ months old
             if ride_data.last_updated:
@@ -612,6 +616,10 @@ class SnapshotCollector:
             wait_time = validate_wait_time(wait_time_raw)
             computed_status = computed_is_open(wait_time, is_open_api)
 
+            # Update last_operated_at for 7-day hybrid denominator calculation
+            if computed_status:
+                self._update_last_operated_at(ride_id, ride_repo)
+
             # Store snapshot
             self._store_snapshot(ride_id, wait_time, is_open_api, computed_status, last_updated_api, snapshot_repo)
 
@@ -721,6 +729,23 @@ class SnapshotCollector:
         except Exception as e:
             logger.error(f"Failed to detect status change for ride {ride_id}: {e}")
 
+    def _update_last_operated_at(self, ride_id: int, ride_repo: RideRepository):
+        """
+        Update last_operated_at timestamp when a ride is OPERATING.
+
+        This is used by the 7-day hybrid denominator to filter out rides
+        that haven't operated recently (seasonal closures, refurbishments).
+
+        Args:
+            ride_id: Database ride ID
+            ride_repo: Ride repository for database updates
+        """
+        try:
+            ride_repo.update(ride_id, {"last_operated_at": datetime.now()})
+            self.stats['last_operated_updates'] = self.stats.get('last_operated_updates', 0) + 1
+        except Exception as e:
+            logger.debug(f"Failed to update last_operated_at for ride {ride_id}: {e}")
+
     def _print_summary(self):
         """Print collection summary statistics."""
         logger.info("")
@@ -728,6 +753,7 @@ class SnapshotCollector:
         logger.info(f"Rides processed:     {self.stats['rides_processed']}")
         logger.info(f"Snapshots created:   {self.stats['snapshots_created']}")
         logger.info(f"Status changes:      {self.stats['status_changes']}")
+        logger.info(f"Last operated updates: {self.stats.get('last_operated_updates', 0)}")
         logger.info(f"Schedules refreshed: {self.stats.get('schedules_refreshed', 0)}")
         logger.info(f"Stale data issues:   {self.stats.get('stale_data_issues', 0)}")
         logger.info(f"Errors:              {self.stats['errors']}")

@@ -121,12 +121,15 @@ class LiveParkRankingsQuery:
             ),
             park_weights AS (
                 -- Total tier weight for each park (for shame score normalization)
+                -- Uses 7-day hybrid denominator: only rides that operated in last 7 days
+                -- This ensures consistency between rankings and details views
                 SELECT
                     p.park_id,
                     SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
                 FROM parks p
                 INNER JOIN rides r ON p.park_id = r.park_id
                     AND r.is_active = TRUE AND r.category = 'ATTRACTION'
+                    AND r.last_operated_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY
                 LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
                 WHERE p.is_active = TRUE
                     {filter_clause}

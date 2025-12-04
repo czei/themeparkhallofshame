@@ -111,6 +111,7 @@ rides = Table(
         server_default="ATTRACTION",
     ),
     Column("is_active", Boolean, nullable=False, server_default="1"),
+    Column("last_operated_at", DateTime, nullable=True),  # Track when ride last had OPERATING status
     Column("created_at", DateTime, server_default=func.now()),
     Column("updated_at", DateTime, server_default=func.now(), onupdate=func.now()),
     # Indexes

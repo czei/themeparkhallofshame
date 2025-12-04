@@ -658,8 +658,10 @@ class ParkDetailsModal {
             ? (parseFloat(chartData.current) || 0)
             : (parseFloat(chartData.average) || 0);
 
-        // Filter out null values for gradient calculation
-        const validValues = chartData.data.filter(v => v !== null);
+        // Filter out null values and convert strings to numbers for gradient calculation
+        const validValues = chartData.data
+            .filter(v => v !== null)
+            .map(v => parseFloat(v) || 0);
         const maxValue = Math.max(...validValues, displayValue, 5); // At least 5 for scale
 
         // Create gradient for the line
@@ -668,11 +670,14 @@ class ParkDetailsModal {
         gradient.addColorStop(0.5, 'rgba(255, 193, 7, 0.2)'); // Yellow middle
         gradient.addColorStop(1, 'rgba(40, 167, 69, 0.1)');   // Green at bottom
 
+        // Convert chart data to numbers (API returns strings from MariaDB ROUND)
+        const numericData = chartData.data.map(v => v === null ? null : parseFloat(v));
+
         // Build datasets - LIVE charts don't show average line (instantaneous values)
         const datasets = [
             {
                 label: isLive ? 'Instantaneous Score' : 'Shame Score',
-                data: chartData.data,
+                data: numericData,
                 borderColor: 'rgb(220, 53, 69)',
                 backgroundColor: gradient,
                 borderWidth: 2,
@@ -689,7 +694,7 @@ class ParkDetailsModal {
         if (!isLive) {
             datasets.push({
                 label: 'Average',
-                data: chartData.labels.map(() => avgScore),
+                data: chartData.labels.map(() => displayValue),
                 borderColor: 'rgba(108, 117, 125, 0.7)',
                 borderWidth: 2,
                 borderDash: [5, 5],

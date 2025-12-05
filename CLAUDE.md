@@ -25,6 +25,7 @@ Python 3.11+: Follow standard conventions
 
 ## Recent Changes
 - 001-aggregation-tables: Added Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ (Core only, no ORM models), mysqlclient 2.2+
+- 001-aggregation-tables: Added Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ (Core only, no ORM models), mysqlclient 2.2+
 
 - 001-theme-park-tracker: Added Python 3.11+
 

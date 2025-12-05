@@ -20,6 +20,7 @@ import os
 import sys
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
+from sqlalchemy import text
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -61,38 +62,38 @@ def check_recent_snapshots() -> Dict[str, Any]:
         cutoff = now - timedelta(minutes=MAX_DATA_AGE_MINUTES)
 
         # Check ride status snapshots
-        ride_result = conn.execute("""
+        ride_result = conn.execute(text("""
             SELECT
                 MAX(recorded_at) as most_recent,
                 COUNT(DISTINCT ride_id) as ride_count,
                 COUNT(*) as snapshot_count
             FROM ride_status_snapshots
-            WHERE recorded_at >= %s
-        """, (cutoff,))
+            WHERE recorded_at >= :cutoff
+        """), {"cutoff": cutoff})
         ride_row = ride_result.fetchone()
 
         # Check park activity snapshots
-        park_result = conn.execute("""
+        park_result = conn.execute(text("""
             SELECT
                 MAX(recorded_at) as most_recent,
                 COUNT(DISTINCT park_id) as park_count,
                 COUNT(*) as snapshot_count
             FROM park_activity_snapshots
-            WHERE recorded_at >= %s
-        """, (cutoff,))
+            WHERE recorded_at >= :cutoff
+        """), {"cutoff": cutoff})
         park_row = park_result.fetchone()
 
         # Get overall most recent snapshots (even if older than cutoff)
-        overall_ride_result = conn.execute("""
+        overall_ride_result = conn.execute(text("""
             SELECT MAX(recorded_at) as most_recent
             FROM ride_status_snapshots
-        """)
+        """))
         overall_ride_row = overall_ride_result.fetchone()
 
-        overall_park_result = conn.execute("""
+        overall_park_result = conn.execute(text("""
             SELECT MAX(recorded_at) as most_recent
             FROM park_activity_snapshots
-        """)
+        """))
         overall_park_row = overall_park_result.fetchone()
 
         # Calculate results

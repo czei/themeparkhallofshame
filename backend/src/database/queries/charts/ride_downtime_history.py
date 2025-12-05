@@ -28,7 +28,7 @@ from typing import List, Dict, Any
 from sqlalchemy import select, func, and_, text
 from sqlalchemy.engine import Connection
 
-from database.schema import parks, rides, ride_daily_stats, ride_status_snapshots
+from database.schema import parks, rides, ride_daily_stats
 from database.queries.builders import Filters
 from utils.timezone import get_pacific_day_range_utc
 from utils.sql_helpers import ParkStatusSQL

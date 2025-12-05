@@ -180,4 +180,97 @@ def test_<unit>_<scenario>_<expected_result>():
 4. [ ] No decrease in test coverage
 5. [ ] Integration tests pass against test database
 
+---
+
+## MANDATORY: Local Testing Before Production Deployment
+
+**NEVER deploy to production without first testing ALL affected functionality locally with real historical data.**
+
+### Critical Rule
+
+Before ANY production deployment:
+
+1. **Mirror production database to local dev environment** using `deployment/scripts/mirror-production-db.sh`
+   - For testing historical periods (TODAY, YESTERDAY, last_week, last_month), use `--full` or sufficient `--days=N`
+   - Default `--days=7` only provides 1 week of data
+
+2. **Test ALL time periods that could be affected:**
+   - LIVE period
+   - TODAY period
+   - YESTERDAY period
+   - last_week period
+   - last_month period
+
+3. **Manual browser verification:**
+   - Open the frontend locally (http://localhost:8080)
+   - Click through each period tab
+   - Click Details button on multiple parks
+   - Verify shame scores match between Rankings table and Details modal
+   - Check charts display correctly
+
+4. **Only after ALL local testing passes**, consider production deployment
+
+### Why This Matters
+
+- Unit tests can pass while real queries against real data fail
+- Mocked data doesn't catch timezone issues, NULL handling, or edge cases
+- The user's time is wasted debugging production issues that should have been caught locally
+
+### DO NOT:
+- Deploy based on "tests pass" alone
+- Skip manual browser testing
+- Deploy when local dev DB is missing data needed to test the feature
+- Rush to production without testing every affected period
+
+---
+
+## MANDATORY: Human Verification Before Task Completion
+
+**CRITICAL: A task is NOT complete until a human has manually verified it works.**
+
+### The Rule
+
+Before marking ANY task as "completed":
+
+1. **Keep servers running** - Never kill development servers while the human is verifying
+2. **Provide verification URLs** - Give the human the exact URLs to test
+3. **Wait for explicit confirmation** - The human must explicitly say "verified" or "looks good" before marking complete
+4. **Do NOT mark as complete prematurely** - Running automated tests is NOT the same as human verification
+
+### What Human Verification Means
+
+The human must be able to:
+- Open the frontend in their browser
+- Click through the affected features
+- See that things work correctly with their own eyes
+- Report any issues they find
+
+### Claude's Responsibilities
+
+1. Run all automated tests first
+2. Start local servers (backend API + frontend)
+3. Provide clear testing instructions and URLs
+4. **WAIT** for the human to verify
+5. Only mark task complete after human says it's verified
+
+### Example Workflow
+
+```
+Claude: "Tests pass. Starting servers for manual verification..."
+Claude: "Backend: http://localhost:5001"
+Claude: "Frontend: http://localhost:8080"
+Claude: "Please verify the shame scores display correctly on the Rankings page."
+Claude: [WAITS - does NOT mark task complete]
+
+User: "Looks good!"
+Claude: [NOW marks task as complete]
+```
+
+### Why This Matters
+
+- Automated tests can pass while the actual UI is broken
+- Claude cannot see what the user sees in their browser
+- Only a human can verify the full user experience
+- Killing servers before verification wastes the user's time
+
 <!-- MANUAL ADDITIONS END -->

@@ -13,7 +13,6 @@ Tests APIKeyAuth middleware:
 Priority: P2 - Infrastructure testing for coverage increase
 """
 
-import pytest
 from flask import Flask, jsonify
 from unittest.mock import patch, MagicMock
 from api.middleware.auth import APIKeyAuth, api_key_auth

@@ -216,18 +216,24 @@ fi
 log "Exporting from production..."
 
 if [ "$SCHEMA_ONLY" = true ]; then
-    # Schema only (filter MariaDB-specific constraint syntax for MySQL compatibility)
+    # Schema only (filter MariaDB-specific syntax for MySQL compatibility)
     ssh -i "$SSH_KEY" "$REMOTE_HOST" \
         "sudo mysqldump -u root --no-data --routines --triggers $REMOTE_DB_NAME" \
-        | sed 's/CONSTRAINT `CONSTRAINT_[0-9]*` //g' \
+        | sed -e 's/CONSTRAINT `CONSTRAINT_[0-9]*` //g' \
+              -e 's/current_timestamp()/CURRENT_TIMESTAMP/g' \
+              -e 's/DEFAULT NULL ON UPDATE current_timestamp()/DEFAULT NULL/g' \
+              -e "s/DEFAULT '0000-00-00 00:00:00'/DEFAULT CURRENT_TIMESTAMP/g" \
         | mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
     echo "  Schema imported"
 
 elif [ "$FULL" = true ]; then
-    # Full export (filter MariaDB-specific constraint syntax for MySQL compatibility)
+    # Full export (filter MariaDB-specific syntax for MySQL compatibility)
     ssh -i "$SSH_KEY" "$REMOTE_HOST" \
         "sudo mysqldump -u root --routines --triggers --single-transaction $REMOTE_DB_NAME" \
-        | sed 's/CONSTRAINT `CONSTRAINT_[0-9]*` //g' \
+        | sed -e 's/CONSTRAINT `CONSTRAINT_[0-9]*` //g' \
+              -e 's/current_timestamp()/CURRENT_TIMESTAMP/g' \
+              -e 's/DEFAULT NULL ON UPDATE current_timestamp()/DEFAULT NULL/g' \
+              -e "s/DEFAULT '0000-00-00 00:00:00'/DEFAULT CURRENT_TIMESTAMP/g" \
         | pv -N "Importing" \
         | mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
     echo "  Full database imported"
@@ -235,12 +241,30 @@ elif [ "$FULL" = true ]; then
 else
     # Partial export - schema first, then data
 
-    # 1. Export schema only (filter MariaDB-specific constraint syntax for MySQL compatibility)
+    # 1. Export schema only (filter MariaDB-specific syntax for MySQL compatibility)
     log "  Exporting schema..."
     ssh -i "$SSH_KEY" "$REMOTE_HOST" \
         "sudo mysqldump -u root --no-data --routines --triggers $REMOTE_DB_NAME" \
-        | sed 's/CONSTRAINT `CONSTRAINT_[0-9]*` //g' \
+        | sed -e 's/CONSTRAINT `CONSTRAINT_[0-9]*` //g' \
+              -e 's/current_timestamp()/CURRENT_TIMESTAMP/g' \
+              -e 's/DEFAULT NULL ON UPDATE current_timestamp()/DEFAULT NULL/g' \
+              -e "s/DEFAULT '0000-00-00 00:00:00'/DEFAULT CURRENT_TIMESTAMP/g" \
         | mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
+
+    # 1b. CRITICAL FIX: Remove 'ON UPDATE CURRENT_TIMESTAMP' from timestamp columns
+    # This prevents timestamps from being auto-updated during data import
+    log "  Fixing timestamp columns to preserve original values..."
+    mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME" <<'FIXSQL'
+-- park_activity_snapshots: preserve recorded_at timestamps
+-- This is the CRITICAL fix - recorded_at had ON UPDATE CURRENT_TIMESTAMP
+ALTER TABLE park_activity_snapshots
+    MODIFY COLUMN recorded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+-- ride_status_snapshots: preserve recorded_at timestamps
+ALTER TABLE ride_status_snapshots
+    MODIFY COLUMN recorded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+FIXSQL
+    echo "  Timestamp columns fixed"
 
     # 2. Export full tables (small reference data)
     log "  Exporting reference tables..."
@@ -312,6 +336,90 @@ FROM information_schema.tables
 WHERE table_schema = '$LOCAL_DB_NAME'
 ORDER BY table_rows DESC;
 " 2>/dev/null || true
+
+# ============================================
+# AUDIT VERIFICATION: Compare data with production
+# ============================================
+echo ""
+log "Running audit verification..."
+
+AUDIT_PASSED=true
+
+# Function to compare date ranges
+compare_date_range() {
+    local TABLE=$1
+    local DATE_COL=$2
+    local DESCRIPTION=$3
+
+    echo -n "  $DESCRIPTION... "
+
+    # Get production date range
+    PROD_DATES=$(ssh -i "$SSH_KEY" "$REMOTE_HOST" \
+        "sudo mysql -u root -N -e \"SELECT CONCAT(MIN(DATE($DATE_COL)), ' to ', MAX(DATE($DATE_COL)), ' (', COUNT(DISTINCT DATE($DATE_COL)), ' days)') FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER'\" $REMOTE_DB_NAME 2>/dev/null" || echo "ERROR")
+
+    # Get local date range (apply same filter as production for fair comparison)
+    LOCAL_DATES=$(mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} -N -e \
+        "SELECT CONCAT(MIN(DATE($DATE_COL)), ' to ', MAX(DATE($DATE_COL)), ' (', COUNT(DISTINCT DATE($DATE_COL)), ' days)') FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER'" "$LOCAL_DB_NAME" 2>/dev/null || echo "ERROR")
+
+    if [ "$PROD_DATES" = "$LOCAL_DATES" ]; then
+        echo -e "${GREEN}✓ MATCH${NC} ($LOCAL_DATES)"
+    else
+        echo -e "${RED}✗ MISMATCH${NC}"
+        echo "      Production: $PROD_DATES"
+        echo "      Local:      $LOCAL_DATES"
+        AUDIT_PASSED=false
+    fi
+}
+
+# Function to compare row counts
+compare_row_count() {
+    local TABLE=$1
+    local DESCRIPTION=$2
+
+    echo -n "  $DESCRIPTION row count... "
+
+    # Get production count
+    PROD_COUNT=$(ssh -i "$SSH_KEY" "$REMOTE_HOST" \
+        "sudo mysql -u root -N -e \"SELECT COUNT(*) FROM $TABLE\" $REMOTE_DB_NAME 2>/dev/null" || echo "0")
+
+    # Get local count
+    LOCAL_COUNT=$(mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} -N -e \
+        "SELECT COUNT(*) FROM $TABLE" "$LOCAL_DB_NAME" 2>/dev/null || echo "0")
+
+    if [ "$PROD_COUNT" = "$LOCAL_COUNT" ]; then
+        echo -e "${GREEN}✓ MATCH${NC} ($LOCAL_COUNT rows)"
+    else
+        echo -e "${YELLOW}⚠ DIFF${NC} (Prod: $PROD_COUNT, Local: $LOCAL_COUNT)"
+        # This is OK for partial mirrors, just a warning
+    fi
+}
+
+echo ""
+echo "=== Data Integrity Audit ==="
+
+# Verify reference tables match exactly
+compare_row_count "parks" "parks"
+compare_row_count "rides" "rides"
+compare_row_count "ride_classifications" "ride_classifications"
+
+# Verify date-filtered tables have correct date ranges (CRITICAL)
+if [ "$FULL" = false ] && [ "$SCHEMA_ONLY" = false ]; then
+    echo ""
+    echo "=== Date Range Verification (CRITICAL) ==="
+    compare_date_range "park_activity_snapshots" "recorded_at" "park_activity_snapshots"
+    compare_date_range "ride_status_snapshots" "recorded_at" "ride_status_snapshots"
+fi
+
+# Final audit result
+echo ""
+if [ "$AUDIT_PASSED" = true ]; then
+    echo -e "${GREEN}=== AUDIT PASSED ===${NC}"
+else
+    echo -e "${RED}=== AUDIT FAILED ===${NC}"
+    echo -e "${RED}The date ranges don't match production!${NC}"
+    echo -e "${RED}This likely means timestamps were corrupted during import.${NC}"
+    exit 1
+fi
 
 echo ""
 echo -e "${GREEN}======================================${NC}"

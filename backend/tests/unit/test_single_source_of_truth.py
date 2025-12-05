@@ -12,8 +12,6 @@ both ride status AND park_appears_open.
 Any query that determines ride downtime/reliability MUST use this helper.
 """
 
-import ast
-import os
 import re
 from pathlib import Path
 

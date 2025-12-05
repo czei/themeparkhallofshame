@@ -23,7 +23,6 @@ Single Source of Truth:
 - SQL Helpers: utils/sql_helpers.py
 """
 
-from datetime import datetime
 from typing import List, Dict, Any
 
 from sqlalchemy import text
@@ -33,8 +32,6 @@ from utils.timezone import get_today_range_to_now_utc
 from utils.sql_helpers import (
     RideStatusSQL,
     ParkStatusSQL,
-    DowntimeSQL,
-    UptimeSQL,
     RideFilterSQL,
 )
 

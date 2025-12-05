@@ -14,7 +14,7 @@ Priority: P2 - Infrastructure testing (40% → 80% coverage)
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock, call
+from unittest.mock import Mock, patch
 from sqlalchemy.engine import Engine, Connection
 from contextlib import contextmanager
 from database.connection import (

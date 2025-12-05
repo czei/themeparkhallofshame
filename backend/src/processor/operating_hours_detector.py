@@ -4,7 +4,7 @@ Detects park operating hours from ride activity in local timezone.
 """
 
 from datetime import datetime, date, time, timedelta
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, List, Dict, Any
 from zoneinfo import ZoneInfo
 from sqlalchemy import text
 from sqlalchemy.engine import Connection

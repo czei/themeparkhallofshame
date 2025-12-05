@@ -12,7 +12,6 @@ Tests Park dataclass:
 Priority: P1 - Quick win for coverage increase (81% → 100%)
 """
 
-import pytest
 from datetime import datetime
 from models.park import Park
 

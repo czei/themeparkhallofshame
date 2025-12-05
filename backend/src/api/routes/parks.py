@@ -20,8 +20,6 @@ GET /parks/<id>/details               → (uses multiple repositories)
 """
 
 from flask import Blueprint, request, jsonify
-from typing import Dict, Any, List
-from datetime import date, datetime
 
 from database.connection import get_db_connection
 from database.repositories.park_repository import ParkRepository
@@ -29,7 +27,6 @@ from database.repositories.stats_repository import StatsRepository
 from utils.cache import get_query_cache, generate_cache_key
 
 # New query imports - each file handles one specific data source
-from database.queries.live import LiveParkRankingsQuery
 from database.queries.rankings import ParkDowntimeRankingsQuery, ParkWaitTimeRankingsQuery
 from database.queries.today import TodayParkRankingsQuery, TodayParkWaitTimesQuery
 from database.queries.yesterday import YesterdayParkRankingsQuery, YesterdayParkWaitTimesQuery
@@ -63,7 +60,8 @@ def get_park_downtime_rankings():
         filter (str): Park filter - 'disney-universal', 'all-parks' (default: 'all-parks')
         limit (int): Maximum results (default: 50, max: 100)
         weighted (bool): Use weighted scoring by ride tier (default: false)
-        sort_by (str): Sort column - 'shame_score', 'total_downtime_hours', 'uptime_percentage', 'rides_down' (default: 'shame_score')
+        sort_by (str): Sort column - shame_score, total_downtime_hours, uptime_percentage,
+            rides_down (default: shame_score)
 
     Returns:
         JSON response with park rankings and aggregate statistics
@@ -130,7 +128,7 @@ def get_park_downtime_rankings():
 
                 # If cache miss, fall back to computing from raw snapshots
                 if not rankings:
-                    logger.warning(f"Park live rankings cache miss, falling back to raw query")
+                    logger.warning("Park live rankings cache miss, falling back to raw query")
                     rankings = stats_repo.get_park_live_downtime_rankings(
                         filter_disney_universal=filter_disney_universal,
                         limit=limit,
@@ -351,6 +349,67 @@ def get_park_wait_times():
         }), 500
 
 
+@parks_bp.route('/parks/<int:park_id>/rides', methods=['GET'])
+def get_park_rides(park_id: int):
+    """
+    Get all rides for a park, separated into active (included in shame score)
+    and excluded (not operated in 7+ days).
+
+    This endpoint supports the Excluded Rides UI feature, which helps users
+    understand why certain rides are not counted in the park's shame score.
+
+    Path Parameters:
+        park_id (int): Park ID
+
+    Returns:
+        JSON response with:
+        - park_id, park_name
+        - effective_park_weight: Sum of tier weights for active rides
+        - total_roster_weight: Sum of tier weights for all rides
+        - rides.active: List of rides included in shame score
+        - rides.excluded: List of rides excluded (7+ days without operation)
+    """
+    try:
+        with get_db_connection() as conn:
+            park_repo = ParkRepository(conn)
+            stats_repo = StatsRepository(conn)
+
+            # Get park basic info
+            park = park_repo.get_by_id(park_id)
+            if not park:
+                return jsonify({
+                    "success": False,
+                    "error": f"Park with ID {park_id} not found"
+                }), 404
+
+            # Get active and excluded rides
+            active_rides = stats_repo.get_active_rides(park_id)
+            excluded_rides = stats_repo.get_excluded_rides(park_id)
+
+            # Calculate weights
+            effective_weight = sum(r.get('tier_weight', 2) for r in active_rides)
+            total_roster_weight = effective_weight + sum(r.get('tier_weight', 2) for r in excluded_rides)
+
+            return jsonify({
+                "success": True,
+                "park_id": park_id,
+                "park_name": park.name,
+                "effective_park_weight": effective_weight,
+                "total_roster_weight": total_roster_weight,
+                "rides": {
+                    "active": active_rides,
+                    "excluded": excluded_rides
+                }
+            }), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching park rides: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "Internal server error"
+        }), 500
+
+
 @parks_bp.route('/parks/<int:park_id>/details', methods=['GET'])
 def get_park_details(park_id: int):
     """
@@ -439,17 +498,25 @@ def get_park_details(park_id: int):
                 chart_query = ParkShameHistoryQuery(conn)
                 today = get_today_pacific()
                 if period == 'today':
-                    chart_data = chart_query.get_single_park_hourly(park_id, today)
+                    chart_data = chart_query.get_single_park_hourly(park_id, today, is_today=True)
                 elif period == 'yesterday':
                     from datetime import timedelta
                     yesterday = today - timedelta(days=1)
-                    chart_data = chart_query.get_single_park_hourly(park_id, yesterday)
+                    chart_data = chart_query.get_single_park_hourly(park_id, yesterday, is_today=False)
 
                 # Override chart average with breakdown's shame_score for consistency
                 # The hourly chart query uses different filtering logic which can show 0
                 # when rides haven't "operated" yet, but the breakdown correctly counts downtime
                 if chart_data and shame_breakdown:
                     chart_data['average'] = shame_breakdown.get('shame_score', chart_data.get('average', 0))
+
+            # Get excluded rides count for display in modal
+            excluded_rides = stats_repo.get_excluded_rides(park_id)
+            excluded_rides_count = len(excluded_rides)
+
+            # Get active rides (operated in last 7 days) to calculate effective_park_weight
+            active_rides = stats_repo.get_active_rides(park_id)
+            effective_park_weight = sum(r.get('tier_weight', 2) for r in active_rides)
 
             # Build response
             response = {
@@ -467,6 +534,8 @@ def get_park_details(park_id: int):
                 "operating_sessions": operating_sessions,
                 "current_status": current_status,
                 "shame_breakdown": shame_breakdown,
+                "excluded_rides_count": excluded_rides_count,  # Rides not operated in 7+ days
+                "effective_park_weight": effective_park_weight,  # Sum of tier weights for active rides (7-day window)
                 "chart_data": chart_data,  # Hourly shame scores for TODAY/YESTERDAY periods
                 "attribution": {
                     "data_source": "ThemeParks.wiki",

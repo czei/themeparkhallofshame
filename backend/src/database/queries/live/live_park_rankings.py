@@ -30,7 +30,6 @@ Single Source of Truth:
 Performance: Uses raw SQL with centralized helpers for consistency.
 """
 
-from datetime import date, datetime
 from typing import List, Dict, Any
 
 from sqlalchemy import text
@@ -105,9 +104,17 @@ class LiveParkRankingsQuery:
                 WHERE recorded_at >= :start_utc AND recorded_at < :end_utc
                 GROUP BY ride_id
             ),
+            latest_park_snapshot AS (
+                -- Find the most recent park_activity_snapshot for each park
+                -- Contains the pre-calculated shame_score (THE single source of truth)
+                SELECT park_id, MAX(recorded_at) as latest_recorded_at
+                FROM park_activity_snapshots
+                WHERE recorded_at >= :start_utc AND recorded_at < :end_utc
+                GROUP BY park_id
+            ),
             rides_currently_down AS (
                 -- Identify rides that are DOWN in their latest snapshot
-                -- This is used to filter shame score to only currently down rides
+                -- This is used to count currently down rides (not for shame score)
                 SELECT DISTINCT r_inner.ride_id, r_inner.park_id
                 FROM rides r_inner
                 INNER JOIN ride_status_snapshots rss_latest ON r_inner.ride_id = rss_latest.ride_id
@@ -121,13 +128,14 @@ class LiveParkRankingsQuery:
                     AND {park_open_latest}
             ),
             park_weights AS (
-                -- Total tier weight for each park (for shame score normalization)
+                -- Total tier weight for each park (for reference only)
                 SELECT
                     p.park_id,
                     SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
                 FROM parks p
                 INNER JOIN rides r ON p.park_id = r.park_id
                     AND r.is_active = TRUE AND r.category = 'ATTRACTION'
+                    AND r.last_operated_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY
                 LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
                 WHERE p.is_active = TRUE
                     {filter_clause}
@@ -145,17 +153,13 @@ class LiveParkRankingsQuery:
                 -- Weighted downtime hours (using centralized helper)
                 {weighted_downtime} AS weighted_downtime_hours,
 
-                -- Shame Score = weighted downtime ONLY for rides CURRENTLY down
-                -- Rides that were down earlier but are now operating don't count
-                -- Multiplied by 10 for readability (0-10 scale)
-                ROUND(
-                    (SUM(CASE
-                        WHEN rcd.ride_id IS NOT NULL AND {park_open} AND {is_down}
-                        THEN 5 * COALESCE(rc.tier_weight, 2)
-                        ELSE 0
-                    END) / 60.0
-                    / NULLIF(pw.total_park_weight, 0)) * 10,
-                    1
+                -- Shame Score: READ from stored value in park_activity_snapshots
+                -- THE SINGLE SOURCE OF TRUTH - calculated during data collection
+                (SELECT pas_stored.shame_score
+                 FROM park_activity_snapshots pas_stored
+                 INNER JOIN latest_park_snapshot lps ON pas_stored.park_id = lps.park_id
+                     AND pas_stored.recorded_at = lps.latest_recorded_at
+                 WHERE pas_stored.park_id = p.park_id
                 ) AS shame_score,
 
                 -- Count of rides CURRENTLY down (not cumulative)

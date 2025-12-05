@@ -68,7 +68,7 @@ class TestTodayQueryPerformance:
         results = run_query()
 
         print(f"\n{'='*60}")
-        print(f"TODAY Ride Wait Times Query Performance")
+        print("TODAY Ride Wait Times Query Performance")
         print(f"{'='*60}")
         print(f"  Results:    {len(results)} rides")
         print(f"  Min time:   {min_time:.3f}s")
@@ -100,7 +100,7 @@ class TestTodayQueryPerformance:
         results = run_query()
 
         print(f"\n{'='*60}")
-        print(f"TODAY Park Wait Times Query Performance")
+        print("TODAY Park Wait Times Query Performance")
         print(f"{'='*60}")
         print(f"  Results:    {len(results)} parks")
         print(f"  Min time:   {min_time:.3f}s")
@@ -130,7 +130,7 @@ class TestTodayQueryPerformance:
         results = run_query()
 
         print(f"\n{'='*60}")
-        print(f"TODAY Ride Downtime Query Performance")
+        print("TODAY Ride Downtime Query Performance")
         print(f"{'='*60}")
         print(f"  Results:    {len(results)} rides")
         print(f"  Min time:   {min_time:.3f}s")
@@ -159,7 +159,7 @@ class TestTodayQueryPerformance:
         results = run_query()
 
         print(f"\n{'='*60}")
-        print(f"TODAY Park Downtime (Shame) Query Performance")
+        print("TODAY Park Downtime (Shame) Query Performance")
         print(f"{'='*60}")
         print(f"  Results:    {len(results)} parks")
         print(f"  Min time:   {min_time:.3f}s")
@@ -195,7 +195,7 @@ class TestAwardsQueryPerformance:
         results = run_query()
 
         print(f"\n{'='*60}")
-        print(f"Awards: Longest Wait Times (TODAY) Performance")
+        print("Awards: Longest Wait Times (TODAY) Performance")
         print(f"{'='*60}")
         print(f"  Results:    {len(results)} rides")
         print(f"  Min time:   {min_time:.3f}s")
@@ -221,7 +221,7 @@ class TestAwardsQueryPerformance:
         results = run_query()
 
         print(f"\n{'='*60}")
-        print(f"Awards: Least Reliable Rides (TODAY) Performance")
+        print("Awards: Least Reliable Rides (TODAY) Performance")
         print(f"{'='*60}")
         print(f"  Results:    {len(results)} rides")
         print(f"  Min time:   {min_time:.3f}s")
@@ -284,7 +284,7 @@ class TestDatabaseHealth:
             utilization = "N/A"
 
         print(f"\n{'='*60}")
-        print(f"InnoDB Buffer Pool Configuration")
+        print("InnoDB Buffer Pool Configuration")
         print(f"{'='*60}")
         print(f"  Buffer pool size:    {size_mb:.0f} MB")
         print(f"  Hit rate:            {hit_rate}%")
@@ -305,7 +305,7 @@ class TestDatabaseHealth:
         tables = ['ride_status_snapshots', 'park_activity_snapshots', 'rides', 'parks']
 
         print(f"\n{'='*60}")
-        print(f"Table Statistics")
+        print("Table Statistics")
         print(f"{'='*60}")
 
         for table in tables:
@@ -315,7 +315,7 @@ class TestDatabaseHealth:
                 )
                 row_count = count_result.scalar()
 
-                size_result = mysql_connection.execute(text(f"""
+                size_result = mysql_connection.execute(text("""
                     SELECT
                         ROUND((data_length + index_length) / 1024 / 1024, 2) AS size_mb
                     FROM information_schema.tables
@@ -337,7 +337,7 @@ class TestDatabaseHealth:
         from sqlalchemy import text
 
         print(f"\n{'='*60}")
-        print(f"Index Inventory - ride_status_snapshots")
+        print("Index Inventory - ride_status_snapshots")
         print(f"{'='*60}")
 
         result = mysql_connection.execute(text("""

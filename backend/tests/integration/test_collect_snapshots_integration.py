@@ -14,9 +14,7 @@ Coverage: 0% → Target 80%+
 import pytest
 import sys
 from pathlib import Path
-from datetime import datetime, timedelta
-from unittest.mock import Mock, patch, MagicMock
-from typing import Dict, List
+from unittest.mock import Mock, patch
 
 backend_src = Path(__file__).parent.parent.parent / 'src'
 sys.path.insert(0, str(backend_src.absolute()))

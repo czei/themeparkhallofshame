@@ -4,7 +4,7 @@ Provides data access layer for aggregation job tracking and verification.
 """
 
 from typing import List, Optional, Dict, Any
-from datetime import datetime, date
+from datetime import date
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 

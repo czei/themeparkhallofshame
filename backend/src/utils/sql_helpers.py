@@ -849,7 +849,41 @@ class UptimeSQL:
 class RideFilterSQL:
     """
     Centralized SQL fragments for ride filtering.
+
+    This class provides centralized filters for:
+    - Active attractions at active parks
+    - Disney/Universal parks
+    - Live time window
+    - 7-day ride inclusion window (for effective park weight)
     """
+
+    # 7-day window for ride inclusion in park weight calculations
+    RIDE_INCLUSION_WINDOW_DAYS = 7
+
+    @staticmethod
+    def rides_active_in_7_days_filter(rides_alias: str = "r") -> str:
+        """
+        Filter to include only rides that operated in the last 7 days.
+
+        This is the SINGLE SOURCE OF TRUTH for determining which rides
+        are included in effective park weight calculations.
+
+        Used in:
+        - park_weights CTE for effective denominator
+        - aggregate_live_rankings.py
+        - ShameScoreCalculator.get_effective_park_weight()
+
+        IMPORTANT: Uses UTC_TIMESTAMP() not NOW() for timezone consistency.
+        This matches Python's datetime.now(timezone.utc) and prevents subtle
+        timezone bugs (Zen review fix).
+
+        Args:
+            rides_alias: The alias for the rides table (default "r")
+
+        Returns:
+            SQL condition that is TRUE when ride operated in last 7 days
+        """
+        return f"{rides_alias}.last_operated_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY"
 
     @staticmethod
     def active_attractions_filter(
@@ -895,6 +929,10 @@ class RideFilterSQL:
             SQL condition for live time window
         """
         return f"{recorded_at_expr} >= DATE_SUB(NOW(), INTERVAL {RideStatusSQL.LIVE_WINDOW_HOURS} HOUR)"
+
+
+# Add the 7-day filter method to RideStatusSQL as well for consistency with legacy code
+RideStatusSQL.rides_active_in_7_days_filter = staticmethod(RideFilterSQL.rides_active_in_7_days_filter)
 
 
 class ShameScoreSQL:

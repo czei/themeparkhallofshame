@@ -4,14 +4,13 @@ Provides data access layer for ride status change events (up/down transitions).
 """
 
 from typing import List, Optional, Dict, Any
-from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 try:
     from ...utils.logger import logger, log_database_error
 except ImportError:
-    from utils.logger import logger, log_database_error
+    from utils.logger import log_database_error
 
 
 class RideStatusChangeRepository:

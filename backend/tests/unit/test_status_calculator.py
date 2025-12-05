@@ -10,7 +10,6 @@ Tests the computed_is_open logic from data-model.md:
 Corresponds to T144 in tasks.md (originally in Phase 14, moved to Phase 2)
 """
 
-import pytest
 import sys
 from pathlib import Path
 

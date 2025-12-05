@@ -8,9 +8,6 @@ zero shame score when the rankings table shows a value.
 
 BUG 2: tier_weights hardcoded as 5/2/1 instead of 3/2/1.
 """
-import pytest
-from unittest.mock import patch, MagicMock
-from datetime import datetime, timezone
 
 
 class TestTodayShameBreakdownTimeRange:
@@ -108,15 +105,18 @@ class TestLiveShameBreakdownTierWeights:
 class TestChartDataAverageFormat:
     """Tests for chart_data.average numeric format.
 
-    The chart's average should come from ShameScoreCalculator.get_average()
-    to ensure consistency with rankings and breakdown panels.
+    ARCHITECTURE CHANGE (Dec 2025):
+    Shame score is now calculated ONCE during data collection and stored in
+    park_activity_snapshots.shame_score. The chart's average is computed from
+    these stored values, ensuring consistency with rankings and breakdown panels.
     """
 
-    def test_park_shame_history_uses_calculator_for_average(self):
+    def test_park_shame_history_reads_stored_shame_score(self):
         """
-        Verify that get_single_park_hourly uses ShameScoreCalculator.
+        Verify that get_single_park_hourly READs from pas.shame_score.
 
-        This ensures the chart average matches the rankings table value.
+        This ensures the chart average matches the rankings table value because
+        all components read from the same stored source.
         """
         import inspect
         from database.queries.charts.park_shame_history import ParkShameHistoryQuery
@@ -127,12 +127,14 @@ class TestChartDataAverageFormat:
         assert 'average' in source, (
             "get_single_park_hourly should return an 'average' field in the response"
         )
-        # Verify it uses ShameScoreCalculator for consistency
-        assert 'ShameScoreCalculator' in source, (
-            "get_single_park_hourly should use ShameScoreCalculator for consistent calculations"
+        # Verify it reads from stored shame_score (single source of truth)
+        assert 'pas.shame_score' in source, (
+            "get_single_park_hourly should READ from pas.shame_score (stored value)"
         )
-        assert 'calc.get_average' in source, (
-            "get_single_park_hourly should use calc.get_average() for the average value"
+        # Should NOT use ShameScoreCalculator anymore
+        assert 'ShameScoreCalculator' not in source, (
+            "get_single_park_hourly should NOT use ShameScoreCalculator - "
+            "it should READ from stored pas.shame_score instead"
         )
 
 

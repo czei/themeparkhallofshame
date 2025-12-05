@@ -1,0 +1,33 @@
+[tool.ruff]
+# Exclude common non-source directories
+exclude = [
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "htmlcov",
+]
+
+# Line length - 150 is more practical for modern wide displays
+line-length = 150
+
+[tool.ruff.lint]
+# Ignore specific rules:
+# E402: Module level import not at top of file - intentional for scripts that modify sys.path
+# E501: Line too long - many AI prompts and docstrings are intentionally long
+# E712: Avoid equality comparisons to True/False - intentional for SQLAlchemy query building
+# E722: Bare except - legacy code pattern, to be addressed later
+# F401: Unused import - some imports are for side effects or future use
+# F841: Unused variable - some variables are documented or for future use
+ignore = ["E402", "E501", "E712", "E722", "F401", "F841"]
+
+# Per-file ignores
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F841"]  # Unused variables common in test placeholders
+
+# Select rules to enable (default + some extras)
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "W",      # pycodestyle warnings
+]

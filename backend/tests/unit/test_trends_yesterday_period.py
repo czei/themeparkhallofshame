@@ -15,7 +15,6 @@ Test Structure:
 3. REFACTOR: Clean up if needed
 """
 
-import pytest
 from pathlib import Path
 
 

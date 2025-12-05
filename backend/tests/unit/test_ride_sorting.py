@@ -13,7 +13,6 @@ Expected Sort Options:
 - trend_percentage: DESC (Most increased downtime first)
 """
 
-import pytest
 import inspect
 
 

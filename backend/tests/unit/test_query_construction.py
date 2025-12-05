@@ -18,11 +18,7 @@ How to Add Tests for New Queries
 4. Verify the compiled SQL contains expected clauses
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
 from datetime import date
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Connection
 
 
 class MockConnection:
@@ -80,7 +76,6 @@ class TestFilters:
         """Test date range filter for stats tables."""
         from database.queries.builders.filters import Filters
         from database.schema.stats_tables import park_daily_stats
-        from datetime import date
 
         start = date(2024, 11, 1)
         end = date(2024, 11, 7)

@@ -8,9 +8,7 @@ This differentiates LIVE from TODAY:
 - LIVE: Shows recent instantaneous shame scores at 5-min granularity
 - TODAY: Shows hourly averages for the full day
 """
-import pytest
-from unittest.mock import MagicMock, patch
-from datetime import datetime, timezone, timedelta
+from unittest.mock import MagicMock
 
 
 class TestLiveChartBackend:

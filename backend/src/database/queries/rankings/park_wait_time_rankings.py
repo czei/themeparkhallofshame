@@ -26,7 +26,7 @@ Example Response:
 }
 """
 
-from datetime import date, timedelta
+from datetime import date
 from typing import List, Dict, Any
 
 from sqlalchemy import select, func, and_

@@ -25,7 +25,7 @@ Database Tables:
 - ride_daily_stats (7days/30days periods)
 """
 
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import List, Dict, Any
 
 from sqlalchemy import text

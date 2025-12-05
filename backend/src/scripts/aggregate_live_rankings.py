@@ -28,7 +28,7 @@ from sqlalchemy import text
 from database.connection import get_db_connection
 from utils.logger import logger
 from utils.timezone import get_today_pacific, get_pacific_day_range_utc
-from utils.sql_helpers import RideStatusSQL, ParkStatusSQL, DowntimeSQL
+from utils.sql_helpers import RideStatusSQL, ParkStatusSQL
 
 
 class LiveRankingsAggregator:
@@ -144,6 +144,8 @@ class LiveRankingsAggregator:
                     AND {has_operated}
             ),
             park_weights AS (
+                -- Uses 7-day hybrid denominator: only rides that operated in last 7 days
+                -- This ensures consistency between rankings and details views
                 SELECT
                     p.park_id,
                     SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight,
@@ -151,18 +153,24 @@ class LiveRankingsAggregator:
                 FROM parks p
                 INNER JOIN rides r ON p.park_id = r.park_id
                     AND r.is_active = TRUE AND r.category = 'ATTRACTION'
+                    AND r.last_operated_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY
                 LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
                 WHERE p.is_active = TRUE
                 GROUP BY p.park_id
             ),
-            current_down_weights AS (
-                -- Sum of tier_weights for rides CURRENTLY down (for instantaneous shame score)
+            latest_park_shame_score AS (
+                -- READ stored shame_score from the latest park_activity_snapshot
+                -- THE SINGLE SOURCE OF TRUTH - calculated during data collection
                 SELECT
-                    rcd.park_id,
-                    SUM(COALESCE(rc.tier_weight, 2)) AS sum_down_weight
-                FROM rides_currently_down rcd
-                LEFT JOIN ride_classifications rc ON rcd.ride_id = rc.ride_id
-                GROUP BY rcd.park_id
+                    pas.park_id,
+                    pas.shame_score
+                FROM park_activity_snapshots pas
+                INNER JOIN (
+                    SELECT park_id, MAX(recorded_at) as latest_at
+                    FROM park_activity_snapshots
+                    WHERE recorded_at >= :start_utc AND recorded_at < :end_utc
+                    GROUP BY park_id
+                ) latest ON pas.park_id = latest.park_id AND pas.recorded_at = latest.latest_at
             )
             SELECT
                 p.park_id,
@@ -179,12 +187,9 @@ class LiveRankingsAggregator:
                 -- Total rides
                 pw.total_rides,
 
-                -- Shame Score (INSTANTANEOUS - based on rides currently down)
-                ROUND(
-                    (COALESCE(cdw.sum_down_weight, 0)
-                    / NULLIF(pw.total_park_weight, 0)) * 10,
-                    1
-                ) AS shame_score,
+                -- Shame Score: READ from stored value in park_activity_snapshots
+                -- THE SINGLE SOURCE OF TRUTH - calculated during data collection
+                COALESCE(lpss.shame_score, 0.0) AS shame_score,
 
                 -- Park is open
                 {park_is_open_sq},
@@ -215,12 +220,12 @@ class LiveRankingsAggregator:
                 AND pas.recorded_at = rss.recorded_at
             INNER JOIN park_weights pw ON p.park_id = pw.park_id
             LEFT JOIN rides_currently_down rcd ON r.ride_id = rcd.ride_id
-            LEFT JOIN current_down_weights cdw ON p.park_id = cdw.park_id
+            LEFT JOIN latest_park_shame_score lpss ON p.park_id = lpss.park_id
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND p.is_active = TRUE
             GROUP BY p.park_id, p.name, p.city, p.state_province, p.timezone,
                      p.queue_times_id, p.is_disney, p.is_universal,
-                     pw.total_park_weight, pw.total_rides, cdw.sum_down_weight
+                     pw.total_park_weight, pw.total_rides, lpss.shame_score
         """)
 
         conn.execute(insert_query, {

@@ -7,7 +7,6 @@ Provides MySQL database fixtures for integration testing.
 import pytest
 import os
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
 
 
 def get_mysql_connection_string() -> str:

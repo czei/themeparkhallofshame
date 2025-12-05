@@ -18,14 +18,14 @@ How to Add a Filter:
 3. Accept table references as parameters for flexibility
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import and_, or_
 from sqlalchemy.sql import ColumnElement
 from sqlalchemy.sql.expression import BinaryExpression
 
-from database.schema import parks, rides, ride_classifications
+from database.schema import parks, rides
 
 
 # =============================================================================

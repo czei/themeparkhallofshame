@@ -33,10 +33,10 @@ Example Response:
 }
 """
 
-from datetime import date, timedelta
+from datetime import date
 from typing import List, Dict, Any
 
-from sqlalchemy import select, func, and_, case
+from sqlalchemy import select, func, and_
 from sqlalchemy.engine import Connection
 
 from database.schema import (

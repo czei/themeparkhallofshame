@@ -17,7 +17,6 @@ Priority: P2 - Important for AI classification system
 
 import os
 import pytest
-import json
 from classifier.ai_classifier import AIClassifier, AIClassificationResult, AIClassifierError
 
 # Skip tests that require real OpenAI API key

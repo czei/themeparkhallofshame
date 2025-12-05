@@ -19,13 +19,17 @@ Architecture:
     The calculator accepts a db_session via dependency injection,
     enabling unit testing with mock sessions.
 """
-from datetime import datetime, date
+from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from utils.metrics import SHAME_SCORE_PRECISION, SHAME_SCORE_MULTIPLIER
+
+# Feature flag for 7-day hybrid denominator (allows instant rollback)
+import os
+USE_7_DAY_HYBRID_DENOMINATOR = os.getenv('USE_7_DAY_HYBRID_DENOMINATOR', 'true').lower() == 'true'
 
 
 class ShameScoreCalculator:
@@ -46,16 +50,107 @@ class ShameScoreCalculator:
         """
         self.db = db
 
+    def get_effective_park_weight(self, park_id: int, as_of: datetime = None) -> float:
+        """
+        Get total weight of rides that operated in the last 7 days.
+        This is the denominator for shame score calculations.
+
+        Uses the 7-day hybrid denominator approach:
+        - Full roster MINUS rides that haven't operated in 7 days
+        - Provides stability (no morning volatility)
+        - Provides accountability (closed rides don't pad denominator)
+
+        Args:
+            park_id: The park to calculate for
+            as_of: Reference time (default: now UTC)
+
+        Returns:
+            Total tier weight of eligible rides, or 0.0 if none
+        """
+        if not USE_7_DAY_HYBRID_DENOMINATOR:
+            return self.get_park_weight(park_id)  # Rollback path
+
+        # Note: Query uses UTC_TIMESTAMP() for timezone consistency (Zen review fix)
+        # The as_of parameter is for testing; production uses UTC_TIMESTAMP()
+        query = text("""
+            SELECT SUM(COALESCE(rc.tier_weight, 2)) AS effective_weight
+            FROM rides r
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            WHERE r.park_id = :park_id
+              AND r.is_active = TRUE
+              AND r.category = 'ATTRACTION'
+              AND r.last_operated_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY
+        """)
+
+        result = self.db.execute(query, {"park_id": park_id})
+        weight = result.scalar()
+
+        # Return 0.0 for NULL (no eligible rides) - CRITICAL for division by zero protection
+        return float(weight) if weight is not None else 0.0
+
+    def get_park_weight(self, park_id: int) -> float:
+        """
+        Get full roster weight for a park (all active attractions).
+        This is the original denominator before 7-day filtering.
+
+        Used for:
+        - Rollback path when USE_7_DAY_HYBRID_DENOMINATOR is False
+        - Comparison/validation (effective weight <= full roster weight)
+
+        Args:
+            park_id: The park to calculate for
+
+        Returns:
+            Total tier weight of all active attractions
+        """
+        query = text("""
+            SELECT SUM(COALESCE(rc.tier_weight, 2)) AS total_weight
+            FROM rides r
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            WHERE r.park_id = :park_id
+              AND r.is_active = TRUE
+              AND r.category = 'ATTRACTION'
+        """)
+
+        result = self.db.execute(query, {"park_id": park_id})
+        weight = result.scalar()
+
+        return float(weight) if weight is not None else 0.0
+
+    def calculate_shame_score(self, down_weight: float, effective_park_weight: float) -> float:
+        """
+        Calculate shame score with zero-denominator protection.
+
+        Formula: (down_weight / effective_park_weight) * 10
+
+        Returns 0.0 if effective_park_weight is 0 (e.g., seasonal closure,
+        no rides operated in 7 days). This is CRITICAL for preventing
+        ZeroDivisionError.
+
+        Args:
+            down_weight: Sum of tier weights for down rides
+            effective_park_weight: Sum of tier weights for eligible rides
+
+        Returns:
+            Shame score on 0-10 scale, or 0.0 if no eligible rides
+        """
+        if not effective_park_weight:
+            return 0.0  # No eligible rides = no shame (CRITICAL: division by zero protection)
+
+        return round((down_weight / effective_park_weight) * SHAME_SCORE_MULTIPLIER, SHAME_SCORE_PRECISION)
+
     def get_instantaneous(
         self,
         park_id: int,
         timestamp: datetime
     ) -> Optional[float]:
         """
-        Get the shame score at a specific moment in time.
+        DEPRECATED: Use stored shame_score from park_activity_snapshots instead.
 
-        Returns the instantaneous shame score based on which rides
-        were down at the given timestamp.
+        Shame score is now calculated ONCE during data collection and stored in
+        park_activity_snapshots.shame_score. All queries should READ that value.
+
+        This method is kept for reference/testing only.
 
         Args:
             park_id: The park to calculate for
@@ -133,15 +228,14 @@ class ShameScoreCalculator:
         end: datetime
     ) -> Optional[float]:
         """
-        Get the average shame score over a time range.
+        DEPRECATED: Use AVG(pas.shame_score) from park_activity_snapshots instead.
 
-        This is the PRIMARY calculation method for rankings and breakdowns.
-        It calculates the average of per-snapshot instantaneous shame scores,
-        NOT a cumulative formula.
+        Shame score is now calculated ONCE during data collection and stored in
+        park_activity_snapshots.shame_score. For averages, use:
+            SELECT AVG(shame_score) FROM park_activity_snapshots
+            WHERE park_id = :park_id AND recorded_at >= :start AND recorded_at < :end
 
-        IMPORTANT: Only counts data when:
-        1. park_appears_open = TRUE
-        2. Ride has operated at least once in the period
+        This method is kept for reference/testing only.
 
         Args:
             park_id: The park to calculate for
@@ -252,13 +346,16 @@ class ShameScoreCalculator:
         target_date: date
     ) -> List[Dict[str, Any]]:
         """
-        Get hourly shame score breakdown for chart display.
+        DEPRECATED: Use grouped AVG(pas.shame_score) from park_activity_snapshots instead.
 
-        Returns data for each operating hour with:
-        - hour: The hour (0-23)
-        - shame_score: The average shame score for that hour
-        - down_minutes: Total down minutes across all rides
-        - total_rides: Number of rides that operated that hour
+        Shame score is now calculated ONCE during data collection and stored in
+        park_activity_snapshots.shame_score. For hourly breakdown, use:
+            SELECT HOUR(recorded_at) AS hour, AVG(shame_score) AS shame_score
+            FROM park_activity_snapshots
+            WHERE park_id = :park_id AND recorded_at >= :start AND recorded_at < :end
+            GROUP BY HOUR(recorded_at)
+
+        This method is kept for reference/testing only.
 
         Args:
             park_id: The park to get data for
@@ -377,13 +474,16 @@ class ShameScoreCalculator:
         minutes: int = 60
     ) -> Dict[str, Any]:
         """
-        Get recent instantaneous shame scores for LIVE chart display.
+        DEPRECATED: Use pas.shame_score from park_activity_snapshots instead.
 
-        Returns granular 5-minute interval data for the specified duration,
-        showing instantaneous (not averaged) shame scores at each snapshot.
+        Shame score is now calculated ONCE during data collection and stored in
+        park_activity_snapshots.shame_score. For recent snapshots, use:
+            SELECT DATE_FORMAT(recorded_at, '%H:%i') AS label, shame_score
+            FROM park_activity_snapshots
+            WHERE park_id = :park_id AND recorded_at >= :start
+            ORDER BY recorded_at
 
-        This is different from get_hourly_breakdown() which returns hourly averages.
-        LIVE charts need real-time granular data to show current conditions.
+        This method is kept for reference/testing only.
 
         Args:
             park_id: The park to get data for
@@ -395,9 +495,8 @@ class ShameScoreCalculator:
                 - data: List of instantaneous shame scores at each interval
                 - granularity: "minutes" to distinguish from hourly charts
         """
-        from datetime import datetime, timedelta, timezone
-
         # Calculate time range: now back to (now - minutes)
+        # Note: datetime, timedelta, timezone are imported at module level
         now_utc = datetime.now(timezone.utc)
         start_utc = now_utc - timedelta(minutes=minutes)
 

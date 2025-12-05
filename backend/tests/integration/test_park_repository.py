@@ -13,7 +13,6 @@ Priority: P1 - CRITICAL (Complex SQL queries with rankings and aggregations)
 import pytest
 import sys
 from pathlib import Path
-from datetime import datetime
 
 # Add src to path for imports
 backend_src = Path(__file__).parent.parent.parent / 'src'

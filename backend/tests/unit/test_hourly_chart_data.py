@@ -30,7 +30,6 @@ Both should return Chart.js format:
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
 
 
 class TestParkShameHistoryQueryHourly:
@@ -163,54 +162,49 @@ class TestHourlyDataSource:
             "Hourly data should come from ride_status_snapshots, not daily stats"
 
 
-class TestTimestampLevelComparison:
-    """Test that hourly queries use timestamp-level, not hour-level comparison.
+class TestStoredShameScoreReading:
+    """Test that hourly queries READ stored shame_score from park_activity_snapshots.
 
-    Bug Fixed: When a ride first operates at 12:55, the old code used hour-level
-    comparison (hour 12 >= first_op_hour 12 = TRUE) which incorrectly counted
-    all snapshots from 12:00-12:55 as downtime. Now we use timestamp-level
-    comparison (recorded_at >= first_op_time) to only count downtime after
-    the ride actually operated.
+    ARCHITECTURE CHANGE (Dec 2025):
+    Shame score is now calculated ONCE during data collection and stored in
+    park_activity_snapshots.shame_score. All queries just READ the stored value.
+
+    This eliminates the 8+ different formula variants and ensures consistency
+    across Rankings, Details modal, and Charts.
     """
 
-    def test_park_shame_query_uses_timestamp_comparison(self):
+    def test_park_shame_query_reads_stored_shame_score(self):
         """
-        ParkShameHistoryQuery.get_hourly should use timestamp-level comparison,
-        not hour-level comparison, to avoid counting pre-opening time as downtime.
-        """
-        import inspect
-        from database.queries.charts.park_shame_history import ParkShameHistoryQuery
-
-        source = inspect.getsource(ParkShameHistoryQuery._get_park_hourly_data)
-
-        # Should use timestamp column name, not hour column
-        uses_timestamp = 'first_op_time' in source
-        uses_hour = 'first_op_hour' in source
-
-        assert uses_timestamp, \
-            "_get_park_hourly_data should use first_op_time (timestamp level)"
-        assert not uses_hour, \
-            "_get_park_hourly_data should NOT use first_op_hour (hour level) - " \
-            "this causes pre-opening snapshots within same hour to be counted as downtime"
-
-    def test_park_shame_query_compares_recorded_at_to_first_op_time(self):
-        """
-        The query should compare rss.recorded_at >= rfo.first_op_time,
-        not HOUR(...) >= first_op_hour.
+        ParkShameHistoryQuery._get_park_hourly_data should READ from pas.shame_score,
+        not calculate using ride_status_snapshots with first_op_time.
         """
         import inspect
         from database.queries.charts.park_shame_history import ParkShameHistoryQuery
 
         source = inspect.getsource(ParkShameHistoryQuery._get_park_hourly_data)
 
-        # Should have comparison: recorded_at >= ... first_op_time
-        has_timestamp_comparison = (
-            'recorded_at >= rfo.first_op_time' in source or
-            'rss.recorded_at >= rfo.first_op_time' in source
-        )
+        # Should read from park_activity_snapshots (pas)
+        reads_from_pas = 'pas.shame_score' in source or 'park_activity_snapshots' in source
 
-        assert has_timestamp_comparison, \
-            "Query should compare recorded_at >= first_op_time for accurate downtime"
+        assert reads_from_pas, \
+            "_get_park_hourly_data should READ from pas.shame_score (stored value)"
+
+    def test_park_shame_query_uses_pas_not_rss(self):
+        """
+        The query should use park_activity_snapshots (pas), not ride_status_snapshots (rss).
+
+        Shame score is stored in pas during data collection - no need to calculate.
+        """
+        import inspect
+        from database.queries.charts.park_shame_history import ParkShameHistoryQuery
+
+        source = inspect.getsource(ParkShameHistoryQuery._get_park_hourly_data)
+
+        # Should use pas.recorded_at not rss.recorded_at
+        uses_pas = 'pas.recorded_at' in source
+
+        assert uses_pas, \
+            "Query should use pas.recorded_at (park_activity_snapshots)"
 
     def test_ride_downtime_query_uses_timestamp_comparison(self):
         """

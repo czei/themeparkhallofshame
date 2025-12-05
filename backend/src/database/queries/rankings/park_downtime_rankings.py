@@ -47,8 +47,8 @@ Example Response:
 }
 """
 
-from datetime import date, timedelta
-from typing import List, Dict, Any, Optional
+from datetime import date
+from typing import List, Dict, Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection

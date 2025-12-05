@@ -18,8 +18,6 @@ Add filtering in get_park_live_wait_time_rankings() to only include
 parks where park_is_open = 1.
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
 import inspect
 
 

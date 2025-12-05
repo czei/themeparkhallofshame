@@ -26,9 +26,9 @@ Example Response:
 }
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Optional
 
-from sqlalchemy import select, func, and_, or_, case, exists
+from sqlalchemy import select, func, and_, case, exists
 from sqlalchemy.engine import Connection
 
 from database.schema import (
@@ -38,7 +38,6 @@ from database.schema import (
     park_activity_snapshots,
 )
 from database.queries.builders import Filters, StatusExpressions
-from database.queries.builders.filters import LIVE_WINDOW_HOURS
 
 
 class StatusSummaryQuery:

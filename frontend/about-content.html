@@ -11,13 +11,11 @@
     <div class="about-tab-panel active" id="tab-why">
         <section class="about-section">
             <h3>Why This Site Exists</h3>
-            <p>Let's get this out of the way: the name is pure hyperbole. Nobody's clicking on a boring website called "Theme Park Uptime Percentages". I built this site because I got tired of hearing that theme parks "aren't what they used to be" every time a ride has the audacity to break down during someone's vacation. I'm an engineer. Hard numbers are my love language. If we're going to argue about theme park reliability, let's do it with actual data instead of your once-a-year vacation anecdote.</p>
+            <p>Let's get this out of the way: the website name is pure hyperbole. Unfortunately no one (except for me) wants read a boring website called "Theme Park Uptime Percentages". Most people don't appreciate that there's almost nothing harder than keeping an attraction running through a million visitors a year. Engineering something that needs to work flawlessly millions of times annually is orders of magnitude more difficult than everyday engineering challenges. This site is absolutely <em>not</em> an indictment of the people who maintain these parks; they're performing minor miracles daily.</p>
 
-            <p>Here's what most people don't appreciate: there's almost nothing harder than keeping an attraction running through a million visitors a year. Engineering something that needs to work flawlessly millions of times annually is orders of magnitude more difficult than everyday engineering challenges. This site is absolutely <em>not</em> an indictment of the people who maintain these parks; they're performing minor miracles daily.</p>
+<p>The genesis of this website concept comes from the numberous online posts about how theme parks "aren't what they used to be" every time a ride breaks down during someone's vacation. But when I went looking for hard data on park reliability and couldn't find any. There are plenty of sites that'll tell you wait times, but none of them track park reliability. If we're going to talk about theme park reliability, let's do it with actual data!</p>
 
-            <p>When I went looking for park-to-park comparisons, I came up empty. Plenty of sites will tell you the wait time for a specific ride, but nothing that compares parks and attractions against each other in any meaningful way.</p>
-
-            <p>The other perennial debate: which parks have the longest wait times. "Nobody goes there anymore. It's too crowded." Once again, no actual numbers existed to compare parks, so that became the second major feature of this site.</p>
+            <p>The other perennial debate is which parks have the longest wait times? "Nobody goes there anymore. It's too crowded." Once again, no actual numbers existed to compare parks, so that became the second major feature of this site.</p>
         </section>
     </div>
 
@@ -41,8 +39,8 @@ of a park's ride capacity is currently down, weighted by ride importance.</p>
 
             <p>Where:</p>
             <ul>
-                <li><strong>Weighted Down</strong> = Sum of tier weights for all rides currently showing as DOWN</li>
-                <li><strong>Total Park Weight</strong> = Sum of all ride tier weights in the park</li>
+                <li><strong>Weighted Down</strong> = Sum of tier weights for all rides currently showing as down</li>
+                <li><strong>Total Park Weight</strong> = Sum of tier weights for rides that have operated in the past 7 days (see "The 7-Day Window" below)</li>
             </ul>
 
             <p>This is a real-time "right now" score, not cumulative over time. When a ride comes back up,
@@ -81,6 +79,33 @@ the shame score immediately drops.</p>
                     </tr>
                 </tbody>
             </table>
+
+            <h4>What Counts as "Down"?</h4>
+            <p>Not all parks report ride status the same way:</p>
+            <ul>
+                <li><strong>Disney &amp; Universal</strong>: These parks distinguish between <em>DOWN</em>
+(unexpected breakdown) and <em>CLOSED</em> (scheduled closure, like meal breaks or weather). Only
+<em>DOWN</em> counts toward the Shame Score.</li>
+                <li><strong>Other parks</strong>: Most other parks only report <em>CLOSED</em> for all
+non-operating rides, without distinguishing breakdowns from scheduled closures. We treat <em>CLOSED</em>
+as potential downtime for these parks.</li>
+            </ul>
+            <p><em>Caveat: Parks that don't publish ride schedules may be penalized if they only run certain
+rides part of the day (e.g., only during peak hours), since we can't distinguish "scheduled closure"
+from "breakdown."</em></p>
+
+            <h4>The 7-Day Window</h4>
+            <p><strong>Problem:</strong> Some rides may be closed for extended refurbishment, seasonal operation,
+or other long-term reasons. If we included these in the denominator, parks could pad their score with
+rides that haven't run in weeks.</p>
+
+            <p><strong>Solution:</strong> The "Total Park Weight" only includes rides that have <em>operated at
+least once in the past 7 days</em>. This means:</p>
+            <ul>
+                <li>Rides that haven't operated in 7+ days are excluded from the denominator</li>
+                <li>Parks can't artificially lower their score with defunct rides</li>
+                <li>Seasonal rides are automatically excluded when closed for the season</li>
+            </ul>
 
             <h4>Why This Works</h4>
             <p><strong>Problem:</strong> Raw downtime hours unfairly penalize larger parks. A park with 50 rides

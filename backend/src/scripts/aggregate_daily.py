@@ -19,7 +19,7 @@ import sys
 import argparse
 from pathlib import Path
 from datetime import datetime, timedelta, date
-from typing import Optional, Dict, List
+from typing import Optional
 
 # Add src to path
 backend_src = Path(__file__).parent.parent

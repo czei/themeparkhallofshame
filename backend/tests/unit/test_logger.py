@@ -11,10 +11,7 @@ Tests structured JSON logging functionality:
 Priority: P1 - Quick win for coverage increase
 """
 
-import pytest
 import logging
-import json
-from io import StringIO
 from utils.logger import (
     setup_logger,
     logger,
@@ -273,7 +270,7 @@ class TestLoggerIntegration:
         with caplog.at_level(logging.ERROR):
             try:
                 raise ValueError("Test exception")
-            except ValueError as e:
+            except ValueError:
                 logger.error("Exception occurred", exc_info=True)
 
         assert len(caplog.records) >= 1

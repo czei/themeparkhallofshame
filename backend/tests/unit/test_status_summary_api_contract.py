@@ -22,8 +22,6 @@ Frontend code (wait-times.js lines 119-134):
     <div class="stat-value">${status.REFURBISHMENT || 0}</div>
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
 
 
 class TestStatusSummaryFieldNames:

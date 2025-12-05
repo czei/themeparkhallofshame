@@ -13,10 +13,8 @@ Key Formula:
     Where instantaneous shame at timestamp T =
         (sum of tier_weights for down rides at T) / total_park_weight * 10
 """
-import pytest
-from unittest.mock import MagicMock, patch
-from datetime import datetime, date, timezone
-from typing import Optional
+from unittest.mock import MagicMock
+from datetime import datetime, timezone
 
 
 class TestShameScoreCalculatorInterface:
@@ -172,7 +170,6 @@ class TestShameScoreCalculatorFormula:
         """
         Shame scores should be rounded to 1 decimal place (e.g., 4.7, 3.3).
         """
-        from database.calculators.shame_score import ShameScoreCalculator
         from utils.metrics import SHAME_SCORE_PRECISION
 
         assert SHAME_SCORE_PRECISION == 1

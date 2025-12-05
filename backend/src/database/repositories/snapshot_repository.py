@@ -11,7 +11,7 @@ from sqlalchemy.engine import Connection
 try:
     from ...utils.logger import logger, log_database_error
 except ImportError:
-    from utils.logger import logger, log_database_error
+    from utils.logger import log_database_error
 
 
 class RideStatusSnapshotRepository:
@@ -204,12 +204,12 @@ class ParkActivitySnapshotRepository:
             INSERT INTO park_activity_snapshots (
                 park_id, recorded_at, total_rides_tracked,
                 rides_open, rides_closed, avg_wait_time, max_wait_time,
-                park_appears_open
+                park_appears_open, shame_score
             )
             VALUES (
                 :park_id, :recorded_at, :total_rides_tracked,
                 :rides_open, :rides_closed, :avg_wait_time, :max_wait_time,
-                :park_appears_open
+                :park_appears_open, :shame_score
             )
         """)
 

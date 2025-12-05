@@ -34,13 +34,12 @@ Created: 2024-11 (Data Accuracy Audit Framework)
 Updated: 2024-11 (Rewritten to use pre-aggregated tables)
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Dict, Any, Optional, List
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from utils.logger import logger
 from utils.timezone import get_today_pacific
 
 

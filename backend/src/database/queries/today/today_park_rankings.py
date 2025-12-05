@@ -29,7 +29,6 @@ Single Source of Truth:
 - SQL Helpers: utils/sql_helpers.py
 """
 
-from datetime import datetime
 from typing import List, Dict, Any
 
 from sqlalchemy import text
@@ -39,7 +38,6 @@ from utils.timezone import get_today_range_to_now_utc
 from utils.sql_helpers import (
     RideStatusSQL,
     ParkStatusSQL,
-    DowntimeSQL,
     RideFilterSQL,
 )
 
@@ -136,35 +134,17 @@ class TodayParkRankingsQuery:
                     {filter_clause}
                 GROUP BY p.park_id
             ),
-            per_snapshot_shame AS (
-                -- Calculate instantaneous shame score for each park at each snapshot
-                -- shame = (sum of weights of down rides that have operated) / total_park_weight * 10
+            stored_shame_scores AS (
+                -- READ stored shame_score from park_activity_snapshots
+                -- THE SINGLE SOURCE OF TRUTH - calculated during data collection
                 SELECT
-                    p_inner.park_id,
-                    rss_inner.recorded_at,
-                    COALESCE(
-                        SUM(CASE
-                            WHEN {is_down_inner} AND {park_open_inner} AND rto_inner.ride_id IS NOT NULL
-                            THEN COALESCE(rc_inner.tier_weight, 2)
-                            ELSE 0
-                        END) / NULLIF(pw_inner.total_park_weight, 0) * 10,
-                        0
-                    ) AS snapshot_shame_score
-                FROM parks p_inner
-                INNER JOIN rides r_inner ON p_inner.park_id = r_inner.park_id
-                    AND r_inner.is_active = TRUE AND r_inner.category = 'ATTRACTION'
-                LEFT JOIN ride_classifications rc_inner ON r_inner.ride_id = rc_inner.ride_id
-                INNER JOIN ride_status_snapshots rss_inner ON r_inner.ride_id = rss_inner.ride_id
-                INNER JOIN park_activity_snapshots pas_inner ON p_inner.park_id = pas_inner.park_id
-                    AND pas_inner.recorded_at = rss_inner.recorded_at
-                INNER JOIN park_weights pw_inner ON p_inner.park_id = pw_inner.park_id
-                LEFT JOIN rides_that_operated rto_inner ON r_inner.ride_id = rto_inner.ride_id
-                WHERE rss_inner.recorded_at >= :start_utc AND rss_inner.recorded_at < :now_utc
-                    AND p_inner.is_active = TRUE
-                    AND {park_open_inner}
-                    AND r_inner.ride_id IN (SELECT ride_id FROM rides_that_operated)
-                    {filter_clause_inner}
-                GROUP BY p_inner.park_id, rss_inner.recorded_at, pw_inner.total_park_weight
+                    pas_inner.park_id,
+                    pas_inner.recorded_at,
+                    pas_inner.shame_score AS snapshot_shame_score
+                FROM park_activity_snapshots pas_inner
+                WHERE pas_inner.recorded_at >= :start_utc AND pas_inner.recorded_at < :now_utc
+                    AND pas_inner.park_appears_open = TRUE
+                    AND pas_inner.shame_score IS NOT NULL
             )
             SELECT
                 p.park_id,
@@ -192,10 +172,10 @@ class TodayParkRankingsQuery:
                     2
                 ) AS weighted_downtime_hours,
 
-                -- AVERAGE Shame Score = average of per-snapshot instantaneous shame scores
-                -- This makes TODAY comparable to LIVE (same 0-100 scale)
+                -- AVERAGE Shame Score: READ stored values from park_activity_snapshots
+                -- THE SINGLE SOURCE OF TRUTH - calculated during data collection
                 ROUND(
-                    (SELECT AVG(pss.snapshot_shame_score) FROM per_snapshot_shame pss WHERE pss.park_id = p.park_id),
+                    (SELECT AVG(sss.snapshot_shame_score) FROM stored_shame_scores sss WHERE sss.park_id = p.park_id),
                     1
                 ) AS shame_score,
 

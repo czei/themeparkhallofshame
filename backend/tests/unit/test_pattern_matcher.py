@@ -13,7 +13,6 @@ Tests PatternMatcher:
 Priority: P2 - Important for ride classification system
 """
 
-import pytest
 from classifier.pattern_matcher import PatternMatcher, PatternMatchResult
 
 

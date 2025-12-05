@@ -15,15 +15,11 @@ import pytest
 import sys
 import json
 from pathlib import Path
-from datetime import datetime
-from decimal import Decimal
 
 backend_src = Path(__file__).parent.parent.parent / 'src'
 sys.path.insert(0, str(backend_src.absolute()))
 
 from classifier.classification_service import ClassificationService, ClassificationResult
-from database.repositories.park_repository import ParkRepository
-from database.repositories.ride_repository import RideRepository
 from sqlalchemy import text
 
 

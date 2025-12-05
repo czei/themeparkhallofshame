@@ -19,7 +19,6 @@ Example:
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
 
 
 class TestRideWaitTimesTrendCalculation:

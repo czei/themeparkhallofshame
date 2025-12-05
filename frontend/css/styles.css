@@ -2055,6 +2055,35 @@ td {
     line-height: 1.5;
 }
 
+/* Excluded rides notice - shown when rides are excluded from 7-day denominator */
+.excluded-rides-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    margin-top: 1rem;
+    background: rgba(249, 175, 25, 0.1);
+    border: 2px solid var(--gold);
+    border-radius: 4px;
+}
+
+.excluded-icon {
+    font-size: 1.1rem;
+    color: var(--gold);
+    flex-shrink: 0;
+    line-height: 1.4;
+}
+
+.excluded-text {
+    font-size: 0.85rem;
+    color: #666;
+    line-height: 1.4;
+}
+
+.excluded-text strong {
+    color: var(--charcoal);
+}
+
 .rides-down-section {
     margin-bottom: 1.5rem;
 }

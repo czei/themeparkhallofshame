@@ -19,7 +19,6 @@ import random
 from pathlib import Path
 from datetime import datetime, timedelta, date
 from typing import List, Dict, Tuple
-from decimal import Decimal
 
 # Add src to path
 backend_src = Path(__file__).parent.parent

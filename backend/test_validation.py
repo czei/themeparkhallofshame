@@ -21,16 +21,13 @@ print('Testing imports...')
 print()
 
 # Core utilities
-from utils.config import config, DB_HOST, DB_PORT
 print('✓ utils.config imported')
 
-from utils.logger import logger
 print('✓ utils.logger imported')
 
 # Models
 from models.park import Park
 from models.ride import Ride
-from models.statistics import ParkDailyStats, RideDailyStats
 print('✓ models.park, models.ride, models.statistics imported')
 
 # Collectors
@@ -45,9 +42,6 @@ from classifier.pattern_matcher import PatternMatcher
 print('✓ classifier.pattern_matcher imported')
 
 # API middleware
-from api.middleware.auth import api_key_auth
-from api.middleware.rate_limiter import rate_limiter
-from api.middleware.error_handler import register_error_handlers
 print('✓ api.middleware (auth, rate_limiter, error_handler) imported')
 
 print()
@@ -86,7 +80,7 @@ result = matcher.classify('Prince Charming Regal Carrousel', 'Magic Kingdom')
 if result.tier:
     print(f'✓ Carousel → Tier {result.tier} (confidence: {result.confidence})')
 else:
-    print(f'✓ Carousel → No pattern match (would use AI classifier)')
+    print('✓ Carousel → No pattern match (would use AI classifier)')
 
 result = matcher.classify('Pirates of the Caribbean', 'Magic Kingdom')
 assert result.tier == 2, 'Generic ride should be Tier 2'

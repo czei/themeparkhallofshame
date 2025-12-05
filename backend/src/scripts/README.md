@@ -271,9 +271,72 @@ For initial testing without waiting 24 hours:
 - `park_daily_stats` - Park statistics (permanent)
 - `aggregation_log` - Aggregation tracking (permanent)
 
-## Monitoring
+## Monitoring & Alerts
 
-Check logs for errors:
+### Hourly Data Collection Health Check (`check_data_collection.py`) ⚠️ NEW
+
+**Purpose:** Immediate alerting when data collection stops.
+
+**Background:** On 2025-12-04, we lost a full day of data because `collect_snapshots.py` stopped running and we didn't discover it until the next morning. This script provides early warning within 1 hour.
+
+**Schedule:** Every hour on the hour via cron
+
+**What it checks:**
+- ✅ Recent ride status snapshots (within last 30 minutes)
+- ✅ Recent park activity snapshots (within last 30 minutes)
+- ✅ Minimum number of parks reporting data (≥5)
+- ✅ Minimum number of rides reporting data (≥50)
+- ✅ Whether `collect_snapshots` process is running
+
+**Alert trigger:** If no recent snapshots OR insufficient data
+
+**Email alert includes:**
+- Current status table with timestamps
+- Process status (running/stopped)
+- Last 30 lines of collection log
+- Recommended troubleshooting steps
+
+**Usage:**
+```bash
+# Test locally
+cd /Users/czei/Projects/ThemeParkHallOfShame/backend
+python -m src.scripts.check_data_collection
+
+# Cron job (already configured in deployment/config/crontab.prod)
+0 * * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.check_data_collection >> /opt/themeparkhallofshame/logs/data_collection_check.log 2>&1
+```
+
+**Thresholds (adjustable):**
+```python
+MAX_DATA_AGE_MINUTES = 30    # Alert if no data in last 30 minutes
+MIN_PARKS_EXPECTED = 5       # Alert if fewer than 5 parks reporting
+MIN_RIDES_EXPECTED = 50      # Alert if fewer than 50 rides reporting
+```
+
+### Daily Data Quality Alert (`send_data_quality_alert.py`)
+
+**Purpose:** Report stale data from external APIs and validate awards data.
+
+**Schedule:** Daily at 8:00 AM Pacific (16:00 UTC)
+
+**What it checks:**
+- Stale data from ThemeParks.wiki (data older than 24 hours)
+- Awards validation (downtime/wait time bounds)
+- Routing bugs (all-zero wait times)
+
+**Alert trigger:** If ≥5 stale data issues OR critical awards issues
+
+**Usage:**
+```bash
+# Test locally
+python -m src.scripts.send_data_quality_alert
+
+# Cron job (already configured)
+0 16 * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.send_data_quality_alert >> /opt/themeparkhallofshame/logs/data_quality_alert.log 2>&1
+```
+
+### Check logs for errors
+
 ```bash
 # View recent collection activity
 tail -f logs/collection.log
@@ -283,6 +346,12 @@ grep ERROR logs/collection.log
 
 # View aggregation results
 tail -f logs/aggregation.log
+
+# View data collection health checks
+tail -f /opt/themeparkhallofshame/logs/data_collection_check.log
+
+# View data quality alerts
+tail -f /opt/themeparkhallofshame/logs/data_quality_alert.log
 ```
 
 Check database status:
@@ -302,6 +371,56 @@ SELECT * FROM aggregation_log ORDER BY started_at DESC LIMIT 5;
 ```
 
 ## Troubleshooting
+
+### Data collection stopped (received alert from `check_data_collection.py`)
+
+If you receive a CRITICAL alert that data collection has stopped:
+
+1. **SSH to production:**
+   ```bash
+   ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com
+   ```
+
+2. **Check if cron job exists:**
+   ```bash
+   crontab -l | grep collect_snapshots
+   ```
+
+3. **Check recent logs:**
+   ```bash
+   tail -100 /opt/themeparkhallofshame/logs/collect_snapshots.log
+   ```
+
+4. **Check for errors in system log:**
+   ```bash
+   journalctl -u cron -n 50
+   ```
+
+5. **Manually run collection to test:**
+   ```bash
+   cd /opt/themeparkhallofshame/backend
+   source .env
+   /opt/themeparkhallofshame/venv/bin/python -m src.scripts.collect_snapshots
+   ```
+
+6. **Check disk space:**
+   ```bash
+   df -h
+   ```
+
+7. **Check database connectivity:**
+   ```bash
+   mysql -u admin -p themepark_tracker -e "SELECT 1;"
+   ```
+
+### False positives during maintenance
+
+If you're getting alerts during expected downtime (e.g., maintenance windows):
+
+- Temporarily disable the hourly check: `crontab -e` and comment out the line
+- Or adjust `MAX_DATA_AGE_MINUTES` threshold in `check_data_collection.py`
+
+### Other issues
 
 **No parks collected:**
 - Check `FILTER_COUNTRY` setting in `.env`

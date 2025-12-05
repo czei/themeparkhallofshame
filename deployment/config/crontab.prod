@@ -25,6 +25,18 @@ BASH_ENV=/opt/themeparkhallofshame/backend/.env
 0 1 * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.aggregate_daily >> /opt/themeparkhallofshame/logs/aggregate_daily.log 2>&1
 
 # =============================================================================
+# MONITORING & ALERTS
+# =============================================================================
+
+# Hourly data collection health check
+# Monitors that collect_snapshots is running and alerts if data collection stops
+0 * * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.check_data_collection >> /opt/themeparkhallofshame/logs/data_collection_check.log 2>&1
+
+# Daily data quality alert at 8:00 AM Pacific (16:00 UTC)
+# Reports stale data from ThemeParks.wiki and validates awards data
+0 16 * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.send_data_quality_alert >> /opt/themeparkhallofshame/logs/data_quality_alert.log 2>&1
+
+# =============================================================================
 # MAINTENANCE
 # =============================================================================
 

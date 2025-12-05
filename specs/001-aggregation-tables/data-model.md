@@ -30,7 +30,7 @@ CREATE TABLE park_hourly_stats (
     rides_down INT COMMENT 'Average number of rides down during hour',
     total_downtime_hours DECIMAL(8,2) COMMENT 'Total ride-hours of downtime (unweighted)',
     weighted_downtime_hours DECIMAL(8,2) COMMENT 'Tier-weighted ride-hours of downtime',
-    effective_park_weight DECIMAL(10,2) COMMENT '7-day hybrid denominator (sum of tier weights for operated rides)',
+    effective_park_weight DECIMAL(10,2) COMMENT '7-day hybrid denominator (MAX from hour for accuracy - monotonic within day)',
 
     -- Quality metadata
     snapshot_count INT NOT NULL COMMENT 'Number of snapshots aggregated (expect ~12 for 5-min collection)',
@@ -242,6 +242,7 @@ aggregation_log (existing)
 │ - aggregate_hourly.py (NEW)                                  │
 │ - Reads: Last hour of snapshots                              │
 │ - Writes: park_hourly_stats, ride_hourly_stats              │
+│ - Uses: MAX(effective_park_weight) for accuracy             │
 │ - Logs: aggregation_log with processing time                │
 └────────────────────┬────────────────────────────────────────┘
                      │
@@ -249,8 +250,8 @@ aggregation_log (existing)
                      ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ DAILY AGGREGATION (Once per day at 2 AM Pacific)            │
-│ - aggregate_daily.py (MODIFIED)                              │
-│ - Reads: park_hourly_stats, ride_hourly_stats               │
+│ - aggregate_daily.py (NOT MODIFIED - Phase 2 follow-up)     │
+│ - Reads: park_activity_snapshots (continues using raw data) │
 │ - Writes: park_daily_stats, ride_daily_stats                │
 │ - Cleanup: Deletes snapshots >90 days, hourly stats >3 years│
 └────────────────────┬────────────────────────────────────────┘
@@ -260,11 +261,13 @@ aggregation_log (existing)
 ┌─────────────────────────────────────────────────────────────┐
 │ API QUERIES (On-demand)                                      │
 │ - LIVE: park_live_rankings (10-min refresh)                  │
-│ - TODAY: park_hourly_stats (last 24 hours)                   │
+│ - TODAY: Hybrid (hourly stats + live rankings current hour)  │
 │ - YESTERDAY: park_daily_stats (1 day ago)                    │
 │ - CHARTS: park_hourly_stats (time range query)               │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Note**: `aggregate_daily.py` is intentionally NOT modified in this phase to de-risk deployment. Refactoring it to read from hourly tables is a Phase 2 follow-up task after the hourly system is stable in production.
 
 ---
 

@@ -120,7 +120,7 @@ backend/
 │   │       └── stats_repository.py         # MODIFY: Add hourly stats queries
 │   ├── scripts/
 │   │   ├── aggregate_hourly.py             # NEW: Hourly aggregation job (runs every hour)
-│   │   ├── aggregate_daily.py              # MODIFY: Read from hourly tables instead of snapshots
+│   │   ├── aggregate_daily.py              # EXISTING: NOT MODIFIED (Phase 2 follow-up - see Out of Scope)
 │   │   └── collect_snapshots.py            # EXISTING: No changes (continues 5-min collection)
 │   └── utils/
 │       ├── sql_helpers.py                  # EXISTING: Reuse RideStatusSQL, DowntimeSQL
@@ -152,4 +152,37 @@ deployment/
 > **Fill ONLY if Constitution Check has violations that must be justified**
 
 *No violations - all constitutional principles aligned.*
+
+## Out of Scope
+
+The following items are explicitly excluded from this feature to de-risk deployment:
+
+### 1. Refactoring aggregate_daily.py
+
+**Excluded**: Migrating `aggregate_daily.py` to read from hourly tables instead of raw `park_activity_snapshots`.
+
+**Rationale**: Lines 236-273 of `aggregate_daily.py` contain complex per-snapshot business logic (park status precedence, ride operation rules, tier weighting) that would be non-trivial to translate to hourly averages. The existing daily aggregation script:
+- Iterates through snapshots chronologically
+- Applies complex CASE logic based on park/ride states
+- Handles edge cases for ride exclusions and seasonal closures
+
+Translating this logic to work with pre-aggregated hourly data introduces risk of subtle data corruption in long-term daily/weekly/monthly/yearly statistics that power historical awards and trends.
+
+**Phase 2 Follow-up**: After the hourly aggregation system is stable in production for 1+ week, a separate feature will refactor `aggregate_daily.py` to:
+1. Read from `park_hourly_stats` and `ride_hourly_stats` (instead of raw snapshots)
+2. Validate results match current implementation (integration tests comparing V1 vs V2)
+3. Deploy with feature flag for instant rollback if discrepancies detected
+
+**Current Phase Scope**: The hourly aggregation job (`aggregate_hourly.py`) will be implemented with the same business logic as `aggregate_daily.py` (reusing `ShameScoreCalculator`, `RideStatusSQL`, etc.), but daily aggregation continues reading from raw snapshots for stability.
+
+### 2. Yearly Awards UI Implementation
+
+**Excluded**: User Story 3 ("Annual Awards") validates the aggregation architecture can scale to year-long timeframes, but the actual yearly awards feature (UI, rankings display, "Hall of Shame" badging) is not implemented.
+
+**Rationale**: This refactoring focuses on performance (fixing chart query bottleneck). The yearly awards feature requires:
+- Frontend UI design for awards display
+- UX decisions on how to present historical "winners"
+- Product decisions on award categories and criteria
+
+**Current Phase Scope**: Only the data infrastructure is built (park_yearly_stats table already exists from migration 003). Chart queries can span up to 1 year of hourly data if needed, but the frontend only displays last 24 hours (TODAY), 7 days (WEEK), and 30 days (MONTH) per current design.
 

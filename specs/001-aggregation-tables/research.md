@@ -145,7 +145,7 @@ def aggregate_hour(hour_start_utc: datetime):
             AVG(pas.rides_down),
             AVG(pas.total_downtime_hours),
             AVG(pas.weighted_downtime_hours),
-            AVG(pas.effective_park_weight),
+            MAX(pas.effective_park_weight),  -- MAX ensures we use most current weight from hour
             COUNT(*),
             MAX(pas.park_appears_open)  -- Any snapshot with park open = hour had activity
         FROM parks p
@@ -170,12 +170,18 @@ def aggregate_hour(hour_start_utc: datetime):
 - **Hour completeness check**: Prevents partial aggregation if collection failed
 - **ON DUPLICATE KEY UPDATE**: MySQL-native idempotency (safe to re-run if job crashes mid-execution)
 - **AVG() on pre-computed shame_score**: Snapshots already have shame scores calculated (during collection), just average them
+- **MAX() on effective_park_weight**: Uses most current weight from hour (7-day window only grows/stays same within day, never shrinks)
 - **Log to aggregation_log**: Enables monitoring and debugging (matches daily aggregation pattern)
+- **Data quality warning**: Add logger.warning() if snapshot_count < 6 (indicates collection failures)
 
 **Alternatives Considered**:
-- ❌ **Atomic swap for hourly**: Unnecessary (hourly jobs sequential, no concurrent read risk)
+- ❌ **Atomic swap for hourly**: Unnecessary for most cases (hourly jobs sequential, no concurrent read risk)
+- ⚠️ **Atomic swap for TODAY queries**: Could reconsider if users report seeing mixed data during aggregation (brief inconsistency ~10 seconds)
 - ❌ **Transaction rollback on failure**: ON DUPLICATE KEY simpler (no transaction overhead, partial progress safe)
 - ❌ **Backfill on first read**: Lazy loading adds latency, prefer batch job
+
+**Note on aggregate_daily.py**:
+**IMPORTANT**: `aggregate_daily.py` is **NOT MODIFIED** in this phase. It continues reading from raw snapshots to create daily stats. Refactoring it to read hourly tables is a **Phase 2 follow-up** (separate feature, 1+ week after hourly tables are stable). This decouples the two major changes and de-risks the deployment.
 
 **References**:
 - `backend/src/scripts/aggregate_daily.py` (existing aggregation job pattern)
@@ -193,14 +199,33 @@ def aggregate_hour(hour_start_utc: datetime):
 
 1. **Add hourly tables** (migration 012)
 2. **Deploy hourly aggregation job** (runs in background, populates historical data)
-3. **Add new query classes** using hourly tables:
+3. **Refactor query classes** to use parameter instead of separate V2 classes (DRY principle):
    ```python
-   # backend/src/database/queries/charts/park_shame_history_v2.py (new)
-   class ParkShameHistoryQueryV2:
-       """Chart query using park_hourly_stats (fast)."""
+   # backend/src/database/queries/charts/park_shame_history.py (modified, not new file)
+   class ParkShameHistoryQuery:
+       """Chart query with fallback to raw snapshots."""
+
+       def __init__(self, conn, use_hourly_tables=None):
+           """
+           Initialize query with optional hourly table override.
+
+           Args:
+               use_hourly_tables: None=auto-detect from env, True=use hourly, False=use raw
+           """
+           self.conn = conn
+           if use_hourly_tables is None:
+               use_hourly_tables = os.getenv("USE_HOURLY_TABLES", "true").lower() == "true"
+           self.use_hourly_tables = use_hourly_tables
 
        def execute(self, park_id: int, start_time: datetime, end_time: datetime):
-           return conn.execute(text("""
+           if self.use_hourly_tables:
+               return self._query_hourly_tables(park_id, start_time, end_time)
+           else:
+               return self._query_raw_snapshots(park_id, start_time, end_time)  # Rollback path
+
+       def _query_hourly_tables(self, park_id, start, end):
+           """Fast path: Read from pre-aggregated hourly stats."""
+           return self.conn.execute(text("""
                SELECT
                    hour_start_utc,
                    shame_score,
@@ -213,18 +238,19 @@ def aggregate_hour(hour_start_utc: datetime):
                  AND hour_start_utc < :end
                  AND park_was_open = TRUE
                ORDER BY hour_start_utc
-           """), {"park_id": park_id, "start": start_time, "end": end_time})
+           """), {"park_id": park_id, "start": start, "end": end})
+
+       def _query_raw_snapshots(self, park_id, start, end):
+           """Fallback path: Original GROUP BY HOUR query on raw snapshots."""
+           # [Original GROUP BY logic remains unchanged for rollback]
    ```
 
 4. **Feature flag in Flask routes**:
    ```python
    # backend/src/api/routes/parks.py
-   USE_HOURLY_TABLES = os.getenv("USE_HOURLY_TABLES", "true").lower() == "true"
-
-   if USE_HOURLY_TABLES:
-       query = ParkShameHistoryQueryV2()
-   else:
-       query = ParkShameHistoryQuery()  # Original GROUP BY version
+   # Single query class, behavior controlled by env var
+   query = ParkShameHistoryQuery(conn)  # Auto-detects USE_HOURLY_TABLES env var
+   results = query.execute(park_id, start_time, end_time)
    ```
 
 5. **Test with mirrored production DB**, verify results match
@@ -346,6 +372,92 @@ def cleanup_old_hourly_stats():
 **References**:
 - `backend/src/scripts/aggregate_daily.py:cleanup_old_snapshots()` (existing cleanup pattern)
 - Specification FR-017: 3-year hourly retention
+
+---
+
+### Finding 7: TODAY Period Hybrid Query Strategy
+
+**Context**: Hourly aggregation runs at :05 past each hour, creating a 5-65 minute data freshness gap for the current, partial hour. Users expect real-time data for TODAY period.
+
+**Decision**: **Hybrid query strategy** that combines completed hours from hourly tables with current hour from live rankings.
+
+**Implementation Pattern**:
+```python
+# backend/src/database/queries/today/today_park_rankings.py (modified)
+
+def get_today_rankings(self, filter_disney_universal=False, limit=50, sort_by='shame_score'):
+    """Get TODAY rankings using hybrid approach for real-time freshness."""
+
+    start_of_day_utc, now_utc = get_today_range_to_now_utc()
+    current_hour_start = now_utc.replace(minute=0, second=0, microsecond=0)
+
+    # Query 1: Completed hours from hourly tables (fast)
+    completed_hours = conn.execute(text("""
+        SELECT
+            park_id,
+            AVG(shame_score) as avg_shame_score,
+            AVG(avg_wait_time_minutes) as avg_wait_time,
+            SUM(total_downtime_hours) as total_downtime,
+            AVG(rides_operating) as avg_rides_operating,
+            AVG(rides_down) as avg_rides_down
+        FROM park_hourly_stats
+        WHERE hour_start_utc >= :start_of_day
+          AND hour_start_utc < :current_hour
+          AND park_was_open = TRUE
+        GROUP BY park_id
+    """), {"start_of_day": start_of_day_utc, "current_hour": current_hour_start})
+
+    # Query 2: Current partial hour from live rankings (real-time)
+    current_hour = conn.execute(text("""
+        SELECT
+            park_id,
+            shame_score,
+            avg_wait_time_minutes,
+            total_downtime_hours,
+            rides_operating,
+            rides_down
+        FROM park_live_rankings
+    """))
+
+    # Merge: Weighted average of completed hours + current hour
+    # Weight by hours: N completed hours + 1 current hour
+    for park_id in all_parks:
+        completed = completed_hours.get(park_id, {})
+        current = current_hour.get(park_id, {})
+
+        hours_completed = count_completed_hours(start_of_day_utc, current_hour_start)
+        weight_completed = hours_completed / (hours_completed + 1)
+        weight_current = 1 / (hours_completed + 1)
+
+        final_shame_score = (
+            completed['avg_shame_score'] * weight_completed +
+            current['shame_score'] * weight_current
+        )
+        # ...combine other metrics similarly
+```
+
+**Rationale**:
+- **Real-time freshness**: Current hour always shows latest data (no 5-65 minute lag)
+- **Performance**: Completed hours from fast hourly tables (not GROUP BY on snapshots)
+- **User experience**: Matches existing expectation of "real-time" TODAY view
+- **Accurate averaging**: Weights by number of hours (early morning = mostly current, evening = mostly historical)
+- **Reuses existing infrastructure**: `park_live_rankings` already updated every 10 minutes
+
+**Alternatives Considered**:
+- ❌ **Wait for hourly aggregation**: Creates frustrating data freshness gap
+- ❌ **Fall back to GROUP BY for current hour**: Defeats performance benefit
+- ❌ **Show only completed hours**: Confusing UX (last hour disappears until :05)
+
+**Trade-offs**:
+- **Pro**: Best user experience, maintains real-time expectation
+- **Pro**: Leverages existing live rankings infrastructure
+- **Con**: Slightly more complex query logic (two sources instead of one)
+- **Con**: Need to handle weighted averaging of metrics
+
+**References**:
+- `backend/src/scripts/aggregate_live_rankings.py` (10-minute refresh pattern)
+- `backend/src/database/queries/today/today_park_rankings.py` (existing TODAY logic)
+- Specification FR-001: TODAY rankings < 1 second (hybrid approach maintains this)
 
 ---
 

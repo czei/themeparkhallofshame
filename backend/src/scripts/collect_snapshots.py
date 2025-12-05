@@ -23,6 +23,8 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
+from sqlalchemy import text
+
 # Add src to path
 backend_src = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_src.absolute()))
@@ -245,9 +247,24 @@ class SnapshotCollector:
         avg_wait = sum(open_wait_times) / len(open_wait_times) if open_wait_times else None
         max_wait = max(open_wait_times) if open_wait_times else None
 
+        # Collect down ride IDs for shame score calculation
+        # DOWN = broken/malfunctioning rides (counts as shame)
+        # CLOSED/REFURBISHMENT = intentional closures (does NOT count as shame)
+        down_entity_ids = [r.entity_id for r in live_data if r.status == 'DOWN']
+        down_ride_ids = []
+        if down_entity_ids:
+            # Look up database ride_ids from ThemeParks.wiki entity IDs
+            for entity_id in down_entity_ids:
+                ride = ride_repo.get_by_themeparks_wiki_id(entity_id)
+                if ride:
+                    down_ride_ids.append(ride.ride_id)
+
+        # Calculate shame score (THE single source of truth)
+        shame_score = self.calculate_shame_score(park_id, down_ride_ids, ride_repo.conn)
+
         self._store_park_activity(park_id, park_appears_open, total_rides,
                                  rides_operating, rides_closed + rides_down,
-                                 avg_wait, max_wait, park_activity_repo)
+                                 avg_wait, max_wait, park_activity_repo, shame_score)
 
         # Process each ride
         for ride_data in live_data:
@@ -530,8 +547,22 @@ class SnapshotCollector:
             avg_wait = sum(open_wait_times) / len(open_wait_times) if open_wait_times else None
             max_wait = max(open_wait_times) if open_wait_times else None
 
+            # Collect down ride IDs for shame score calculation
+            # Queue-Times doesn't distinguish DOWN from CLOSED, so we treat all non-open rides as down
+            down_queue_times_ids = [r.get('id') for r in rides_data if not r.get('is_open', True)]
+            down_ride_ids = []
+            if down_queue_times_ids:
+                # Look up database ride_ids from Queue-Times IDs
+                for qt_id in down_queue_times_ids:
+                    ride = ride_repo.get_by_queue_times_id(qt_id)
+                    if ride:
+                        down_ride_ids.append(ride.ride_id)
+
+            # Calculate shame score (THE single source of truth)
+            shame_score = self.calculate_shame_score(park_id, down_ride_ids, ride_repo.conn)
+
             self._store_park_activity(park_id, park_appears_open, total_rides, rides_open,
-                                      rides_closed, avg_wait, max_wait, park_activity_repo)
+                                      rides_closed, avg_wait, max_wait, park_activity_repo, shame_score)
 
             # Process each ride
             for ride_data in rides_data:
@@ -546,9 +577,10 @@ class SnapshotCollector:
 
     def _store_park_activity(self, park_id: int, appears_open: bool, total_rides: int,
                              rides_open: int, rides_closed: int, avg_wait: Optional[float],
-                             max_wait: Optional[int], park_activity_repo: ParkActivitySnapshotRepository):
+                             max_wait: Optional[int], park_activity_repo: ParkActivitySnapshotRepository,
+                             shame_score: Optional[float] = None):
         """
-        Store park activity snapshot.
+        Store park activity snapshot with pre-calculated shame score.
 
         Args:
             park_id: Database park ID
@@ -559,6 +591,7 @@ class SnapshotCollector:
             avg_wait: Average wait time across open rides
             max_wait: Maximum wait time across all rides
             park_activity_repo: Park activity snapshot repository
+            shame_score: Pre-calculated shame score (THE single source of truth)
         """
         try:
             activity_record = {
@@ -569,13 +602,74 @@ class SnapshotCollector:
                 'rides_closed': rides_closed,
                 'avg_wait_time': avg_wait,
                 'max_wait_time': max_wait,
-                'park_appears_open': appears_open
+                'park_appears_open': appears_open,
+                'shame_score': shame_score
             }
 
             park_activity_repo.insert(activity_record)
 
         except Exception as e:
             logger.error(f"Failed to store park activity: {e}")
+
+    def calculate_shame_score(self, park_id: int, down_ride_ids: List[int], conn) -> Optional[float]:
+        """
+        THE ONLY PLACE shame score is calculated.
+
+        This is the single source of truth for shame score calculation.
+        All other code should READ from park_activity_snapshots.shame_score.
+
+        Formula: (sum_down_weight / effective_park_weight) * 10
+
+        Where:
+        - sum_down_weight: tier_weights of rides currently DOWN
+        - effective_park_weight: tier_weights of rides that operated in last 7 days
+
+        Args:
+            park_id: Database park ID
+            down_ride_ids: List of ride_ids that are currently DOWN
+            conn: Database connection
+
+        Returns:
+            Shame score as float (0.0-10.0), or None if no eligible rides
+        """
+        try:
+            # Get effective park weight (rides that operated in last 7 days)
+            effective_weight_result = conn.execute(text("""
+                SELECT COALESCE(SUM(COALESCE(rc.tier_weight, 2)), 0) AS effective_weight
+                FROM rides r
+                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                WHERE r.park_id = :park_id
+                  AND r.is_active = TRUE
+                  AND r.category = 'ATTRACTION'
+                  AND r.last_operated_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY
+            """), {"park_id": park_id})
+            effective_weight = effective_weight_result.scalar() or 0
+
+            # Zero-denominator protection (Zen review fix)
+            if not effective_weight:
+                return 0.0
+
+            # Get down weight (sum of tier_weights for currently down rides)
+            if not down_ride_ids:
+                return 0.0
+
+            down_weight_result = conn.execute(text("""
+                SELECT COALESCE(SUM(COALESCE(rc.tier_weight, 2)), 0) AS down_weight
+                FROM rides r
+                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                WHERE r.ride_id IN :ride_ids
+                  AND r.is_active = TRUE
+                  AND r.category = 'ATTRACTION'
+            """), {"ride_ids": tuple(down_ride_ids)})
+            down_weight = down_weight_result.scalar() or 0
+
+            # Calculate shame score: (down_weight / effective_weight) * 10
+            shame_score = round((down_weight / effective_weight) * 10, 1)
+            return shame_score
+
+        except Exception as e:
+            logger.error(f"Failed to calculate shame score for park {park_id}: {e}")
+            return None
 
     def _process_ride(self, ride_data: Dict, park_id: int, ride_repo: RideRepository,
                      snapshot_repo: RideStatusSnapshotRepository, status_change_repo: RideStatusChangeRepository):

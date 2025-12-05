@@ -145,10 +145,12 @@ class ShameScoreCalculator:
         timestamp: datetime
     ) -> Optional[float]:
         """
-        Get the shame score at a specific moment in time.
+        DEPRECATED: Use stored shame_score from park_activity_snapshots instead.
 
-        Returns the instantaneous shame score based on which rides
-        were down at the given timestamp.
+        Shame score is now calculated ONCE during data collection and stored in
+        park_activity_snapshots.shame_score. All queries should READ that value.
+
+        This method is kept for reference/testing only.
 
         Args:
             park_id: The park to calculate for
@@ -226,15 +228,14 @@ class ShameScoreCalculator:
         end: datetime
     ) -> Optional[float]:
         """
-        Get the average shame score over a time range.
+        DEPRECATED: Use AVG(pas.shame_score) from park_activity_snapshots instead.
 
-        This is the PRIMARY calculation method for rankings and breakdowns.
-        It calculates the average of per-snapshot instantaneous shame scores,
-        NOT a cumulative formula.
+        Shame score is now calculated ONCE during data collection and stored in
+        park_activity_snapshots.shame_score. For averages, use:
+            SELECT AVG(shame_score) FROM park_activity_snapshots
+            WHERE park_id = :park_id AND recorded_at >= :start AND recorded_at < :end
 
-        IMPORTANT: Only counts data when:
-        1. park_appears_open = TRUE
-        2. Ride has operated at least once in the period
+        This method is kept for reference/testing only.
 
         Args:
             park_id: The park to calculate for
@@ -345,13 +346,16 @@ class ShameScoreCalculator:
         target_date: date
     ) -> List[Dict[str, Any]]:
         """
-        Get hourly shame score breakdown for chart display.
+        DEPRECATED: Use grouped AVG(pas.shame_score) from park_activity_snapshots instead.
 
-        Returns data for each operating hour with:
-        - hour: The hour (0-23)
-        - shame_score: The average shame score for that hour
-        - down_minutes: Total down minutes across all rides
-        - total_rides: Number of rides that operated that hour
+        Shame score is now calculated ONCE during data collection and stored in
+        park_activity_snapshots.shame_score. For hourly breakdown, use:
+            SELECT HOUR(recorded_at) AS hour, AVG(shame_score) AS shame_score
+            FROM park_activity_snapshots
+            WHERE park_id = :park_id AND recorded_at >= :start AND recorded_at < :end
+            GROUP BY HOUR(recorded_at)
+
+        This method is kept for reference/testing only.
 
         Args:
             park_id: The park to get data for
@@ -470,13 +474,16 @@ class ShameScoreCalculator:
         minutes: int = 60
     ) -> Dict[str, Any]:
         """
-        Get recent instantaneous shame scores for LIVE chart display.
+        DEPRECATED: Use pas.shame_score from park_activity_snapshots instead.
 
-        Returns granular 5-minute interval data for the specified duration,
-        showing instantaneous (not averaged) shame scores at each snapshot.
+        Shame score is now calculated ONCE during data collection and stored in
+        park_activity_snapshots.shame_score. For recent snapshots, use:
+            SELECT DATE_FORMAT(recorded_at, '%H:%i') AS label, shame_score
+            FROM park_activity_snapshots
+            WHERE park_id = :park_id AND recorded_at >= :start
+            ORDER BY recorded_at
 
-        This is different from get_hourly_breakdown() which returns hourly averages.
-        LIVE charts need real-time granular data to show current conditions.
+        This method is kept for reference/testing only.
 
         Args:
             park_id: The park to get data for

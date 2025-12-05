@@ -130,14 +130,14 @@ class ParkDetailsModal {
             return '<div class="empty-state"><p>No park details available</p></div>';
         }
 
-        const { park, tier_distribution, operating_sessions, current_status, shame_breakdown, chart_data } = this.state.parkDetails;
+        const { park, tier_distribution, operating_sessions, current_status, shame_breakdown, chart_data, excluded_rides_count } = this.state.parkDetails;
 
         // Only show current status for LIVE period
         const showCurrentStatus = this.state.period === 'live';
 
         return `
             <div class="park-details-content">
-                ${this.renderShameBreakdown(shame_breakdown, chart_data)}
+                ${this.renderShameBreakdown(shame_breakdown, chart_data, excluded_rides_count)}
                 ${showCurrentStatus ? this.renderCurrentStatus(current_status) : ''}
                 ${this.renderTierDistribution(tier_distribution)}
                 ${this.renderParkInfo(park)}
@@ -147,28 +147,34 @@ class ParkDetailsModal {
 
     /**
      * Render shame score breakdown - dispatches to appropriate renderer based on breakdown_type
+     * @param {Object} breakdown - Shame breakdown data from API
+     * @param {Object} chartData - Chart data (optional)
+     * @param {number} excludedRidesCount - Number of rides excluded from shame score (7-day rule)
      */
-    renderShameBreakdown(breakdown, chartData = null) {
+    renderShameBreakdown(breakdown, chartData = null, excludedRidesCount = 0) {
         if (!breakdown) return '';
 
         // Dispatch based on breakdown_type from API
         switch (breakdown.breakdown_type) {
             case 'today':
             case 'yesterday':
-                return this.renderTodayShameBreakdown(breakdown, chartData);
+                return this.renderTodayShameBreakdown(breakdown, chartData, excludedRidesCount);
             case 'last_week':
             case 'last_month':
-                return this.renderHistoricalShameBreakdown(breakdown);
+                return this.renderHistoricalShameBreakdown(breakdown, excludedRidesCount);
             default:
-                return this.renderLiveShameBreakdown(breakdown, chartData);
+                return this.renderLiveShameBreakdown(breakdown, chartData, excludedRidesCount);
         }
     }
 
     /**
      * Render LIVE shame score breakdown - shows rides currently down RIGHT NOW
      * When chartData is provided with granularity='minutes', shows recent snapshot trend
+     * @param {Object} breakdown - Shame breakdown data
+     * @param {Object} chartData - Chart data (optional)
+     * @param {number} excludedRidesCount - Number of rides excluded from shame score (7-day rule)
      */
-    renderLiveShameBreakdown(breakdown, chartData = null) {
+    renderLiveShameBreakdown(breakdown, chartData = null, excludedRidesCount = 0) {
         const { rides_down, total_park_weight, total_weighted_down, shame_score, park_is_open } = breakdown;
 
         // If park is closed, show that instead
@@ -226,6 +232,15 @@ class ParkDetailsModal {
                         weighted by ride importance. Flagship attractions (Tier 1) count 3x more than minor rides (Tier 3).
                         Scores typically range from 0 (perfect) to 10+ (severe problems).
                     </div>
+                    ${excludedRidesCount > 0 ? `
+                    <div class="excluded-rides-notice">
+                        <span class="excluded-icon">&#9432;</span>
+                        <span class="excluded-text">
+                            <strong>${excludedRidesCount} ride${excludedRidesCount !== 1 ? 's' : ''} excluded</strong> from the denominator
+                            (haven't operated in 7+ days). These are likely under refurbishment or seasonally closed.
+                        </span>
+                    </div>
+                    ` : ''}
                 </div>
 
                 ${chartData && chartData.granularity === 'minutes' ? this.renderLiveChart(chartData) : ''}
@@ -271,8 +286,11 @@ class ParkDetailsModal {
     /**
      * Render TODAY/YESTERDAY shame score breakdown - shows AVERAGE shame score
      * This is completely different from live - it shows ALL rides that had ANY downtime
+     * @param {Object} breakdown - Shame breakdown data
+     * @param {Object} chartData - Chart data (optional)
+     * @param {number} excludedRidesCount - Number of rides excluded from shame score (7-day rule)
      */
-    renderTodayShameBreakdown(breakdown, chartData = null) {
+    renderTodayShameBreakdown(breakdown, chartData = null, excludedRidesCount = 0) {
         const {
             rides_with_downtime,
             rides_affected_count,
@@ -352,6 +370,15 @@ class ParkDetailsModal {
                             <span class="stat-label">Rides Affected</span>
                         </div>
                     </div>
+                    ${excludedRidesCount > 0 ? `
+                    <div class="excluded-rides-notice">
+                        <span class="excluded-icon">&#9432;</span>
+                        <span class="excluded-text">
+                            <strong>${excludedRidesCount} ride${excludedRidesCount !== 1 ? 's' : ''} excluded</strong> from the denominator
+                            (haven't operated in 7+ days). These are likely under refurbishment or seasonally closed.
+                        </span>
+                    </div>
+                    ` : ''}
                 </div>
 
                 ${chartData ? this.renderShameChart(chartData, isYesterday) : ''}
@@ -400,8 +427,10 @@ class ParkDetailsModal {
     /**
      * Render HISTORICAL shame score breakdown - shows average daily shame score for last_week or last_month
      * This shows ALL rides that had ANY downtime during the period
+     * @param {Object} breakdown - Shame breakdown data
+     * @param {number} excludedRidesCount - Number of rides excluded from shame score (7-day rule)
      */
-    renderHistoricalShameBreakdown(breakdown) {
+    renderHistoricalShameBreakdown(breakdown, excludedRidesCount = 0) {
         const {
             rides_with_downtime,
             rides_affected_count,
@@ -485,6 +514,15 @@ class ParkDetailsModal {
                             <span class="stat-label">Days in Period</span>
                         </div>
                     </div>
+                    ${excludedRidesCount > 0 ? `
+                    <div class="excluded-rides-notice">
+                        <span class="excluded-icon">&#9432;</span>
+                        <span class="excluded-text">
+                            <strong>${excludedRidesCount} ride${excludedRidesCount !== 1 ? 's' : ''} excluded</strong> from the denominator
+                            (haven't operated in 7+ days). These are likely under refurbishment or seasonally closed.
+                        </span>
+                    </div>
+                    ` : ''}
                 </div>
 
                 ${rides_with_downtime.length > 0 ? `

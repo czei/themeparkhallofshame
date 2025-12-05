@@ -17,7 +17,8 @@
 
 const CONFIG = {
     // API Configuration
-    API_BASE_URL: '/api',
+    API_BASE_URL: 'http://localhost:5001/api',  // For local testing
+    // API_BASE_URL: '/api',  // Production
 
     // For production deployment, uncomment and set your backend URL:
     // API_BASE_URL: 'https://your-backend-api.com/api',

@@ -296,15 +296,19 @@ class TestChartsLiveAndTodaySupport:
 
         MariaDB strict mode requires GROUP BY to use the full expression, not alias:
         - BAD:  GROUP BY hour  (where hour is an alias)
-        - GOOD: GROUP BY HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR))
+        - GOOD: GROUP BY HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR))
+
+        ARCHITECTURE CHANGE (Dec 2025):
+        Query now READs from park_activity_snapshots (pas) instead of
+        ride_status_snapshots (rss). The stored shame_score is THE SINGLE SOURCE OF TRUTH.
         """
         from pathlib import Path
         query_path = Path(__file__).parent.parent.parent / "src" / "database" / "queries" / "charts" / "park_shame_history.py"
         source_code = query_path.read_text()
 
         # The query should NOT use just "GROUP BY hour" - needs full expression
-        # Check for the correct pattern
-        assert "GROUP BY HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR))" in source_code, \
+        # Check for the correct pattern (uses pas.recorded_at after architecture change)
+        assert "GROUP BY HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR))" in source_code, \
             "park_shame_history.py should use full expression in GROUP BY for MariaDB compatibility"
 
 

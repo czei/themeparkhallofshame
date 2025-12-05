@@ -39,8 +39,8 @@ of a park's ride capacity is currently down, weighted by ride importance.</p>
 
             <p>Where:</p>
             <ul>
-                <li><strong>Weighted Down</strong> = Sum of tier weights for all rides currently showing as DOWN</li>
-                <li><strong>Total Park Weight</strong> = Sum of all ride tier weights in the park</li>
+                <li><strong>Weighted Down</strong> = Sum of tier weights for all rides currently showing as down</li>
+                <li><strong>Total Park Weight</strong> = Sum of tier weights for rides that have operated in the past 7 days (see "The 7-Day Window" below)</li>
             </ul>
 
             <p>This is a real-time "right now" score, not cumulative over time. When a ride comes back up,
@@ -79,6 +79,33 @@ the shame score immediately drops.</p>
                     </tr>
                 </tbody>
             </table>
+
+            <h4>What Counts as "Down"?</h4>
+            <p>Not all parks report ride status the same way:</p>
+            <ul>
+                <li><strong>Disney &amp; Universal</strong>: These parks distinguish between <em>DOWN</em>
+(unexpected breakdown) and <em>CLOSED</em> (scheduled closure, like meal breaks or weather). Only
+<em>DOWN</em> counts toward the Shame Score.</li>
+                <li><strong>Other parks</strong>: Most other parks only report <em>CLOSED</em> for all
+non-operating rides, without distinguishing breakdowns from scheduled closures. We treat <em>CLOSED</em>
+as potential downtime for these parks.</li>
+            </ul>
+            <p><em>Caveat: Parks that don't publish ride schedules may be penalized if they only run certain
+rides part of the day (e.g., only during peak hours), since we can't distinguish "scheduled closure"
+from "breakdown."</em></p>
+
+            <h4>The 7-Day Window</h4>
+            <p><strong>Problem:</strong> Some rides may be closed for extended refurbishment, seasonal operation,
+or other long-term reasons. If we included these in the denominator, parks could pad their score with
+rides that haven't run in weeks.</p>
+
+            <p><strong>Solution:</strong> The "Total Park Weight" only includes rides that have <em>operated at
+least once in the past 7 days</em>. This means:</p>
+            <ul>
+                <li>Rides that haven't operated in 7+ days are excluded from the denominator</li>
+                <li>Parks can't artificially lower their score with defunct rides</li>
+                <li>Seasonal rides are automatically excluded when closed for the season</li>
+            </ul>
 
             <h4>Why This Works</h4>
             <p><strong>Problem:</strong> Raw downtime hours unfairly penalize larger parks. A park with 50 rides

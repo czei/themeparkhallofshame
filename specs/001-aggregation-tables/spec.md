@@ -41,19 +41,19 @@ Users viewing YESTERDAY, last week, and last month rankings experience the same 
 
 ---
 
-### User Story 3 - Yearly Awards Rankings (Priority: P3)
+### User Story 3 - Yearly Aggregation Capability (Priority: P3)
 
-Users can view yearly award rankings showing which parks had the best/worst performance over the entire year.
+The system architecture supports aggregating full calendar years of data for future yearly awards functionality.
 
-**Why this priority**: Enables new functionality (yearly awards) that would be impossible with current on-the-fly aggregation performance. This is the long-term payoff of the aggregation architecture.
+**Why this priority**: Validates that the aggregation architecture can scale to year-long timeframes. Yearly awards feature is NOT implemented in this phase, but the data infrastructure must be designed to support it. This story ensures yearly aggregates can be computed and queried efficiently when the feature is built later.
 
-**Independent Test**: Query yearly rankings for completed calendar years and verify results appear instantly. This demonstrates the system can scale to year-long timeframes.
+**Independent Test**: Run yearly aggregation job on a completed calendar year and verify the aggregate is created within the required timeframe. Query the yearly aggregate and confirm sub-second response. This proves the architecture can handle year-scale data volumes.
 
 **Acceptance Scenarios**:
 
-1. **Given** calendar year has completed, **When** user requests yearly awards, **Then** rankings display in under 1 second
-2. **Given** multiple years of data exist, **When** user compares year-over-year performance, **Then** results load instantly
-3. **Given** new year begins, **When** system starts tracking new yearly data, **Then** current year shows partial results and prior year is complete
+1. **Given** calendar year has completed, **When** yearly aggregation job runs, **Then** yearly aggregate is created within 2 days
+2. **Given** yearly aggregate exists, **When** system queries it, **Then** results return in under 1 second
+3. **Given** new year begins, **When** system transitions, **Then** prior year aggregate is complete and current year starts fresh
 
 ---
 
@@ -91,7 +91,7 @@ The system automatically maintains aggregated data as new snapshots are collecte
 - **FR-001**: System MUST return TODAY rankings in under 1 second
 - **FR-002**: System MUST return YESTERDAY/last_week/last_month rankings in under 1 second
 - **FR-003**: System MUST return yearly rankings in under 1 second
-- **FR-004**: System MUST support 10,000 concurrent users without performance degradation
+- **FR-004**: System MUST support 500 concurrent users without performance degradation
 
 **Data Architecture Requirements:**
 
@@ -145,11 +145,11 @@ The system automatically maintains aggregated data as new snapshots are collecte
 - **SC-002**: YESTERDAY rankings load in under 1 second
 - **SC-003**: Last week rankings load in under 1 second
 - **SC-004**: Last month rankings load in under 1 second
-- **SC-005**: Yearly rankings load in under 1 second (currently not feasible)
+- **SC-005**: Yearly aggregates can be queried in under 1 second (validates architecture for future yearly awards feature)
 
 **Scalability:**
 
-- **SC-006**: System handles 10,000 concurrent users with average response time under 2 seconds
+- **SC-006**: System handles 500 concurrent users with average response time under 2 seconds
 - **SC-007**: Database query time for rankings improves by 10x or more
 - **SC-008**: Storage costs remain flat or decrease over time (through retention policies)
 
@@ -174,6 +174,7 @@ The system automatically maintains aggregated data as new snapshots are collecte
 5. **API Contract**: Frontend expects specific JSON response format from Flask endpoints
 6. **Timezone**: All data stored in UTC, converted to Pacific Time for display
 7. **Frontend Independence**: Frontend code doesn't need changes (API layer provides decoupling)
+8. **Deployment Target**: Single-server deployment with 500 concurrent user capacity
 
 ## Dependencies
 
@@ -184,6 +185,7 @@ The system automatically maintains aggregated data as new snapshots are collecte
 
 ## Out of Scope
 
+- **Yearly Awards Feature**: The UI and logic for displaying yearly awards to users is NOT implemented in this phase. We are only building the data infrastructure (yearly aggregates) to support this feature in the future.
 - Frontend UI changes or new visualizations (maintain current interface)
 - Real-time streaming aggregation (5-minute collection cadence sufficient)
 - Migration to specialized time-series database (TimescaleDB, InfluxDB, etc.)

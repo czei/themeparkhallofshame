@@ -15,6 +15,7 @@
 
 - [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
+- [x] Requirements align with TDD principles (test-first, incremental validation)
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
 - [x] All acceptance scenarios are defined
@@ -37,14 +38,17 @@
 1. Raw snapshot retention: 90 days
 2. Hourly aggregate retention: 3 years
 3. Initial data strategy: Wipe DB and restart with new schema
+4. Concurrent user target: 500 users (single-server deployment)
+5. Yearly awards: Infrastructure only, feature implementation deferred
 
 **Key Strengths**:
 - Clear performance refactoring focus
-- Well-prioritized user stories (P1-P4) with independent test scenarios
+- Well-prioritized user stories (P1-P4) with independent test scenarios that support TDD workflow
 - Comprehensive functional requirements covering performance, data architecture, automation, and API contracts
 - Measurable, technology-agnostic success criteria
 - Explicit assumptions and dependencies documented
-- Clear "Out of Scope" section sets boundaries
+- Clear "Out of Scope" section sets boundaries (yearly awards UI deferred, focus on data infrastructure)
+- Realistic deployment target (500 concurrent users, single-server)
 
 **Ready for**: `/speckit.plan` or `/speckit.clarify`
 
@@ -54,3 +58,6 @@
 - Flask API layer provides clean decoupling between database schema and frontend
 - Fresh database start simplifies implementation (no complex migration logic needed)
 - Retention policies balance storage costs with analytical needs (90 days raw, 3 years hourly, indefinite daily/yearly)
+- TDD approach: each user story includes independent test scenarios that can be validated incrementally
+- Yearly aggregation infrastructure built now, but awards feature implementation deferred to future phase
+- Single-server deployment target (500 concurrent users) appropriate for current scale

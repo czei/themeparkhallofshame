@@ -1,0 +1,592 @@
+# OpenAPI 3.0 Contract: Parks API
+# Feature: 001-aggregation-tables
+# Purpose: Document existing API response format (MUST NOT change during refactoring)
+
+openapi: 3.0.3
+info:
+  title: Theme Park Hall of Shame - Parks API
+  version: 1.0.0
+  description: |
+    Park-level downtime rankings and statistics API.
+
+    **IMPORTANT**: This refactoring (001-aggregation-tables) changes INTERNAL query
+    implementation (hourly tables) but MUST maintain 100% backwards compatibility with
+    this API contract. Frontend depends on this exact response format.
+
+    **Data Source Attribution**: All endpoints MUST include attribution to ThemeParks.wiki
+    per constitutional requirement (Principle III: API Source Attribution).
+
+servers:
+  - url: https://www.webperformance.com/api
+    description: Production
+  - url: http://localhost:5001/api
+    description: Local development
+
+paths:
+  /parks/downtime:
+    get:
+      summary: Get park downtime rankings
+      description: |
+        Returns parks ranked by downtime/shame score for specified time period.
+
+        **Performance Requirements** (per spec FR-001 to FR-003):
+        - TODAY: < 1 second
+        - YESTERDAY/last_week/last_month: < 1 second
+
+        **Query Implementation** (internal - NOT part of contract):
+        - live: Pre-aggregated park_live_rankings table (10-min refresh)
+        - today: Hourly stats (after refactoring) or snapshots (before)
+        - yesterday/last_week/last_month: Daily/weekly/monthly stats tables
+
+      parameters:
+        - name: period
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [live, today, yesterday, last_week, last_month]
+            default: live
+          description: Time period for rankings
+
+        - name: filter
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [disney-universal, all-parks]
+            default: all-parks
+          description: Filter to Disney/Universal parks only or all parks
+
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          description: Maximum number of results to return
+
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [shame_score, total_downtime_hours, uptime_percentage, rides_down]
+            default: shame_score
+          description: Column to sort rankings by
+
+        - name: weighted
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Use tier-weighted scoring (currently unused)
+
+      responses:
+        '200':
+          description: Successful response with park rankings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParkDowntimeRankingsResponse'
+              example:
+                success: true
+                period: today
+                filter: all-parks
+                weighted: false
+                sort_by: shame_score
+                aggregate_stats:
+                  total_parks: 80
+                  parks_with_downtime: 42
+                  avg_shame_score: 4.2
+                  total_downtime_hours: 128.5
+                data:
+                  - rank: 1
+                    park_id: 196
+                    park_name: Six Flags Magic Mountain
+                    location: Los Angeles, California
+                    timezone: America/Los_Angeles
+                    operator: Six Flags
+                    queue_times_id: 196
+                    queue_times_url: https://queue-times.com/parks/196
+                    shame_score: 8.7
+                    shame_score_raw: 8.6543
+                    total_downtime_hours: 12.5
+                    weighted_downtime_hours: 18.2
+                    rides_operating: 48
+                    rides_down: 5
+                    uptime_percentage: 82.3
+                    effective_park_weight: 120.0
+                    snapshot_count: 144
+                attribution:
+                  data_source: ThemeParks.wiki
+                  url: https://themeparks.wiki
+
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error: "Invalid period. Must be 'live', 'today', 'yesterday', 'last_week', or 'last_month'"
+
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error: Internal server error
+
+  /parks/waittimes:
+    get:
+      summary: Get park wait time rankings
+      description: |
+        Returns parks ranked by average wait times for specified time period.
+
+        **Performance Requirements** (per spec FR-001 to FR-003):
+        - TODAY: < 1 second
+        - YESTERDAY/last_week/last_month: < 1 second
+
+      parameters:
+        - name: period
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [live, today, yesterday, last_week, last_month]
+            default: live
+
+        - name: filter
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [disney-universal, all-parks]
+            default: all-parks
+
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+
+      responses:
+        '200':
+          description: Successful response with park wait time rankings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParkWaitTimeRankingsResponse'
+              example:
+                success: true
+                period: today
+                filter: all-parks
+                data:
+                  - rank: 1
+                    park_id: 196
+                    park_name: Six Flags Magic Mountain
+                    location: Los Angeles, California
+                    avg_wait_time_minutes: 62.5
+                    peak_wait_time_minutes: 120
+                    queue_times_id: 196
+                    queue_times_url: https://queue-times.com/parks/196
+                attribution:
+                  data_source: ThemeParks.wiki
+                  url: https://themeparks.wiki
+
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /parks/{park_id}/details:
+    get:
+      summary: Get detailed park information with chart data
+      description: |
+        Returns comprehensive park details including:
+        - Park metadata
+        - Current shame breakdown (rides down by tier)
+        - Hourly shame score chart data (last 24 hours for TODAY period)
+        - Ride-level downtime details
+
+        **CRITICAL**: Chart data currently uses GROUP BY HOUR on raw snapshots.
+        After refactoring, it MUST query park_hourly_stats instead while maintaining
+        exact same response format.
+
+        **Performance Requirement**: < 1 second for chart data (currently 5-10 seconds)
+
+      parameters:
+        - name: park_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Park ID (from parks table)
+
+        - name: period
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [live, today, yesterday, last_week, last_month]
+            default: today
+          description: Time period for chart data
+
+      responses:
+        '200':
+          description: Successful response with park details and chart data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParkDetailsResponse'
+              example:
+                success: true
+                park:
+                  park_id: 196
+                  park_name: Six Flags Magic Mountain
+                  location: Los Angeles, California
+                  timezone: America/Los_Angeles
+                  operator: Six Flags
+                  queue_times_id: 196
+                  queue_times_url: https://queue-times.com/parks/196
+                shame_breakdown:
+                  tier1_down: 2
+                  tier2_down: 1
+                  tier3_down: 2
+                  total_down: 5
+                  tier1_total: 15
+                  tier2_total: 20
+                  tier3_total: 25
+                chart_data:
+                  - hour_start_utc: "2025-12-05T21:00:00Z"
+                    shame_score: 6.8
+                    avg_wait_time_minutes: 42.5
+                    rides_operating: 48
+                    rides_down: 5
+                  - hour_start_utc: "2025-12-05T22:00:00Z"
+                    shame_score: 7.2
+                    avg_wait_time_minutes: 45.0
+                    rides_operating: 47
+                    rides_down: 6
+                rides_down:
+                  - ride_id: 5823
+                    ride_name: X2
+                    tier: 1
+                    downtime_hours: 2.5
+                    last_seen_operating: "2025-12-05T19:30:00Z"
+                attribution:
+                  data_source: ThemeParks.wiki
+                  url: https://themeparks.wiki
+
+        '404':
+          description: Park not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error: Park not found
+
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    ParkDowntimeRankingsResponse:
+      type: object
+      required: [success, period, filter, data, attribution]
+      properties:
+        success:
+          type: boolean
+          description: Always true for successful responses
+        period:
+          type: string
+          enum: [live, today, yesterday, last_week, last_month]
+        filter:
+          type: string
+          enum: [disney-universal, all-parks]
+        weighted:
+          type: boolean
+        sort_by:
+          type: string
+        aggregate_stats:
+          type: object
+          properties:
+            total_parks:
+              type: integer
+            parks_with_downtime:
+              type: integer
+            avg_shame_score:
+              type: number
+              format: float
+            total_downtime_hours:
+              type: number
+              format: float
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParkDowntimeRanking'
+        attribution:
+          $ref: '#/components/schemas/Attribution'
+
+    ParkWaitTimeRankingsResponse:
+      type: object
+      required: [success, period, filter, data, attribution]
+      properties:
+        success:
+          type: boolean
+        period:
+          type: string
+        filter:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParkWaitTimeRanking'
+        attribution:
+          $ref: '#/components/schemas/Attribution'
+
+    ParkDetailsResponse:
+      type: object
+      required: [success, park, chart_data, attribution]
+      properties:
+        success:
+          type: boolean
+        park:
+          $ref: '#/components/schemas/ParkMetadata'
+        shame_breakdown:
+          $ref: '#/components/schemas/ShameBreakdown'
+        chart_data:
+          type: array
+          items:
+            $ref: '#/components/schemas/HourlyChartData'
+          description: |
+            CRITICAL: Array of hourly data points for charts.
+            - TODAY period: Last 24 hours (up to 24 data points)
+            - YESTERDAY: Full previous day (24 data points)
+            - LAST_WEEK: 7 days of hourly data (up to 168 data points)
+
+            **Implementation Note**: After refactoring, this comes from park_hourly_stats
+            instead of GROUP BY HOUR on raw snapshots. Response format MUST NOT change.
+        rides_down:
+          type: array
+          items:
+            $ref: '#/components/schemas/RideDowntimeDetail'
+        attribution:
+          $ref: '#/components/schemas/Attribution'
+
+    ParkDowntimeRanking:
+      type: object
+      required: [rank, park_id, park_name, shame_score]
+      properties:
+        rank:
+          type: integer
+          description: Ranking position (1 = worst)
+        park_id:
+          type: integer
+        park_name:
+          type: string
+        location:
+          type: string
+        timezone:
+          type: string
+        operator:
+          type: string
+        queue_times_id:
+          type: integer
+        queue_times_url:
+          type: string
+          format: uri
+        shame_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 10
+          description: Rounded to 1 decimal place (0-10 scale)
+        shame_score_raw:
+          type: number
+          format: float
+          description: Unrounded shame score for sorting
+        total_downtime_hours:
+          type: number
+          format: float
+        weighted_downtime_hours:
+          type: number
+          format: float
+        rides_operating:
+          type: integer
+        rides_down:
+          type: integer
+        uptime_percentage:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+        effective_park_weight:
+          type: number
+          format: float
+          description: 7-day hybrid denominator (sum of tier weights for operated rides)
+        snapshot_count:
+          type: integer
+          description: Number of snapshots aggregated (quality indicator)
+
+    ParkWaitTimeRanking:
+      type: object
+      required: [rank, park_id, park_name, avg_wait_time_minutes]
+      properties:
+        rank:
+          type: integer
+        park_id:
+          type: integer
+        park_name:
+          type: string
+        location:
+          type: string
+        avg_wait_time_minutes:
+          type: number
+          format: float
+        peak_wait_time_minutes:
+          type: number
+          format: float
+        queue_times_id:
+          type: integer
+        queue_times_url:
+          type: string
+          format: uri
+
+    ParkMetadata:
+      type: object
+      required: [park_id, park_name]
+      properties:
+        park_id:
+          type: integer
+        park_name:
+          type: string
+        location:
+          type: string
+        timezone:
+          type: string
+        operator:
+          type: string
+        queue_times_id:
+          type: integer
+        queue_times_url:
+          type: string
+          format: uri
+
+    ShameBreakdown:
+      type: object
+      description: Current rides down by tier (for shame score visualization)
+      properties:
+        tier1_down:
+          type: integer
+          description: Number of tier 1 rides currently down
+        tier2_down:
+          type: integer
+        tier3_down:
+          type: integer
+        total_down:
+          type: integer
+        tier1_total:
+          type: integer
+          description: Total number of tier 1 rides that operated
+        tier2_total:
+          type: integer
+        tier3_total:
+          type: integer
+
+    HourlyChartData:
+      type: object
+      required: [hour_start_utc, shame_score]
+      description: |
+        Single data point for hourly shame score chart.
+        **CRITICAL**: After refactoring, this comes from park_hourly_stats.hour_start_utc
+      properties:
+        hour_start_utc:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of hour start (e.g., 2025-12-05T21:00:00Z)
+        shame_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 10
+          nullable: true
+          description: Null if park was closed during hour
+        avg_wait_time_minutes:
+          type: number
+          format: float
+          nullable: true
+        rides_operating:
+          type: integer
+        rides_down:
+          type: integer
+
+    RideDowntimeDetail:
+      type: object
+      properties:
+        ride_id:
+          type: integer
+        ride_name:
+          type: string
+        tier:
+          type: integer
+          enum: [1, 2, 3]
+        downtime_hours:
+          type: number
+          format: float
+        last_seen_operating:
+          type: string
+          format: date-time
+          nullable: true
+
+    Attribution:
+      type: object
+      required: [data_source, url]
+      description: |
+        **Constitutional Requirement** (Principle III: API Source Attribution):
+        All responses MUST include attribution to ThemeParks.wiki
+      properties:
+        data_source:
+          type: string
+          enum: [ThemeParks.wiki]
+        url:
+          type: string
+          format: uri
+          enum: [https://themeparks.wiki]
+
+    ErrorResponse:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          type: string
+          description: Human-readable error message
+

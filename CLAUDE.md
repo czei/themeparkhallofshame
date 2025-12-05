@@ -3,6 +3,8 @@
 Auto-generated from all feature plans. Last updated: 2025-11-22
 
 ## Active Technologies
+- Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ (Core only, no ORM models), mysqlclient 2.2+ (001-aggregation-tables)
+- MySQL/MariaDB with existing schema (park_activity_snapshots, ride_status_snapshots, park_daily_stats, etc.) (001-aggregation-tables)
 
 - Python 3.11+ (001-theme-park-tracker)
 
@@ -22,6 +24,7 @@ cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLO
 Python 3.11+: Follow standard conventions
 
 ## Recent Changes
+- 001-aggregation-tables: Added Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ (Core only, no ORM models), mysqlclient 2.2+
 
 - 001-theme-park-tracker: Added Python 3.11+
 

@@ -82,8 +82,10 @@ This project uses web application structure:
 - [ ] T017 [US1] Update Flask route `/api/parks/downtime?period=today` in `backend/src/api/routes/parks.py` to use new hybrid query (controlled by `USE_HOURLY_TABLES` env var)
 - [ ] T018 [US1] Run tests - verify all US1 tests now PASS (TDD GREEN phase)
 - [ ] T019 [US1] Code cleanup and refactoring while keeping tests green (TDD REFACTOR phase)
+- [ ] T020 [P] [US1] Create hourly job health check in `backend/src/database/queries/monitoring/hourly_job_health.py` - queries `aggregation_log` for last successful 'hourly' run, alerts if > 2 hours ago (CRITICAL: proactive failure detection for new cron job)
+- [ ] T021 [P] [US1] Integration test for `USE_HOURLY_TABLES=false` rollback path in `backend/tests/integration/test_feature_flag_rollback.py` - validates system uses `_query_raw_snapshots()` when feature flag disabled
 
-**Checkpoint**: TODAY rankings work with sub-1-second response times. Tests pass. API contract maintained. Feature flag allows instant rollback to GROUP BY approach.
+**Checkpoint**: TODAY rankings work with sub-1-second response times. Tests pass. API contract maintained. Feature flag allows instant rollback to GROUP BY approach. **Monitoring in place to detect aggregation job failures.**
 
 ---
 
@@ -99,22 +101,22 @@ This project uses web application structure:
 
 > **TDD RED PHASE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T020 [P] [US2] Contract test for `/api/parks/downtime?period=yesterday` in `backend/tests/integration/test_yesterday_api.py` - validates response format
-- [ ] T021 [P] [US2] Contract test for `/api/parks/downtime?period=last_week` in `backend/tests/integration/test_weekly_api.py` - validates response format
-- [ ] T022 [P] [US2] Contract test for `/api/parks/downtime?period=last_month` in `backend/tests/integration/test_monthly_api.py` - validates response format
-- [ ] T023 [P] [US2] Integration test for park details chart data in `backend/tests/integration/test_hourly_chart_data.py` - verifies `/api/parks/{park_id}/details?period=today` returns 24 hourly data points
+- [ ] T022 [P] [US2] Contract test for `/api/parks/downtime?period=yesterday` in `backend/tests/integration/test_yesterday_api.py` - validates response format
+- [ ] T023 [P] [US2] Contract test for `/api/parks/downtime?period=last_week` in `backend/tests/integration/test_weekly_api.py` - validates response format
+- [ ] T024 [P] [US2] Contract test for `/api/parks/downtime?period=last_month` in `backend/tests/integration/test_monthly_api.py` - validates response format
+- [ ] T025 [P] [US2] Integration test for park details chart data in `backend/tests/integration/test_hourly_chart_data.py` - verifies `/api/parks/{park_id}/details?period=today` returns 24 hourly data points
 
 **Checkpoint**: Tests written and FAILING (RED) - ready for GREEN phase
 
 ### Implementation for User Story 2 (TDD GREEN/REFACTOR)
 
-- [ ] T024 [P] [US2] Update YESTERDAY query in `backend/src/database/queries/yesterday/yesterday_park_rankings.py` to use `park_hourly_stats` (controlled by `USE_HOURLY_TABLES` env var)
-- [ ] T025 [P] [US2] Update last_week query logic to aggregate from `park_hourly_stats` instead of GROUP BY on raw snapshots
-- [ ] T026 [P] [US2] Update last_month query logic to aggregate from `park_hourly_stats` instead of GROUP BY on raw snapshots
-- [ ] T027 [US2] Update park details chart query in `backend/src/database/queries/charts/park_shame_history.py` to use hourly tables for all periods (TODAY, YESTERDAY, last_week, last_month)
-- [ ] T028 [US2] Update Flask routes in `backend/src/api/routes/parks.py` for YESTERDAY/last_week/last_month periods to use new queries
-- [ ] T029 [US2] Run tests - verify all US2 tests now PASS (TDD GREEN phase)
-- [ ] T030 [US2] Code cleanup and refactoring while keeping tests green (TDD REFACTOR phase)
+- [ ] T026 [P] [US2] Update YESTERDAY query in `backend/src/database/queries/yesterday/yesterday_park_rankings.py` to use `park_hourly_stats` (controlled by `USE_HOURLY_TABLES` env var)
+- [ ] T027 [P] [US2] Update last_week query logic to aggregate from `park_hourly_stats` instead of GROUP BY on raw snapshots
+- [ ] T028 [P] [US2] Update last_month query logic to aggregate from `park_hourly_stats` instead of GROUP BY on raw snapshots
+- [ ] T029 [US2] Update park details chart query in `backend/src/database/queries/charts/park_shame_history.py` to use hourly tables for all periods (TODAY, YESTERDAY, last_week, last_month)
+- [ ] T030 [US2] Update Flask routes in `backend/src/api/routes/parks.py` for YESTERDAY/last_week/last_month periods to use new queries
+- [ ] T031 [US2] Run tests - verify all US2 tests now PASS (TDD GREEN phase)
+- [ ] T032 [US2] Code cleanup and refactoring while keeping tests green (TDD REFACTOR phase)
 
 **Checkpoint**: All historical periods (YESTERDAY, last_week, last_month) load in under 1 second. Park details modal charts display instantly. Tests pass. API contract maintained across all periods.
 
@@ -132,19 +134,19 @@ This project uses web application structure:
 
 > **TDD RED PHASE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T031 [P] [US3] Unit test for yearly aggregation logic in `backend/tests/unit/test_yearly_aggregation.py` - verifies aggregation from daily stats produces correct yearly averages
-- [ ] T032 [P] [US3] Integration test for yearly query performance in `backend/tests/integration/test_yearly_query_performance.py` - validates sub-1-second response for year-long aggregate
+- [ ] T033 [P] [US3] Unit test for yearly aggregation logic in `backend/tests/unit/test_yearly_aggregation.py` - verifies aggregation from daily stats produces correct yearly averages
+- [ ] T034 [P] [US3] Integration test for yearly query performance in `backend/tests/integration/test_yearly_query_performance.py` - validates sub-1-second response for year-long aggregate
 
 **Checkpoint**: Tests written and FAILING (RED) - ready for GREEN phase
 
 ### Implementation for User Story 3 (TDD GREEN/REFACTOR)
 
-- [ ] T033 [US3] Verify `park_yearly_stats` table exists (created in migration 003) - check schema matches requirements (park_id, year, avg_wait_time, avg_shame_score, sample_count)
-- [ ] T034 [US3] Add yearly aggregation method to `backend/src/scripts/aggregate_daily.py` (reuses existing `DailyAggregator` pattern)
-- [ ] T035 [US3] Implement yearly aggregation job that runs after Dec 31 (queries `park_daily_stats` for previous year, writes to `park_yearly_stats`)
-- [ ] T036 [US3] Add yearly aggregation logging to `aggregation_log` table with execution metrics (records processed, processing time, success/failure status)
-- [ ] T037 [US3] Run tests - verify all US3 tests now PASS (TDD GREEN phase)
-- [ ] T038 [US3] Code cleanup and refactoring while keeping tests green (TDD REFACTOR phase)
+- [ ] T035 [US3] Verify `park_yearly_stats` table exists (created in migration 003) - check schema matches requirements (park_id, year, avg_wait_time, avg_shame_score, sample_count)
+- [ ] T036 [US3] Add yearly aggregation method to `backend/src/scripts/aggregate_daily.py` (reuses existing `DailyAggregator` pattern)
+- [ ] T037 [US3] Implement yearly aggregation job that runs after Dec 31 (queries `park_daily_stats` for previous year, writes to `park_yearly_stats`)
+- [ ] T038 [US3] Add yearly aggregation logging to `aggregation_log` table with execution metrics (records processed, processing time, success/failure status)
+- [ ] T039 [US3] Run tests - verify all US3 tests now PASS (TDD GREEN phase)
+- [ ] T040 [US3] Code cleanup and refactoring while keeping tests green (TDD REFACTOR phase)
 
 **Checkpoint**: Yearly aggregation infrastructure complete. Architecture validated for year-scale data. Tests prove sub-second query performance. Yearly awards UI (out of scope) can be built on this foundation in future phase.
 
@@ -162,22 +164,22 @@ This project uses web application structure:
 
 > **TDD RED PHASE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T039 [P] [US4] Unit test for hourly job idempotency in `backend/tests/unit/test_hourly_aggregation.py` - verifies running same hour twice produces identical results (no duplicate rows)
-- [ ] T040 [P] [US4] Unit test for aggregation error handling in `backend/tests/unit/test_hourly_aggregation.py` - verifies failures logged to `aggregation_log` with error details
-- [ ] T041 [P] [US4] Integration test for continuous aggregation in `backend/tests/integration/test_continuous_aggregation.py` - simulates 24 hours of collection, verifies hourly aggregates created within 15 minutes of hour completion
+- [ ] T041 [P] [US4] Unit test for hourly job idempotency in `backend/tests/unit/test_hourly_aggregation.py` - verifies running same hour twice produces identical results (no duplicate rows)
+- [ ] T042 [P] [US4] Unit test for aggregation error handling in `backend/tests/unit/test_hourly_aggregation.py` - verifies failures logged to `aggregation_log` with error details
+- [ ] T043 [P] [US4] Integration test for continuous aggregation in `backend/tests/integration/test_continuous_aggregation.py` - simulates 24 hours of collection, verifies hourly aggregates created within 15 minutes of hour completion
 
 **Checkpoint**: Tests written and FAILING (RED) - ready for GREEN phase
 
 ### Implementation for User Story 4 (TDD GREEN/REFACTOR)
 
-- [ ] T042 [US4] Add error handling to `backend/src/scripts/aggregate_hourly.py` - catches exceptions, logs to `aggregation_log` with status='failure' and error message
-- [ ] T043 [US4] Add retry logic to `backend/src/scripts/aggregate_hourly.py` - retries failed aggregations with exponential backoff (max 3 attempts)
-- [ ] T044 [US4] Implement aggregation_log writes in `backend/src/scripts/aggregate_hourly.py` - logs every execution with aggregation_type='hourly', target_period, parks_processed, rides_processed, processing_time_seconds
-- [ ] T045 [US4] Create cron job configuration in `deployment/cron.d/aggregate_hourly` - runs at :05 past every hour with proper environment variables (DATABASE_NAME, USE_HOURLY_TABLES, etc.)
-- [ ] T046 [US4] Update daily aggregation job in `backend/src/scripts/aggregate_daily.py` to add cleanup task - deletes `park_hourly_stats` older than 3 years (per data-model.md retention policy)
-- [ ] T047 [US4] Create monitoring dashboard query in `backend/src/database/queries/monitoring/aggregation_health.py` - queries `aggregation_log` for recent failures, processing time trends
-- [ ] T048 [US4] Run tests - verify all US4 tests now PASS (TDD GREEN phase)
-- [ ] T049 [US4] Code cleanup and refactoring while keeping tests green (TDD REFACTOR phase)
+- [ ] T044 [US4] Add error handling to `backend/src/scripts/aggregate_hourly.py` - catches exceptions, logs to `aggregation_log` with status='failure' and error message
+- [ ] T045 [US4] Add retry logic to `backend/src/scripts/aggregate_hourly.py` - retries failed aggregations with exponential backoff (max 3 attempts)
+- [ ] T046 [US4] Implement aggregation_log writes in `backend/src/scripts/aggregate_hourly.py` - logs every execution with aggregation_type='hourly', target_period, parks_processed, rides_processed, processing_time_seconds
+- [ ] T047 [US4] Create cron job configuration in `deployment/cron.d/aggregate_hourly` - runs at :05 past every hour with proper environment variables (DATABASE_NAME, USE_HOURLY_TABLES, etc.)
+- [ ] T048 [US4] Update daily aggregation job in `backend/src/scripts/aggregate_daily.py` to add cleanup task - deletes `park_hourly_stats` older than 3 years (per data-model.md retention policy)
+- [ ] T049 [US4] Create monitoring dashboard query in `backend/src/database/queries/monitoring/aggregation_health.py` - queries `aggregation_log` for recent failures, processing time trends
+- [ ] T050 [US4] Run tests - verify all US4 tests now PASS (TDD GREEN phase)
+- [ ] T051 [US4] Code cleanup and refactoring while keeping tests green (TDD REFACTOR phase)
 
 **Checkpoint**: Continuous aggregation system operational. Jobs run on schedule, handle errors gracefully, retry failures, log execution metrics. System maintains up-to-date aggregates automatically.
 
@@ -187,16 +189,16 @@ This project uses web application structure:
 
 **Purpose**: Improvements that affect multiple user stories, final validation before production deployment
 
-- [ ] T050 [P] Run full local testing workflow per `specs/001-aggregation-tables/quickstart.md` - complete all 10 steps (mirror DB, migration, backfill, API testing, browser verification)
-- [ ] T051 [P] Performance benchmarking per quickstart.md Step 7 - compare GROUP BY HOUR vs hourly table queries, verify 100-700x improvement
-- [ ] T052 [P] Run complete test suite with `pytest backend/tests/ -v` - verify all 882+ tests pass with 0 failures
-- [ ] T053 [P] Run linting with `ruff check backend/` - verify no lint errors
-- [ ] T054 Update CLAUDE.md with any new canonical business rules discovered during implementation
-- [ ] T055 [P] Update `specs/001-aggregation-tables/quickstart.md` with any deviations from original plan (document actual vs planned)
-- [ ] T056 Manual browser verification (MANDATORY per CLAUDE.md) - open http://localhost:8080, test all periods (TODAY, YESTERDAY, last_week, last_month), verify shame scores match between Rankings table and Details modal
-- [ ] T057 Security review - verify no SQL injection vulnerabilities in new queries, confirm proper input validation on API parameters (period, park_id)
-- [ ] T058 [P] Add data quality monitoring queries in `backend/src/database/queries/monitoring/hourly_stats_quality.py` - checks for missing hours, low snapshot counts, shame score anomalies per research.md Finding 3 data quality warnings
-- [ ] T059 Production deployment checklist - verify migration tested on mirrored DB, feature flag in place for rollback, monitoring configured, cron jobs ready
+- [ ] T052 [P] Run full local testing workflow per `specs/001-aggregation-tables/quickstart.md` - complete all 10 steps (mirror DB, migration, backfill, API testing, browser verification)
+- [ ] T053 [P] Performance benchmarking per quickstart.md Step 7 - compare GROUP BY HOUR vs hourly table queries, verify 100-700x improvement
+- [ ] T054 [P] Run complete test suite with `pytest backend/tests/ -v` - verify all 882+ tests pass with 0 failures
+- [ ] T055 [P] Run linting with `ruff check backend/` - verify no lint errors
+- [ ] T056 Update CLAUDE.md with any new canonical business rules discovered during implementation
+- [ ] T057 [P] Update `specs/001-aggregation-tables/quickstart.md` with any deviations from original plan (document actual vs planned)
+- [ ] T058 Manual browser verification (MANDATORY per CLAUDE.md) - open http://localhost:8080, test all periods (TODAY, YESTERDAY, last_week, last_month), verify shame scores match between Rankings table and Details modal
+- [ ] T059 Security review - verify no SQL injection vulnerabilities in new queries, confirm proper input validation on API parameters (period, park_id)
+- [ ] T060 [P] Add data quality monitoring queries in `backend/src/database/queries/monitoring/hourly_stats_quality.py` - checks for missing hours, low snapshot counts, shame score anomalies per research.md Finding 3 data quality warnings
+- [ ] T061 Production deployment checklist - verify migration tested on mirrored DB, feature flag in place for rollback, monitoring configured, cron jobs ready
 
 **Checkpoint**: Feature complete, all tests passing, manual verification complete, ready for production deployment
 
@@ -245,10 +247,10 @@ Foundational (Phase 2) - MUST COMPLETE FIRST
 - **Phase 1 (Setup)**: T001-T003 can run in parallel (different concerns)
 - **Phase 2 (Foundational)**: T006-T007 can run in parallel (migration must complete first)
 - **Phase 3 (US1)**: T009-T011 tests can run in parallel; T013-T014 query methods can run in parallel
-- **Phase 4 (US2)**: T020-T023 tests can run in parallel; T024-T026 period queries can run in parallel
-- **Phase 5 (US3)**: T031-T032 tests can run in parallel
-- **Phase 6 (US4)**: T039-T041 tests can run in parallel
-- **Phase 7 (Polish)**: T050-T053 validation tasks can run in parallel
+- **Phase 4 (US2)**: T022-T025 tests can run in parallel; T026-T028 period queries can run in parallel
+- **Phase 5 (US3)**: T033-T034 tests can run in parallel
+- **Phase 6 (US4)**: T041-T043 tests can run in parallel
+- **Phase 7 (Polish)**: T052-T055 validation tasks can run in parallel
 
 ---
 
@@ -281,27 +283,40 @@ Task T019: "Code cleanup while keeping tests green"
 
 ### MVP First (User Story 1 Only) - Recommended Approach
 
-1. **Complete Phase 1**: Setup - Mirror production DB, verify data (1 hour)
-2. **Complete Phase 2**: Foundational - Migration, aggregation script, backfill (4 hours)
-3. **Complete Phase 3**: User Story 1 - TODAY rankings with hybrid query (6 hours)
+1. **Complete Phase 1**: Setup - Mirror production DB, verify data (**1 hour**)
+2. **Complete Phase 2**: Foundational - Migration, aggregation script, backfill (**6-8 hours**)
+   - T006 (aggregate_hourly.py): 4-6 hours alone - must replicate DailyAggregator pattern
+   - T008 (backfill script): 2-3 hours - depends on T006 completion
+3. **Complete Phase 3**: User Story 1 - TODAY rankings with hybrid query + monitoring (**12-14 hours**)
+   - T012-T014 (refactor park_shame_history.py): 4-5 hours - 467-line file with complex CTEs
+   - T015 (TODAY hybrid query): 3-4 hours - weighted averaging with time boundary handling
+   - T020-T021 (monitoring + rollback test): 2 hours - CRITICAL for MVP observability
+   - Tests + validation: 3-5 hours
 4. **STOP and VALIDATE**:
    - Run tests - all US1 tests must pass
    - Manual browser verification - TODAY rankings load < 1 second
    - Performance benchmark - verify 100-700x improvement
+   - Monitoring health check - verify hourly job alerts working
 5. **Deploy/Demo MVP**: TODAY rankings feature complete and production-ready
 
-**Estimated MVP Time**: 11 hours with TDD workflow
+**Estimated MVP Time**: **19-23 hours** with rigorous TDD workflow (revised from 11h based on code complexity analysis)
+
+**Why the Revision**: Original estimate allocated ~35 min/task. Code examination revealed:
+- Existing query files are 230-467 lines with complex CTEs
+- DailyAggregator pattern is 150+ lines just for setup/error handling
+- TDD workflow (RED-GREEN-REFACTOR) adds necessary overhead
+- Manual browser testing requires substantial time per CLAUDE.md
 
 ### Incremental Delivery (Full Feature)
 
-1. **Foundation** (Setup + Foundational): 5 hours → Database ready with hourly tables
-2. **+US1** (TODAY): 6 hours → Test independently → Deploy MVP ✅
-3. **+US2** (YESTERDAY/last_week/last_month): 4 hours → Test independently → Deploy
-4. **+US3** (Yearly): 3 hours → Test independently → Deploy
-5. **+US4** (Automation): 4 hours → Test independently → Deploy
-6. **+Polish**: 3 hours → Final validation → Production deployment
+1. **Foundation** (Setup + Foundational): **7-9 hours** → Database ready with hourly tables
+2. **+US1** (TODAY): **12-14 hours** → Test independently → Deploy MVP ✅
+3. **+US2** (YESTERDAY/last_week/last_month): **6-8 hours** → Test independently → Deploy
+4. **+US3** (Yearly): **4-5 hours** → Test independently → Deploy
+5. **+US4** (Automation): **6-7 hours** → Test independently → Deploy
+6. **+Polish**: **5-6 hours** → Final validation → Production deployment
 
-**Total Estimated Time**: 25 hours for complete feature (all 4 user stories)
+**Total Estimated Time**: **40-49 hours** for complete feature (all 4 user stories, revised from 25h)
 
 Each story adds value without breaking previous stories. Feature flag (`USE_HOURLY_TABLES`) allows instant rollback at any stage.
 
@@ -309,14 +324,14 @@ Each story adds value without breaking previous stories. Feature flag (`USE_HOUR
 
 With multiple developers (after Foundational phase complete):
 
-1. **Team completes Setup + Foundational together** (5 hours)
+1. **Team completes Setup + Foundational together** (**7-9 hours**)
 2. **Once Foundational done, stories proceed in parallel**:
-   - Developer A: User Story 1 (TODAY) - 6 hours
-   - Developer B: User Story 2 (YESTERDAY/last_week/last_month) - 4 hours
-   - Developer C: User Story 3 (Yearly) + User Story 4 (Automation) - 7 hours
+   - Developer A: User Story 1 (TODAY) - **12-14 hours**
+   - Developer B: User Story 2 (YESTERDAY/last_week/last_month) - **6-8 hours**
+   - Developer C: User Story 3 (Yearly) + User Story 4 (Automation) - **10-12 hours**
 3. Stories complete and integrate independently via feature flag
 
-**Total Time with 3 Developers**: 11 hours (vs 25 hours sequential)
+**Total Time with 3 Developers**: **21-23 hours** (vs 40-49 hours sequential, 47% time savings)
 
 ---
 
@@ -341,16 +356,20 @@ With multiple developers (after Foundational phase complete):
 
 - **Phase 1 (Setup)**: 3 tasks
 - **Phase 2 (Foundational)**: 5 tasks
-- **Phase 3 (US1 - TODAY)**: 11 tasks (3 tests + 8 implementation)
+- **Phase 3 (US1 - TODAY)**: **13 tasks** (3 tests + 8 implementation + **2 monitoring/validation** - revised from 11)
 - **Phase 4 (US2 - Historical)**: 11 tasks (4 tests + 7 implementation)
 - **Phase 5 (US3 - Yearly)**: 8 tasks (2 tests + 6 implementation)
 - **Phase 6 (US4 - Automation)**: 11 tasks (3 tests + 8 implementation)
 - **Phase 7 (Polish)**: 10 tasks
-- **Total**: 59 tasks
+- **Total**: **61 tasks** (revised from 59)
 
-**Parallel Opportunities**: 23 tasks marked [P] (39% parallelizable)
+**Parallel Opportunities**: **25 tasks** marked [P] (**41% parallelizable**, revised from 23 tasks)
 
-**MVP Scope (US1 only)**: 19 tasks (Phase 1 + Phase 2 + Phase 3)
+**MVP Scope (US1 only)**: **21 tasks** (Phase 1: 3 + Phase 2: 5 + Phase 3: 13, revised from 19)
+
+**Time Estimates (Revised)**:
+- **MVP**: 19-23 hours (vs original 11h - 2x adjustment based on code complexity)
+- **Full Feature**: 40-49 hours (vs original 25h - 1.8x adjustment)
 
 **Independent Test Criteria**:
 - US1: Load TODAY rankings with production data, verify < 1 second response

@@ -175,7 +175,7 @@ class ParkDetailsModal {
      * @param {number} excludedRidesCount - Number of rides excluded from shame score (7-day rule)
      */
     renderLiveShameBreakdown(breakdown, chartData = null, excludedRidesCount = 0) {
-        const { rides_down, total_park_weight, total_weighted_down, shame_score, park_is_open } = breakdown;
+        const { rides_down, rides_excluded, total_park_weight, total_weighted_down, total_excluded_weight, shame_score, park_is_open } = breakdown;
 
         // If park is closed, show that instead
         if (!park_is_open) {
@@ -258,6 +258,22 @@ class ParkDetailsModal {
                         <p>All rides are currently operating!</p>
                     </div>
                 `}
+
+                ${rides_excluded && rides_excluded.length > 0 ? `
+                    <div class="rides-excluded-section">
+                        <h4>Rides Excluded from Shame Calculation (${rides_excluded.length})</h4>
+                        <div class="excluded-explanation">
+                            These rides are NOT counted in the denominator because they haven't operated in the last 7 days.
+                            This prevents seasonal closures and long-term refurbishments from artificially inflating shame scores.
+                        </div>
+                        <div class="rides-excluded-list">
+                            ${this.renderExcludedRidesByWeight(rides_excluded)}
+                        </div>
+                        <div class="excluded-weight-summary">
+                            Total Excluded Weight: ${total_excluded_weight.toFixed(1)}
+                        </div>
+                    </div>
+                ` : ''}
 
                 <div class="tier-weights-info">
                     <div class="tier-weights-title">Tier Weight Reference</div>
@@ -861,6 +877,55 @@ class ParkDetailsModal {
                             <li class="ride-item">
                                 <span class="ride-name">${this.escapeHtml(ride.ride_name)}</span>
                                 <span class="ride-weight">+${ride.tier_weight}</span>
+                            </li>
+                        `).join('')}
+                    </ul>
+                </div>
+            `;
+        }).join('');
+    }
+
+    /**
+     * Render excluded rides grouped by weight, showing exclusion reason
+     */
+    renderExcludedRidesByWeight(rides) {
+        // Group rides by their actual tier_weight
+        const groupedByWeight = {};
+        rides.forEach(ride => {
+            const weight = ride.tier_weight || 2; // Default to 2 if missing
+            if (!groupedByWeight[weight]) {
+                groupedByWeight[weight] = [];
+            }
+            groupedByWeight[weight].push(ride);
+        });
+
+        // Sort weights descending (highest weight first)
+        const sortedWeights = Object.keys(groupedByWeight)
+            .map(Number)
+            .sort((a, b) => b - a);
+
+        // Get tier name based on weight (3x/2x/1x system)
+        const getTierInfo = (weight) => {
+            if (weight >= 3) return { tier: 1, name: 'Flagship Attractions' };
+            if (weight >= 2) return { tier: 2, name: 'Standard Attractions' };
+            return { tier: 3, name: 'Minor Attractions' };
+        };
+
+        return sortedWeights.map(weight => {
+            const ridesInGroup = groupedByWeight[weight];
+            const tierInfo = getTierInfo(weight);
+            return `
+                <div class="tier-group tier-${tierInfo.tier}">
+                    <div class="tier-group-header">
+                        <span class="tier-badge">Tier ${tierInfo.tier}</span>
+                        <span class="tier-name">${tierInfo.name}</span>
+                        <span class="tier-weight-label">${weight}x weight</span>
+                    </div>
+                    <ul class="rides-list">
+                        ${ridesInGroup.map(ride => `
+                            <li class="ride-item">
+                                <span class="ride-name">${this.escapeHtml(ride.ride_name)}</span>
+                                <span class="exclusion-reason">${this.escapeHtml(ride.exclusion_reason)}</span>
                             </li>
                         `).join('')}
                     </ul>

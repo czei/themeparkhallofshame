@@ -1197,8 +1197,10 @@ class StatsRepository:
             # No live rankings data for this park
             return {
                 "rides_down": [],
+                "rides_excluded": [],
                 "total_park_weight": 0,
                 "total_weighted_down": 0,
+                "total_excluded_weight": 0,
                 "shame_score": 0.0,
                 "park_is_open": False,
                 "breakdown_type": "live",
@@ -1239,10 +1241,50 @@ class StatsRepository:
             rides_down.append(ride_data)
             total_weighted_down += float(row.tier_weight) if row.tier_weight else 2.0
 
+        # STEP 3: Get rides EXCLUDED from the 7-day denominator
+        # These rides haven't operated in the last 7 days (seasonal closures, long-term refurbishments)
+        rides_excluded_query = text("""
+            SELECT
+                r.ride_id,
+                r.name AS ride_name,
+                COALESCE(rc.tier, 3) AS tier,
+                COALESCE(rc.tier_weight, 2.0) AS tier_weight,
+                r.last_operated_at,
+                CASE
+                    WHEN r.last_operated_at IS NULL THEN 'Never operated'
+                    ELSE CONCAT('Last operated ', TIMESTAMPDIFF(DAY, r.last_operated_at, UTC_TIMESTAMP()), ' days ago')
+                END AS exclusion_reason
+            FROM rides r
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            WHERE r.park_id = :park_id
+              AND r.is_active = TRUE
+              AND r.category = 'ATTRACTION'
+              AND (r.last_operated_at IS NULL OR r.last_operated_at < UTC_TIMESTAMP() - INTERVAL 7 DAY)
+            ORDER BY rc.tier ASC, r.name ASC
+        """)
+
+        rides_excluded_result = self.conn.execute(rides_excluded_query, {"park_id": park_id})
+
+        rides_excluded = []
+        total_excluded_weight = 0
+        for row in rides_excluded_result:
+            ride_data = {
+                "ride_id": row.ride_id,
+                "ride_name": row.ride_name,
+                "tier": row.tier,
+                "tier_weight": float(row.tier_weight) if row.tier_weight else 2.0,
+                "last_operated_at": row.last_operated_at,
+                "exclusion_reason": row.exclusion_reason
+            }
+            rides_excluded.append(ride_data)
+            total_excluded_weight += float(row.tier_weight) if row.tier_weight else 2.0
+
         return {
             "rides_down": rides_down,
+            "rides_excluded": rides_excluded,
             "total_park_weight": total_park_weight,
             "total_weighted_down": total_weighted_down,
+            "total_excluded_weight": total_excluded_weight,
             "shame_score": stored_shame_score,  # From park_live_rankings - same as Rankings API
             "park_is_open": park_is_open,
             "breakdown_type": "live",
@@ -4957,4 +4999,59 @@ class StatsRepository:
         """)
 
         result = self.conn.execute(query, {"park_id": park_id})
+        return [dict(row._mapping) for row in result.fetchall()]
+
+    def get_hourly_stats(
+        self,
+        park_id: Optional[int] = None,
+        start_hour: datetime = None,
+        end_hour: datetime = None
+    ) -> List[Dict]:
+        """
+        Get hourly statistics from park_hourly_stats table.
+
+        Args:
+            park_id: Optional park filter (None = all parks)
+            start_hour: Start hour (inclusive)
+            end_hour: End hour (exclusive)
+
+        Returns:
+            List of dicts with hourly stats (shame_score, rides_operating, etc.)
+        """
+        # Build dynamic WHERE clause
+        where_conditions = []
+        params = {}
+
+        if start_hour is not None:
+            where_conditions.append("hour_start_utc >= :start_hour")
+            params['start_hour'] = start_hour
+
+        if end_hour is not None:
+            where_conditions.append("hour_start_utc < :end_hour")
+            params['end_hour'] = end_hour
+
+        if park_id is not None:
+            where_conditions.append("park_id = :park_id")
+            params['park_id'] = park_id
+
+        where_clause = "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
+
+        query = text(f"""
+            SELECT
+                park_id,
+                hour_start_utc,
+                shame_score,
+                rides_operating,
+                rides_down,
+                total_downtime_hours,
+                weighted_downtime_hours,
+                effective_park_weight,
+                snapshot_count,
+                park_was_open
+            FROM park_hourly_stats
+            {where_clause}
+            ORDER BY hour_start_utc ASC, park_id ASC
+        """)
+
+        result = self.conn.execute(query, params)
         return [dict(row._mapping) for row in result.fetchall()]

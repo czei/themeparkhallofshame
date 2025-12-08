@@ -23,12 +23,15 @@ Single Source of Truth:
 """
 
 from typing import List, Dict, Any
+from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from utils.timezone import get_today_range_to_now_utc
 from utils.sql_helpers import ParkStatusSQL, RideFilterSQL
+from utils.metrics import USE_HOURLY_TABLES
+from database.repositories.stats_repository import StatsRepository
 
 
 class TodayParkWaitTimesQuery:
@@ -42,6 +45,7 @@ class TodayParkWaitTimesQuery:
 
     def __init__(self, connection: Connection):
         self.conn = connection
+        self.stats_repo = StatsRepository(connection)
 
     def get_rankings(
         self,
@@ -60,6 +64,78 @@ class TodayParkWaitTimesQuery:
         """
         # Get time range from midnight Pacific to now
         start_utc, now_utc = get_today_range_to_now_utc()
+
+        # HYBRID QUERY: Use hourly tables when enabled
+        if USE_HOURLY_TABLES:
+            current_hour_start = now_utc.replace(minute=0, second=0, microsecond=0)
+
+            # Get hourly stats for complete hours
+            hourly_stats = self.stats_repo.get_hourly_stats(
+                start_hour=start_utc,
+                end_hour=now_utc
+            )
+
+            # Group by park and calculate averages
+            park_data = {}
+            for row in hourly_stats:
+                park_id = row['park_id']
+                if park_id not in park_data:
+                    park_data[park_id] = {'wait_times': [], 'snapshots': 0}
+
+                if row['avg_wait_time_minutes']:
+                    # Weight by snapshot count
+                    for _ in range(row['snapshot_count']):
+                        park_data[park_id]['wait_times'].append(float(row['avg_wait_time_minutes']))
+                    park_data[park_id]['snapshots'] += row['snapshot_count']
+
+            # Calculate final averages and get park details
+            if not park_data:
+                return []
+
+            park_ids = list(park_data.keys())
+            filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
+            park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
+
+            query = text(f"""
+                SELECT
+                    p.park_id,
+                    p.queue_times_id,
+                    p.name AS park_name,
+                    CONCAT(p.city, ', ', p.state_province) AS location,
+                    {park_is_open_sq}
+                FROM parks p
+                WHERE p.park_id IN :park_ids
+                    AND p.is_active = TRUE
+                    {filter_clause}
+            """)
+
+            result = self.conn.execute(query, {"park_ids": tuple(park_ids)})
+
+            rankings = []
+            for row in result:
+                data = park_data[row.park_id]
+                wait_times = data['wait_times']
+
+                if wait_times:
+                    avg_wait = round(sum(wait_times) / len(wait_times), 1)
+                    peak_wait = round(max(wait_times), 1)
+
+                    rankings.append({
+                        'park_id': row.park_id,
+                        'queue_times_id': row.queue_times_id,
+                        'park_name': row.park_name,
+                        'location': row.location,
+                        'avg_wait_minutes': avg_wait,
+                        'peak_wait_minutes': peak_wait,
+                        'rides_reporting': None,  # TODO: Get from hourly stats
+                        'park_is_open': row.park_is_open
+                    })
+
+            # Sort and limit
+            rankings.sort(key=lambda x: x['avg_wait_minutes'] or 0, reverse=True)
+            return rankings[:limit]
+
+        # FALLBACK: Use original query on raw snapshots
 
         # Use centralized SQL helpers for consistent logic
         filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""

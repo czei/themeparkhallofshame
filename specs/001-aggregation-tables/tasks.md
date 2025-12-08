@@ -27,9 +27,9 @@ This project uses web application structure:
 
 **Purpose**: Prepare local development environment per quickstart.md
 
-- [ ] T001 Mirror production database to local dev environment using `deployment/scripts/mirror-production-db.sh --days=7`
-- [ ] T002 [P] Verify mirrored data completeness in `themepark_tracker_dev` database (check snapshot counts, date ranges)
-- [ ] T003 [P] Review existing aggregation infrastructure in `backend/src/scripts/aggregate_daily.py` to understand proven patterns
+- [x] T001 Mirror production database to local dev environment using `deployment/scripts/mirror-production-db.sh --days=7`
+- [x] T002 [P] Verify mirrored data completeness in `themepark_tracker_dev` database (check snapshot counts, date ranges)
+- [x] T003 [P] Review existing aggregation infrastructure in `backend/src/scripts/aggregate_daily.py` to understand proven patterns
 
 **Checkpoint**: Local environment ready with production data for testing
 
@@ -41,8 +41,8 @@ This project uses web application structure:
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T004 Create database migration `backend/src/database/migrations/012_add_hourly_stats.sql` with `park_hourly_stats` and `ride_hourly_stats` tables per data-model.md schema
-- [ ] T005 Apply migration to local dev database and verify tables created with correct indexes
+- [x] T004 Create database migration `backend/src/database/migrations/013_add_hourly_stats.sql` with `park_hourly_stats` and `ride_hourly_stats` tables per data-model.md schema
+- [x] T005 Apply migration to local dev database and verify tables created with correct indexes
 - [ ] T006 [P] Implement hourly aggregation script `backend/src/scripts/aggregate_hourly.py` (reuses `ShameScoreCalculator`, `RideStatusSQL`, `DowntimeSQL` from existing code)
 - [ ] T007 [P] Add `USE_HOURLY_TABLES` feature flag to `backend/src/utils/metrics.py` (defaults to `false` for safe rollback)
 - [ ] T008 Implement backfill script `backend/src/scripts/backfill_hourly_stats.py` for populating historical hourly data from raw snapshots

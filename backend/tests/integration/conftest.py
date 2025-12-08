@@ -20,7 +20,7 @@ def get_mysql_connection_string() -> str:
         ValueError: If required environment variables are not set
     """
     required_vars = ['TEST_DB_HOST', 'TEST_DB_NAME', 'TEST_DB_USER', 'TEST_DB_PASSWORD']
-    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    missing_vars = [var for var in required_vars if os.getenv(var) is None]
 
     if missing_vars:
         raise ValueError(

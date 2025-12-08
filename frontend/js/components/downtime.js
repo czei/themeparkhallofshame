@@ -238,7 +238,7 @@ class Downtime {
                             <th class="downtime-col sortable ${this.state.sortBy === 'total_downtime_hours' ? 'sorted' : ''}"
                                 data-sort="total_downtime_hours"
                                 title="Total accumulated ride downtime hours during the selected period. Click to sort.">
-                                Cumulative Downtime ${this.getSortIndicator('total_downtime_hours')}
+                                Total Ride-Hours Down ${this.getSortIndicator('total_downtime_hours')}
                             </th>
                             <th class="uptime-col sortable ${this.state.sortBy === 'uptime_percentage' ? 'sorted' : ''}"
                                 data-sort="uptime_percentage"
@@ -370,7 +370,7 @@ class Downtime {
                             <th class="downtime-col sortable ${this.state.rideSortBy === 'downtime_hours' ? 'sorted' : ''}"
                                 data-ride-sort="downtime_hours"
                                 title="Total time the ride was non-operational. Click to sort (most downtime first).">
-                                Cumulative Downtime ${this.getRideSortIndicator('downtime_hours')}
+                                Total Ride-Hours Down ${this.getRideSortIndicator('downtime_hours')}
                             </th>
                             <th class="uptime-col sortable ${this.state.rideSortBy === 'uptime_percentage' ? 'sorted' : ''}"
                                 data-ride-sort="uptime_percentage"

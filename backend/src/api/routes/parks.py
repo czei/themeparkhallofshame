@@ -481,19 +481,51 @@ def get_park_details(park_id: int):
             # - TODAY/YESTERDAY: Hourly averages for full day
             chart_data = None
             if period == 'live':
-                # LIVE: Get recent 60 minutes of data at 5-minute granularity
-                calc = ShameScoreCalculator(conn)
-                chart_data = calc.get_recent_snapshots(park_id=park_id, minutes=60)
+                # LIVE: Get recent 60 minutes of stored shame_score data at 5-minute granularity
+                # Use the pre-calculated shame_score from park_activity_snapshots (calculated with 7-day hybrid logic)
+                from datetime import datetime, timedelta, timezone
+                from sqlalchemy import text
+
+                now_utc = datetime.now(timezone.utc)
+                start_utc = now_utc - timedelta(minutes=60)
+
+                query = text("""
+                    SELECT
+                        DATE_FORMAT(DATE_SUB(recorded_at, INTERVAL 8 HOUR), '%H:%i') AS time_label,
+                        shame_score
+                    FROM park_activity_snapshots
+                    WHERE park_id = :park_id
+                        AND recorded_at >= :start_utc
+                        AND recorded_at < :end_utc
+                    ORDER BY recorded_at
+                """)
+
+                result = conn.execute(query, {
+                    "park_id": park_id,
+                    "start_utc": start_utc,
+                    "end_utc": now_utc
+                })
+
+                rows = [dict(row._mapping) for row in result]
+
+                # Build chart data
+                labels = [row['time_label'] for row in rows]
+                data = [float(row['shame_score']) if row['shame_score'] is not None else None for row in rows]
+
+                chart_data = {
+                    "labels": labels,
+                    "data": data,
+                    "granularity": "minutes"
+                }
+
                 # For LIVE, set 'current' to the last non-null value from the chart data
                 # This ensures the badge matches the rightmost point on the chart
-                if chart_data and chart_data.get('data'):
-                    # Find last non-null value from data array
-                    last_value = None
-                    for val in reversed(chart_data['data']):
-                        if val is not None:
-                            last_value = val
-                            break
-                    chart_data['current'] = float(last_value) if last_value is not None else 0.0
+                last_value = None
+                for val in reversed(data):
+                    if val is not None:
+                        last_value = val
+                        break
+                chart_data['current'] = float(last_value) if last_value is not None else 0.0
             elif period in ('today', 'yesterday'):
                 chart_query = ParkShameHistoryQuery(conn)
                 today = get_today_pacific()

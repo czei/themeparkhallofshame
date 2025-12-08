@@ -218,24 +218,24 @@ log "Exporting from production..."
 if [ "$SCHEMA_ONLY" = true ]; then
     # Schema only (filter MariaDB-specific syntax for MySQL compatibility)
     ssh -i "$SSH_KEY" "$REMOTE_HOST" \
-        "sudo mysqldump -u root --no-data --routines --triggers $REMOTE_DB_NAME" \
+        "sudo mysqldump -u root --tz-utc --no-data --routines --triggers $REMOTE_DB_NAME" \
         | sed -e 's/CONSTRAINT `CONSTRAINT_[0-9]*` //g' \
               -e 's/current_timestamp()/CURRENT_TIMESTAMP/g' \
               -e 's/DEFAULT NULL ON UPDATE current_timestamp()/DEFAULT NULL/g' \
               -e "s/DEFAULT '0000-00-00 00:00:00'/DEFAULT CURRENT_TIMESTAMP/g" \
-        | mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
+        | mysql --init-command="SET TIME_ZONE='+00:00';" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
     echo "  Schema imported"
 
 elif [ "$FULL" = true ]; then
     # Full export (filter MariaDB-specific syntax for MySQL compatibility)
     ssh -i "$SSH_KEY" "$REMOTE_HOST" \
-        "sudo mysqldump -u root --routines --triggers --single-transaction $REMOTE_DB_NAME" \
+        "sudo mysqldump -u root --tz-utc --routines --triggers --single-transaction $REMOTE_DB_NAME" \
         | sed -e 's/CONSTRAINT `CONSTRAINT_[0-9]*` //g' \
               -e 's/current_timestamp()/CURRENT_TIMESTAMP/g' \
               -e 's/DEFAULT NULL ON UPDATE current_timestamp()/DEFAULT NULL/g' \
               -e "s/DEFAULT '0000-00-00 00:00:00'/DEFAULT CURRENT_TIMESTAMP/g" \
         | pv -N "Importing" \
-        | mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
+        | mysql --init-command="SET TIME_ZONE='+00:00';" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
     echo "  Full database imported"
 
 else
@@ -244,12 +244,12 @@ else
     # 1. Export schema only (filter MariaDB-specific syntax for MySQL compatibility)
     log "  Exporting schema..."
     ssh -i "$SSH_KEY" "$REMOTE_HOST" \
-        "sudo mysqldump -u root --no-data --routines --triggers $REMOTE_DB_NAME" \
+        "sudo mysqldump -u root --tz-utc --no-data --routines --triggers $REMOTE_DB_NAME" \
         | sed -e 's/CONSTRAINT `CONSTRAINT_[0-9]*` //g' \
               -e 's/current_timestamp()/CURRENT_TIMESTAMP/g' \
               -e 's/DEFAULT NULL ON UPDATE current_timestamp()/DEFAULT NULL/g' \
               -e "s/DEFAULT '0000-00-00 00:00:00'/DEFAULT CURRENT_TIMESTAMP/g" \
-        | mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
+        | mysql --init-command="SET TIME_ZONE='+00:00';" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
 
     # 1b. CRITICAL FIX: Remove 'ON UPDATE CURRENT_TIMESTAMP' from timestamp columns
     # This prevents timestamps from being auto-updated during data import
@@ -270,8 +270,8 @@ FIXSQL
     log "  Exporting reference tables..."
     FULL_TABLES_STR="${FULL_TABLES[*]}"
     ssh -i "$SSH_KEY" "$REMOTE_HOST" \
-        "sudo mysqldump -u root --no-create-info --single-transaction $REMOTE_DB_NAME $FULL_TABLES_STR 2>/dev/null || true" \
-        | mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
+        "sudo mysqldump -u root --tz-utc --no-create-info --single-transaction $REMOTE_DB_NAME $FULL_TABLES_STR 2>/dev/null || true" \
+        | mysql --init-command="SET TIME_ZONE='+00:00';" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
 
     # 3. Export filtered tables (last N days)
     log "  Exporting snapshot data (last $DAYS days)..."
@@ -307,8 +307,8 @@ FIXSQL
 
         if [ "$ROW_COUNT" -gt 0 ]; then
             ssh -i "$SSH_KEY" "$REMOTE_HOST" \
-                "sudo mysqldump -u root --no-create-info --single-transaction --where=\"$DATE_COL >= '$DATE_FILTER'\" $REMOTE_DB_NAME $TABLE 2>/dev/null" \
-                | mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
+                "sudo mysqldump -u root --tz-utc --no-create-info --single-transaction --where=\"$DATE_COL >= '$DATE_FILTER'\" $REMOTE_DB_NAME $TABLE 2>/dev/null" \
+                | mysql --init-command="SET TIME_ZONE='+00:00';" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
             echo "$ROW_COUNT rows"
         else
             echo "0 rows (skipped)"

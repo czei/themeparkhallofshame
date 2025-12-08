@@ -1,6 +1,6 @@
 # ThemeParkHallOfShame Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2025-11-22
+Auto-generated from all feature plans. Last updated: 2025-12-08
 
 ## Active Technologies
 - Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ (Core only, no ORM models), mysqlclient 2.2+ (001-aggregation-tables)
@@ -276,5 +276,70 @@ Claude: [NOW marks task as complete]
 - Claude cannot see what the user sees in their browser
 - Only a human can verify the full user experience
 - Killing servers before verification wastes the user's time
+
+## Zen AI Capabilities for Cost and Context Efficiency
+
+**CRITICAL: Use Zen's specialized tools instead of expensive Claude reasoning whenever possible.** Zen provides cheaper, faster access to expert models and reduces Claude context usage.
+
+### 🚨 MANDATORY CHECK-FIRST RULE 🚨
+
+**BEFORE doing ANY of these tasks yourself, you MUST check if Zen can do it:**
+
+1. **Writing tests** → Use `testgen` tool FIRST
+2. **Code review** → Use `codereview` tool FIRST
+3. **Debugging** → Use `debug` tool FIRST
+4. **Planning implementation** → Use `planner` tool FIRST
+5. **Analyzing code** → Use `analyze` tool FIRST
+6. **Refactoring** → Use `refactor` tool FIRST
+7. **Security audits** → Use `secaudit` tool FIRST
+8. **Generating docs** → Use `docgen` tool FIRST
+9. **Complex decisions** → Use `consensus` tool FIRST
+10. **Pre-commit validation** → Use `precommit` tool FIRST
+
+**If you find yourself about to write code, tests, or analysis manually, STOP and ask: "Can Zen do this for me?"**
+
+The answer is almost always YES. Use Zen first, then execute based on Zen's output.
+
+### When to Use Each Zen Tool
+
+| Tool | Purpose | When to Use |
+|------|---------|-------------|
+| **chat** | Collaborative thinking, brainstorming, getting second opinions | When you need to discuss ideas, validate approaches, or explore concepts with an external model |
+| **thinkdeep** | Multi-stage investigation and reasoning for complex problems | For architecture decisions, complex bugs, performance challenges, security analysis requiring systematic hypothesis testing |
+| **challenge** | Prevents reflexive agreement, forces critical thinking | Automatically triggered when user pushes back; use manually to sanity-check contentious claims |
+| **planner** | Interactive step-by-step planning with revision capabilities | For complex project planning, system design, migration strategies, architectural decisions |
+| **consensus** | Multi-model consensus analysis through structured debate | For complex decisions, architectural choices, feature proposals, technology evaluations |
+| **codereview** | Systematic code review covering quality, security, performance, architecture | After writing significant code, before merging PRs, for comprehensive analysis |
+| **precommit** | Validates git changes and repository state before committing | Before any commit to check for security issues, change impact, completeness |
+| **debug** | Systematic debugging and root cause analysis | For complex bugs, mysterious errors, performance issues, race conditions, memory leaks |
+| **analyze** | Comprehensive code analysis for architecture, performance, maintainability | When exploring codebase structure, assessing tech debt, planning improvements |
+| **refactor** | Code refactoring analysis with decomposition focus | For detecting code smells, planning decomposition, modernization, organization improvements |
+| **tracer** | Call-flow mapping and dependency tracing | To understand execution flow (precision mode) or structural relationships (dependencies mode) |
+| **testgen** | Test generation with edge case coverage | When creating comprehensive test suites for specific functions/classes/modules |
+| **secaudit** | Security audit with OWASP analysis | For OWASP Top 10 analysis, compliance evaluation, threat modeling, security architecture review |
+| **docgen** | Documentation generation with complexity analysis | When generating API docs, analyzing function complexity, creating maintainer documentation |
+
+### Benefits of Using Zen
+
+1. **Cost Savings**: Zen tools use cheaper models (GPT-5.1, Gemini, etc.) instead of expensive Claude reasoning
+2. **Context Efficiency**: Reduces Claude context usage by offloading complex analysis to external models
+3. **Expert Validation**: Provides expert analysis from multiple model perspectives
+4. **Structured Workflows**: Enforces systematic investigation patterns (hypothesis testing, evidence gathering)
+
+### Usage Guidelines
+
+- **Default to Zen**: When a task matches a Zen tool's purpose, use the Zen tool first
+- **Combine with Claude**: Use Claude for execution after Zen provides analysis/planning
+- **Continuation IDs**: Always reuse `continuation_id` to preserve conversation context across Zen calls
+- **Model Selection**: Let Zen auto-select models unless user specifies a preference
+
+### Example Workflow
+
+1. **Planning**: Use `planner` for complex implementation planning
+2. **Analysis**: Use `analyze` to understand existing codebase structure
+3. **Implementation**: Use Claude for actual coding with TDD
+4. **Review**: Use `codereview` to validate code quality
+5. **Testing**: Use `testgen` to create comprehensive tests
+6. **Validation**: Use `precommit` before committing changes
 
 <!-- MANUAL ADDITIONS END -->

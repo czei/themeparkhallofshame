@@ -1,52 +1,42 @@
 """
-Yesterday Park Rankings Query (Average Shame Score)
-===================================================
+Yesterday Park Rankings Query
+==============================
 
-Endpoint: GET /api/parks/downtime?period=yesterday
-UI Location: Parks tab → Downtime Rankings (yesterday)
+Endpoint: GET /api/parks/rankings?period=yesterday
+UI Location: Parks tab → Yesterday Rankings
 
-Returns parks ranked by AVERAGE shame score for the FULL previous day.
+Returns parks ranked by AVERAGE shame score from the full previous Pacific day
+(midnight to midnight).
 
-KEY DIFFERENCES FROM TODAY:
-- TODAY: midnight Pacific to NOW (partial, live-updating)
-- YESTERDAY: full previous Pacific day (complete, immutable)
-
-Because YESTERDAY is immutable, responses can be cached for 24 hours.
-
-SHAME SCORE CALCULATION:
-- Same as TODAY: Average of instantaneous shame scores across all snapshots
-- Shame = (sum of weights of down rides) / total_park_weight × 10
+CRITICAL: For YESTERDAY, we use stored shame_scores from park_activity_snapshots
+rather than recalculating from ride-level data. This avoids timestamp mismatches
+between ride_status_snapshots and park_activity_snapshots which can occur when
+snapshots are collected at slightly different times.
 
 Database Tables:
 - parks (park metadata)
-- rides (ride metadata)
-- ride_classifications (tier weights)
-- ride_status_snapshots (real-time status)
-- park_activity_snapshots (park open status)
+- park_activity_snapshots (stored shame_scores)
 
 Single Source of Truth:
-- Formulas: utils/metrics.py
-- SQL Helpers: utils/sql_helpers.py
+- Shame scores: Pre-calculated and stored in park_activity_snapshots.shame_score
 """
 
 from typing import List, Dict, Any
+from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from utils.timezone import get_yesterday_range_utc
-from utils.sql_helpers import (
-    RideStatusSQL,
-    ParkStatusSQL,
-    RideFilterSQL,
-)
+from utils.sql_helpers import RideFilterSQL, ParkStatusSQL
 
 
 class YesterdayParkRankingsQuery:
     """
-    Query handler for yesterday's park rankings using AVERAGE shame score.
+    Query handler for YESTERDAY park rankings using stored shame scores.
 
-    Shame score for YESTERDAY = average of instantaneous shame scores across
+    YESTERDAY aggregates PRE-CALCULATED shame scores from park_activity_snapshots.
+    Unlike TODAY/LIVE which calculate shame scores in real-time, YESTERDAY uses
     all snapshots from the full previous Pacific day.
 
     This makes the score comparable to LIVE and TODAY (same 0-100 scale).
@@ -68,157 +58,97 @@ class YesterdayParkRankingsQuery:
         """
         Get park rankings for the full previous Pacific day using AVERAGE shame score.
 
+        For YESTERDAY, we use stored shame_scores from park_activity_snapshots
+        rather than recalculating from ride-level data. This avoids issues with
+        timestamp mismatches between ride and park snapshot collections.
+
         Args:
             filter_disney_universal: Only Disney/Universal parks
             limit: Maximum results
-            sort_by: Sort field (shame_score or downtime_hours)
+            sort_by: Sort field (shame_score, total_downtime_hours, uptime_percentage, rides_down)
 
         Returns:
-            List of parks ranked by average shame_score (descending)
+            List of parks ranked by the specified sort field
         """
         # Get time range for yesterday (full previous day)
         start_utc, end_utc, label = get_yesterday_range_utc()
 
+        # Determine sort column and direction based on parameter
+        sort_column_map = {
+            "total_downtime_hours": "total_downtime_hours",
+            "uptime_percentage": "uptime_percentage",
+            "rides_down": "rides_down",
+            "shame_score": "shame_score"
+        }
+        sort_column = sort_column_map.get(sort_by, "shame_score")
+        # Uptime sorts ascending (higher is better), others sort descending (higher is worse)
+        sort_direction = "ASC" if sort_column == "uptime_percentage" else "DESC"
+
         # Use centralized SQL helpers for consistent logic
         filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
-        filter_clause_inner = f"AND {RideFilterSQL.disney_universal_filter('p_inner')}" if filter_disney_universal else ""
-        # PARK-TYPE AWARE: Disney/Universal only counts DOWN (not CLOSED)
-        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
-        is_down_inner = RideStatusSQL.is_down("rss_inner", parks_alias="p_inner")
-        park_open = ParkStatusSQL.park_appears_open_filter("pas")
-        park_open_inner = ParkStatusSQL.park_appears_open_filter("pas_inner")
         park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
 
-        # Use centralized CTE for rides that operated (includes park-open check)
-        rides_operated_cte = RideStatusSQL.rides_that_operated_cte(
-            start_param=":start_utc",
-            end_param=":end_utc",
-            filter_clause=filter_clause
-        )
-
-        # Determine sort column
-        sort_column = "shame_score" if sort_by == "shame_score" else "total_downtime_hours"
-
+        # SIMPLIFIED QUERY: Use stored shame_scores from park_activity_snapshots
+        # This avoids timestamp mismatch issues with ride-level joins
         query = text(f"""
-            WITH
-            {rides_operated_cte},
-            park_weights AS (
-                -- Total tier weight for each park (for shame score normalization)
-                -- Only count rides that have operated
-                SELECT
-                    p.park_id,
-                    SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
-                FROM parks p
-                INNER JOIN rides r ON p.park_id = r.park_id
-                    AND r.is_active = TRUE AND r.category = 'ATTRACTION'
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE p.is_active = TRUE
-                    AND r.ride_id IN (SELECT ride_id FROM rides_that_operated)
-                    {filter_clause}
-                GROUP BY p.park_id
-            ),
-            park_operating_snapshots AS (
-                -- Count total snapshots when park was open (for averaging)
-                SELECT
-                    p.park_id,
-                    COUNT(DISTINCT rss.recorded_at) AS total_snapshots
-                FROM parks p
-                INNER JOIN rides r ON p.park_id = r.park_id
-                    AND r.is_active = TRUE AND r.category = 'ATTRACTION'
-                INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-                INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
-                WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                    AND p.is_active = TRUE
-                    AND {park_open}
-                    AND r.ride_id IN (SELECT ride_id FROM rides_that_operated)
-                    {filter_clause}
-                GROUP BY p.park_id
-            ),
-            stored_shame_scores AS (
-                -- READ stored shame_score from park_activity_snapshots
-                -- THE SINGLE SOURCE OF TRUTH - calculated during data collection
-                SELECT
-                    pas_inner.park_id,
-                    pas_inner.recorded_at,
-                    pas_inner.shame_score AS snapshot_shame_score
-                FROM park_activity_snapshots pas_inner
-                WHERE pas_inner.recorded_at >= :start_utc AND pas_inner.recorded_at < :end_utc
-                    AND pas_inner.park_appears_open = TRUE
-                    AND pas_inner.shame_score IS NOT NULL
-            )
             SELECT
                 p.park_id,
                 p.queue_times_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
 
-                -- Total downtime hours (for reference)
+                -- AVERAGE Shame Score: Use stored values from park_activity_snapshots
+                -- THE SINGLE SOURCE OF TRUTH - calculated during data collection
+                ROUND(
+                    AVG(CASE
+                        WHEN pas.park_appears_open = TRUE AND pas.shame_score IS NOT NULL
+                        THEN pas.shame_score
+                    END),
+                    1
+                ) AS shame_score,
+
+                -- Total downtime hours: Calculate from snapshot counts
+                -- {self.SNAPSHOT_INTERVAL_MINUTES} minutes per snapshot
                 ROUND(
                     SUM(CASE
-                        WHEN {is_down} AND {park_open} AND rto.ride_id IS NOT NULL
-                        THEN {self.SNAPSHOT_INTERVAL_MINUTES} / 60.0
+                        WHEN pas.park_appears_open = TRUE
+                        THEN pas.rides_closed * {self.SNAPSHOT_INTERVAL_MINUTES}.0 / 60.0
                         ELSE 0
                     END),
                     2
                 ) AS total_downtime_hours,
 
-                -- Weighted downtime hours (for reference)
+                -- Weighted downtime: Not available (would need ride tier weights)
+                NULL AS weighted_downtime_hours,
+
+                -- Uptime percentage: Calculate from rides_open vs total_rides_tracked
                 ROUND(
-                    SUM(CASE
-                        WHEN {is_down} AND {park_open} AND rto.ride_id IS NOT NULL
-                        THEN ({self.SNAPSHOT_INTERVAL_MINUTES} / 60.0) * COALESCE(rc.tier_weight, 2)
-                        ELSE 0
+                    AVG(CASE
+                        WHEN pas.park_appears_open = TRUE AND pas.total_rides_tracked > 0
+                        THEN (pas.rides_open * 100.0 / pas.total_rides_tracked)
                     END),
-                    2
-                ) AS weighted_downtime_hours,
-
-                -- AVERAGE Shame Score: READ stored values from park_activity_snapshots
-                -- THE SINGLE SOURCE OF TRUTH - calculated during data collection
-                ROUND(
-                    (SELECT AVG(sss.snapshot_shame_score) FROM stored_shame_scores sss WHERE sss.park_id = p.park_id),
-                    1
-                ) AS shame_score,
-
-                -- Uptime percentage = (operating snapshots) / (total ride-snapshots) * 100
-                -- Must divide by total (rides × snapshots), not just snapshots
-                ROUND(
-                    100.0 * SUM(CASE
-                        WHEN {park_open} AND rto.ride_id IS NOT NULL AND NOT ({is_down})
-                        THEN 1
-                        ELSE 0
-                    END) / NULLIF(
-                        SUM(CASE WHEN {park_open} AND rto.ride_id IS NOT NULL THEN 1 ELSE 0 END),
-                        0
-                    ),
                     1
                 ) AS uptime_percentage,
 
-                -- Count of DISTINCT rides that were down at some point yesterday
-                COUNT(DISTINCT CASE
-                    WHEN {is_down} AND {park_open} AND rto.ride_id IS NOT NULL
-                    THEN r.ride_id
+                -- Rides down: Peak number of concurrent closed rides
+                -- This is the maximum number of rides closed at any single snapshot,
+                -- NOT the total unique rides that experienced downtime during the day
+                MAX(CASE
+                    WHEN pas.park_appears_open = TRUE
+                    THEN pas.rides_closed
                 END) AS rides_down,
 
                 -- Park operating status (current - may differ from yesterday's status)
                 {park_is_open_sq}
 
             FROM parks p
-            INNER JOIN rides r ON p.park_id = r.park_id
-                AND r.is_active = TRUE AND r.category = 'ATTRACTION'
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
-            INNER JOIN park_weights pw ON p.park_id = pw.park_id
-            LEFT JOIN park_operating_snapshots pos ON p.park_id = pos.park_id
-            LEFT JOIN rides_that_operated rto ON r.ride_id = rto.ride_id
-            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
+            WHERE pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
                 AND p.is_active = TRUE
                 {filter_clause}
-            GROUP BY p.park_id, p.name, p.city, p.state_province, pw.total_park_weight, pos.total_snapshots
-            HAVING total_downtime_hours > 0
-            ORDER BY {sort_column} DESC
+            GROUP BY p.park_id, p.name, p.city, p.state_province
+            HAVING shame_score IS NOT NULL AND shame_score > 0
+            ORDER BY {sort_column} {sort_direction}
             LIMIT :limit
         """)
 

@@ -421,13 +421,11 @@ class Downtime {
                         <span class="ride-name">${this.escapeHtml(ride.ride_name || 'Unknown Ride')}</span>
                         <div class="ride-actions">
                             <a
-                                href="${ride.queue_times_url}"
-                                target="_blank"
-                                rel="noopener noreferrer"
+                                href="ride-detail.html?ride_id=${ride.ride_id}&period=${this.state.period === 'live' ? 'today' : this.state.period}"
                                 class="ride-external-link"
-                                title="View on Queue-Times.com"
+                                title="View ride details"
                             >
-                                <span class="external-icon">↗</span>
+                                <span class="external-icon">→</span>
                             </a>
                         </div>
                     </div>

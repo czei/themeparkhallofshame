@@ -408,13 +408,11 @@ class WaitTimes {
                 </td>
                 <td class="ride-col">
                     <a
-                        href="${ride.queue_times_url}"
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        href="ride-detail.html?ride_id=${ride.ride_id}&period=${this.state.period === 'live' ? 'today' : this.state.period}"
                         class="ride-link"
                     >
                         ${this.escapeHtml(ride.ride_name || 'Unknown Ride')}
-                        <span class="external-icon">↗</span>
+                        <span class="external-icon">→</span>
                     </a>
                 </td>
                 <td class="tier-col">

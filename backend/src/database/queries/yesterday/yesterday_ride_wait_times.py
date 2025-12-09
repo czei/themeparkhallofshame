@@ -100,7 +100,7 @@ class YesterdayRideWaitTimesQuery:
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
+                AND pas.recorded_at = rss.recorded_at
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'

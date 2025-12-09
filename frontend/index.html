@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>US Theme Park Hall of Shame</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=20">
+    <link rel="stylesheet" href="css/styles.css?v=21">
     <!-- Chart.js for Trends visualization -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
@@ -80,15 +80,16 @@
 
         <div class="time-selector">
             <button class="time-btn active" data-period="live" title="Current snapshot - rides down right now">Live</button>
-            <button class="time-btn" data-period="today" title="Average stats during operating hours today (Pacific time)">Today</button>
-            <button class="time-btn" data-period="yesterday" title="Full previous day (Pacific time)">Yesterday</button>
+            <button class="time-btn" data-period="today" title="Today's stats (midnight to now, Pacific Time)">Today</button>
+            <button class="time-btn" data-period="yesterday" title="Yesterday's full day (midnight to midnight, Pacific Time)">Yesterday</button>
             <div class="history-dropdown">
                 <button class="history-btn" id="history-dropdown-btn">History <span class="chevron">▼</span></button>
                 <div class="dropdown-menu" id="history-dropdown-menu">
-                    <button class="dropdown-item" data-period="last_week" title="Previous complete week (Sunday-Saturday)">Last Week</button>
-                    <button class="dropdown-item" data-period="last_month" title="Previous complete calendar month">Last Month</button>
+                    <button class="dropdown-item" data-period="last_week" title="Previous complete week (Sunday-Saturday, Pacific Time)">Last Week</button>
+                    <button class="dropdown-item" data-period="last_month" title="Previous complete calendar month (Pacific Time)">Last Month</button>
                 </div>
             </div>
+            <span class="timezone-indicator">All times Pacific</span>
         </div>
     </div>
 

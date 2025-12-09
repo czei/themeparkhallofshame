@@ -481,7 +481,19 @@ body {
 .time-selector {
     display: flex;
     gap: 0;
-    align-items: stretch;
+    align-items: center;
+}
+
+.timezone-indicator {
+    margin-left: 16px;
+    padding: 6px 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--deep-teal);
+    background: rgba(0, 123, 138, 0.1);
+    border-radius: 4px;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
 }
 
 .time-btn,
@@ -2738,6 +2750,13 @@ footer a:hover,
 
     .time-selector {
         flex-direction: column;
+    }
+
+    .timezone-indicator {
+        margin-left: 0;
+        margin-top: 8px;
+        width: 100%;
+        text-align: center;
     }
 
     .time-btn,

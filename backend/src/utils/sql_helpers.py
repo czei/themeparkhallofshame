@@ -39,7 +39,7 @@ def timestamp_match_condition(col1: str, col2: str) -> str:
 
     Example:
         >>> timestamp_match_condition("pas.recorded_at", "rss.recorded_at")
-        "DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')"
+        "pas.recorded_at = rss.recorded_at"
     """
     return f"DATE_FORMAT({col1}, '%Y-%m-%d %H:%i') = DATE_FORMAT({col2}, '%Y-%m-%d %H:%i')"
 

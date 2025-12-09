@@ -129,6 +129,8 @@ class LiveRankingsAggregator:
                 GROUP BY ride_id
             ),
             rides_currently_down AS (
+                -- LIVE: Use 7-day hybrid filter to match denominator (park_weights)
+                -- Only consider rides that operated in the last 7 days
                 SELECT DISTINCT r_inner.ride_id, r_inner.park_id
                 FROM rides r_inner
                 INNER JOIN parks p ON r_inner.park_id = p.park_id
@@ -141,7 +143,7 @@ class LiveRankingsAggregator:
                     AND r_inner.category = 'ATTRACTION'
                     AND {is_down_latest}
                     AND {park_open_latest}
-                    AND {has_operated}
+                    AND r_inner.last_operated_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY
             ),
             park_weights AS (
                 -- Uses 7-day hybrid denominator: only rides that operated in last 7 days
@@ -358,7 +360,7 @@ class LiveRankingsAggregator:
                 AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'
                 AND p.is_active = TRUE
-                AND {has_operated}
+                AND r.last_operated_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY
             GROUP BY r.ride_id, r.name, r.park_id, r.queue_times_id, r.category,
                      p.name, p.is_disney, p.is_universal,
                      rc.tier, rc.tier_weight,

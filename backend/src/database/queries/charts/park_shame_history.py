@@ -230,9 +230,6 @@ class ParkShameHistoryQuery:
         Returns:
             Chart.js compatible dict with hourly labels and single dataset
         """
-        # Generate hourly labels (6am to 11pm = 18 hours)
-        labels = [f"{h}:00" for h in range(6, 24)]
-
         # Get UTC time range for the target date in Pacific timezone
         if is_today:
             start_utc, end_utc = get_today_range_to_now_utc()
@@ -245,12 +242,28 @@ class ParkShameHistoryQuery:
         else:
             hourly_data = self._query_raw_snapshots(park_id, start_utc, end_utc, target_date)
 
-        # Align data to labels (6am to 11pm)
-        # Convert Decimal to float for JSON serialization (Decimal becomes string in JSON)
-        data_by_hour = {row["hour"]: row["shame_score"] for row in hourly_data}
+        # Build data by hour for all metrics
+        # Convert Decimal to float for JSON serialization
+        shame_by_hour = {row["hour"]: row["shame_score"] for row in hourly_data}
+        rides_down_by_hour = {row["hour"]: row.get("rides_down") for row in hourly_data}
+        avg_wait_by_hour = {row["hour"]: row.get("avg_wait_time_minutes") for row in hourly_data}
+
+        # Get the hours that have data, in order
+        hours_with_data = sorted(shame_by_hour.keys())
+
+        # Build labels and data arrays only for hours with data
+        labels = [f"{h}:00" for h in hours_with_data]
         aligned_data = [
-            float(data_by_hour[h]) if data_by_hour.get(h) is not None else None
-            for h in range(6, 24)
+            float(shame_by_hour[h]) if shame_by_hour.get(h) is not None else None
+            for h in hours_with_data
+        ]
+        rides_down_data = [
+            int(rides_down_by_hour[h]) if rides_down_by_hour.get(h) is not None else None
+            for h in hours_with_data
+        ]
+        avg_wait_data = [
+            float(avg_wait_by_hour[h]) if avg_wait_by_hour.get(h) is not None else None
+            for h in hours_with_data
         ]
 
         # Calculate average FROM the chart data points (ensures average badge matches chart)
@@ -260,6 +273,8 @@ class ParkShameHistoryQuery:
         return {
             "labels": labels,
             "data": aligned_data,
+            "rides_down": rides_down_data,
+            "avg_wait": avg_wait_data,
             "average": avg_score,
             "granularity": "hourly"
         }
@@ -387,10 +402,13 @@ class ParkShameHistoryQuery:
         # 2. rides_open > 0 (rides are actually operating)
         #
         # This makes charts robust against schedule data issues.
+        # Include rides_closed (as rides_down) and avg_wait_time for chart display
         query = text("""
             SELECT
                 HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR)) AS hour,
-                ROUND(AVG(pas.shame_score), 1) AS shame_score
+                ROUND(AVG(pas.shame_score), 1) AS shame_score,
+                ROUND(AVG(pas.rides_closed), 0) AS rides_down,
+                ROUND(AVG(pas.avg_wait_time), 1) AS avg_wait_time_minutes
             FROM park_activity_snapshots pas
             WHERE pas.park_id = :park_id
                 AND pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
@@ -421,10 +439,13 @@ class ParkShameHistoryQuery:
         Returns same format as _query_raw_snapshots for seamless switching.
         """
         # Query park_hourly_stats table for the time range
+        # Include rides_down and avg_wait_time_minutes for chart display
         query = text("""
             SELECT
                 HOUR(DATE_SUB(phs.hour_start_utc, INTERVAL 8 HOUR)) AS hour,
-                phs.shame_score
+                phs.shame_score,
+                phs.rides_down,
+                phs.avg_wait_time_minutes
             FROM park_hourly_stats phs
             WHERE phs.park_id = :park_id
                 AND phs.hour_start_utc >= :start_utc

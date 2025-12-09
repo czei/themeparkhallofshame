@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Park Details - US Theme Park Hall of Shame</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css?v=20">
+    <!-- Chart.js for shame score visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        /* Park detail specific styles */
+        .park-header {
+            text-align: center;
+            padding: 2rem 1rem;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 8px;
+            margin-bottom: 2rem;
+        }
+
+        .park-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #212529;
+            margin-bottom: 0.5rem;
+        }
+
+        .park-subtitle {
+            font-size: 1.1rem;
+            color: #6c757d;
+            margin-bottom: 1rem;
+        }
+
+        .park-meta {
+            display: flex;
+            gap: 2rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+        }
+
+        .meta-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .meta-label {
+            font-size: 0.85rem;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .meta-value {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #212529;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-bottom: 1rem;
+            color: #007bff;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #212529;
+        }
+
+        .stat-unit {
+            font-size: 1rem;
+            font-weight: 400;
+            color: #6c757d;
+        }
+
+        .chart-container {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .chart-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #212529;
+        }
+
+        .data-table {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            overflow-x: auto;
+        }
+
+        .data-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .data-table th {
+            background: #f8f9fa;
+            padding: 0.75rem;
+            text-align: left;
+            font-weight: 600;
+            color: #495057;
+            border-bottom: 2px solid #dee2e6;
+        }
+
+        .data-table td {
+            padding: 0.75rem;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .data-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .ride-name-link {
+            color: #007bff;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .ride-name-link:hover {
+            text-decoration: underline;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-operating {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-down {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-closed {
+            background: #e2e3e5;
+            color: #383d41;
+        }
+
+        /* Info icon styles */
+        .info-icon {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            line-height: 18px;
+            text-align: center;
+            border-radius: 50%;
+            background: #007bff;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-left: 8px;
+            vertical-align: middle;
+            transition: background 0.2s;
+        }
+
+        .info-icon:hover {
+            background: #0056b3;
+        }
+
+        @media (max-width: 768px) {
+            .park-title {
+                font-size: 1.75rem;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Geometric Top Bar -->
+    <div class="geometric-bar"></div>
+
+    <!-- Beta Warning Banner - Mary Blair Collage Style -->
+    <div class="beta-section">
+        <!-- Base color blocks -->
+        <div class="geo-base-1"></div>
+        <div class="geo-base-2"></div>
+        <div class="geo-base-3"></div>
+
+        <!-- Overlapping rectangles - collage style -->
+        <div class="geo-rect-coral-1"></div>
+        <div class="geo-rect-coral-2"></div>
+        <div class="geo-rect-teal-1"></div>
+        <div class="geo-rect-teal-2"></div>
+        <div class="geo-rect-gold-1"></div>
+        <div class="geo-rect-gold-2"></div>
+        <div class="geo-rect-pink-1"></div>
+        <div class="geo-rect-pink-2"></div>
+
+        <!-- Small accent squares -->
+        <div class="geo-square-1"></div>
+        <div class="geo-square-2"></div>
+        <div class="geo-square-3"></div>
+
+        <!-- Vertical bars -->
+        <div class="geo-bar-1"></div>
+        <div class="geo-bar-2"></div>
+
+        <div class="beta-content">
+            <span class="beta-badge">BETA</span>
+            <span class="beta-message">Data accuracy under review. Some metrics may be incorrect.</span>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <div class="header-section">
+        <div class="established">Est. 2025</div>
+        <h1>
+            <div class="title-line-1">US THEME PARK</div>
+            <div class="title-line-2">HALL OF SHAME</div>
+        </h1>
+        <div class="subtitle">
+            Park Performance Details
+        </div>
+        <a href="index.html" class="about-link">← Back to Rankings</a>
+    </div>
+
+    <!-- Content Container -->
+    <div style="max-width: 1200px; margin: 0 auto; padding: 2rem 1rem;">
+
+        <!-- Loading State -->
+        <div id="loading" class="loading">
+            <p>Loading park details...</p>
+        </div>
+
+        <!-- Error State -->
+        <div id="error" class="error-message" style="display: none;">
+            <strong>Error:</strong> <span id="error-message"></span>
+        </div>
+
+        <!-- Content -->
+        <div id="content" style="display: none;">
+            <!-- Park Header -->
+            <div class="park-header">
+                <h1 class="park-title" id="park-name">--</h1>
+                <div class="park-subtitle" id="park-location">--</div>
+                <div class="park-meta">
+                    <div class="meta-item">
+                        <div class="meta-label">Operator</div>
+                        <div class="meta-value" id="park-operator">--</div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Period</div>
+                        <div class="meta-value" id="current-period">--</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Period Selector -->
+            <div class="time-selector" style="margin-bottom: 2rem;">
+                <button class="time-btn" data-period="live">Live</button>
+                <button class="time-btn" data-period="today">Today</button>
+                <button class="time-btn" data-period="yesterday">Yesterday</button>
+                <button class="time-btn" data-period="last_week">Last Week</button>
+                <button class="time-btn" data-period="last_month">Last Month</button>
+            </div>
+
+            <!-- Summary Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">
+                        Shame Score
+                        <span class="info-icon" id="shame-info-icon" title="Explain Shame Score">?</span>
+                    </div>
+                    <div class="stat-value">
+                        <span id="shame-score">--</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Worst Ride</div>
+                    <div class="stat-value" style="font-size: 1.2rem;">
+                        <span id="worst-ride">--</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Operating Rides</div>
+                    <div class="stat-value">
+                        <span id="operating-rides">--</span>
+                        <span class="stat-unit">rides</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Park Performance Chart -->
+            <div id="chart-section" class="chart-container" style="display: none;">
+                <h2 class="chart-title">Park Performance Metrics</h2>
+                <canvas id="shame-chart"></canvas>
+            </div>
+
+            <!-- Top Offenders Table -->
+            <div class="data-table">
+                <h2 class="chart-title">Problem Rides</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Ride</th>
+                            <th>Tier</th>
+                            <th>Status</th>
+                            <th>Shame Contribution</th>
+                            <th>Downtime</th>
+                        </tr>
+                    </thead>
+                    <tbody id="offenders-tbody">
+                        <tr>
+                            <td colspan="5" style="text-align: center; color: #6c757d;">No data available</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Include Config, API Client and Park Details Modal -->
+    <script src="js/config.js?v=7"></script>
+    <script src="js/api-client.js"></script>
+    <script src="js/components/park-details-modal.js"></script>
+
+    <script>
+        // Get URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const parkId = urlParams.get('park_id');
+        let currentPeriod = urlParams.get('period') || 'live';
+
+        // Initialize Park Details Modal (apiClient is already created by api-client.js)
+        const parkDetailsModal = new ParkDetailsModal(apiClient);
+
+        // API base URL
+        const API_BASE_URL = window.location.hostname === 'localhost'
+            ? 'http://localhost:5001/api'
+            : 'https://api.themeparkhallofshame.com/api';
+
+        let chartInstance = null;
+
+        // Load park details
+        async function loadParkDetails() {
+            if (!parkId) {
+                showError('No park ID provided in URL');
+                return;
+            }
+
+            try {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('content').style.display = 'none';
+                document.getElementById('error').style.display = 'none';
+
+                const response = await fetch(`${API_BASE_URL}/parks/${parkId}/details?period=${currentPeriod}`);
+                const data = await response.json();
+
+                if (!data.success) {
+                    showError(data.error || 'Failed to load park details');
+                    return;
+                }
+
+                renderParkDetails(data);
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+            } catch (error) {
+                console.error('Error loading park details:', error);
+                showError('Failed to load park details. Please try again later.');
+            }
+        }
+
+        function renderParkDetails(data) {
+            // Park metadata
+            document.getElementById('park-name').textContent = data.park.name;
+            document.getElementById('park-location').textContent = data.park.location || 'Unknown Location';
+            document.getElementById('park-operator').textContent = data.park.operator || 'Unknown';
+            document.getElementById('current-period').textContent = data.period.replace('_', ' ').toUpperCase();
+
+            // Summary stats
+            const shameScore = data.shame_breakdown?.shame_score ?? data.chart_data?.current ?? 0;
+            document.getElementById('shame-score').textContent = shameScore.toFixed(1);
+
+            // Get rides list (different field names for live vs historical)
+            const ridesList = data.shame_breakdown?.rides_with_downtime || data.shame_breakdown?.rides_down || data.shame_breakdown?.rides || [];
+
+            // Worst ride
+            if (ridesList.length > 0) {
+                const worstRide = ridesList[0];
+                document.getElementById('worst-ride').textContent = worstRide.ride_name || 'None';
+            } else {
+                document.getElementById('worst-ride').textContent = 'None';
+            }
+
+            // Update third stat card based on period
+            const statLabel = document.querySelector('.stat-card:nth-child(3) .stat-label');
+            const statValue = document.getElementById('operating-rides');
+
+            if (currentPeriod === 'live') {
+                statLabel.textContent = 'Operating Rides';
+                const operatingCount = data.current_status?.operating ?? 0;
+                statValue.textContent = operatingCount;
+            } else {
+                statLabel.textContent = 'Rides with Issues';
+                statValue.textContent = ridesList.length;
+            }
+
+            // Render chart if data available
+            if (data.chart_data && data.chart_data.labels && data.chart_data.labels.length > 0) {
+                document.getElementById('chart-section').style.display = 'block';
+                renderChart(data.chart_data);
+            } else {
+                document.getElementById('chart-section').style.display = 'none';
+            }
+
+            // Render top offenders table
+            renderOffendersTable(ridesList);
+
+            // Update period selector
+            updatePeriodSelector();
+        }
+
+        function renderChart(chartData) {
+            const ctx = document.getElementById('shame-chart').getContext('2d');
+
+            // Destroy previous chart if exists
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            // Prepare datasets - order matters for layering (bars first, then lines on top)
+            const datasets = [];
+
+            // Rides Down as BAR chart (background layer, semi-transparent)
+            // Uses its own axis for proper scaling
+            if (chartData.rides_down && chartData.rides_down.length > 0) {
+                datasets.push({
+                    type: 'bar',
+                    label: 'Rides Down',
+                    data: chartData.rides_down,
+                    backgroundColor: 'rgba(253, 126, 20, 0.3)',
+                    borderColor: 'rgba(253, 126, 20, 0.6)',
+                    borderWidth: 1,
+                    yAxisID: 'y-rides',
+                    order: 2  // Higher order = rendered first (background)
+                });
+            }
+
+            // Shame Score (primary metric, left y-axis) - line with fill
+            if (chartData.data && chartData.data.length > 0) {
+                datasets.push({
+                    type: 'line',
+                    label: 'Shame Score',
+                    data: chartData.data,
+                    borderColor: '#dc3545',
+                    backgroundColor: 'rgba(220, 53, 69, 0.15)',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: true,
+                    yAxisID: 'y-shame',
+                    order: 1  // Lower order = rendered on top
+                });
+            }
+
+            // Average Wait Time (right y-axis) - line only
+            if (chartData.avg_wait && chartData.avg_wait.length > 0) {
+                datasets.push({
+                    type: 'line',
+                    label: 'Avg Wait (min)',
+                    data: chartData.avg_wait,
+                    borderColor: '#007bff',
+                    backgroundColor: 'transparent',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: false,
+                    yAxisID: 'y-wait',
+                    order: 0  // Rendered last (on top)
+                });
+            }
+
+            // Build scales configuration
+            const scales = {
+                'y-shame': {
+                    type: 'linear',
+                    position: 'left',
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Shame Score',
+                        color: '#dc3545'
+                    },
+                    ticks: {
+                        color: '#dc3545'
+                    },
+                    grid: {
+                        color: 'rgba(220, 53, 69, 0.1)'
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: chartData.granularity === 'minutes' ? 'Time' : 'Hour'
+                    }
+                }
+            };
+
+            // Add right y-axis for Wait Time (minutes)
+            if (chartData.avg_wait && chartData.avg_wait.length > 0) {
+                scales['y-wait'] = {
+                    type: 'linear',
+                    position: 'right',
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Wait Time (min)',
+                        color: '#007bff'
+                    },
+                    ticks: {
+                        color: '#007bff'
+                    },
+                    grid: {
+                        drawOnChartArea: false
+                    }
+                };
+            }
+
+            // Add hidden axis for Rides Down bars (scaled independently)
+            if (chartData.rides_down && chartData.rides_down.length > 0) {
+                scales['y-rides'] = {
+                    type: 'linear',
+                    position: 'right',
+                    beginAtZero: true,
+                    display: false,  // Hide this axis - bars are for context
+                    // Scale to make bars fill ~60% of chart height
+                    max: Math.max(...chartData.rides_down) * 1.7
+                };
+            }
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',  // Default type, overridden per dataset
+                data: {
+                    labels: chartData.labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            display: datasets.length > 1,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        if (context.dataset.label === 'Rides Down') {
+                                            label += context.parsed.y + ' rides';
+                                        } else if (context.dataset.label === 'Avg Wait (min)') {
+                                            label += context.parsed.y.toFixed(1) + ' min';
+                                        } else {
+                                            label += context.parsed.y.toFixed(1);
+                                        }
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    },
+                    scales: scales
+                }
+            });
+        }
+
+        function renderOffendersTable(rides) {
+            const tbody = document.getElementById('offenders-tbody');
+
+            if (!rides || rides.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #6c757d;">No problem rides for this period</td></tr>';
+                return;
+            }
+
+            // Show top 10 rides
+            const topRides = rides.slice(0, 10);
+
+            tbody.innerHTML = topRides.map(ride => {
+                const downtimeHours = ride.downtime_hours || ride.total_downtime_hours || 0;
+                const shameContrib = ride.weighted_contribution || ride.shame_contribution || 0;
+
+                return `
+                <tr>
+                    <td>
+                        <a href="ride-detail.html?ride_id=${ride.ride_id}&period=${currentPeriod}" class="ride-name-link">
+                            ${escapeHtml(ride.ride_name || 'Unknown Ride')}
+                        </a>
+                    </td>
+                    <td><span class="tier-badge tier-${ride.tier || 'unknown'}">${ride.tier || '?'}</span></td>
+                    <td><span class="status-badge status-${(ride.status || 'issue').toLowerCase()}">${ride.status || 'ISSUE'}</span></td>
+                    <td>${shameContrib.toFixed(2)}</td>
+                    <td>${downtimeHours.toFixed(1)} hrs</td>
+                </tr>
+                `;
+            }).join('');
+        }
+
+        function updatePeriodSelector() {
+            document.querySelectorAll('.time-btn').forEach(btn => {
+                if (btn.dataset.period === currentPeriod) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+        }
+
+        // Period selector event listeners
+        document.querySelectorAll('.time-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentPeriod = btn.dataset.period;
+
+                // Update URL without reload
+                const newUrl = new URL(window.location);
+                newUrl.searchParams.set('period', currentPeriod);
+                window.history.pushState({}, '', newUrl);
+
+                loadParkDetails();
+            });
+        });
+
+        function showError(message) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('content').style.display = 'none';
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('error-message').textContent = message;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // "?" icon click handler - opens Park Details Modal with shame score explanation
+        document.getElementById('shame-info-icon').addEventListener('click', () => {
+            if (parkId) {
+                const parkName = document.getElementById('park-name').textContent;
+                parkDetailsModal.open(parseInt(parkId), parkName, currentPeriod);
+            }
+        });
+
+        // Load on page load
+        loadParkDetails();
+    </script>
+</body>
+</html>

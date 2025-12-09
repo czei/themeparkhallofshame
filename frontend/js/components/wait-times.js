@@ -291,14 +291,8 @@ class WaitTimes {
                     <span class="rank-number">${park.rank}</span>
                 </td>
                 <td class="park-col">
-                    <a
-                        href="${park.queue_times_url}"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="park-link"
-                    >
+                    <a href="park-detail.html?park_id=${park.park_id}&period=${this.state.period}" class="park-link">
                         ${this.escapeHtml(park.park_name || 'Unknown Park')}
-                        <span class="external-icon">↗</span>
                     </a>
                     ${parkStatusBadge}
                 </td>

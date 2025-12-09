@@ -284,29 +284,17 @@ class Downtime {
                     </span>
                 </td>
                 <td class="park-col">
-                    <div class="park-name-cell">
-                        <span class="park-name">${this.escapeHtml(park.park_name || park.name || 'Unknown Park')}</span>
-                        <div class="park-actions">
-                            <button
-                                class="park-details-btn"
-                                data-park-id="${park.park_id}"
-                                data-park-name="${this.escapeHtml(park.park_name || park.name || 'Unknown Park')}"
-                                title="View park details"
-                            >Details</button>
-                            <a
-                                href="${park.queue_times_url}"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                class="park-external-link"
-                                title="View on Queue-Times.com"
-                            >
-                                <span class="external-icon">↗</span>
-                            </a>
-                        </div>
-                    </div>
+                    <a href="park-detail.html?park_id=${park.park_id}&period=${this.state.period}" class="park-link">
+                        ${this.escapeHtml(park.park_name || park.name || 'Unknown Park')}
+                    </a>
                 </td>
                 <td class="shame-col">
-                    <span class="shame-score ${this.getShameClass(park.shame_score)}">${park.shame_score !== null && park.shame_score !== undefined ? Number(park.shame_score).toFixed(2) : 'N/A'}</span>
+                    <span class="shame-score ${this.getShameClass(park.shame_score)} clickable-shame"
+                          data-park-id="${park.park_id}"
+                          data-park-name="${this.escapeHtml(park.park_name || park.name || 'Unknown Park')}"
+                          title="Explain Shame Score">
+                        ${park.shame_score !== null && park.shame_score !== undefined ? Number(park.shame_score).toFixed(2) : 'N/A'}
+                    </span>
                 </td>
                 <td class="location-col">${this.escapeHtml(park.location || 'Unknown')}</td>
                 ${this.state.period === 'live' ? `<td class="status-col">${parkStatusBadge}</td>` : ''}
@@ -682,20 +670,6 @@ class Downtime {
                 }
             });
         });
-
-        // Park details buttons
-        const detailsBtns = this.container.querySelectorAll('.park-details-btn');
-        detailsBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const parkId = parseInt(btn.dataset.parkId);
-                const parkName = btn.dataset.parkName;
-                if (this.parkDetailsModal && parkId) {
-                    // Pass current period to modal so it can fetch appropriate breakdown
-                    this.parkDetailsModal.open(parkId, parkName, this.state.period);
-                }
-            });
-        });
-
         // Sortable column headers for park table (data-sort)
         const sortableHeaders = this.container.querySelectorAll('th.sortable[data-sort]');
         sortableHeaders.forEach(th => {
@@ -725,6 +699,19 @@ class Downtime {
                 this.fetchAllData();
             });
         }
+
+        // Clickable shame scores - open park details modal
+        const shameScores = this.container.querySelectorAll('.clickable-shame');
+        shameScores.forEach(span => {
+            span.addEventListener('click', (e) => {
+                e.preventDefault();
+                const parkId = span.dataset.parkId;
+                const parkName = span.dataset.parkName;
+                if (this.parkDetailsModal && parkId) {
+                    this.parkDetailsModal.open(parseInt(parkId), parkName, this.state.period);
+                }
+            });
+        });
     }
 }
 

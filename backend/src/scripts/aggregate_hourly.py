@@ -23,8 +23,9 @@ Performance:
 import sys
 import argparse
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime, timedelta, date
+from typing import Optional, Tuple
+import pytz
 
 # Add src to path
 backend_src = Path(__file__).parent.parent
@@ -37,6 +38,32 @@ from database.repositories.ride_repository import RideRepository
 from database.repositories.aggregation_repository import AggregationLogRepository
 from database.connection import get_db_connection
 from sqlalchemy import text
+
+
+def get_pacific_day_range_utc(utc_dt: datetime) -> Tuple[datetime, datetime]:
+    """
+    For a given UTC datetime, find the start and end of the corresponding
+    Pacific calendar day, returned in UTC.
+
+    Args:
+        utc_dt: UTC datetime
+
+    Returns:
+        Tuple of (day_start_utc, day_end_utc)
+    """
+    pacific_tz = pytz.timezone('America/Los_Angeles')
+    # Convert the target UTC time to Pacific to find out what "day" it is
+    target_pacific = utc_dt.astimezone(pacific_tz)
+    # Get the start of that day in Pacific time (midnight)
+    day_start_pacific = target_pacific.replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    # Get the start of the next day
+    day_end_pacific = day_start_pacific + timedelta(days=1)
+    # Convert the day boundaries back to UTC
+    day_start_utc = day_start_pacific.astimezone(pytz.utc).replace(tzinfo=None)
+    day_end_utc = day_end_pacific.astimezone(pytz.utc).replace(tzinfo=None)
+    return day_start_utc, day_end_utc
 
 
 class HourlyAggregator:
@@ -164,8 +191,9 @@ class HourlyAggregator:
                 # Use 'hourly' aggregation type (matches enum in 014 migration)
                 aggregation_type = "hourly"
 
-                # Insert new log entry for this specific hour
-                # Each hour gets its own row identified by aggregated_until_ts (hour_end)
+                # Insert a new log entry for each hourly run
+                # Migration 015 removed unique constraint to allow multiple hourly entries per day
+                # This enables proper hourly progress monitoring in health checks
                 result = conn.execute(text("""
                     INSERT INTO aggregation_log (
                         aggregation_date,
@@ -207,12 +235,35 @@ class HourlyAggregator:
         """
         try:
             with get_db_connection() as conn:
+                # Calculate Pacific day range for "operated today" CTE
+                day_start_utc, day_end_utc = get_pacific_day_range_utc(self.target_hour)
+
+                # Pre-calculate which rides operated today (fixes N+1 query problem)
+                # This runs ONCE instead of once per ride
+                operated_today_result = conn.execute(text("""
+                    SELECT DISTINCT rss_day.ride_id
+                    FROM ride_status_snapshots rss_day
+                    JOIN rides r_day ON rss_day.ride_id = r_day.ride_id
+                    JOIN park_activity_snapshots pas_day
+                        ON r_day.park_id = pas_day.park_id
+                        AND pas_day.recorded_at = rss_day.recorded_at
+                    WHERE rss_day.recorded_at >= :day_start_utc
+                        AND rss_day.recorded_at < :day_end_utc
+                        AND pas_day.park_appears_open = TRUE
+                        AND (rss_day.status = 'OPERATING' OR rss_day.computed_is_open = TRUE)
+                """), {
+                    'day_start_utc': day_start_utc,
+                    'day_end_utc': day_end_utc
+                })
+                operated_today_ride_ids = {row.ride_id for row in operated_today_result}
+                logger.info(f"  Pre-calculated {len(operated_today_ride_ids)} rides that operated today")
+
                 # Get all active rides
                 rides = ride_repo.get_all_active()
 
                 for ride in rides:
                     try:
-                        self._aggregate_ride(conn, ride)
+                        self._aggregate_ride(conn, ride, operated_today_ride_ids)
                         self.stats['rides_processed'] += 1
                     except Exception as e:
                         logger.error(f"Error aggregating ride {ride.name}: {e}")
@@ -224,18 +275,22 @@ class HourlyAggregator:
             logger.error(f"Failed to aggregate rides: {e}")
             raise
 
-    def _aggregate_ride(self, conn, ride):
+    def _aggregate_ride(self, conn, ride, operated_today_ride_ids: set):
         """
         Aggregate statistics for a single ride for the target hour.
 
         Args:
             conn: Database connection
             ride: Ride model object
+            operated_today_ride_ids: Set of ride IDs that operated anywhere during the Pacific calendar day
 
-        Business Logic (from CLAUDE.md Rule 2):
-        ========================================
-        A ride has "operated" if it had at least one snapshot with
-        computed_is_open=TRUE while park_appears_open=TRUE during the hour.
+        Business Logic (from CLAUDE.md Rule 2 - HOURLY):
+        ==================================================
+        A ride has "operated" if it operated at ANY point during the Pacific calendar day.
+        This ensures multi-hour outages persist across all hours after the ride operated.
+
+        Example: Ride operates at 10:00am, goes down at 10:30am
+        → Counts as down in 10am, 11am, 12pm, etc. hours (operated "today")
 
         Only rides that operated count toward downtime calculations.
         This prevents scheduled maintenance rides from showing false downtime.
@@ -246,18 +301,17 @@ class HourlyAggregator:
         # Pre-check: Skip rides with no snapshots during this hour
         # (avoids NULL ride_operated errors for rides that didn't operate)
         check = conn.execute(text("""
-            SELECT COUNT(*) as snapshot_count
-            FROM ride_status_snapshots rss
-            WHERE rss.ride_id = :ride_id
-              AND rss.recorded_at >= :hour_start
-              AND rss.recorded_at < :hour_end
+            SELECT 1 FROM ride_status_snapshots
+            WHERE ride_id = :ride_id
+              AND recorded_at >= :hour_start
+              AND recorded_at < :hour_end
+            LIMIT 1
         """), {
             'ride_id': ride_id,
             'hour_start': self.target_hour,
             'hour_end': self.hour_end
         })
-        row = check.fetchone()
-        if not row or row[0] == 0:
+        if check.fetchone() is None:
             # No snapshots for this ride during this hour - skip
             return
 
@@ -265,6 +319,9 @@ class HourlyAggregator:
         is_down_sql = RideStatusSQL.is_down("rss", parks_alias="p")
         park_open_sql = ParkStatusSQL.park_appears_open_filter("pas")
 
+        # NEW: "Operated Today" subquery to fix multi-hour outage bug
+        # MySQL doesn't support CTEs with INSERT ... ON DUPLICATE KEY UPDATE
+        # So we use a derived table (subquery) instead
         result = conn.execute(text(f"""
             INSERT INTO ride_hourly_stats (
                 ride_id,
@@ -317,8 +374,9 @@ class HourlyAggregator:
                 -- Total snapshots in hour
                 COUNT(*) as snapshot_count,
 
-                -- Did ride operate at all during hour? (Rule 2)
-                MAX(CASE WHEN {park_open_sql} AND rss.computed_is_open THEN 1 ELSE 0 END) as ride_operated,
+                -- NEW: Did ride operate anywhere today? (Rule 2 - HOURLY)
+                -- Pre-calculated in _aggregate_rides() to avoid N+1 query problem
+                :ride_operated as ride_operated,
 
                 NOW()
 
@@ -343,7 +401,8 @@ class HourlyAggregator:
             'ride_id': ride_id,
             'park_id': park_id,
             'hour_start': self.target_hour,
-            'hour_end': self.hour_end
+            'hour_end': self.hour_end,
+            'ride_operated': 1 if ride_id in operated_today_ride_ids else 0
         })
 
     def _aggregate_parks(self, park_repo: ParkRepository):
@@ -458,16 +517,22 @@ class HourlyAggregator:
                       AND rhs.ride_operated = 1
                 ), 0) as weighted_downtime_hours,
 
-                -- Effective park weight (7-day hybrid denominator)
-                -- Sum of tier_weight for all rides that have operated in the last 7 days
+                -- Effective park weight (park-type aware denominator)
+                -- Disney/Universal: 7-day window (have schedules, REFURBISHMENT status)
+                -- Other parks: 3-day (72-hour) window (CLOSED is only status, faster seasonal detection)
                 COALESCE((
                     SELECT SUM(COALESCE(rc.tier_weight, 2))
                     FROM rides r
                     LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                    JOIN parks p ON r.park_id = p.park_id
                     WHERE r.park_id = :park_id
                       AND r.is_active = TRUE
                       AND r.category = 'ATTRACTION'
-                      AND r.last_operated_at >= DATE_SUB(:hour_start, INTERVAL 7 DAY)
+                      AND r.last_operated_at >= CASE
+                        WHEN p.is_disney = TRUE OR p.is_universal = TRUE
+                        THEN DATE_SUB(:hour_start, INTERVAL 7 DAY)  -- 7 days for Disney/Universal
+                        ELSE DATE_SUB(:hour_start, INTERVAL 3 DAY)  -- 3 days (72 hours) for others
+                      END
                 ), 0) as effective_park_weight,
 
                 -- Number of snapshots aggregated (expect ~12 for 5-min collection)

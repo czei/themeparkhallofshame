@@ -198,8 +198,9 @@ def get_ride_downtime_rankings():
             stats_repo = StatsRepository(conn)
 
             # Route to appropriate query class based on period
-            if period == 'live':
-                # LIVE: Try pre-aggregated cache first (instant ~10ms)
+            if period in ('live', 'today'):
+                # LIVE/TODAY: Try pre-aggregated cache first (instant ~10ms)
+                # The ride_live_rankings table contains cumulative today data
                 # Falls back to raw query (~7s) if cache is empty/stale
                 rankings = stats_repo.get_ride_live_rankings_cached(
                     filter_disney_universal=filter_disney_universal,
@@ -215,13 +216,6 @@ def get_ride_downtime_rankings():
                         limit=limit,
                         sort_by=sort_by
                     )
-            elif period == 'today':
-                # TODAY: Cumulative data from midnight Pacific to now
-                query = TodayRideRankingsQuery(conn)
-                rankings = query.get_rankings(
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
             elif period == 'yesterday':
                 # YESTERDAY: Full previous Pacific day (immutable, highly cacheable)
                 query = YesterdayRideRankingsQuery(conn)

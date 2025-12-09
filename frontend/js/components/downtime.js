@@ -418,7 +418,13 @@ class Downtime {
                 </td>
                 <td class="ride-col">
                     <div class="ride-name-cell">
-                        <span class="ride-name">${this.escapeHtml(ride.ride_name || 'Unknown Ride')}</span>
+                        <a
+                            href="ride-detail.html?ride_id=${ride.ride_id}&period=${this.state.period === 'live' ? 'today' : this.state.period}"
+                            class="ride-name-link"
+                            title="View ride details"
+                        >
+                            <span class="ride-name">${this.escapeHtml(ride.ride_name || 'Unknown Ride')}</span>
+                        </a>
                         <div class="ride-actions">
                             <a
                                 href="ride-detail.html?ride_id=${ride.ride_id}&period=${this.state.period === 'live' ? 'today' : this.state.period}"

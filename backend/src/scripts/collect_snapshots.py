@@ -218,6 +218,12 @@ class SnapshotCollector:
         park_id = park.park_id
         park_name = park.name
 
+        # CRITICAL: Single timestamp for ALL snapshots in this collection cycle
+        # This ensures park_activity_snapshots and ride_status_snapshots have
+        # EXACTLY matching recorded_at values, enabling fast exact-match joins
+        # instead of slow DATE_FORMAT minute-level matching.
+        snapshot_timestamp = datetime.now()
+
         # Fetch live data from ThemeParks.wiki
         live_data = self.themeparks_wiki_client.get_park_live_data(wiki_id)
 
@@ -264,13 +270,14 @@ class SnapshotCollector:
 
         self._store_park_activity(park_id, park_appears_open, total_rides,
                                  rides_operating, rides_closed + rides_down,
-                                 avg_wait, max_wait, park_activity_repo, shame_score)
+                                 avg_wait, max_wait, park_activity_repo, shame_score,
+                                 snapshot_timestamp)
 
         # Process each ride
         for ride_data in live_data:
             self._process_ride_themeparks_wiki(
                 ride_data, park_id, ride_repo, snapshot_repo, status_change_repo,
-                data_quality_repo
+                data_quality_repo, snapshot_timestamp
             )
 
         logger.info(f"  ✓ Processed {len(live_data)} rides "
@@ -280,7 +287,8 @@ class SnapshotCollector:
                                        ride_repo: RideRepository,
                                        snapshot_repo: RideStatusSnapshotRepository,
                                        status_change_repo: RideStatusChangeRepository,
-                                       data_quality_repo: DataQualityRepository):
+                                       data_quality_repo: DataQualityRepository,
+                                       snapshot_timestamp: datetime):
         """
         Process a single ride from ThemeParks.wiki data.
 
@@ -291,6 +299,7 @@ class SnapshotCollector:
             snapshot_repo: Ride status snapshot repository
             status_change_repo: Ride status change repository
             data_quality_repo: Data quality issue tracking repository
+            snapshot_timestamp: Synchronized timestamp for this collection cycle
         """
         try:
             # Find ride in database by themeparks_wiki_id
@@ -350,7 +359,7 @@ class SnapshotCollector:
             # Store snapshot with rich status
             self._store_snapshot_with_status(
                 ride_id, wait_time, is_operating, is_operating, status,
-                ride_data.last_updated, snapshot_repo
+                ride_data.last_updated, snapshot_repo, snapshot_timestamp
             )
 
             # Detect status change using rich status
@@ -365,7 +374,8 @@ class SnapshotCollector:
     def _store_snapshot_with_status(self, ride_id: int, wait_time: Optional[int],
                                      is_open_api: Optional[bool], computed_status: bool,
                                      status_enum: Optional[str], last_updated_api: Optional[str],
-                                     snapshot_repo: RideStatusSnapshotRepository):
+                                     snapshot_repo: RideStatusSnapshotRepository,
+                                     snapshot_timestamp: datetime):
         """
         Store ride status snapshot with rich status enum.
 
@@ -377,11 +387,12 @@ class SnapshotCollector:
             status_enum: Rich status (OPERATING/DOWN/CLOSED/REFURBISHMENT)
             last_updated_api: API timestamp
             snapshot_repo: Ride status snapshot repository
+            snapshot_timestamp: Synchronized timestamp for this collection cycle
         """
         try:
             snapshot_record = {
                 'ride_id': ride_id,
-                'recorded_at': datetime.now(),
+                'recorded_at': snapshot_timestamp,
                 'wait_time': wait_time,
                 'is_open': is_open_api,
                 'computed_is_open': computed_status,
@@ -486,6 +497,12 @@ class SnapshotCollector:
         park_id = park.park_id
         park_name = park.name
 
+        # CRITICAL: Single timestamp for ALL snapshots in this collection cycle
+        # This ensures park_activity_snapshots and ride_status_snapshots have
+        # EXACTLY matching recorded_at values, enabling fast exact-match joins
+        # instead of slow DATE_FORMAT minute-level matching.
+        snapshot_timestamp = datetime.now()
+
         try:
             # Fetch current wait times from Queue-Times API
             api_response = self.queue_times_client.get_park_wait_times(queue_times_id)
@@ -562,11 +579,13 @@ class SnapshotCollector:
             shame_score = self.calculate_shame_score(park_id, down_ride_ids, ride_repo.conn)
 
             self._store_park_activity(park_id, park_appears_open, total_rides, rides_open,
-                                      rides_closed, avg_wait, max_wait, park_activity_repo, shame_score)
+                                      rides_closed, avg_wait, max_wait, park_activity_repo, shame_score,
+                                      snapshot_timestamp)
 
             # Process each ride
             for ride_data in rides_data:
-                self._process_ride(ride_data, park_id, ride_repo, snapshot_repo, status_change_repo)
+                self._process_ride(ride_data, park_id, ride_repo, snapshot_repo, status_change_repo,
+                                  snapshot_timestamp)
 
             logger.info(f"  ✓ Processed {len(rides_data)} rides "
                         f"({rides_open} open, park appears {'open' if park_appears_open else 'closed'})")
@@ -578,7 +597,8 @@ class SnapshotCollector:
     def _store_park_activity(self, park_id: int, appears_open: bool, total_rides: int,
                              rides_open: int, rides_closed: int, avg_wait: Optional[float],
                              max_wait: Optional[int], park_activity_repo: ParkActivitySnapshotRepository,
-                             shame_score: Optional[float] = None):
+                             shame_score: Optional[float] = None,
+                             snapshot_timestamp: Optional[datetime] = None):
         """
         Store park activity snapshot with pre-calculated shame score.
 
@@ -592,11 +612,14 @@ class SnapshotCollector:
             max_wait: Maximum wait time across all rides
             park_activity_repo: Park activity snapshot repository
             shame_score: Pre-calculated shame score (THE single source of truth)
+            snapshot_timestamp: Synchronized timestamp for this collection cycle
         """
         try:
+            # Use provided timestamp or fall back to now (for backwards compatibility)
+            recorded_at = snapshot_timestamp if snapshot_timestamp else datetime.now()
             activity_record = {
                 'park_id': park_id,
-                'recorded_at': datetime.now(),
+                'recorded_at': recorded_at,
                 'total_rides_tracked': total_rides,
                 'rides_open': rides_open,
                 'rides_closed': rides_closed,
@@ -672,7 +695,8 @@ class SnapshotCollector:
             return None
 
     def _process_ride(self, ride_data: Dict, park_id: int, ride_repo: RideRepository,
-                     snapshot_repo: RideStatusSnapshotRepository, status_change_repo: RideStatusChangeRepository):
+                     snapshot_repo: RideStatusSnapshotRepository, status_change_repo: RideStatusChangeRepository,
+                     snapshot_timestamp: Optional[datetime] = None):
         """
         Process a single ride: store snapshot and detect status changes.
 
@@ -682,6 +706,7 @@ class SnapshotCollector:
             ride_repo: Ride repository
             snapshot_repo: Ride status snapshot repository
             status_change_repo: Ride status change repository
+            snapshot_timestamp: Synchronized timestamp for this collection cycle
         """
         try:
             queue_times_id = ride_data.get('id')
@@ -715,7 +740,8 @@ class SnapshotCollector:
                 self._update_last_operated_at(ride_id, ride_repo)
 
             # Store snapshot
-            self._store_snapshot(ride_id, wait_time, is_open_api, computed_status, last_updated_api, snapshot_repo)
+            self._store_snapshot(ride_id, wait_time, is_open_api, computed_status, last_updated_api,
+                                snapshot_repo, snapshot_timestamp)
 
             # Detect status change
             self._detect_status_change(ride_id, computed_status, snapshot_repo, status_change_repo)
@@ -727,7 +753,8 @@ class SnapshotCollector:
     def _store_snapshot(self, ride_id: int, wait_time: Optional[int],
                        is_open_api: Optional[bool], computed_status: bool,
                        last_updated_api: Optional[str],
-                       snapshot_repo: RideStatusSnapshotRepository):
+                       snapshot_repo: RideStatusSnapshotRepository,
+                       snapshot_timestamp: Optional[datetime] = None):
         """
         Store ride status snapshot.
 
@@ -738,11 +765,14 @@ class SnapshotCollector:
             computed_status: Computed open/closed status
             last_updated_api: API timestamp when ride data was last updated (ISO format)
             snapshot_repo: Ride status snapshot repository
+            snapshot_timestamp: Synchronized timestamp for this collection cycle
         """
         try:
+            # Use provided timestamp or fall back to now (for backwards compatibility)
+            recorded_at = snapshot_timestamp if snapshot_timestamp else datetime.now()
             snapshot_record = {
                 'ride_id': ride_id,
-                'recorded_at': datetime.now(),
+                'recorded_at': recorded_at,
                 'wait_time': wait_time,
                 'is_open': is_open_api,
                 'computed_is_open': computed_status,

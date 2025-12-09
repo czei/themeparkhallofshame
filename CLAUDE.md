@@ -51,9 +51,24 @@ Many parks do not update ride status data when the park is closed:
 
 ### Rule 2: Rides Must Have Operated to Count
 
-A ride only counts toward downtime calculations if it has "operated" during the analysis period. A ride has "operated" if and only if:
+A ride only counts toward downtime calculations if it has "operated" during the analysis period.
+
+**For Hourly Aggregation:**
+A ride has "operated" if it operated at ANY point during the Pacific calendar day:
 1. The ride had at least one snapshot with `status='OPERATING'` or `computed_is_open=TRUE`
 2. AND the park was open at that time (`park_appears_open=TRUE`)
+3. AND the snapshot occurred anywhere during the Pacific calendar day (not just the specific hour)
+
+**Why this matters for hourly metrics:**
+- **CRITICAL FIX**: Multi-hour outages must persist across all hours of the day after the ride operated
+- Example: Ride operates at 10:00am, goes down at 10:30am → counts as down in 10am, 11am, 12pm, etc.
+- Without "operated today" logic, multi-hour outages disappear after the first hour
+
+**For Daily/Weekly/Monthly Aggregation:**
+A ride has "operated" if it operated during the specific aggregation period (day/week/month):
+1. The ride had at least one snapshot with `status='OPERATING'` or `computed_is_open=TRUE`
+2. AND the park was open at that time (`park_appears_open=TRUE`)
+3. AND the snapshot occurred during the aggregation period
 
 **Why this matters:**
 - Prevents closed parks from appearing in reliability rankings
@@ -61,7 +76,8 @@ A ride only counts toward downtime calculations if it has "operated" during the 
 - Ensures Michigan's Adventure doesn't show 0% uptime when it's closed for the season
 
 **Implementation:**
-- Use `RideStatusSQL.rides_that_operated_cte()` for all downtime/reliability queries
+- **Hourly**: Use `rides_operated_today` CTE that checks Pacific calendar day
+- **Daily/Weekly/Monthly**: Use `RideStatusSQL.rides_that_operated_cte()` for the aggregation period
 - This CTE joins `park_activity_snapshots` to verify park was open when ride operated
 
 ### Rule 3: Park-Type Aware Downtime Logic
@@ -88,7 +104,7 @@ Other parks (Dollywood, Busch Gardens, etc.) only report `CLOSED` for all non-op
 
 ---
 
-## Test-Driven Development (TDD) Process
+## MANDATORY: Test-Driven Development (TDD) Process
 
 This project follows classic Test-Driven Development. All code changes must adhere to the TDD cycle.
 

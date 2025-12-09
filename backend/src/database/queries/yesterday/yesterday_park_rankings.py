@@ -8,43 +8,36 @@ UI Location: Parks tab → Yesterday Rankings
 Returns parks ranked by AVERAGE shame score from the full previous Pacific day
 (midnight to midnight).
 
-CRITICAL: For YESTERDAY, we use stored shame_scores from park_activity_snapshots
-rather than recalculating from ride-level data. This avoids timestamp mismatches
-between ride_status_snapshots and park_activity_snapshots which can occur when
-snapshots are collected at slightly different times.
+Performance Optimization (2025-12):
+====================================
+This query uses pre-aggregated park_hourly_stats for fast performance.
+It does NOT query raw snapshot tables.
 
 Database Tables:
+- park_hourly_stats (pre-aggregated hourly data)
 - parks (park metadata)
-- park_activity_snapshots (stored shame_scores)
 
 Single Source of Truth:
-- Shame scores: Pre-calculated and stored in park_activity_snapshots.shame_score
+- Hourly aggregation: scripts/aggregate_hourly.py
 """
 
 from typing import List, Dict, Any
-from datetime import datetime
+from datetime import timedelta
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from utils.timezone import get_yesterday_range_utc
+from utils.timezone import get_today_pacific, get_pacific_day_range_utc
 from utils.sql_helpers import RideFilterSQL, ParkStatusSQL
 
 
 class YesterdayParkRankingsQuery:
     """
-    Query handler for YESTERDAY park rankings using stored shame scores.
+    Query handler for YESTERDAY park rankings using pre-aggregated hourly stats.
 
-    YESTERDAY aggregates PRE-CALCULATED shame scores from park_activity_snapshots.
-    Unlike TODAY/LIVE which calculate shame scores in real-time, YESTERDAY uses
-    all snapshots from the full previous Pacific day.
-
-    This makes the score comparable to LIVE and TODAY (same 0-100 scale).
-    Unlike TODAY, YESTERDAY data is immutable and highly cacheable.
+    Uses ONLY pre-aggregated tables for instant performance (<50ms).
+    YESTERDAY data is immutable and highly cacheable.
     """
-
-    # Snapshot interval in minutes (for converting snapshot counts to time)
-    SNAPSHOT_INTERVAL_MINUTES = 5
 
     def __init__(self, connection: Connection):
         self.conn = connection
@@ -58,9 +51,7 @@ class YesterdayParkRankingsQuery:
         """
         Get park rankings for the full previous Pacific day using AVERAGE shame score.
 
-        For YESTERDAY, we use stored shame_scores from park_activity_snapshots
-        rather than recalculating from ride-level data. This avoids issues with
-        timestamp mismatches between ride and park snapshot collections.
+        Uses pre-aggregated park_hourly_stats table for fast performance.
 
         Args:
             filter_disney_universal: Only Disney/Universal parks
@@ -70,8 +61,10 @@ class YesterdayParkRankingsQuery:
         Returns:
             List of parks ranked by the specified sort field
         """
-        # Get time range for yesterday (full previous day)
-        start_utc, end_utc, label = get_yesterday_range_utc()
+        # Get time range for yesterday (full previous Pacific day)
+        today = get_today_pacific()
+        yesterday = today - timedelta(days=1)
+        start_utc, end_utc = get_pacific_day_range_utc(yesterday)
 
         # Determine sort column and direction based on parameter
         sort_column_map = {
@@ -88,8 +81,7 @@ class YesterdayParkRankingsQuery:
         filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
         park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
 
-        # SIMPLIFIED QUERY: Use stored shame_scores from park_activity_snapshots
-        # This avoids timestamp mismatch issues with ride-level joins
+        # Fast query using pre-aggregated park_hourly_stats
         query = text(f"""
             SELECT
                 p.park_id,
@@ -97,57 +89,36 @@ class YesterdayParkRankingsQuery:
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
 
-                -- AVERAGE Shame Score: Use stored values from park_activity_snapshots
-                -- THE SINGLE SOURCE OF TRUTH - calculated during data collection
-                ROUND(
-                    AVG(CASE
-                        WHEN pas.park_appears_open = TRUE AND pas.shame_score IS NOT NULL
-                        THEN pas.shame_score
-                    END),
-                    1
-                ) AS shame_score,
+                -- Shame score: average across yesterday's hourly stats
+                ROUND(AVG(phs.shame_score), 1) AS shame_score,
 
-                -- Total downtime hours: Calculate from snapshot counts
-                -- {self.SNAPSHOT_INTERVAL_MINUTES} minutes per snapshot
-                ROUND(
-                    SUM(CASE
-                        WHEN pas.park_appears_open = TRUE
-                        THEN pas.rides_closed * {self.SNAPSHOT_INTERVAL_MINUTES}.0 / 60.0
-                        ELSE 0
-                    END),
-                    2
-                ) AS total_downtime_hours,
+                -- Total downtime hours: sum across yesterday
+                ROUND(SUM(phs.total_downtime_hours), 2) AS total_downtime_hours,
 
-                -- Weighted downtime: Not available (would need ride tier weights)
-                NULL AS weighted_downtime_hours,
+                -- Weighted downtime hours: sum across yesterday
+                ROUND(SUM(phs.weighted_downtime_hours), 2) AS weighted_downtime_hours,
 
-                -- Uptime percentage: Calculate from rides_open vs total_rides_tracked
+                -- Uptime percentage: calculated from hourly aggregates
                 ROUND(
-                    AVG(CASE
-                        WHEN pas.park_appears_open = TRUE AND pas.total_rides_tracked > 0
-                        THEN (pas.rides_open * 100.0 / pas.total_rides_tracked)
-                    END),
+                    100.0 * SUM(phs.rides_operating) /
+                    NULLIF(SUM(phs.rides_operating) + SUM(phs.rides_down), 0),
                     1
                 ) AS uptime_percentage,
 
-                -- Rides down: Peak number of concurrent closed rides
-                -- This is the maximum number of rides closed at any single snapshot,
-                -- NOT the total unique rides that experienced downtime during the day
-                MAX(CASE
-                    WHEN pas.park_appears_open = TRUE
-                    THEN pas.rides_closed
-                END) AS rides_down,
+                -- Rides down: max concurrent across yesterday
+                MAX(phs.rides_down) AS rides_down,
 
                 -- Park operating status (current - may differ from yesterday's status)
                 {park_is_open_sq}
 
-            FROM parks p
-            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-            WHERE pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
-                AND p.is_active = TRUE
-                {filter_clause}
-            GROUP BY p.park_id, p.name, p.city, p.state_province
-            HAVING shame_score IS NOT NULL AND shame_score > 0
+            FROM park_hourly_stats phs
+            INNER JOIN parks p ON phs.park_id = p.park_id
+            WHERE phs.hour_start_utc >= :start_utc
+              AND phs.hour_start_utc < :end_utc
+              AND p.is_active = TRUE
+              {filter_clause}
+            GROUP BY p.park_id, p.queue_times_id, p.name, p.city, p.state_province
+            HAVING AVG(phs.shame_score) > 0
             ORDER BY {sort_column} {sort_direction}
             LIMIT :limit
         """)

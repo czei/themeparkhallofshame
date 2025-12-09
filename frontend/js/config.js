@@ -17,8 +17,8 @@
 
 const CONFIG = {
     // API Configuration
-    API_BASE_URL: 'http://localhost:5001/api',  // For local testing
-    // API_BASE_URL: '/api',  // Production
+    // Use relative URL - works in both dev (via proxy) and production
+    API_BASE_URL: '/api',
 
     // For production deployment, uncomment and set your backend URL:
     // API_BASE_URL: 'https://your-backend-api.com/api',

@@ -376,10 +376,8 @@
         // Initialize Park Details Modal (apiClient is already created by api-client.js)
         const parkDetailsModal = new ParkDetailsModal(apiClient);
 
-        // API base URL
-        const API_BASE_URL = window.location.hostname === 'localhost'
-            ? 'http://localhost:5001/api'
-            : 'https://api.themeparkhallofshame.com/api';
+        // API base URL - use config or relative path
+        const API_BASE_URL = window.APP_CONFIG?.API_BASE_URL || '/api';
 
         let chartInstance = null;
 

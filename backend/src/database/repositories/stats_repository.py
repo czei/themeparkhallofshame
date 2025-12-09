@@ -965,7 +965,7 @@ class StatsRepository:
                             AND EXISTS (
                                 SELECT 1 FROM ride_status_snapshots rss4
                                 JOIN park_activity_snapshots pas ON pas.park_id = pk.park_id
-                                    AND pas.recorded_at = rss4.recorded_at
+                                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss4.recorded_at, '%Y-%m-%d %H:%i')
                                 WHERE rss4.ride_id = r.ride_id
                                     AND (rss4.status = 'OPERATING' OR (rss4.status IS NULL AND rss4.computed_is_open = TRUE))
                                     AND pas.park_appears_open = TRUE
@@ -1018,7 +1018,7 @@ class StatsRepository:
                             AND EXISTS (
                                 SELECT 1 FROM ride_status_snapshots rss4
                                 JOIN park_activity_snapshots pas ON pas.park_id = pk.park_id
-                                    AND pas.recorded_at = rss4.recorded_at
+                                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss4.recorded_at, '%Y-%m-%d %H:%i')
                                 WHERE rss4.ride_id = r.ride_id
                                     AND (rss4.status = 'OPERATING' OR (rss4.status IS NULL AND rss4.computed_is_open = TRUE))
                                     AND pas.park_appears_open = TRUE
@@ -1071,7 +1071,7 @@ class StatsRepository:
                             AND EXISTS (
                                 SELECT 1 FROM ride_status_snapshots rss4
                                 JOIN park_activity_snapshots pas ON pas.park_id = pk.park_id
-                                    AND pas.recorded_at = rss4.recorded_at
+                                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss4.recorded_at, '%Y-%m-%d %H:%i')
                                 WHERE rss4.ride_id = r.ride_id
                                     AND (rss4.status = 'OPERATING' OR (rss4.status IS NULL AND rss4.computed_is_open = TRUE))
                                     AND pas.park_appears_open = TRUE
@@ -1413,7 +1413,7 @@ class StatsRepository:
             INNER JOIN parks p ON r.park_id = p.park_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
+                AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             LEFT JOIN latest_snapshot ls ON r.ride_id = ls.ride_id
             WHERE r.park_id = :park_id
@@ -1572,7 +1572,7 @@ class StatsRepository:
             INNER JOIN parks p ON r.park_id = p.park_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
+                AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             WHERE r.park_id = :park_id
                 AND r.is_active = TRUE
@@ -2374,7 +2374,7 @@ class StatsRepository:
                 JOIN rides r ON rss.ride_id = r.ride_id
                 JOIN parks p ON r.park_id = p.park_id
                 INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 LEFT JOIN ride_daily_stats prev_day ON r.ride_id = prev_day.ride_id
                     AND prev_day.stat_date = :yesterday_pacific
                 WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
@@ -2602,7 +2602,7 @@ class StatsRepository:
                 JOIN rides r ON rss.ride_id = r.ride_id
                 JOIN parks p ON r.park_id = p.park_id
                 INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 LEFT JOIN park_daily_stats prev_day ON p.park_id = prev_day.park_id
                     AND prev_day.stat_date = :yesterday_pacific
                 WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
@@ -3714,7 +3714,7 @@ class StatsRepository:
                 INNER JOIN latest_snapshot ls ON rss_latest.ride_id = ls.ride_id
                     AND rss_latest.recorded_at = ls.latest_recorded_at
                 INNER JOIN park_activity_snapshots pas_latest ON r_inner.park_id = pas_latest.park_id
-                    AND pas_latest.recorded_at = rss_latest.recorded_at
+                    AND DATE_FORMAT(pas_latest.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss_latest.recorded_at, '%Y-%m-%d %H:%i')
                 WHERE r_inner.is_active = TRUE
                     AND r_inner.category = 'ATTRACTION'
                     AND {is_down_latest}
@@ -3770,7 +3770,7 @@ class StatsRepository:
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
+                AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
             INNER JOIN park_weights pw ON p.park_id = pw.park_id
             LEFT JOIN rides_currently_down rcd ON r.ride_id = rcd.ride_id
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
@@ -4094,7 +4094,7 @@ class StatsRepository:
             INNER JOIN parks p ON r.park_id = p.park_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
+                AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             LEFT JOIN ride_daily_stats prev_day ON r.ride_id = prev_day.ride_id
                 AND prev_day.stat_date = :yesterday_pacific
@@ -4810,7 +4810,7 @@ class StatsRepository:
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             -- CRITICAL: Join park_activity_snapshots for consistent park filtering
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
+                AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             -- LEFT JOIN yesterday's stats for trend calculation
             LEFT JOIN ride_daily_stats yesterday_stats

@@ -142,7 +142,7 @@ class TodayParkRankingsQuery:
                 FROM rides r
                 INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
                 INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 INNER JOIN parks p ON r.park_id = p.park_id
                 WHERE rss.recorded_at >= :start_time AND rss.recorded_at < :end_time
                     AND r.is_active = TRUE AND r.category = 'ATTRACTION'
@@ -305,7 +305,7 @@ class TodayParkRankingsQuery:
             LEFT JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
                 AND rss.recorded_at >= :start_utc AND rss.recorded_at < :now_utc
             LEFT JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
+                AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
             WHERE p.park_id IN :park_ids
                 AND p.is_active = TRUE
                 {filter_clause}
@@ -451,7 +451,7 @@ class TodayParkRankingsQuery:
                     AND r.is_active = TRUE AND r.category = 'ATTRACTION'
                 INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
                 INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :now_utc
                     AND p.is_active = TRUE
                     AND {park_open}
@@ -533,7 +533,7 @@ class TodayParkRankingsQuery:
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
+                AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
             INNER JOIN park_weights pw ON p.park_id = pw.park_id
             LEFT JOIN park_operating_snapshots pos ON p.park_id = pos.park_id
             LEFT JOIN rides_that_operated rto ON r.ride_id = rto.ride_id

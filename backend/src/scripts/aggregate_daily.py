@@ -285,7 +285,7 @@ class DailyAggregator:
             FROM ride_status_snapshots rss
             JOIN rides r ON rss.ride_id = r.ride_id
             JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
+                AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
             WHERE rss.ride_id = :ride_id
               AND DATE(rss.recorded_at) = :stat_date
             ON DUPLICATE KEY UPDATE

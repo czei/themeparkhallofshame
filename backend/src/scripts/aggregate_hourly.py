@@ -246,7 +246,7 @@ class HourlyAggregator:
                     JOIN rides r_day ON rss_day.ride_id = r_day.ride_id
                     JOIN park_activity_snapshots pas_day
                         ON r_day.park_id = pas_day.park_id
-                        AND pas_day.recorded_at = rss_day.recorded_at
+                        AND DATE_FORMAT(pas_day.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss_day.recorded_at, '%Y-%m-%d %H:%i')
                     WHERE rss_day.recorded_at >= :day_start_utc
                         AND rss_day.recorded_at < :day_end_utc
                         AND pas_day.park_appears_open = TRUE
@@ -384,7 +384,7 @@ class HourlyAggregator:
             JOIN rides r ON rss.ride_id = r.ride_id
             JOIN parks p ON r.park_id = p.park_id
             JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
+                AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
             WHERE rss.ride_id = :ride_id
               AND rss.recorded_at >= :hour_start
               AND rss.recorded_at < :hour_end

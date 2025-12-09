@@ -95,7 +95,7 @@ class TodayRideRankingsQuery:
                 FROM rides r
                 INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
                 INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :now_utc
                     AND {park_open}
                 GROUP BY r.ride_id
@@ -146,7 +146,7 @@ class TodayRideRankingsQuery:
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
+                AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
             LEFT JOIN rides_that_operated rto ON r.ride_id = rto.ride_id
             LEFT JOIN operating_snapshots os ON r.ride_id = os.ride_id
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :now_utc

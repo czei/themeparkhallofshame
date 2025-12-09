@@ -123,7 +123,7 @@ class LeastReliableRidesQuery:
                 INNER JOIN parks p ON r.park_id = p.park_id
                 LEFT JOIN park_activity_snapshots pas
                     ON p.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 WHERE rss.recorded_at >= :start_utc
                   AND rss.recorded_at <= :now_utc
                   AND r.ride_id IN (SELECT ride_id FROM rides_that_operated)
@@ -195,7 +195,7 @@ class LeastReliableRidesQuery:
                 INNER JOIN parks p ON r.park_id = p.park_id
                 LEFT JOIN park_activity_snapshots pas
                     ON p.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 WHERE rss.recorded_at >= :start_utc
                   AND rss.recorded_at < :end_utc
                   AND r.ride_id IN (SELECT ride_id FROM rides_that_operated)
@@ -374,7 +374,7 @@ class LeastReliableRidesQuery:
                 LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
                 LEFT JOIN park_activity_snapshots pas
                     ON p.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 INNER JOIN park_weights pw ON p.park_id = pw.park_id
                 WHERE rss.recorded_at >= :start_utc
                   AND rss.recorded_at <= :now_utc
@@ -467,7 +467,7 @@ class LeastReliableRidesQuery:
                 LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
                 LEFT JOIN park_activity_snapshots pas
                     ON p.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 INNER JOIN park_weights pw ON p.park_id = pw.park_id
                 WHERE rss.recorded_at >= :start_utc
                   AND rss.recorded_at < :end_utc

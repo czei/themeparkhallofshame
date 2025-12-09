@@ -121,7 +121,7 @@ class LongestWaitTimesQuery:
                 INNER JOIN active_rides ar ON rss.ride_id = ar.ride_id
                 INNER JOIN park_activity_snapshots pas
                     ON ar.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 WHERE rss.recorded_at >= :start_utc
                   AND rss.recorded_at <= :now_utc
                   AND rss.wait_time > 0
@@ -191,7 +191,7 @@ class LongestWaitTimesQuery:
                 INNER JOIN active_rides ar ON rss.ride_id = ar.ride_id
                 INNER JOIN park_activity_snapshots pas
                     ON ar.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 WHERE rss.recorded_at >= :start_utc
                   AND rss.recorded_at < :end_utc
                   AND rss.wait_time > 0
@@ -347,7 +347,7 @@ class LongestWaitTimesQuery:
                 INNER JOIN active_rides ar ON rss.ride_id = ar.ride_id
                 INNER JOIN park_activity_snapshots pas
                     ON ar.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 WHERE rss.recorded_at >= :start_utc
                   AND rss.recorded_at <= :now_utc
                   AND rss.wait_time > 0
@@ -416,7 +416,7 @@ class LongestWaitTimesQuery:
                 INNER JOIN active_rides ar ON rss.ride_id = ar.ride_id
                 INNER JOIN park_activity_snapshots pas
                     ON ar.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 WHERE rss.recorded_at >= :start_utc
                   AND rss.recorded_at < :end_utc
                   AND rss.wait_time > 0

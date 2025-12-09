@@ -252,7 +252,7 @@ class ShameScoreCalculator:
                 FROM rides r
                 INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
                 INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 WHERE r.park_id = :park_id
                     AND r.is_active = TRUE
                     AND r.category = 'ATTRACTION'
@@ -296,7 +296,7 @@ class ShameScoreCalculator:
                 INNER JOIN parks p ON r.park_id = p.park_id
                 INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
                 INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
                 WHERE r.park_id = :park_id
                     AND r.is_active = TRUE
@@ -376,7 +376,7 @@ class ShameScoreCalculator:
                 FROM rides r
                 INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
                 INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 WHERE r.park_id = :park_id
                     AND r.is_active = TRUE
                     AND r.category = 'ATTRACTION'
@@ -432,7 +432,7 @@ class ShameScoreCalculator:
                 INNER JOIN parks p ON r.park_id = p.park_id
                 INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
                 INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
                 WHERE r.park_id = :park_id
                     AND r.is_active = TRUE
@@ -507,7 +507,7 @@ class ShameScoreCalculator:
                 FROM rides r
                 INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
                 INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 WHERE r.park_id = :park_id
                     AND r.is_active = TRUE
                     AND r.category = 'ATTRACTION'
@@ -548,7 +548,7 @@ class ShameScoreCalculator:
                 INNER JOIN parks p ON r.park_id = p.park_id
                 INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
                 INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
+                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
                 LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
                 WHERE r.park_id = :park_id
                     AND r.is_active = TRUE

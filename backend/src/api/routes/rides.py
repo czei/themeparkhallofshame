@@ -536,6 +536,12 @@ def get_ride_details(ride_id: int):
             park_row = park_result.fetchone()
             park_name = park_row[0] if park_row else None
 
+            # Get tier from ride_classifications (tier data is stored there, not in rides table)
+            tier_query = text("SELECT tier FROM ride_classifications WHERE ride_id = :ride_id")
+            tier_result = conn.execute(tier_query, {"ride_id": ride_id})
+            tier_row = tier_result.fetchone()
+            tier = tier_row[0] if tier_row else None
+
             # Build response
             response = {
                 "success": True,
@@ -545,7 +551,7 @@ def get_ride_details(ride_id: int):
                     "name": ride.name,
                     "park_id": ride.park_id,
                     "park_name": park_name,
-                    "tier": ride.tier,
+                    "tier": tier,
                     "category": ride.category,
                     "queue_times_url": f"https://queue-times.com/parks/{ride.park_queue_times_id}/rides/{ride.queue_times_id}" if ride.queue_times_id and ride.park_queue_times_id else None
                 },

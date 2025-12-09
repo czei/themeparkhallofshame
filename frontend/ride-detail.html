@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ride Details - US Theme Park Hall of Shame</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css?v=20">
+    <!-- Chart.js for wait time visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        /* Ride detail specific styles */
+        .ride-header {
+            text-align: center;
+            padding: 2rem 1rem;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 8px;
+            margin-bottom: 2rem;
+        }
+
+        .ride-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #212529;
+            margin-bottom: 0.5rem;
+        }
+
+        .ride-subtitle {
+            font-size: 1.1rem;
+            color: #6c757d;
+            margin-bottom: 1rem;
+        }
+
+        .ride-meta {
+            display: flex;
+            gap: 2rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+        }
+
+        .meta-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .meta-label {
+            font-size: 0.85rem;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .meta-value {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #212529;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-bottom: 1rem;
+            color: #007bff;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #212529;
+        }
+
+        .stat-unit {
+            font-size: 1rem;
+            color: #6c757d;
+            margin-left: 0.25rem;
+        }
+
+        .chart-container {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
+        }
+
+        .chart-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #212529;
+        }
+
+        .data-table {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
+            overflow-x: auto;
+        }
+
+        .data-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .data-table th {
+            text-align: left;
+            padding: 0.75rem;
+            border-bottom: 2px solid #dee2e6;
+            font-weight: 600;
+            color: #495057;
+            font-size: 0.9rem;
+        }
+
+        .data-table td {
+            padding: 0.75rem;
+            border-bottom: 1px solid #dee2e6;
+            color: #212529;
+        }
+
+        .data-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .status-operating {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-down {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-closed {
+            background: #e2e3e5;
+            color: #383d41;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: #6c757d;
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+        }
+
+        .tier-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            background: #007bff;
+            color: white;
+        }
+
+        @media (max-width: 768px) {
+            .ride-title {
+                font-size: 1.75rem;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Geometric Top Bar -->
+    <div class="geometric-bar"></div>
+
+    <!-- Beta Warning Banner - Mary Blair Collage Style -->
+    <div class="beta-section">
+        <!-- Base color blocks -->
+        <div class="geo-base-1"></div>
+        <div class="geo-base-2"></div>
+        <div class="geo-base-3"></div>
+
+        <!-- Overlapping rectangles - collage style -->
+        <div class="geo-rect-coral-1"></div>
+        <div class="geo-rect-coral-2"></div>
+        <div class="geo-rect-teal-1"></div>
+        <div class="geo-rect-teal-2"></div>
+        <div class="geo-rect-gold-1"></div>
+        <div class="geo-rect-gold-2"></div>
+        <div class="geo-rect-pink-1"></div>
+        <div class="geo-rect-pink-2"></div>
+
+        <!-- Small accent squares -->
+        <div class="geo-square-1"></div>
+        <div class="geo-square-2"></div>
+        <div class="geo-square-3"></div>
+
+        <!-- Vertical bars -->
+        <div class="geo-bar-1"></div>
+        <div class="geo-bar-2"></div>
+
+        <div class="beta-content">
+            <span class="beta-badge">BETA</span>
+            <span class="beta-message">Data accuracy under review. Some metrics may be incorrect.</span>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <div class="header-section">
+        <div class="established">Est. 2025</div>
+        <h1>
+            <div class="title-line-1">US THEME PARK</div>
+            <div class="title-line-2">HALL OF SHAME</div>
+        </h1>
+        <div class="subtitle">
+            Ride Performance Details
+        </div>
+        <a href="index.html" class="about-link">← Back to Rankings</a>
+    </div>
+
+    <!-- Content Container -->
+    <div style="max-width: 1200px; margin: 0 auto; padding: 2rem 1rem;">
+
+        <!-- Loading State -->
+        <div id="loading" class="loading">
+            <p>Loading ride details...</p>
+        </div>
+
+        <!-- Error State -->
+        <div id="error" class="error-message" style="display: none;">
+            <strong>Error:</strong> <span id="error-message"></span>
+        </div>
+
+        <!-- Content -->
+        <div id="content" style="display: none;">
+            <!-- Ride Header -->
+            <div class="ride-header">
+                <h1 class="ride-title" id="ride-name">--</h1>
+                <div class="ride-subtitle" id="park-name">--</div>
+                <div class="ride-meta">
+                    <div class="meta-item">
+                        <div class="meta-label">Tier</div>
+                        <div class="meta-value" id="ride-tier">--</div>
+                    </div>
+                    <div class="meta-item" id="category-item" style="display: none;">
+                        <div class="meta-label">Category</div>
+                        <div class="meta-value" id="ride-category">--</div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Period</div>
+                        <div class="meta-value" id="current-period">--</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Period Selector -->
+            <div class="time-selector" style="margin-bottom: 2rem;">
+                <button class="time-btn" data-period="today">Today</button>
+                <button class="time-btn" data-period="yesterday">Yesterday</button>
+                <button class="time-btn" data-period="last_week">Last Week</button>
+                <button class="time-btn" data-period="last_month">Last Month</button>
+            </div>
+
+            <!-- Summary Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Total Downtime</div>
+                    <div class="stat-value">
+                        <span id="total-downtime">--</span>
+                        <span class="stat-unit">hrs</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Uptime %</div>
+                    <div class="stat-value">
+                        <span id="uptime-percentage">--</span>
+                        <span class="stat-unit">%</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg Wait Time</div>
+                    <div class="stat-value">
+                        <span id="avg-wait-time">--</span>
+                        <span class="stat-unit">min</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Operating Hours</div>
+                    <div class="stat-value">
+                        <span id="operating-hours">--</span>
+                        <span class="stat-unit">hrs</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Wait Time Chart -->
+            <div class="chart-container">
+                <h2 class="chart-title">Wait Times & Status</h2>
+                <canvas id="wait-time-chart"></canvas>
+            </div>
+
+            <!-- Hourly Breakdown Table -->
+            <div class="data-table">
+                <h2 class="chart-title">Hourly Breakdown</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Hour</th>
+                            <th>Status</th>
+                            <th>Avg Wait</th>
+                            <th>Uptime %</th>
+                            <th>Downtime</th>
+                            <th>Snapshots</th>
+                        </tr>
+                    </thead>
+                    <tbody id="hourly-breakdown-tbody">
+                        <tr>
+                            <td colspan="6" style="text-align: center; color: #6c757d;">No data available</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Custom plugin to draw status background bands
+        const statusBandsPlugin = {
+            id: 'statusBands',
+            beforeDatasetsDraw(chart, args, options) {
+                const { ctx, chartArea: { left, right, top, bottom }, scales: { x, y } } = chart;
+
+                if (!options.intervals || options.intervals.length === 0) return;
+
+                ctx.save();
+
+                options.intervals.forEach(interval => {
+                    // For bar charts, each bar spans ±0.5 around its center
+                    // Draw band from left edge of first bar to right edge of last bar
+                    const xStart = x.getPixelForValue(interval.startIndex - 0.5);
+                    const xEnd = x.getPixelForValue(interval.endIndex + 0.5);
+                    const width = xEnd - xStart;
+
+                    const color = interval.status === 'DOWN'
+                        ? 'rgba(220, 53, 69, 0.15)'  // Light red for DOWN
+                        : 'rgba(108, 117, 125, 0.15)'; // Light gray for CLOSED
+
+                    ctx.fillStyle = color;
+                    ctx.fillRect(xStart, top, width, bottom - top);
+                });
+
+                ctx.restore();
+            }
+        };
+
+        Chart.register(statusBandsPlugin);
+
+        // Get URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const rideId = urlParams.get('ride_id');
+        let currentPeriod = urlParams.get('period') || 'today';
+
+        // API base URL
+        const API_BASE_URL = window.location.hostname === 'localhost'
+            ? 'http://localhost:5001/api'
+            : 'https://api.themeparkhallofshame.com/api';
+
+        let chartInstance = null;
+
+        // Load ride details
+        async function loadRideDetails() {
+            if (!rideId) {
+                showError('No ride ID provided in URL');
+                return;
+            }
+
+            try {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('content').style.display = 'none';
+                document.getElementById('error').style.display = 'none';
+
+                const response = await fetch(`${API_BASE_URL}/rides/${rideId}/details?period=${currentPeriod}`);
+                const data = await response.json();
+
+                if (!data.success) {
+                    showError(data.error || 'Failed to load ride details');
+                    return;
+                }
+
+                renderRideDetails(data);
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+            } catch (error) {
+                console.error('Error loading ride details:', error);
+                showError('Failed to load ride details. Please try again later.');
+            }
+        }
+
+        function renderRideDetails(data) {
+            // Ride metadata
+            document.getElementById('ride-name').textContent = data.ride.name;
+            document.getElementById('park-name').textContent = data.ride.park_name || `Park ID: ${data.ride.park_id}`;
+            document.getElementById('ride-tier').textContent = data.ride.tier ? `Tier ${data.ride.tier}` : 'Tier Unknown';
+            document.getElementById('current-period').textContent = data.period.replace('_', ' ').toUpperCase();
+
+            if (data.ride.category) {
+                document.getElementById('ride-category').textContent = data.ride.category;
+                document.getElementById('category-item').style.display = 'flex';
+            }
+
+            // Summary stats
+            document.getElementById('total-downtime').textContent =
+                (data.summary.total_downtime_hours || 0).toFixed(1);
+            document.getElementById('uptime-percentage').textContent =
+                (data.summary.uptime_percentage || 0).toFixed(1);
+            document.getElementById('avg-wait-time').textContent =
+                (data.summary.avg_wait_time || 0).toFixed(0);
+            document.getElementById('operating-hours').textContent =
+                data.summary.total_operating_hours || 0;
+
+            // Render chart
+            renderChart(data.timeseries);
+
+            // Render hourly breakdown table
+            renderHourlyBreakdown(data.hourly_breakdown);
+
+            // Update period selector
+            document.querySelectorAll('.time-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.period === currentPeriod);
+            });
+        }
+
+        /**
+         * Compute contiguous intervals for each status type (DOWN, CLOSED)
+         * Returns array of {status, startIndex, endIndex}
+         */
+        function computeStatusIntervals(timeseries) {
+            const intervals = [];
+            let currentStatus = null;
+            let startIndex = null;
+
+            for (let i = 0; i < timeseries.length; i++) {
+                const status = timeseries[i].status;
+
+                // Only track DOWN and CLOSED intervals
+                if (status === 'DOWN' || status === 'CLOSED') {
+                    if (status === currentStatus) {
+                        // Continue current interval
+                        continue;
+                    } else {
+                        // End previous interval if exists
+                        if (currentStatus !== null && startIndex !== null) {
+                            intervals.push({
+                                status: currentStatus,
+                                startIndex: startIndex,
+                                endIndex: i - 1
+                            });
+                        }
+                        // Start new interval
+                        currentStatus = status;
+                        startIndex = i;
+                    }
+                } else {
+                    // OPERATING status - end any current interval
+                    if (currentStatus !== null && startIndex !== null) {
+                        intervals.push({
+                            status: currentStatus,
+                            startIndex: startIndex,
+                            endIndex: i - 1
+                        });
+                    }
+                    currentStatus = null;
+                    startIndex = null;
+                }
+            }
+
+            // Close final interval if still open
+            if (currentStatus !== null && startIndex !== null) {
+                intervals.push({
+                    status: currentStatus,
+                    startIndex: startIndex,
+                    endIndex: timeseries.length - 1
+                });
+            }
+
+            return intervals;
+        }
+
+        function renderChart(timeseries) {
+            const canvas = document.getElementById('wait-time-chart');
+            const ctx = canvas.getContext('2d');
+
+            // DEBUG: Log timeseries data
+            console.log('=== TIMESERIES DATA ===');
+            const isHourlyData = timeseries.length > 0 && 'hour_start_utc' in timeseries[0];
+            const isDailyData = timeseries.length > 0 && 'date' in timeseries[0];
+            console.log(`Data type: ${isHourlyData ? 'hourly' : 'daily'} (${timeseries.length} points)`);
+            timeseries.forEach((point, idx) => {
+                const label = isDailyData ? point.date :
+                             new Date(point.hour_start_utc).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                console.log(`[${idx}] ${label}: status=${point.status}, wait=${point.avg_wait_time_minutes}, snapshots=${point.snapshot_count}`);
+            });
+
+            // Destroy existing chart if it exists
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            // Prepare data - handle both hourly and daily formats
+            const labels = timeseries.map(point => {
+                if ('date' in point) {
+                    // Daily data: format as "Dec 06"
+                    const date = new Date(point.date + 'T00:00:00');
+                    return date.toLocaleDateString('en-US', { month: 'short', day: '2-digit' });
+                } else {
+                    // Hourly data: format as "02:00 PM"
+                    const date = new Date(point.hour_start_utc);
+                    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                }
+            });
+
+            // Create single wait-time dataset (only OPERATING periods have values)
+            const waitTimeData = timeseries.map(point =>
+                point.status === 'OPERATING' ? point.avg_wait_time_minutes : null
+            );
+
+            // Compute status intervals for background bands
+            const statusIntervals = computeStatusIntervals(timeseries);
+            console.log('=== STATUS INTERVALS ===', statusIntervals);
+
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Wait Time (when operating)',
+                            data: waitTimeData,
+                            backgroundColor: 'rgba(75, 192, 192, 0.8)',
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            labels: {
+                                generateLabels: function(chart) {
+                                    // Custom legend to show wait time line + status bands
+                                    return [
+                                        {
+                                            text: 'Wait Time (when operating)',
+                                            fillStyle: 'rgba(75, 192, 192, 1)',
+                                            strokeStyle: 'rgba(75, 192, 192, 1)',
+                                            lineWidth: 2,
+                                            hidden: false
+                                        },
+                                        {
+                                            text: 'Down (Broken)',
+                                            fillStyle: 'rgba(220, 53, 69, 0.3)',
+                                            strokeStyle: 'rgba(220, 53, 69, 0.3)',
+                                            lineWidth: 0,
+                                            hidden: false
+                                        },
+                                        {
+                                            text: 'Closed',
+                                            fillStyle: 'rgba(108, 117, 125, 0.3)',
+                                            strokeStyle: 'rgba(108, 117, 125, 0.3)',
+                                            lineWidth: 0,
+                                            hidden: false
+                                        }
+                                    ];
+                                }
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: function(context) {
+                                    const dataIndex = context.dataIndex;
+                                    const point = timeseries[dataIndex];
+
+                                    if (point.status === 'OPERATING') {
+                                        return `Wait: ${point.avg_wait_time_minutes?.toFixed(0) || 0} min`;
+                                    } else {
+                                        return `Status: ${point.status}`;
+                                    }
+                                }
+                            }
+                        },
+                        statusBands: {
+                            intervals: statusIntervals
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Wait Time (minutes)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderHourlyBreakdown(breakdown) {
+            const tbody = document.getElementById('hourly-breakdown-tbody');
+
+            if (breakdown.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #6c757d;">No data available</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = breakdown.map(row => {
+                // Handle both hourly and daily data formats
+                let timeLabel;
+                if ('date' in row) {
+                    // Daily data
+                    const date = new Date(row.date + 'T00:00:00');
+                    timeLabel = date.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
+                } else {
+                    // Hourly data
+                    timeLabel = new Date(row.hour_start_utc).toLocaleString();
+                }
+
+                // Use majority rule: if uptime > 50%, mark as OPERATING
+                const status = row.uptime_percentage >= 50 ? 'OPERATING' :
+                              (row.uptime_percentage > 0 ? 'DOWN' : 'CLOSED');
+                const statusClass = status === 'OPERATING' ? 'status-operating' :
+                                  (status === 'DOWN' ? 'status-down' : 'status-closed');
+
+                return `
+                    <tr>
+                        <td>${timeLabel}</td>
+                        <td><span class="status-badge ${statusClass}">${status}</span></td>
+                        <td>${(row.avg_wait_time_minutes || 0).toFixed(0)} min</td>
+                        <td>${(row.uptime_percentage || 0).toFixed(1)}%</td>
+                        <td>${(row.downtime_hours || 0).toFixed(2)} hrs</td>
+                        <td>${row.snapshot_count || 0}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function showError(message) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('content').style.display = 'none';
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('error-message').textContent = message;
+        }
+
+        // Period selector
+        document.querySelectorAll('.time-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentPeriod = btn.dataset.period;
+                // Update URL
+                const newUrl = `${window.location.pathname}?ride_id=${rideId}&period=${currentPeriod}`;
+                window.history.pushState({}, '', newUrl);
+                // Reload data
+                loadRideDetails();
+            });
+        });
+
+        // Initial load
+        loadRideDetails();
+    </script>
+</body>
+</html>

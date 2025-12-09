@@ -17,8 +17,9 @@
 
 const CONFIG = {
     // API Configuration
-    // Use relative URL - works in both dev (via proxy) and production
-    API_BASE_URL: '/api',
+    // For local development without proxy, point to backend port
+    // In production, nginx proxies /api to the backend
+    API_BASE_URL: window.location.port === '8080' ? 'http://localhost:5001/api' : '/api',
 
     // For production deployment, uncomment and set your backend URL:
     // API_BASE_URL: 'https://your-backend-api.com/api',

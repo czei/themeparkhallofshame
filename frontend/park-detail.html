@@ -363,8 +363,8 @@
     </div>
 
     <!-- Include Config, API Client and Park Details Modal -->
-    <script src="js/config.js?v=7"></script>
-    <script src="js/api-client.js"></script>
+    <script src="js/config.js?v=8"></script>
+    <script src="js/api-client.js?v=4"></script>
     <script src="js/components/park-details-modal.js"></script>
 
     <script>
@@ -376,8 +376,8 @@
         // Initialize Park Details Modal (apiClient is already created by api-client.js)
         const parkDetailsModal = new ParkDetailsModal(apiClient);
 
-        // API base URL - use config or relative path
-        const API_BASE_URL = window.APP_CONFIG?.API_BASE_URL || '/api';
+        // API base URL - use apiClient's baseUrl which has port detection for local dev
+        const API_BASE_URL = apiClient.baseUrl;
 
         let chartInstance = null;
 

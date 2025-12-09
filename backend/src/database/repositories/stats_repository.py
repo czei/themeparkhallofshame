@@ -903,186 +903,59 @@ class StatsRepository:
         """
         Get aggregate statistics for all parks.
 
-        Computes from LIVE data for real-time accuracy:
+        PERFORMANCE OPTIMIZED: Uses simple queries on indexed tables.
         - total_parks_tracked: Count of active parks
-        - peak_downtime_hours: Peak ride downtime from recent data
-        - currently_down_rides: Count of rides currently showing as down
+        - peak_downtime_hours: Peak ride downtime from aggregation tables
+        - currently_down_rides: Sum from ride_live_rankings cache (if available)
 
         Args:
-            period: 'today', '7days', or '30days'
+            period: 'live', 'today', 'yesterday', 'last_week', or 'last_month'
             filter_disney_universal: Filter to only Disney/Universal parks
 
         Returns:
             Dictionary with aggregate statistics
         """
         disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-        disney_filter_pk = disney_filter.replace('p.', 'pk.')
 
-        # Use Pacific day bounds for consistency with ride rankings table
-        today_pacific = get_today_pacific()
-        start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
+        # Determine date range for peak downtime based on period
+        if period in ('live', 'today'):
+            date_interval = 1
+        elif period == 'yesterday':
+            date_interval = 2  # Include yesterday and day before for context
+        elif period == 'last_week':
+            date_interval = 7
+        else:  # last_month
+            date_interval = 30
 
-        if period == 'today':
-            # Compute from LIVE data - active parks and current snapshots
-            query = text(f"""
-                SELECT
-                    (SELECT COUNT(DISTINCT p.park_id)
-                     FROM parks p
-                     WHERE p.is_active = TRUE
-                     {disney_filter}) AS total_parks_tracked,
-                    COALESCE((
-                        SELECT ROUND(MAX(rds.downtime_minutes) / 60.0, 2)
-                        FROM ride_daily_stats rds
-                        WHERE rds.stat_date >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
-                    ), 0) AS peak_downtime_hours,
-                    COALESCE((
-                        SELECT COUNT(DISTINCT r.ride_id)
-                        FROM rides r
-                        JOIN parks pk ON r.park_id = pk.park_id
-                        WHERE r.is_active = TRUE
-                            AND r.category = 'ATTRACTION'
-                            -- Currently showing as DOWN (not CLOSED or REFURBISHMENT)
-                            AND EXISTS (
-                                SELECT 1 FROM ride_status_snapshots rss
-                                WHERE rss.ride_id = r.ride_id
-                                    AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
-                                    AND rss.recorded_at = (
-                                        SELECT MAX(rss2.recorded_at)
-                                        FROM ride_status_snapshots rss2
-                                        WHERE rss2.ride_id = r.ride_id
-                                    )
-                            )
-                            -- Park is currently operating
-                            AND EXISTS (
-                                SELECT 1 FROM ride_status_snapshots rss3
-                                JOIN rides r3 ON rss3.ride_id = r3.ride_id
-                                WHERE r3.park_id = pk.park_id
-                                    AND rss3.wait_time > 0
-                                    AND rss3.recorded_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
-                            )
-                            -- Ride had some uptime today (was running at some point - excludes all-day closures)
-                            -- Uses Pacific day bounds for consistency with ride rankings table
-                            AND EXISTS (
-                                SELECT 1 FROM ride_status_snapshots rss4
-                                JOIN park_activity_snapshots pas ON pas.park_id = pk.park_id
-                                    AND pas.recorded_at = rss4.recorded_at
-                                WHERE rss4.ride_id = r.ride_id
-                                    AND (rss4.status = 'OPERATING' OR (rss4.status IS NULL AND rss4.computed_is_open = TRUE))
-                                    AND pas.park_appears_open = TRUE
-                                    AND rss4.recorded_at >= :start_utc
-                                    AND rss4.recorded_at < :end_utc
-                            )
-                        {disney_filter_pk}
-                    ), 0) AS currently_down_rides
-            """)
-        elif period == '7days':
-            # Aggregate from park_daily_stats for last 7 days
-            query = text(f"""
-                SELECT
-                    (SELECT COUNT(DISTINCT p.park_id)
-                     FROM parks p
-                     WHERE p.is_active = TRUE
-                     {disney_filter}) AS total_parks_tracked,
-                    COALESCE((
-                        SELECT ROUND(MAX(rds.downtime_minutes) / 60.0, 2)
-                        FROM ride_daily_stats rds
-                        WHERE rds.stat_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-                    ), 0) AS peak_downtime_hours,
-                    COALESCE((
-                        SELECT COUNT(DISTINCT r.ride_id)
-                        FROM rides r
-                        JOIN parks pk ON r.park_id = pk.park_id
-                        WHERE r.is_active = TRUE
-                            AND r.category = 'ATTRACTION'
-                            -- Currently showing as DOWN (not CLOSED or REFURBISHMENT)
-                            AND EXISTS (
-                                SELECT 1 FROM ride_status_snapshots rss
-                                WHERE rss.ride_id = r.ride_id
-                                    AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
-                                    AND rss.recorded_at = (
-                                        SELECT MAX(rss2.recorded_at)
-                                        FROM ride_status_snapshots rss2
-                                        WHERE rss2.ride_id = r.ride_id
-                                    )
-                            )
-                            -- Park is currently operating
-                            AND EXISTS (
-                                SELECT 1 FROM ride_status_snapshots rss3
-                                JOIN rides r3 ON rss3.ride_id = r3.ride_id
-                                WHERE r3.park_id = pk.park_id
-                                    AND rss3.wait_time > 0
-                                    AND rss3.recorded_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
-                            )
-                            -- Ride had some uptime today (was running at some point - excludes all-day closures)
-                            -- Uses Pacific day bounds for consistency with ride rankings table
-                            AND EXISTS (
-                                SELECT 1 FROM ride_status_snapshots rss4
-                                JOIN park_activity_snapshots pas ON pas.park_id = pk.park_id
-                                    AND pas.recorded_at = rss4.recorded_at
-                                WHERE rss4.ride_id = r.ride_id
-                                    AND (rss4.status = 'OPERATING' OR (rss4.status IS NULL AND rss4.computed_is_open = TRUE))
-                                    AND pas.park_appears_open = TRUE
-                                    AND rss4.recorded_at >= :start_utc
-                                    AND rss4.recorded_at < :end_utc
-                            )
-                        {disney_filter_pk}
-                    ), 0) AS currently_down_rides
-            """)
-        else:  # 30days
-            # Aggregate from park_daily_stats for last 30 days
-            query = text(f"""
-                SELECT
-                    (SELECT COUNT(DISTINCT p.park_id)
-                     FROM parks p
-                     WHERE p.is_active = TRUE
-                     {disney_filter}) AS total_parks_tracked,
-                    COALESCE((
-                        SELECT ROUND(MAX(rds.downtime_minutes) / 60.0, 2)
-                        FROM ride_daily_stats rds
-                        WHERE rds.stat_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-                    ), 0) AS peak_downtime_hours,
-                    COALESCE((
-                        SELECT COUNT(DISTINCT r.ride_id)
-                        FROM rides r
-                        JOIN parks pk ON r.park_id = pk.park_id
-                        WHERE r.is_active = TRUE
-                            AND r.category = 'ATTRACTION'
-                            -- Currently showing as DOWN (not CLOSED or REFURBISHMENT)
-                            AND EXISTS (
-                                SELECT 1 FROM ride_status_snapshots rss
-                                WHERE rss.ride_id = r.ride_id
-                                    AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
-                                    AND rss.recorded_at = (
-                                        SELECT MAX(rss2.recorded_at)
-                                        FROM ride_status_snapshots rss2
-                                        WHERE rss2.ride_id = r.ride_id
-                                    )
-                            )
-                            -- Park is currently operating
-                            AND EXISTS (
-                                SELECT 1 FROM ride_status_snapshots rss3
-                                JOIN rides r3 ON rss3.ride_id = r3.ride_id
-                                WHERE r3.park_id = pk.park_id
-                                    AND rss3.wait_time > 0
-                                    AND rss3.recorded_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
-                            )
-                            -- Ride had some uptime today (was running at some point - excludes all-day closures)
-                            -- Uses Pacific day bounds for consistency with ride rankings table
-                            AND EXISTS (
-                                SELECT 1 FROM ride_status_snapshots rss4
-                                JOIN park_activity_snapshots pas ON pas.park_id = pk.park_id
-                                    AND pas.recorded_at = rss4.recorded_at
-                                WHERE rss4.ride_id = r.ride_id
-                                    AND (rss4.status = 'OPERATING' OR (rss4.status IS NULL AND rss4.computed_is_open = TRUE))
-                                    AND pas.park_appears_open = TRUE
-                                    AND rss4.recorded_at >= :start_utc
-                                    AND rss4.recorded_at < :end_utc
-                            )
-                        {disney_filter_pk}
-                    ), 0) AS currently_down_rides
-            """)
+        # Simple, fast query using indexed columns only
+        # disney_filter applied to all subqueries for consistency
+        query = text(f"""
+            SELECT
+                (SELECT COUNT(DISTINCT p.park_id)
+                 FROM parks p
+                 WHERE p.is_active = TRUE
+                 {disney_filter}) AS total_parks_tracked,
+                COALESCE((
+                    SELECT ROUND(MAX(rds.downtime_minutes) / 60.0, 2)
+                    FROM ride_daily_stats rds
+                    INNER JOIN rides r ON rds.ride_id = r.ride_id
+                    INNER JOIN parks p ON r.park_id = p.park_id
+                    WHERE rds.stat_date >= DATE_SUB(CURDATE(), INTERVAL :date_interval DAY)
+                    {disney_filter}
+                ), 0) AS peak_downtime_hours,
+                -- Use sum of rides_down from park_hourly_stats (fast, indexed)
+                COALESCE((
+                    SELECT SUM(phs.rides_down)
+                    FROM park_hourly_stats phs
+                    INNER JOIN parks p ON phs.park_id = p.park_id
+                    WHERE phs.hour_start_utc = (
+                        SELECT MAX(hour_start_utc) FROM park_hourly_stats
+                    )
+                    {disney_filter}
+                ), 0) AS currently_down_rides
+        """)
 
-        result = self.conn.execute(query, {"start_utc": start_utc, "end_utc": end_utc})
+        result = self.conn.execute(query, {"date_interval": date_interval})
         row = result.fetchone()
         if row:
             return dict(row._mapping)

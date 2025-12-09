@@ -6,7 +6,7 @@ Endpoints for park-level downtime rankings and statistics.
 
 Query File Mapping
 ------------------
-GET /parks/downtime?period=live       → database/queries/live/live_park_rankings.py (instantaneous)
+GET /parks/downtime?period=live       → database/queries/live/fast_live_park_rankings.py (instantaneous via cache table)
 GET /parks/downtime?period=today      → database/queries/today/today_park_rankings.py (cumulative)
 GET /parks/downtime?period=yesterday  → database/queries/yesterday/yesterday_park_rankings.py (full prev day)
 GET /parks/downtime?period=last_week  → database/queries/rankings/park_downtime_rankings.py
@@ -31,6 +31,7 @@ from database.queries.rankings import ParkDowntimeRankingsQuery, ParkWaitTimeRan
 from database.queries.today import TodayParkRankingsQuery, TodayParkWaitTimesQuery
 from database.queries.yesterday import YesterdayParkRankingsQuery, YesterdayParkWaitTimesQuery
 from database.queries.charts import ParkShameHistoryQuery
+from database.queries.live.fast_live_park_rankings import FastLiveParkRankingsQuery
 from database.calculators.shame_score import ShameScoreCalculator
 
 from utils.logger import logger
@@ -118,24 +119,17 @@ def get_park_downtime_rankings():
 
             # Route to appropriate query based on period
             if period == 'live':
-                # LIVE: Try pre-aggregated cache first (instant ~10ms)
-                # Falls back to raw query (~7s) if cache is empty/stale
-                rankings = stats_repo.get_park_live_rankings_cached(
+                # LIVE: True instantaneous data - rides down RIGHT NOW
+                # Uses pre-aggregated park_live_rankings table for instant performance
+                query = FastLiveParkRankingsQuery(conn)
+                rankings = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit,
                     sort_by=sort_by
                 )
-
-                # If cache miss, fall back to computing from raw snapshots
-                if not rankings:
-                    logger.warning("Park live rankings cache miss, falling back to raw query")
-                    rankings = stats_repo.get_park_live_downtime_rankings(
-                        filter_disney_universal=filter_disney_universal,
-                        limit=limit,
-                        sort_by=sort_by
-                    )
             elif period == 'today':
-                # TODAY: Cumulative data from midnight Pacific to now
+                # TODAY: Cumulative totals from midnight Pacific to now
+                # Uses hourly aggregation tables for fast performance
                 query = TodayParkRankingsQuery(conn)
                 rankings = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,

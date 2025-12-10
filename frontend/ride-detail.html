@@ -397,9 +397,9 @@
 
         Chart.register(statusBandsPlugin);
 
-        // Get URL parameters
+        // Get URL parameters - support both 'id' and 'ride_id' for backwards compatibility
         const urlParams = new URLSearchParams(window.location.search);
-        const rideId = urlParams.get('ride_id');
+        const rideId = urlParams.get('id') || urlParams.get('ride_id');
         let currentPeriod = urlParams.get('period') || 'today';
 
         // API base URL - match config.js pattern
@@ -740,8 +740,8 @@
         document.querySelectorAll('.time-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 currentPeriod = btn.dataset.period;
-                // Update URL
-                const newUrl = `${window.location.pathname}?ride_id=${rideId}&period=${currentPeriod}`;
+                // Update URL - use 'id' parameter for consistency with search
+                const newUrl = `${window.location.pathname}?id=${rideId}&period=${currentPeriod}`;
                 window.history.pushState({}, '', newUrl);
                 // Reload data
                 loadRideDetails();

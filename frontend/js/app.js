@@ -32,6 +32,17 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Initialize Search component
+    if (typeof Search !== 'undefined') {
+        const searchComponent = new Search(apiClient);
+        const searchTrigger = document.getElementById('search-trigger');
+        if (searchTrigger) {
+            searchTrigger.addEventListener('click', () => {
+                searchComponent.open();
+            });
+        }
+    }
+
     navItems.forEach(item => {
         item.addEventListener('click', () => {
             // Remove active class from all nav items

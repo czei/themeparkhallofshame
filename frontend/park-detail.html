@@ -359,18 +359,152 @@
                     </tbody>
                 </table>
             </div>
+
+            <!-- Ride Comparison Section (hidden for live period) -->
+            <div id="ride-comparison-section" class="ride-comparison-section" style="display: none; margin-top: 2rem;">
+                <div class="ride-comparison-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h2 class="chart-title" style="margin: 0;">Ride Comparison</h2>
+                    <div class="chart-type-toggle" style="display: flex; gap: 0.5rem;">
+                        <button class="toggle-btn active" id="toggle-downtime" data-chart-type="downtime">Downtime</button>
+                        <button class="toggle-btn" id="toggle-waittimes" data-chart-type="wait_times">Wait Times</button>
+                    </div>
+                </div>
+                <div id="ride-comparison-content">
+                    <p style="text-align: center; color: #6c757d;">Loading ride comparison data...</p>
+                </div>
+                <div id="ride-comparison-heatmap-container" style="display: none; overflow-x: auto;">
+                    <div id="ride-comparison-heatmap" class="heatmap-grid"></div>
+                </div>
+            </div>
+
+            <style>
+                .heatmap-grid {
+                    display: grid;
+                    gap: 1px;
+                    background: #e9ecef;
+                    border-radius: 8px;
+                    overflow: hidden;
+                    min-width: fit-content;
+                }
+                .heatmap-header-row {
+                    display: contents;
+                }
+                .heatmap-header-cell {
+                    background: #f8f9fa;
+                    padding: 6px 4px;
+                    font-size: 11px;
+                    font-weight: 600;
+                    text-align: center;
+                    color: #495057;
+                    white-space: nowrap;
+                }
+                .heatmap-header-cell.ride-name {
+                    text-align: left;
+                    padding-left: 10px;
+                    min-width: 180px;
+                    max-width: 220px;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+                .heatmap-header-cell.total-col {
+                    background: #dee2e6;
+                    min-width: 60px;
+                }
+                .heatmap-row {
+                    display: contents;
+                }
+                .heatmap-ride-name {
+                    background: #fff;
+                    padding: 8px 10px;
+                    font-size: 12px;
+                    color: #212529;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                }
+                .heatmap-ride-name .tier-badge {
+                    font-size: 9px;
+                    padding: 2px 5px;
+                    border-radius: 3px;
+                    font-weight: 600;
+                }
+                .heatmap-ride-name .tier-1 { background: #dc3545; color: white; }
+                .heatmap-ride-name .tier-2 { background: #fd7e14; color: white; }
+                .heatmap-ride-name .tier-3 { background: #6c757d; color: white; }
+                .heatmap-cell {
+                    min-width: 40px;
+                    height: 32px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 10px;
+                    cursor: default;
+                    transition: transform 0.1s;
+                    position: relative;
+                }
+                .heatmap-cell:hover {
+                    transform: scale(1.1);
+                    z-index: 10;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                }
+                .heatmap-cell.total-cell {
+                    font-weight: 600;
+                    font-size: 11px;
+                    min-width: 60px;
+                }
+                .heatmap-tooltip {
+                    position: absolute;
+                    bottom: 100%;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background: #212529;
+                    color: white;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                    white-space: nowrap;
+                    opacity: 0;
+                    pointer-events: none;
+                    transition: opacity 0.2s;
+                    z-index: 100;
+                }
+                .heatmap-cell:hover .heatmap-tooltip {
+                    opacity: 1;
+                }
+                .heatmap-legend {
+                    display: flex;
+                    align-items: center;
+                    justify-content: flex-end;
+                    gap: 8px;
+                    margin-top: 12px;
+                    font-size: 11px;
+                    color: #6c757d;
+                }
+                .heatmap-legend-scale {
+                    display: flex;
+                    height: 12px;
+                    border-radius: 2px;
+                    overflow: hidden;
+                }
+                .heatmap-legend-scale div {
+                    width: 20px;
+                }
+            </style>
         </div>
     </div>
 
     <!-- Include Config, API Client and Park Details Modal -->
     <script src="js/config.js?v=8"></script>
     <script src="js/api-client.js?v=4"></script>
-    <script src="js/components/park-details-modal.js"></script>
+    <script src="js/components/park-details-modal.js?v=12"></script>
 
     <script>
         // Get URL parameters
         const urlParams = new URLSearchParams(window.location.search);
-        const parkId = urlParams.get('park_id');
+        const parkId = urlParams.get('park_id') || urlParams.get('id');
         let currentPeriod = urlParams.get('period') || 'live';
 
         // Initialize Park Details Modal (apiClient is already created by api-client.js)
@@ -459,6 +593,13 @@
 
             // Update period selector
             updatePeriodSelector();
+
+            // Load ride comparison (only for non-live periods)
+            if (currentPeriod !== 'live') {
+                loadRideComparison('downtime');
+            } else {
+                document.getElementById('ride-comparison-section').style.display = 'none';
+            }
         }
 
         function renderChart(chartData) {
@@ -696,6 +837,200 @@
             if (parkId) {
                 const parkName = document.getElementById('park-name').textContent;
                 parkDetailsModal.open(parseInt(parkId), parkName, currentPeriod);
+            }
+        });
+
+        // ============ Ride Comparison Section ============
+        let rideComparisonChartInstance = null;
+        let currentChartType = 'downtime';
+        let rideComparisonData = null;
+
+        async function loadRideComparison(chartType) {
+            const section = document.getElementById('ride-comparison-section');
+            const content = document.getElementById('ride-comparison-content');
+            const heatmapContainer = document.getElementById('ride-comparison-heatmap-container');
+
+            // Show section
+            section.style.display = 'block';
+
+            // Show loading
+            content.innerHTML = '<p style="text-align: center; color: #6c757d;">Loading ride comparison data...</p>';
+            content.style.display = 'block';
+            heatmapContainer.style.display = 'none';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/parks/${parkId}/rides/charts?period=${currentPeriod}&type=${chartType}`);
+                const data = await response.json();
+
+                if (!data.success) {
+                    content.innerHTML = '<p style="text-align: center; color: #dc3545;">Failed to load ride comparison data</p>';
+                    return;
+                }
+
+                rideComparisonData = data;
+                currentChartType = chartType;
+
+                // Hide loading, show heatmap
+                content.style.display = 'none';
+                heatmapContainer.style.display = 'block';
+
+                renderRideComparisonHeatmap(data);
+            } catch (error) {
+                console.error('Error loading ride comparison:', error);
+                content.innerHTML = '<p style="text-align: center; color: #dc3545;">Failed to load ride comparison data</p>';
+            }
+        }
+
+        function renderRideComparisonHeatmap(data) {
+            const heatmapEl = document.getElementById('ride-comparison-heatmap');
+
+            // Check if we have data
+            if (!data.datasets || data.datasets.length === 0) {
+                document.getElementById('ride-comparison-content').innerHTML = '<p style="text-align: center; color: #6c757d;">No ride comparison data available for this period</p>';
+                document.getElementById('ride-comparison-content').style.display = 'block';
+                document.getElementById('ride-comparison-heatmap-container').style.display = 'none';
+                return;
+            }
+
+            const isDowntime = currentChartType === 'downtime';
+            const labels = data.labels; // Time labels (e.g., "6:00", "7:00", ...)
+            const datasets = data.datasets; // Array of {label, data, tier}
+
+            // Find max value for color scaling
+            const allValues = datasets.flatMap(d => d.data).filter(v => v !== null && v !== undefined).map(v => parseFloat(v) || 0);
+            const maxValue = Math.max(...allValues, isDowntime ? 0.5 : 30);
+
+            // Color scale function - white to yellow to orange to red
+            function getColor(value, max) {
+                if (value === null || value === undefined || value === 0) {
+                    return '#ffffff'; // White for zero/no data
+                }
+                const ratio = Math.min(value / max, 1);
+
+                if (ratio < 0.25) {
+                    // White to light yellow
+                    const t = ratio / 0.25;
+                    return `rgb(255, 255, ${Math.round(255 - t * 50)})`;
+                } else if (ratio < 0.5) {
+                    // Light yellow to yellow
+                    const t = (ratio - 0.25) / 0.25;
+                    return `rgb(255, ${Math.round(255 - t * 50)}, ${Math.round(205 - t * 105)})`;
+                } else if (ratio < 0.75) {
+                    // Yellow to orange
+                    const t = (ratio - 0.5) / 0.25;
+                    return `rgb(255, ${Math.round(205 - t * 80)}, ${Math.round(100 - t * 50)})`;
+                } else {
+                    // Orange to red
+                    const t = (ratio - 0.75) / 0.25;
+                    return `rgb(${Math.round(255 - t * 35)}, ${Math.round(125 - t * 80)}, ${Math.round(50 - t * 30)})`;
+                }
+            }
+
+            // Calculate total for each ride
+            function calculateTotal(dataArray) {
+                return dataArray.reduce((sum, v) => sum + (parseFloat(v) || 0), 0);
+            }
+
+            // Sort datasets by total (worst first)
+            const sortedDatasets = [...datasets].sort((a, b) => {
+                const totalA = calculateTotal(a.data);
+                const totalB = calculateTotal(b.data);
+                return totalB - totalA;
+            });
+
+            // Build grid HTML
+            const numCols = labels.length + 2; // ride name + time columns + total
+            // Calculate column width: use wider columns for daily data (fewer columns)
+            // Target total grid width of ~900px for the data columns
+            // Hourly (18 cols) = 40px each, Daily (7 cols) = ~100px each
+            const dataColWidth = labels.length <= 7 ? 100 : (labels.length <= 14 ? 60 : 40);
+            heatmapEl.style.gridTemplateColumns = `180px repeat(${labels.length}, ${dataColWidth}px) 60px`;
+
+            let html = '';
+
+            // Header row
+            html += '<div class="heatmap-header-cell ride-name">Ride</div>';
+            labels.forEach(label => {
+                html += `<div class="heatmap-header-cell">${label}</div>`;
+            });
+            html += '<div class="heatmap-header-cell total-col">Total</div>';
+
+            // Data rows
+            sortedDatasets.forEach(dataset => {
+                const tier = dataset.tier || 2;
+                const total = calculateTotal(dataset.data);
+                const maxTotal = isDowntime ? labels.length : labels.length * 120; // Max possible
+
+                // Ride name cell with tier badge
+                html += `<div class="heatmap-ride-name" title="${dataset.label}">
+                    <span class="tier-badge tier-${tier}">T${tier}</span>
+                    <span style="overflow: hidden; text-overflow: ellipsis;">${dataset.label}</span>
+                </div>`;
+
+                // Time cells
+                dataset.data.forEach((value, idx) => {
+                    const numValue = parseFloat(value) || 0;
+                    const color = getColor(numValue, maxValue);
+                    const textColor = numValue > maxValue * 0.5 ? '#fff' : '#212529';
+                    const displayValue = isDowntime
+                        ? (numValue > 0 ? numValue.toFixed(1) : '')
+                        : (numValue > 0 ? Math.round(numValue) : '');
+                    const tooltipText = isDowntime
+                        ? `${dataset.label} @ ${labels[idx]}: ${numValue.toFixed(2)}h down`
+                        : `${dataset.label} @ ${labels[idx]}: ${Math.round(numValue)} min wait`;
+
+                    html += `<div class="heatmap-cell" style="background: ${color}; color: ${textColor};">
+                        ${displayValue}
+                        <div class="heatmap-tooltip">${tooltipText}</div>
+                    </div>`;
+                });
+
+                // Total cell
+                const totalColor = getColor(total, maxValue * labels.length * 0.3);
+                const totalTextColor = total > maxValue * labels.length * 0.15 ? '#fff' : '#212529';
+                const totalDisplay = isDowntime ? total.toFixed(1) + 'h' : Math.round(total) + 'm';
+
+                html += `<div class="heatmap-cell total-cell" style="background: ${totalColor}; color: ${totalTextColor};">
+                    ${totalDisplay}
+                </div>`;
+            });
+
+            // Add legend
+            html += `
+                <div style="grid-column: 1 / -1; padding: 12px 0 4px 0;">
+                    <div class="heatmap-legend">
+                        <span>${isDowntime ? 'Downtime:' : 'Wait Time:'}</span>
+                        <span>None</span>
+                        <div class="heatmap-legend-scale">
+                            <div style="background: #ffffff;"></div>
+                            <div style="background: #ffffc8;"></div>
+                            <div style="background: #ffeb64;"></div>
+                            <div style="background: #ffcd32;"></div>
+                            <div style="background: #ff7d14;"></div>
+                            <div style="background: #dc3514;"></div>
+                        </div>
+                        <span>${isDowntime ? 'High' : 'Long'}</span>
+                    </div>
+                </div>
+            `;
+
+            heatmapEl.innerHTML = html;
+        }
+
+        // Toggle button handlers
+        document.getElementById('toggle-downtime').addEventListener('click', () => {
+            if (currentChartType !== 'downtime') {
+                document.getElementById('toggle-downtime').classList.add('active');
+                document.getElementById('toggle-waittimes').classList.remove('active');
+                loadRideComparison('downtime');
+            }
+        });
+
+        document.getElementById('toggle-waittimes').addEventListener('click', () => {
+            if (currentChartType !== 'wait_times') {
+                document.getElementById('toggle-waittimes').classList.add('active');
+                document.getElementById('toggle-downtime').classList.remove('active');
+                loadRideComparison('wait_times');
             }
         });
 

@@ -10,9 +10,13 @@ class ParkDetailsModal {
             isOpen: false,
             loading: false,
             error: null,
-            parkDetails: null
+            parkDetails: null,
+            rideComparisonData: null,
+            rideComparisonLoading: false,
+            rideComparisonChartType: 'downtime'  // 'downtime' or 'wait_times'
         };
         this.chartInstance = null;  // Store Chart.js instance for cleanup
+        this.rideComparisonChartInstance = null;  // Store ride comparison chart
     }
 
     /**
@@ -59,12 +63,18 @@ class ParkDetailsModal {
      * Close modal
      */
     close() {
-        // Cleanup chart instance
+        // Cleanup chart instances
         if (this.chartInstance) {
             this.chartInstance.destroy();
             this.chartInstance = null;
         }
+        if (this.rideComparisonChartInstance) {
+            this.rideComparisonChartInstance.destroy();
+            this.rideComparisonChartInstance = null;
+        }
         this.state.isOpen = false;
+        this.state.rideComparisonData = null;
+        this.state.rideComparisonChartType = 'downtime';
         this.render();
     }
 
@@ -135,9 +145,13 @@ class ParkDetailsModal {
         // Only show current status for LIVE period
         const showCurrentStatus = this.state.period === 'live';
 
+        // Show ride comparison charts for non-live periods
+        const showRideComparison = this.state.period !== 'live';
+
         return `
             <div class="park-details-content">
                 ${this.renderShameBreakdown(shame_breakdown, chart_data, excluded_rides_count)}
+                ${showRideComparison ? this.renderRideComparisonSection() : ''}
                 ${showCurrentStatus ? this.renderCurrentStatus(current_status) : ''}
                 ${this.renderTierDistribution(tier_distribution)}
                 ${this.renderParkInfo(park)}
@@ -821,6 +835,264 @@ class ParkDetailsModal {
         });
     }
 
+    // =========================================================================
+    // Ride Comparison Charts
+    // =========================================================================
+
+    /**
+     * Render the ride comparison section with toggle
+     */
+    renderRideComparisonSection() {
+        const chartType = this.state.rideComparisonChartType;
+        const isLoading = this.state.rideComparisonLoading;
+        const data = this.state.rideComparisonData;
+
+        return `
+            <div class="ride-comparison-section">
+                <div class="ride-comparison-header">
+                    <h3>Ride Comparison</h3>
+                    <div class="chart-type-toggle">
+                        <button class="toggle-btn ${chartType === 'downtime' ? 'active' : ''}" data-chart-type="downtime">
+                            Downtime
+                        </button>
+                        <button class="toggle-btn ${chartType === 'wait_times' ? 'active' : ''}" data-chart-type="wait_times">
+                            Wait Times
+                        </button>
+                    </div>
+                </div>
+                <div class="ride-comparison-chart-container">
+                    ${isLoading ? `
+                        <div class="chart-loading">
+                            <div class="spinner"></div>
+                            <span>Loading chart data...</span>
+                        </div>
+                    ` : `
+                        <canvas id="ride-comparison-chart"></canvas>
+                    `}
+                </div>
+                ${data && data.datasets && data.datasets.length > 0 ? `
+                    <p class="chart-description">
+                        ${chartType === 'downtime'
+                            ? 'Hours of downtime per ride over time. Tier 1 rides are shown in brighter colors.'
+                            : 'Average wait time in minutes per ride. Tier 1 rides are shown in brighter colors.'
+                        }
+                        ${data.granularity === 'hourly' ? ' (Hourly data)' : ' (Daily data)'}
+                    </p>
+                ` : ''}
+                ${data && data.datasets && data.datasets.length === 0 ? `
+                    <div class="no-data-message">
+                        <p>No ${chartType === 'downtime' ? 'downtime' : 'wait time'} data available for this period.</p>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    /**
+     * Fetch ride comparison chart data from API
+     * @param {string} chartType - 'downtime' or 'wait_times'
+     */
+    async fetchRideComparisonData(chartType) {
+        const parkId = this.state.parkId;
+        const period = this.state.period;
+
+        // Don't fetch for live period
+        if (period === 'live') return;
+
+        this.state.rideComparisonLoading = true;
+        this.state.rideComparisonChartType = chartType;
+
+        // Re-render to show loading state
+        this.updateRideComparisonSection();
+
+        try {
+            const response = await this.apiClient.get(`/parks/${parkId}/rides/charts`, {
+                period: period,
+                type: chartType
+            });
+
+            this.state.rideComparisonData = response;
+            this.state.rideComparisonLoading = false;
+
+            // Re-render the section and initialize chart
+            this.updateRideComparisonSection();
+            setTimeout(() => {
+                this.initializeRideComparisonChart();
+            }, 50);
+        } catch (error) {
+            console.error('Failed to fetch ride comparison data:', error);
+            this.state.rideComparisonLoading = false;
+            this.state.rideComparisonData = null;
+            this.updateRideComparisonSection();
+        }
+    }
+
+    /**
+     * Update just the ride comparison section without re-rendering entire modal
+     */
+    updateRideComparisonSection() {
+        const sectionContainer = document.querySelector('.ride-comparison-section');
+        if (sectionContainer) {
+            sectionContainer.outerHTML = this.renderRideComparisonSection();
+            this.attachRideComparisonListeners();
+        }
+    }
+
+    /**
+     * Attach event listeners for ride comparison toggle buttons
+     */
+    attachRideComparisonListeners() {
+        const toggleBtns = document.querySelectorAll('.chart-type-toggle .toggle-btn');
+        toggleBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const newType = e.target.dataset.chartType;
+                if (newType !== this.state.rideComparisonChartType) {
+                    this.fetchRideComparisonData(newType);
+                }
+            });
+        });
+    }
+
+    /**
+     * Initialize Chart.js instance for ride comparison chart
+     */
+    initializeRideComparisonChart() {
+        const data = this.state.rideComparisonData;
+        if (!data || !data.datasets || data.datasets.length === 0) return;
+
+        const canvas = document.getElementById('ride-comparison-chart');
+        if (!canvas) return;
+
+        // Destroy existing chart
+        if (this.rideComparisonChartInstance) {
+            this.rideComparisonChartInstance.destroy();
+        }
+
+        const ctx = canvas.getContext('2d');
+        const chartType = data.chart_type;
+        const isDowntime = chartType === 'downtime';
+
+        // Generate colors based on tier (Tier 1 = brighter/bolder)
+        const tierColors = {
+            1: [ // Tier 1 - Bold, saturated colors
+                'rgb(220, 53, 69)',   // Red
+                'rgb(0, 123, 255)',   // Blue
+                'rgb(40, 167, 69)',   // Green
+                'rgb(255, 193, 7)',   // Yellow
+                'rgb(111, 66, 193)',  // Purple
+            ],
+            2: [ // Tier 2 - Medium saturation
+                'rgb(253, 126, 20)',  // Orange
+                'rgb(23, 162, 184)',  // Cyan
+                'rgb(102, 16, 242)',  // Indigo
+                'rgb(232, 62, 140)',  // Pink
+                'rgb(52, 58, 64)',    // Dark gray
+            ],
+            3: [ // Tier 3 - Muted colors
+                'rgba(108, 117, 125, 0.8)',  // Gray
+                'rgba(134, 142, 150, 0.8)',  // Light gray
+                'rgba(173, 181, 189, 0.8)',  // Lighter gray
+                'rgba(206, 212, 218, 0.8)',  // Very light gray
+                'rgba(222, 226, 230, 0.8)',  // Almost white
+            ]
+        };
+
+        // Track color index per tier
+        const colorIndex = { 1: 0, 2: 0, 3: 0 };
+
+        // Build datasets with colors based on tier
+        const datasets = data.datasets.map(dataset => {
+            const tier = dataset.tier || 2;
+            const tierColorArray = tierColors[tier] || tierColors[2];
+            const colorIdx = colorIndex[tier] % tierColorArray.length;
+            colorIndex[tier]++;
+
+            const color = tierColorArray[colorIdx];
+
+            // Convert string values from API to numbers
+            const numericData = dataset.data.map(v => v === null ? null : parseFloat(v) || 0);
+
+            return {
+                label: dataset.label,
+                data: numericData,
+                borderColor: color,
+                backgroundColor: color.replace('rgb', 'rgba').replace(')', ', 0.1)'),
+                borderWidth: tier === 1 ? 3 : tier === 2 ? 2 : 1,
+                pointRadius: tier === 1 ? 4 : tier === 2 ? 3 : 2,
+                pointHoverRadius: 6,
+                tension: 0.3,
+                fill: false,
+                spanGaps: true
+            };
+        });
+
+        // Find max value for scale
+        const allValues = datasets.flatMap(d => d.data).filter(v => v !== null);
+        const maxValue = Math.max(...allValues, isDowntime ? 1 : 30);
+
+        this.rideComparisonChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: data.labels,
+                datasets: datasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'bottom',
+                        labels: {
+                            boxWidth: 12,
+                            padding: 8,
+                            font: { size: 10 },
+                            usePointStyle: true
+                        }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.raw;
+                                if (value === null) return `${context.dataset.label}: No data`;
+                                if (isDowntime) {
+                                    return `${context.dataset.label}: ${value.toFixed(2)}h`;
+                                }
+                                return `${context.dataset.label}: ${Math.round(value)} min`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: {
+                            maxRotation: 45,
+                            autoSkip: true,
+                            maxTicksLimit: 12
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        max: Math.ceil(maxValue * 1.1),
+                        grid: { color: 'rgba(0, 0, 0, 0.1)' },
+                        title: {
+                            display: true,
+                            text: isDowntime ? 'Hours Down' : 'Wait Time (min)'
+                        }
+                    }
+                },
+                interaction: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
+                }
+            }
+        });
+    }
+
     /**
      * Format downtime hours to readable string
      */
@@ -1229,6 +1501,16 @@ class ParkDetailsModal {
             setTimeout(() => {
                 this.initializeShameChart(this.state.parkDetails.chart_data);
             }, 50);
+        }
+
+        // Auto-fetch ride comparison chart for non-live periods
+        if (this.state.period !== 'live' && this.state.parkDetails) {
+            // Attach toggle listeners and fetch initial data
+            this.attachRideComparisonListeners();
+            // Fetch with slight delay to let UI render first
+            setTimeout(() => {
+                this.fetchRideComparisonData(this.state.rideComparisonChartType);
+            }, 100);
         }
     }
 }

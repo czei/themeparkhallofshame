@@ -462,6 +462,93 @@ class ParkShameHistoryQuery:
         })
         return [dict(row._mapping) for row in result]
 
+    def get_single_park_daily(
+        self,
+        park_id: int,
+        start_date: date,
+        end_date: date,
+    ) -> Dict[str, Any]:
+        """
+        Get daily shame score data for a single park over a date range.
+
+        Used by park details modal for last_week/last_month periods to show
+        a daily bar chart of shame scores.
+
+        Args:
+            park_id: The park ID to get data for
+            start_date: Start date of the period
+            end_date: End date of the period
+
+        Returns:
+            Chart.js compatible dict with daily labels and single dataset
+        """
+        # Calculate shame score per day from ride_daily_stats
+        # shame_score = weighted_downtime_hours / park_weight
+        # weighted_downtime = SUM(downtime_minutes * tier_weight) / 60
+        query = text("""
+            WITH park_weights AS (
+                SELECT
+                    r.park_id,
+                    SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
+                FROM rides r
+                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                WHERE r.park_id = :park_id
+                    AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'
+                GROUP BY r.park_id
+            ),
+            daily_weighted_downtime AS (
+                SELECT
+                    rds.stat_date,
+                    ROUND(SUM(rds.downtime_minutes / 60.0 * COALESCE(rc.tier_weight, 2)), 2) AS weighted_downtime_hours,
+                    ROUND(SUM(rds.downtime_minutes / 60.0), 2) AS total_downtime_hours,
+                    COUNT(DISTINCT CASE WHEN rds.downtime_minutes > 0 THEN rds.ride_id END) AS rides_with_downtime
+                FROM ride_daily_stats rds
+                JOIN rides r ON rds.ride_id = r.ride_id
+                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                WHERE r.park_id = :park_id
+                    AND r.is_active = TRUE
+                    AND r.category = 'ATTRACTION'
+                    AND rds.stat_date >= :start_date
+                    AND rds.stat_date <= :end_date
+                GROUP BY rds.stat_date
+            )
+            SELECT
+                dwd.stat_date,
+                ROUND(dwd.weighted_downtime_hours / pw.total_park_weight, 1) AS shame_score,
+                dwd.total_downtime_hours AS downtime_hours,
+                dwd.rides_with_downtime AS rides_down
+            FROM daily_weighted_downtime dwd
+            CROSS JOIN park_weights pw
+            ORDER BY dwd.stat_date
+        """)
+
+        result = self.conn.execute(query, {
+            "park_id": park_id,
+            "start_date": start_date,
+            "end_date": end_date
+        })
+        rows = [dict(row._mapping) for row in result]
+
+        # Build labels and data arrays
+        labels = [row['stat_date'].strftime("%b %d") for row in rows]
+        data = [float(row['shame_score']) if row['shame_score'] is not None else 0.0 for row in rows]
+        downtime_data = [float(row['downtime_hours']) if row['downtime_hours'] is not None else 0.0 for row in rows]
+        rides_down_data = [int(row['rides_down']) if row['rides_down'] is not None else 0 for row in rows]
+
+        # Calculate average FROM the chart data points
+        non_null_data = [v for v in data if v is not None and v > 0]
+        avg_score = round(sum(non_null_data) / len(non_null_data), 1) if non_null_data else 0.0
+
+        return {
+            "labels": labels,
+            "data": data,
+            "downtime_hours": downtime_data,
+            "rides_down": rides_down_data,
+            "average": avg_score,
+            "granularity": "daily"
+        }
+
     def _get_top_parks(
         self,
         start_date: date,

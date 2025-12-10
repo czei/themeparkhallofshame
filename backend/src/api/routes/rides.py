@@ -579,15 +579,15 @@ def _get_ride_timeseries(conn, ride_id, start_date, end_date, is_today, period):
     """
     Get time-series data for the ride (for wait time chart with status overlay).
 
-    For TODAY/YESTERDAY: Returns hourly data with hour_start_utc
-    For LAST_WEEK/LAST_MONTH: Returns daily aggregated data with date field
+    For TODAY/YESTERDAY/LAST_WEEK: Returns hourly data with hour_start_utc
+    For LAST_MONTH: Returns daily aggregated data with date field
 
     Returns:
     - Hourly data: hour_start_utc, avg_wait_time_minutes, status, uptime_percentage
     - Daily data: date, avg_wait_time_minutes, status, uptime_percentage
     """
-    # Use daily aggregation for weekly and monthly views
-    if period in ['last_week', 'last_month']:
+    # Use daily aggregation only for monthly view (too many hourly points for a month)
+    if period in ['last_month']:
         # Daily aggregation query
         query = text("""
             SELECT
@@ -783,8 +783,8 @@ def _get_ride_hourly_breakdown(conn, ride_id, start_date, end_date, is_today, pe
     """
     Get breakdown data for the ride (for breakdown table).
 
-    For TODAY/YESTERDAY: Returns hourly breakdown
-    For LAST_WEEK/LAST_MONTH: Returns daily breakdown (matches chart granularity)
+    For TODAY/YESTERDAY/LAST_WEEK: Returns hourly breakdown
+    For LAST_MONTH: Returns daily breakdown (matches chart granularity)
 
     Returns detailed stats:
     - hour_start_utc or date: Time period
@@ -794,8 +794,8 @@ def _get_ride_hourly_breakdown(conn, ride_id, start_date, end_date, is_today, pe
     - downtime_hours: Hours of downtime
     - uptime_percentage: Uptime percentage
     """
-    # Use daily aggregation for weekly and monthly views
-    if period in ['last_week', 'last_month']:
+    # Use daily aggregation only for monthly view (too many hourly rows for a month)
+    if period in ['last_month']:
         query = text("""
             SELECT
                 DATE(CONVERT_TZ(hour_start_utc, 'UTC', 'America/Los_Angeles')) as date,

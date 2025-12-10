@@ -23,6 +23,8 @@ class Charts {
         this.container = document.getElementById(containerId);
         this.parksChart = null;  // Chart.js instance for parks shame score
         this.waitTimesChart = null;  // Chart.js instance for park wait times
+        this.ridesDowntimeChart = null;  // Chart.js instance for ride downtime
+        this.ridesWaitTimesChart = null;  // Chart.js instance for ride wait times
         this.state = {
             period: 'last_week',
             filter: initialFilter,
@@ -30,6 +32,8 @@ class Charts {
             error: null,
             parksChartData: null,
             waitTimesChartData: null,
+            ridesDowntimeChartData: null,
+            ridesWaitTimesChartData: null,
             chartsMock: false,
             chartsGranularity: 'daily'  // 'hourly' for today, 'daily' for 7/30 days
         };
@@ -44,23 +48,31 @@ class Charts {
     }
 
     /**
-     * Fetch chart data for parks shame score and park wait times
+     * Fetch chart data for all four charts
      */
     async fetchChartData() {
         this.setState({ loading: true, error: null });
 
         try {
             // Pass the effective period - charts don't support 'live', use 'today' instead
-            const params = {
+            const parksParams = {
                 period: this.getEffectivePeriod(),
                 filter: this.state.filter,
                 limit: 4  // Top 4 performers for cleaner charts
             };
 
-            // Fetch parks shame scores and park wait times in parallel
-            const [parksResponse, waitTimesResponse] = await Promise.all([
-                this.apiClient.get('/trends/chart-data', { ...params, type: 'parks' }),
-                this.apiClient.get('/trends/chart-data', { ...params, type: 'waittimes' })
+            const ridesParams = {
+                period: this.getEffectivePeriod(),
+                filter: this.state.filter,
+                limit: 5  // Worst 5 rides
+            };
+
+            // Fetch all four chart data types in parallel
+            const [parksResponse, waitTimesResponse, ridesDowntimeResponse, ridesWaitTimesResponse] = await Promise.all([
+                this.apiClient.get('/trends/chart-data', { ...parksParams, type: 'parks' }),
+                this.apiClient.get('/trends/chart-data', { ...parksParams, type: 'waittimes' }),
+                this.apiClient.get('/trends/chart-data', { ...ridesParams, type: 'rides' }),
+                this.apiClient.get('/trends/chart-data', { ...ridesParams, type: 'ridewaittimes' })
             ]);
 
             const newState = { loading: false };
@@ -71,6 +83,12 @@ class Charts {
             }
             if (waitTimesResponse.success) {
                 newState.waitTimesChartData = waitTimesResponse.chart_data;
+            }
+            if (ridesDowntimeResponse.success) {
+                newState.ridesDowntimeChartData = ridesDowntimeResponse.chart_data;
+            }
+            if (ridesWaitTimesResponse.success) {
+                newState.ridesWaitTimesChartData = ridesWaitTimesResponse.chart_data;
             }
 
             this.setState(newState);
@@ -164,6 +182,18 @@ class Charts {
                         <canvas id="parks-waittimes-chart"></canvas>
                     </div>
                 </div>
+                <div class="chart-container">
+                    <h3>Worst 5 Rides - Downtime (${this.getPeriodLabel()})</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="rides-downtime-chart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <h3>Worst 5 Rides - Wait Times (${this.getPeriodLabel()})</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="rides-waittimes-chart"></canvas>
+                    </div>
+                </div>
             </div>
         `;
     }
@@ -194,6 +224,8 @@ class Charts {
 
         this.renderParksChart();
         this.renderWaitTimesChart();
+        this.renderRidesDowntimeChart();
+        this.renderRidesWaitTimesChart();
     }
 
     /**
@@ -268,6 +300,181 @@ class Charts {
             },
             options: this.getChartOptions('Avg Wait (min)')
         });
+    }
+
+    /**
+     * Render rides downtime chart (worst 5 rides)
+     */
+    renderRidesDowntimeChart() {
+        const canvas = document.getElementById('rides-downtime-chart');
+        if (!canvas || !this.state.ridesDowntimeChartData) return;
+
+        // Destroy existing chart if any
+        if (this.ridesDowntimeChart) {
+            this.ridesDowntimeChart.destroy();
+        }
+
+        const ctx = canvas.getContext('2d');
+        const chartData = this.state.ridesDowntimeChartData;
+
+        // Add colors to datasets - include park name in tooltip
+        const datasets = chartData.datasets.map((dataset, index) => ({
+            ...dataset,
+            borderColor: MARY_BLAIR_COLORS[index % MARY_BLAIR_COLORS.length],
+            backgroundColor: MARY_BLAIR_COLORS[index % MARY_BLAIR_COLORS.length] + '20',
+            tension: 0.3,
+            borderWidth: 3,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            fill: false
+        }));
+
+        this.ridesDowntimeChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: chartData.labels,
+                datasets: datasets
+            },
+            options: this.getRideChartOptions('Downtime (hrs)')
+        });
+    }
+
+    /**
+     * Render rides wait times chart (worst 5 rides)
+     */
+    renderRidesWaitTimesChart() {
+        const canvas = document.getElementById('rides-waittimes-chart');
+        if (!canvas || !this.state.ridesWaitTimesChartData) return;
+
+        // Destroy existing chart if any
+        if (this.ridesWaitTimesChart) {
+            this.ridesWaitTimesChart.destroy();
+        }
+
+        const ctx = canvas.getContext('2d');
+        const chartData = this.state.ridesWaitTimesChartData;
+
+        // Add colors to datasets
+        const datasets = chartData.datasets.map((dataset, index) => ({
+            ...dataset,
+            borderColor: MARY_BLAIR_COLORS[index % MARY_BLAIR_COLORS.length],
+            backgroundColor: MARY_BLAIR_COLORS[index % MARY_BLAIR_COLORS.length] + '20',
+            tension: 0.3,
+            borderWidth: 3,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            fill: false
+        }));
+
+        this.ridesWaitTimesChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: chartData.labels,
+                datasets: datasets
+            },
+            options: this.getRideChartOptions('Avg Wait (min)')
+        });
+    }
+
+    /**
+     * Get chart options for ride charts (includes park name in tooltip)
+     */
+    getRideChartOptions(yAxisLabel) {
+        return {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        font: {
+                            family: 'Inter',
+                            size: 11
+                        },
+                        usePointStyle: true,
+                        padding: 16,
+                        boxWidth: 8
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(42, 42, 42, 0.95)',
+                    titleFont: {
+                        family: 'Space Grotesk',
+                        size: 13
+                    },
+                    bodyFont: {
+                        family: 'Inter',
+                        size: 12
+                    },
+                    padding: 12,
+                    cornerRadius: 8,
+                    displayColors: true,
+                    callbacks: {
+                        label: function(context) {
+                            const label = context.dataset.label || '';
+                            const park = context.dataset.park || '';
+                            const value = context.parsed.y;
+                            const parkSuffix = park ? ` (${park})` : '';
+                            if (yAxisLabel === 'Avg Wait (min)') {
+                                return `${label}${parkSuffix}: ${value} min`;
+                            }
+                            if (yAxisLabel === 'Downtime (hrs)') {
+                                return `${label}${parkSuffix}: ${value} hrs`;
+                            }
+                            return `${label}${parkSuffix}: ${value}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: {
+                        color: 'rgba(0, 0, 0, 0.05)'
+                    },
+                    ticks: {
+                        font: {
+                            family: 'Inter',
+                            size: 11
+                        },
+                        callback: function(value) {
+                            if (yAxisLabel === 'Avg Wait (min)') {
+                                return value + ' min';
+                            }
+                            if (yAxisLabel === 'Downtime (hrs)') {
+                                return value + ' hrs';
+                            }
+                            return value;
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: yAxisLabel,
+                        font: {
+                            family: 'Space Grotesk',
+                            size: 12,
+                            weight: 600
+                        },
+                        color: '#007B8A'
+                    }
+                },
+                x: {
+                    grid: {
+                        display: false
+                    },
+                    ticks: {
+                        font: {
+                            family: 'Inter',
+                            size: 11
+                        }
+                    }
+                }
+            }
+        };
     }
 
     /**
@@ -394,6 +601,14 @@ class Charts {
         if (this.waitTimesChart) {
             this.waitTimesChart.destroy();
             this.waitTimesChart = null;
+        }
+        if (this.ridesDowntimeChart) {
+            this.ridesDowntimeChart.destroy();
+            this.ridesDowntimeChart = null;
+        }
+        if (this.ridesWaitTimesChart) {
+            this.ridesWaitTimesChart.destroy();
+            this.ridesWaitTimesChart = null;
         }
     }
 }

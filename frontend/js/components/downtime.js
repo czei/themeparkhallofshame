@@ -632,7 +632,7 @@ class Downtime {
         const lastUpdateEl = document.getElementById('last-update-time');
         if (lastUpdateEl) {
             const now = new Date();
-            lastUpdateEl.textContent = now.toLocaleTimeString();
+            lastUpdateEl.textContent = now.toLocaleTimeString() + ' PST';
         }
     }
 

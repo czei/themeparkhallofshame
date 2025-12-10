@@ -2488,6 +2488,106 @@ td {
     text-align: center;
 }
 
+/* Ride Comparison Chart Section */
+.ride-comparison-section {
+    margin: 1.5rem 0;
+    background: white;
+    border: 3px solid var(--charcoal);
+    padding: 1rem;
+}
+
+.ride-comparison-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.ride-comparison-header h3 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--charcoal);
+    margin: 0;
+}
+
+.chart-type-toggle {
+    display: flex;
+    gap: 0;
+    border: 2px solid var(--charcoal);
+}
+
+.chart-type-toggle .toggle-btn {
+    padding: 0.4rem 1rem;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 600;
+    background: white;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: var(--charcoal);
+}
+
+.chart-type-toggle .toggle-btn:first-child {
+    border-right: 2px solid var(--charcoal);
+}
+
+.chart-type-toggle .toggle-btn:hover {
+    background: #f0f0f0;
+}
+
+.chart-type-toggle .toggle-btn.active {
+    background: var(--deep-teal);
+    color: white;
+}
+
+.ride-comparison-chart-container {
+    position: relative;
+    height: 300px;
+    width: 100%;
+    min-height: 200px;
+}
+
+.ride-comparison-chart-container .chart-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 0.75rem;
+    color: #666;
+}
+
+.ride-comparison-chart-container .spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid var(--deep-teal);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.ride-comparison-section .no-data-message {
+    text-align: center;
+    padding: 2rem;
+    color: #666;
+    font-style: italic;
+}
+
+@media (max-width: 480px) {
+    .ride-comparison-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .ride-comparison-chart-container {
+        height: 250px;
+    }
+}
+
 /* Park Details - Current Status Section */
 .current-status-section {
     margin-bottom: 1.5rem;

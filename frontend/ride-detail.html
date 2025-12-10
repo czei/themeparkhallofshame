@@ -549,22 +549,36 @@
                 chartInstance.destroy();
             }
 
+            // Check if hourly data spans multiple days (e.g., last_week period)
+            const isMultiDayHourlyData = timeseries.length > 0 &&
+                'hour_start_utc' in timeseries[0] &&
+                timeseries.length > 30; // More than ~1 day of data
+
             // Prepare data - handle both hourly and daily formats
-            const labels = timeseries.map(point => {
+            const labels = timeseries.map((point, idx) => {
                 if ('date' in point) {
                     // Daily data: format as "Dec 06"
                     const date = new Date(point.date + 'T00:00:00');
                     return date.toLocaleDateString('en-US', { month: 'short', day: '2-digit' });
+                } else if (isMultiDayHourlyData) {
+                    // Multi-day hourly data: format as "Dec 06 2PM"
+                    const date = new Date(point.hour_start_utc);
+                    const month = date.toLocaleDateString('en-US', { month: 'short' });
+                    const day = date.getDate();
+                    const hour = date.toLocaleTimeString('en-US', { hour: 'numeric' });
+                    return `${month} ${day} ${hour}`;
                 } else {
-                    // Hourly data: format as "02:00 PM"
+                    // Single day hourly data: format as "02:00 PM"
                     const date = new Date(point.hour_start_utc);
                     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
                 }
             });
 
-            // Create single wait-time dataset (only OPERATING periods have values)
+            // Create single wait-time dataset
+            // Show wait time bars whenever there's wait time data, regardless of status
+            // The status background bands will indicate when the ride was down/closed
             const waitTimeData = timeseries.map(point =>
-                point.status === 'OPERATING' ? point.avg_wait_time_minutes : null
+                point.avg_wait_time_minutes
             );
 
             // Compute status intervals for background bands
@@ -627,12 +641,20 @@
                                 label: function(context) {
                                     const dataIndex = context.dataIndex;
                                     const point = timeseries[dataIndex];
+                                    const lines = [];
 
-                                    if (point.status === 'OPERATING') {
-                                        return `Wait: ${point.avg_wait_time_minutes?.toFixed(0) || 0} min`;
-                                    } else {
-                                        return `Status: ${point.status}`;
+                                    // Show wait time if available
+                                    if (point.avg_wait_time_minutes != null) {
+                                        lines.push(`Wait: ${point.avg_wait_time_minutes.toFixed(0)} min`);
                                     }
+
+                                    // Show status and uptime percentage
+                                    lines.push(`Status: ${point.status}`);
+                                    if (point.uptime_percentage != null) {
+                                        lines.push(`Uptime: ${point.uptime_percentage.toFixed(1)}%`);
+                                    }
+
+                                    return lines;
                                 }
                             }
                         },
@@ -652,6 +674,14 @@
                             title: {
                                 display: true,
                                 text: 'Time'
+                            },
+                            ticks: {
+                                // Auto-skip labels for better readability with many data points
+                                autoSkip: true,
+                                maxRotation: 45,
+                                minRotation: 0,
+                                // Show fewer labels when we have many data points
+                                maxTicksLimit: isMultiDayHourlyData ? 24 : 48
                             }
                         }
                     }

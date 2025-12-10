@@ -35,6 +35,7 @@ from database.queries.charts import (
     ParkShameHistoryQuery,
     ParkWaitTimeHistoryQuery,
     RideDowntimeHistoryQuery,
+    RideWaitTimeHistoryQuery,
 )
 
 from utils.logger import logger
@@ -236,7 +237,7 @@ def get_chart_data():
         # Validate parameters
         # Note: 'live' is mapped to 'today' since charts need time series data
         valid_periods = ['live', 'today', 'yesterday', 'last_week', 'last_month']
-        valid_types = ['parks', 'rides', 'waittimes']
+        valid_types = ['parks', 'rides', 'waittimes', 'ridewaittimes']
         valid_filters = ['disney-universal', 'all-parks']
 
         if period not in valid_periods:
@@ -287,10 +288,19 @@ def get_chart_data():
                         filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
-                else:
-                    # Rides don't have LIVE granularity yet, fall back to hourly
+                elif data_type == 'rides':
+                    # Rides downtime don't have LIVE granularity yet, fall back to hourly
                     granularity = 'hourly'
                     query = RideDowntimeHistoryQuery(conn)
+                    chart_data = query.get_hourly(
+                        target_date=today,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                else:  # ridewaittimes
+                    # Ride wait times don't have LIVE granularity yet, fall back to hourly
+                    granularity = 'hourly'
+                    query = RideWaitTimeHistoryQuery(conn)
                     chart_data = query.get_hourly(
                         target_date=today,
                         filter_disney_universal=filter_disney_universal,
@@ -321,9 +331,17 @@ def get_chart_data():
                         filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
-                else:
+                elif data_type == 'rides':
                     # See: database/queries/charts/ride_downtime_history.py
                     query = RideDowntimeHistoryQuery(conn)
+                    chart_data = query.get_hourly(
+                        target_date=today,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                else:  # ridewaittimes
+                    # See: database/queries/charts/ride_waittime_history.py
+                    query = RideWaitTimeHistoryQuery(conn)
                     chart_data = query.get_hourly(
                         target_date=today,
                         filter_disney_universal=filter_disney_universal,
@@ -353,8 +371,15 @@ def get_chart_data():
                         filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
-                else:
+                elif data_type == 'rides':
                     query = RideDowntimeHistoryQuery(conn)
+                    chart_data = query.get_hourly(
+                        target_date=yesterday,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                else:  # ridewaittimes
+                    query = RideWaitTimeHistoryQuery(conn)
                     chart_data = query.get_hourly(
                         target_date=yesterday,
                         filter_disney_universal=filter_disney_universal,
@@ -391,9 +416,17 @@ def get_chart_data():
                         filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
-                else:
+                elif data_type == 'rides':
                     # See: database/queries/charts/ride_downtime_history.py
                     query = RideDowntimeHistoryQuery(conn)
+                    chart_data = query.get_daily(
+                        days=days,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                else:  # ridewaittimes
+                    # See: database/queries/charts/ride_waittime_history.py
+                    query = RideWaitTimeHistoryQuery(conn)
                     chart_data = query.get_daily(
                         days=days,
                         filter_disney_universal=filter_disney_universal,

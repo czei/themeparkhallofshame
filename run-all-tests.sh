@@ -32,6 +32,54 @@ print_warning() {
     echo -e "${YELLOW}⚠️  $1${NC}"
 }
 
+# =============================================================================
+# Safety: Validate test environment before running anything
+# =============================================================================
+
+validate_test_environment() {
+    local missing_vars=()
+    local required_vars=("TEST_DB_HOST" "TEST_DB_NAME" "TEST_DB_USER" "TEST_DB_PASSWORD")
+
+    for var in "${required_vars[@]}"; do
+        if [ -z "${!var}" ]; then
+            missing_vars+=("$var")
+        fi
+    done
+
+    if [ ${#missing_vars[@]} -gt 0 ]; then
+        print_error "Missing required environment variables: ${missing_vars[*]}"
+        echo ""
+        echo "These variables are required for integration tests:"
+        echo "  TEST_DB_HOST     - Database host (e.g., localhost)"
+        echo "  TEST_DB_NAME     - Database name (must be 'themepark_test', NOT prod/dev)"
+        echo "  TEST_DB_USER     - Database user"
+        echo "  TEST_DB_PASSWORD - Database password"
+        echo ""
+        echo "Run this script to auto-configure: ./run-all-tests.sh"
+        echo "Or set variables manually before running pytest."
+        return 1
+    fi
+
+    # Safety check: Ensure we're not pointing at production or dev databases
+    local protected_names=("themepark_tracker" "themepark_tracker_dev" "themepark_tracker_prod" "themepark_prod")
+    for name in "${protected_names[@]}"; do
+        if [ "$TEST_DB_NAME" = "$name" ]; then
+            print_error "SAFETY ERROR: TEST_DB_NAME='$name' is a protected database!"
+            echo ""
+            echo "Protected databases that cannot be used for testing:"
+            echo "  - themepark_tracker (production)"
+            echo "  - themepark_tracker_dev (development)"
+            echo "  - themepark_tracker_prod (production alias)"
+            echo "  - themepark_prod (production alias)"
+            echo ""
+            echo "Use 'themepark_test' or another dedicated test database."
+            return 1
+        fi
+    done
+
+    return 0
+}
+
 # Change to backend directory
 cd "$(dirname "$0")/backend"
 
@@ -62,6 +110,13 @@ echo "  TEST_DB_HOST: $TEST_DB_HOST"
 echo "  TEST_DB_NAME: $TEST_DB_NAME"
 echo "  TEST_DB_USER: $TEST_DB_USER"
 echo "  OPENAI_API_KEY: sk-proj-...${OPENAI_API_KEY: -10}"
+
+# Validate test environment (safety check)
+if ! validate_test_environment; then
+    print_error "Test environment validation failed"
+    exit 1
+fi
+print_success "Test environment validated (not pointing at protected databases)"
 
 # Step 3: Count total tests
 print_section "Step 3: Discovering all tests"
@@ -130,9 +185,45 @@ else
     exit 1
 fi
 
-# Step 6: Summary
+# Step 6: Run replica validation tests (optional)
+REPLICA_COUNT=0
+if [ -n "$REPLICA_DB_HOST" ]; then
+    print_section "Step 6: Running Replica Validation Tests"
+    echo "Running: pytest tests/integration/ -m 'requires_replica' -v --no-cov"
+    echo ""
+
+    # Run replica tests (these validate against fresh production-like data)
+    pytest tests/integration/ -m "requires_replica" -v --no-cov 2>&1 | tee replica_tests.log
+    REPLICA_EXIT_CODE=${PIPESTATUS[0]}
+
+    echo ""
+
+    if [ "$REPLICA_EXIT_CODE" -eq 0 ]; then
+        REPLICA_SUMMARY=$(grep -E "^=+ .*(passed|failed|skipped)" replica_tests.log | tail -1)
+        REPLICA_COUNT=$(echo "$REPLICA_SUMMARY" | sed -E 's/.*=+ ([0-9]+) passed.*/\1/' || echo "0")
+        print_success "Replica validation tests: $REPLICA_COUNT passed"
+    elif [ "$REPLICA_EXIT_CODE" -eq 5 ]; then
+        # Exit code 5 = no tests collected (all skipped due to missing replica)
+        print_warning "No replica tests collected (all skipped - this is OK if replica not configured)"
+    else
+        print_warning "Replica validation tests failed (non-blocking, exit code: $REPLICA_EXIT_CODE)"
+        echo "  Note: Replica tests are optional and don't block the test suite."
+        echo "  Review replica_tests.log for details."
+    fi
+else
+    print_section "Step 6: Replica Validation Tests (Skipped)"
+    print_warning "Skipping replica tests: REPLICA_DB_HOST not set"
+    echo "  To run replica tests, set these environment variables:"
+    echo "    REPLICA_DB_HOST     - Replica database host"
+    echo "    REPLICA_DB_PORT     - Replica port (default: 3306)"
+    echo "    REPLICA_DB_NAME     - Replica database name"
+    echo "    REPLICA_DB_USER     - Read-only user"
+    echo "    REPLICA_DB_PASSWORD - Password"
+fi
+
+# Step 7: Summary
 print_section "Test Summary"
-print_success "All runnable tests passed! ✅"
+print_success "All required tests passed! ✅"
 echo ""
 echo "Test Results:"
 echo "  ✅ Unit Tests: $UNIT_PASSED passed"
@@ -140,7 +231,14 @@ if [ ! -z "$UNIT_ERRORS" ]; then
     echo "     ⚠️  $UNIT_ERRORS test file(s) have import errors (pre-existing issues)"
 fi
 echo "  ✅ Integration Tests: $INTEGRATION_COUNT passed"
-echo "  ✅ Total Tests Run: $((UNIT_PASSED + INTEGRATION_COUNT)) tests"
+if [ "$REPLICA_COUNT" -gt 0 ]; then
+    echo "  ✅ Replica Validation: $REPLICA_COUNT passed"
+elif [ -n "$REPLICA_DB_HOST" ]; then
+    echo "  ⚠️  Replica Validation: skipped or failed (non-blocking)"
+else
+    echo "  ⏭️  Replica Validation: not configured"
+fi
+echo "  ✅ Total Required Tests: $((UNIT_PASSED + INTEGRATION_COUNT)) tests"
 echo ""
 echo "Coverage Areas:"
 echo "  ✅ API endpoints and middleware"

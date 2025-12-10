@@ -200,6 +200,85 @@ def test_<unit>_<scenario>_<expected_result>():
 4. [ ] No decrease in test coverage
 5. [ ] Integration tests pass against test database
 
+### Test Failure Policy
+
+**CRITICAL: "Database out of sync" is NOT a valid reason to ignore test failures.**
+
+When a test fails:
+1. The test failure **MUST** block deployment
+2. Investigate the actual cause - do **NOT** assume it's a data issue
+3. If the test genuinely requires fresh data, it should use `freezegun` + fixtures
+4. Only a human can explicitly waive a test failure (and must document why)
+
+Tests are designed to be deterministic. If a test is flaky due to data:
+- The test is **broken** and needs to be fixed
+- **NOT**: The data is "out of sync" and can be ignored
+
+**Why this policy exists:**
+- Serious bugs reached production because test failures were dismissed as "database sync issues"
+- Test infrastructure now includes safety checks to prevent running against wrong databases
+- All time-sensitive tests should use `freezegun` for deterministic behavior
+
+### Test Directory Structure
+
+```
+tests/
+├── unit/           # Pure logic tests with mocks. NO external I/O (database, network)
+├── integration/    # Database interaction tests. Use mysql_connection fixture
+├── contract/       # API contract validation tests
+├── golden_data/    # Hand-computed expected values for regression testing
+└── conftest.py     # Pytest configuration
+```
+
+**Database Rules:**
+- **Unit tests**: Use `mock_db_connection` fixture (MagicMock)
+- **Integration tests**: Use `mysql_connection` fixture (creates isolated transaction, rolls back after test)
+- **NEVER** run automated tests against production or development databases
+- Test database is `themepark_test` - protected databases will cause immediate test failure
+
+### Time-Sensitive Tests
+
+For any test involving date/time logic (TODAY, YESTERDAY, last_week, etc.):
+
+1. **MUST** use `freezegun.freeze_time()` decorator with explicit timestamp
+2. **MUST** define constants like `MOCKED_NOW_UTC` at module level
+3. **MUST** create test data with timestamps relative to the mocked time
+
+**Example pattern** (from `test_today_api_contract.py`):
+```python
+from freezegun import freeze_time
+from datetime import datetime, timezone
+
+MOCKED_NOW_UTC = datetime(2025, 12, 6, 4, 0, 0, tzinfo=timezone.utc)  # 8 PM PST Dec 5th
+TODAY_START_UTC = datetime(2025, 12, 5, 8, 0, 0, tzinfo=timezone.utc)  # Midnight PST Dec 5th
+
+@freeze_time(MOCKED_NOW_UTC)
+def test_today_data(self):
+    # Test runs with deterministic "now"
+    # Create test data with timestamps between TODAY_START_UTC and MOCKED_NOW_UTC
+```
+
+### Production Replica Testing (Optional)
+
+For tests that validate real-world time-based aggregations against fresh data:
+
+1. **Setup**: Configure read-only MySQL replica with ≤5 min lag
+2. **Environment Variables**:
+   - `REPLICA_DB_HOST` - Replica hostname
+   - `REPLICA_DB_PORT` - Replica port (default: 3306)
+   - `REPLICA_DB_NAME` - Replica database name
+   - `REPLICA_DB_USER` - Read-only user
+   - `REPLICA_DB_PASSWORD` - Password
+
+3. **Usage**: Mark tests with `@pytest.mark.requires_replica`
+4. **Purpose**: Catch time-boundary bugs that deterministic fixtures might miss
+5. **Note**: Replica tests are **optional** and **non-blocking** for CI
+
+**When to use replica tests:**
+- Validating aggregation logic against real data patterns
+- Testing timezone edge cases with actual park schedules
+- Smoke testing before production deployment
+
 ---
 
 ## MANDATORY: Local Testing Before Production Deployment

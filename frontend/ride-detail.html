@@ -402,10 +402,11 @@
         const rideId = urlParams.get('ride_id');
         let currentPeriod = urlParams.get('period') || 'today';
 
-        // API base URL
-        const API_BASE_URL = window.location.hostname === 'localhost'
+        // API base URL - match config.js pattern
+        // In production, nginx proxies /api to the backend
+        const API_BASE_URL = window.location.port === '8080'
             ? 'http://localhost:5001/api'
-            : 'https://api.themeparkhallofshame.com/api';
+            : '/api';
 
         let chartInstance = null;
 

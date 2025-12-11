@@ -28,7 +28,7 @@ from sqlalchemy import text
 from database.connection import get_db_connection
 from utils.logger import logger
 from utils.timezone import get_today_pacific, get_pacific_day_range_utc
-from utils.sql_helpers import RideStatusSQL, ParkStatusSQL
+from utils.sql_helpers import RideStatusSQL, ParkStatusSQL, timestamp_match_condition
 
 
 class LiveRankingsAggregator:
@@ -97,6 +97,7 @@ class LiveRankingsAggregator:
         today = get_today_pacific()
         start_utc, end_utc = get_pacific_day_range_utc(today)
         calculated_at = datetime.utcnow()
+        live_window_hours = RideStatusSQL.LIVE_WINDOW_HOURS
 
         # SQL helpers for consistent logic
         is_down_latest = RideStatusSQL.is_down("rss_latest", parks_alias="p")
@@ -126,6 +127,7 @@ class LiveRankingsAggregator:
                 SELECT ride_id, MAX(recorded_at) as latest_recorded_at
                 FROM ride_status_snapshots
                 WHERE recorded_at >= :start_utc AND recorded_at < :end_utc
+                    AND recorded_at >= DATE_SUB(NOW(), INTERVAL {live_window_hours} HOUR)
                 GROUP BY ride_id
             ),
             rides_currently_down AS (
@@ -273,9 +275,13 @@ class LiveRankingsAggregator:
         # SQL helpers
         is_down = RideStatusSQL.is_down("rss", parks_alias="p")
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
+        current_is_down = RideStatusSQL.is_down("rcs", parks_alias="p")
+        live_window_hours = RideStatusSQL.LIVE_WINDOW_HOURS
         # CRITICAL: Filter out rides that never operated today (seasonal closures)
         # Must pass park_id_expr to check park_appears_open during operation
         has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p", park_id_expr="r.park_id")
+        # Minute-level match to join park snapshots to ride snapshots (handles clock drift)
+        ts_match_current = timestamp_match_condition("pas_current.recorded_at", "rss.recorded_at")
 
         # Step 1: Truncate staging table
         conn.execute(text("TRUNCATE TABLE ride_live_rankings_staging"))
@@ -295,17 +301,24 @@ class LiveRankingsAggregator:
                 SELECT ride_id, MAX(recorded_at) as latest_recorded_at
                 FROM ride_status_snapshots
                 WHERE recorded_at >= :start_utc AND recorded_at < :end_utc
+                    AND recorded_at >= DATE_SUB(NOW(), INTERVAL {live_window_hours} HOUR)
                 GROUP BY ride_id
             ),
             ride_current_status AS (
                 SELECT
                     rss.ride_id,
+                    rss.status AS status,
                     rss.status AS current_status,
                     rss.wait_time AS current_wait_time,
-                    rss.computed_is_open
+                    rss.computed_is_open,
+                    pas_current.park_appears_open
                 FROM ride_status_snapshots rss
                 INNER JOIN latest_snapshot ls ON rss.ride_id = ls.ride_id
                     AND rss.recorded_at = ls.latest_recorded_at
+                INNER JOIN rides r_current ON rss.ride_id = r_current.ride_id
+                LEFT JOIN park_activity_snapshots pas_current
+                    ON pas_current.park_id = r_current.park_id
+                    AND {ts_match_current}
             ),
             last_status_changes AS (
                 SELECT ride_id, MAX(changed_at) as last_status_change
@@ -328,7 +341,11 @@ class LiveRankingsAggregator:
                 p.is_universal,
 
                 -- Current status (from latest snapshot)
-                CASE WHEN rcs.computed_is_open = FALSE THEN TRUE ELSE FALSE END AS is_down,
+                CASE
+                    WHEN COALESCE(rcs.park_appears_open, FALSE) = FALSE THEN FALSE
+                    WHEN {current_is_down} THEN TRUE
+                    ELSE FALSE
+                END AS is_down,
                 rcs.current_status,
                 rcs.current_wait_time,
                 lsc.last_status_change,
@@ -361,11 +378,13 @@ class LiveRankingsAggregator:
                 AND r.category = 'ATTRACTION'
                 AND p.is_active = TRUE
                 AND r.last_operated_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY
+                AND {has_operated}
             GROUP BY r.ride_id, r.name, r.park_id, r.queue_times_id, r.category,
                      p.name, p.is_disney, p.is_universal,
                      rc.tier, rc.tier_weight,
                      rcs.computed_is_open, rcs.current_status, rcs.current_wait_time,
-                     lsc.last_status_change
+                     rcs.park_appears_open, lsc.last_status_change
+            HAVING downtime_hours > 0 OR is_down = TRUE
         """)
 
         conn.execute(insert_query, {

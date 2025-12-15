@@ -7,16 +7,18 @@ UI Location: Rides tab → Downtime Rankings (today - cumulative)
 
 Returns rides ranked by CUMULATIVE downtime from midnight Pacific to now.
 
-CRITICAL DIFFERENCE FROM LIVE:
-- LIVE: Shows rides CURRENTLY down (latest snapshot status)
-- TODAY: Shows CUMULATIVE downtime since midnight
+PERFORMANCE UPDATE (Dec 2025):
+- Switched to pre-aggregated ride_hourly_stats (fast, indexed) to avoid
+  scanning raw ride_status_snapshots for the entire day.
+- Only a tiny "latest status" subquery hits ride_status_snapshots to show the
+  current badge; the heavy aggregation now stays on ride_hourly_stats.
 
 Database Tables:
+- ride_hourly_stats (pre-aggregated downtime/uptime per hour)
 - rides (ride metadata)
 - parks (park metadata)
 - ride_classifications (tier weights)
-- ride_status_snapshots (real-time status)
-- park_activity_snapshots (park open status)
+- ride_status_snapshots (latest-only subquery for current badge)
 
 Single Source of Truth:
 - Formulas: utils/metrics.py
@@ -38,14 +40,9 @@ from utils.sql_helpers import (
 
 class TodayRideRankingsQuery:
     """
-    Query handler for today's CUMULATIVE ride rankings.
-
-    Unlike LiveRideRankingsQuery which shows current status,
-    this aggregates ALL downtime from midnight Pacific to now.
+    Query handler for today's CUMULATIVE ride rankings using pre-aggregated
+    ride_hourly_stats (fast path).
     """
-
-    # Snapshot interval in minutes (for converting snapshot counts to time)
-    SNAPSHOT_INTERVAL_MINUTES = 5
 
     def __init__(self, connection: Connection):
         self.conn = connection
@@ -54,6 +51,7 @@ class TodayRideRankingsQuery:
         self,
         filter_disney_universal: bool = False,
         limit: int = 50,
+        sort_by: str = "downtime_hours",
     ) -> List[Dict[str, Any]]:
         """
         Get cumulative ride rankings from midnight Pacific to now.
@@ -61,45 +59,36 @@ class TodayRideRankingsQuery:
         Args:
             filter_disney_universal: Only Disney/Universal parks
             limit: Maximum results
+            sort_by: Sort column (downtime_hours, uptime_percentage,
+                     current_is_open, trend_percentage)
 
         Returns:
             List of rides ranked by cumulative downtime hours (descending)
         """
-        # Get time range from midnight Pacific to now
+        # Get time range from midnight Pacific to now (UTC)
         start_utc, now_utc = get_today_range_to_now_utc()
 
-        # Use centralized SQL helpers for consistent logic
         filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
-        # PARK-TYPE AWARE: Disney/Universal only counts DOWN (not CLOSED)
-        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
-        park_open = ParkStatusSQL.park_appears_open_filter("pas")
-        current_status_sq = RideStatusSQL.current_status_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
-        current_is_open_sq = RideStatusSQL.current_is_open_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
+
+        # Latest status subqueries (tiny, bounded by live window)
+        current_status_sq = RideStatusSQL.current_status_subquery(
+            "r.ride_id", include_time_window=True, park_id_expr="r.park_id"
+        )
+        current_is_open_sq = RideStatusSQL.current_is_open_subquery(
+            "r.ride_id", include_time_window=True, park_id_expr="r.park_id"
+        )
         park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
 
-        # Use centralized CTE for rides that operated (includes park-open check)
-        rides_operated_cte = RideStatusSQL.rides_that_operated_cte(
-            start_param=":start_utc",
-            end_param=":now_utc",
-            filter_clause=filter_clause
-        )
+        # Determine sort column/direction
+        sort_map = {
+            "downtime_hours": "downtime_hours DESC",
+            "uptime_percentage": "uptime_percentage ASC",
+            "current_is_open": "current_is_open ASC",  # down/closed first
+            "trend_percentage": "trend_percentage DESC",
+        }
+        sort_clause = sort_map.get(sort_by, "downtime_hours DESC")
 
         query = text(f"""
-            WITH
-            {rides_operated_cte},
-            operating_snapshots AS (
-                -- Count total snapshots when park was open (for uptime calculation)
-                SELECT
-                    r.ride_id,
-                    COUNT(*) AS total_operating_snapshots
-                FROM rides r
-                INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-                INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
-                WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :now_utc
-                    AND {park_open}
-                GROUP BY r.ride_id
-            )
             SELECT
                 r.ride_id,
                 r.queue_times_id,
@@ -110,54 +99,36 @@ class TodayRideRankingsQuery:
                 CONCAT(p.city, ', ', p.state_province) AS location,
                 rc.tier,
 
-                -- CUMULATIVE downtime hours (all downtime since midnight)
-                ROUND(
-                    SUM(CASE
-                        WHEN {is_down} AND {park_open} AND rto.ride_id IS NOT NULL
-                        THEN {self.SNAPSHOT_INTERVAL_MINUTES} / 60.0
-                        ELSE 0
-                    END),
-                    2
-                ) AS downtime_hours,
+                -- Cumulative downtime from pre-aggregated hourly stats
+                ROUND(SUM(rhs.downtime_hours), 2) AS downtime_hours,
 
-                -- Uptime percentage for today
+                -- Uptime percentage based on aggregated snapshots
                 ROUND(
-                    100 - (
-                        SUM(CASE
-                            WHEN {is_down} AND {park_open} AND rto.ride_id IS NOT NULL
-                            THEN 1
-                            ELSE 0
-                        END) * 100.0 / NULLIF(os.total_operating_snapshots, 0)
-                    ),
+                    100 - (SUM(rhs.down_snapshots) * 100.0 / NULLIF(SUM(rhs.snapshot_count), 0)),
                     1
                 ) AS uptime_percentage,
 
-                -- Current status (for display)
+                -- Current status (latest-only subquery for badge/sorting)
                 {current_status_sq},
                 {current_is_open_sq},
                 {park_is_open_sq},
 
-                -- Wait time stats for today
-                MAX(rss.wait_time) AS peak_wait_time,
-                ROUND(AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END), 0) AS avg_wait_time
+                -- Trend placeholder (not available for partial day)
+                NULL AS trend_percentage
 
-            FROM rides r
-            INNER JOIN parks p ON r.park_id = p.park_id
+            FROM ride_hourly_stats rhs
+            INNER JOIN rides r ON rhs.ride_id = r.ride_id
+            INNER JOIN parks p ON rhs.park_id = p.park_id
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
-            LEFT JOIN rides_that_operated rto ON r.ride_id = rto.ride_id
-            LEFT JOIN operating_snapshots os ON r.ride_id = os.ride_id
-            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :now_utc
+            WHERE rhs.hour_start_utc >= :start_utc AND rhs.hour_start_utc < :now_utc
                 AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'
                 AND p.is_active = TRUE
                 {filter_clause}
-            GROUP BY r.ride_id, r.name, p.name, p.park_id, p.city, p.state_province,
-                     rc.tier, os.total_operating_snapshots
-            HAVING downtime_hours > 0
-            ORDER BY downtime_hours DESC
+            GROUP BY r.ride_id, r.name, p.name, p.park_id, p.city, p.state_province, rc.tier
+            HAVING SUM(CASE WHEN rhs.ride_operated THEN 1 ELSE 0 END) > 0
+                AND downtime_hours > 0
+            ORDER BY {sort_clause}
             LIMIT :limit
         """)
 

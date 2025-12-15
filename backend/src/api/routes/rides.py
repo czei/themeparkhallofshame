@@ -128,13 +128,13 @@ def get_ride_downtime_rankings():
     """
     Get ride downtime rankings for specified time period.
 
-    Query Files Used:
-    -----------------
-    - period=live: database/queries/live/live_ride_rankings.py
-      Uses real-time snapshot data (instantaneous - rides down RIGHT NOW)
+Query Files Used:
+-----------------
+- period=live: database/queries/live/live_ride_rankings.py
+  Uses real-time snapshot data (instantaneous - rides down RIGHT NOW)
 
-    - period=today: StatsRepository.get_ride_daily_rankings()
-      Uses ride_daily_stats to provide deterministic contract-friendly data
+- period=today: database/queries/today/today_ride_rankings.py
+  Uses ride_hourly_stats (pre-aggregated) for fast cumulative downtime
 
     - period=last_week/last_month: database/queries/rankings/ride_downtime_rankings.py
       Uses pre-aggregated data from ride_daily_stats (calendar-based periods)
@@ -223,7 +223,8 @@ def get_ride_downtime_rankings():
                 query = TodayRideRankingsQuery(conn)
                 rankings = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
-                    limit=limit
+                    limit=limit,
+                    sort_by=sort_by
                 )
             elif period == 'yesterday':
                 # YESTERDAY: Full previous Pacific day (immutable, highly cacheable)

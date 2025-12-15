@@ -41,6 +41,51 @@ MAX_DATA_AGE_MINUTES = 30  # Alert if no data in last 30 minutes
 MIN_PARKS_EXPECTED = 5     # Alert if fewer than this many parks have recent data
 MIN_RIDES_EXPECTED = 50    # Alert if fewer than this many rides have recent data
 
+# Hourly aggregate freshness thresholds
+MAX_HOURLY_LAG_MINUTES = 70  # Latest hour_start_utc must be within 70 minutes
+
+# -----------------------------------------------------------------------------
+# Helpers for hourly aggregate freshness
+# -----------------------------------------------------------------------------
+
+def check_hourly_aggregates() -> Dict[str, Any]:
+    """
+    Verify hourly aggregates are being written recently.
+
+    Returns:
+        Dict with:
+        - park_hourly_fresh (bool)
+        - ride_hourly_fresh (bool)
+        - latest_park_hour (datetime or None)
+        - latest_ride_hour (datetime or None)
+        - minutes_since_park_hour (int or None)
+        - minutes_since_ride_hour (int or None)
+    """
+    now = datetime.utcnow()
+    cutoff_seconds = MAX_HOURLY_LAG_MINUTES * 60
+
+    with get_db_connection() as conn:
+        park_row = conn.execute(text("SELECT MAX(hour_start_utc) FROM park_hourly_stats")).scalar()
+        ride_row = conn.execute(text("SELECT MAX(hour_start_utc) FROM ride_hourly_stats")).scalar()
+
+    def compute(dt: Optional[datetime]):
+        if dt is None:
+            return None, False
+        delta = now - dt
+        return int(delta.total_seconds() // 60), delta.total_seconds() <= cutoff_seconds
+
+    park_minutes, park_fresh = compute(park_row)
+    ride_minutes, ride_fresh = compute(ride_row)
+
+    return {
+        "park_hourly_fresh": park_fresh,
+        "ride_hourly_fresh": ride_fresh,
+        "latest_park_hour": park_row,
+        "latest_ride_hour": ride_row,
+        "minutes_since_park_hour": park_minutes,
+        "minutes_since_ride_hour": ride_minutes,
+    }
+
 
 def check_recent_snapshots() -> Dict[str, Any]:
     """
@@ -215,13 +260,10 @@ def format_alert_email(diagnostics: Dict[str, Any], process_status: Dict[str, An
     """
     now = datetime.now()
 
+    hourly = diagnostics.get("hourly", {})
     # Determine severity and color
     severity = "CRITICAL"
     severity_color = "#d32f2f"
-
-    if not diagnostics["has_recent_ride_data"] or not diagnostics["has_recent_park_data"]:
-        severity = "CRITICAL"
-        severity_color = "#d32f2f"
 
     # Format timestamps
     def format_timestamp(dt: Optional[datetime]) -> str:
@@ -313,6 +355,25 @@ def format_alert_email(diagnostics: Dict[str, Any], process_status: Dict[str, An
             </tr>
         </table>
 
+        <h2>Hourly Aggregates</h2>
+        <table>
+            <tr><th>Metric</th><th>Value</th><th>Status</th></tr>
+            <tr>
+                <td>Latest park_hourly_stats</td>
+                <td>{format_timestamp(hourly.get('latest_park_hour'))}</td>
+                <td class=\"{'ok' if hourly.get('park_hourly_fresh') else 'error'}\">
+                    {hourly.get('minutes_since_park_hour', 'N/A')} minutes ago
+                </td>
+            </tr>
+            <tr>
+                <td>Latest ride_hourly_stats</td>
+                <td>{format_timestamp(hourly.get('latest_ride_hour'))}</td>
+                <td class=\"{'ok' if hourly.get('ride_hourly_fresh') else 'error'}\">
+                    {hourly.get('minutes_since_ride_hour', 'N/A')} minutes ago
+                </td>
+            </tr>
+        </table>
+
         <h2>Process Status</h2>
         <table>
             <tr>
@@ -398,6 +459,9 @@ def main():
 
     # Check recent snapshots
     diagnostics = check_recent_snapshots()
+    # Check hourly aggregates
+    hourly = check_hourly_aggregates()
+    diagnostics["hourly"] = hourly
 
     logger.info(f"Has recent ride data: {diagnostics['has_recent_ride_data']}")
     logger.info(f"Has recent park data: {diagnostics['has_recent_park_data']}")
@@ -405,6 +469,8 @@ def main():
     logger.info(f"Parks with recent data: {diagnostics['parks_with_recent_data']}")
     logger.info(f"Minutes since last ride snapshot: {diagnostics['minutes_since_last_ride_snapshot']}")
     logger.info(f"Minutes since last park snapshot: {diagnostics['minutes_since_last_park_snapshot']}")
+    logger.info(f"Latest park_hourly_stats: {hourly['latest_park_hour']} ({hourly['minutes_since_park_hour']} min ago)")
+    logger.info(f"Latest ride_hourly_stats: {hourly['latest_ride_hour']} ({hourly['minutes_since_ride_hour']} min ago)")
 
     # Check process status
     process_status = get_collection_process_status()
@@ -413,7 +479,9 @@ def main():
     # Determine if we need to alert
     should_alert = (
         not diagnostics["has_recent_ride_data"] or
-        not diagnostics["has_recent_park_data"]
+        not diagnostics["has_recent_park_data"] or
+        not hourly["park_hourly_fresh"] or
+        not hourly["ride_hourly_fresh"]
     )
 
     if should_alert:

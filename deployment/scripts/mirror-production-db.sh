@@ -96,6 +96,8 @@ DATE_FILTERED_TABLES=(
     "ride_monthly_stats"
     "park_monthly_stats"
     "data_quality_issues"
+    "ride_hourly_stats"
+    "park_hourly_stats"
 )
 
 echo -e "${GREEN}======================================${NC}"
@@ -129,6 +131,11 @@ LOCAL_DB_NAME="${DB_NAME:-themepark_tracker_dev}"
 LOCAL_DB_HOST="${DB_HOST:-localhost}"
 LOCAL_DB_USER="${DB_USER:-root}"
 LOCAL_DB_PASS="${DB_PASSWORD:-}"
+
+# Use UTC for all remote/local mysql sessions to avoid date-boundary drift
+REMOTE_MYSQL="sudo mysql -u root --init-command=\"SET time_zone='+00:00';\""
+# Store local init options in an array to avoid word-splitting issues
+LOCAL_MYSQL_INIT=(--init-command="SET time_zone='+00:00';")
 
 # Safety check - refuse to overwrite production
 if [[ "$LOCAL_DB_NAME" == *"prod"* ]] || [[ "$LOCAL_DB_NAME" == "theme_park_tracker" ]]; then
@@ -213,7 +220,7 @@ echo "  Database recreated: $LOCAL_DB_NAME"
 if [ "$FULL" = false ] && [ "$SCHEMA_ONLY" = false ]; then
     # Anchor the window to production's most recent park_activity_snapshots date
     LAST_PROD_DATE=$(ssh -i "$SSH_KEY" "$REMOTE_HOST" \
-        "sudo mysql -u root -N -e \"SELECT DATE(MAX(recorded_at)) FROM park_activity_snapshots\" $REMOTE_DB_NAME 2>/dev/null" || true)
+        "$REMOTE_MYSQL -N -e \"SELECT DATE(MAX(recorded_at)) FROM park_activity_snapshots\" $REMOTE_DB_NAME 2>/dev/null" || true)
     if [ -z "$LAST_PROD_DATE" ]; then
         LAST_PROD_DATE=$(date +%Y-%m-%d)
         warn "Could not determine last prod snapshot date, defaulting to today ($LAST_PROD_DATE)"
@@ -271,7 +278,7 @@ else
     # 1b. CRITICAL FIX: Remove 'ON UPDATE CURRENT_TIMESTAMP' from timestamp columns
     # This prevents timestamps from being auto-updated during data import
     log "  Fixing timestamp columns to preserve original values..."
-    mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME" <<'FIXSQL'
+    mysql "${LOCAL_MYSQL_INIT[@]}" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME" <<'FIXSQL'
 -- park_activity_snapshots: preserve recorded_at timestamps
 -- This is the CRITICAL fix - recorded_at had ON UPDATE CURRENT_TIMESTAMP
 ALTER TABLE park_activity_snapshots
@@ -288,7 +295,7 @@ FIXSQL
     FULL_TABLES_STR="${FULL_TABLES[*]}"
     ssh -i "$SSH_KEY" "$REMOTE_HOST" \
         "sudo mysqldump -u root --tz-utc --no-create-info --single-transaction $REMOTE_DB_NAME $FULL_TABLES_STR 2>/dev/null || true" \
-        | mysql --init-command="SET TIME_ZONE='+00:00';" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
+        | mysql "${LOCAL_MYSQL_INIT[@]}" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
 
     # 3. Export filtered tables (last N days)
     log "  Exporting snapshot data (last $DAYS days)..."
@@ -319,12 +326,12 @@ FIXSQL
 
         # Export with WHERE clause (bounded window to match prod exactly)
         ROW_COUNT=$(ssh -i "$SSH_KEY" "$REMOTE_HOST" \
-            "sudo mysql -u root -N -e \"SELECT COUNT(*) FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER' AND $DATE_COL < DATE_ADD('$DATE_FILTER_END', INTERVAL 1 DAY)\" $REMOTE_DB_NAME 2>/dev/null || echo 0")
+            "$REMOTE_MYSQL -N -e \"SELECT COUNT(*) FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER' AND $DATE_COL < DATE_ADD('$DATE_FILTER_END', INTERVAL 1 DAY)\" $REMOTE_DB_NAME 2>/dev/null || echo 0")
 
         if [ "$ROW_COUNT" -gt 0 ]; then
             ssh -i "$SSH_KEY" "$REMOTE_HOST" \
                 "sudo mysqldump -u root --tz-utc --no-create-info --single-transaction --where=\"$DATE_COL >= '$DATE_FILTER' AND $DATE_COL < DATE_ADD('$DATE_FILTER_END', INTERVAL 1 DAY)\" $REMOTE_DB_NAME $TABLE 2>/dev/null" \
-                | mysql --init-command="SET TIME_ZONE='+00:00';" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
+                | mysql "${LOCAL_MYSQL_INIT[@]}" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
             echo "$ROW_COUNT rows"
         else
             echo "0 rows (skipped)"
@@ -371,10 +378,10 @@ compare_date_range() {
 
     # Get production date range
     PROD_DATES=$(ssh -i "$SSH_KEY" "$REMOTE_HOST" \
-        "sudo mysql -u root -N -e \"SELECT CONCAT(MIN(DATE($DATE_COL)), ' to ', MAX(DATE($DATE_COL)), ' (', COUNT(DISTINCT DATE($DATE_COL)), ' days)') FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER' AND $DATE_COL < DATE_ADD('$DATE_FILTER_END', INTERVAL 1 DAY)\" $REMOTE_DB_NAME 2>/dev/null" || echo "ERROR")
+        "$REMOTE_MYSQL -N -e \"SELECT CONCAT(MIN(DATE($DATE_COL)), ' to ', MAX(DATE($DATE_COL)), ' (', COUNT(DISTINCT DATE($DATE_COL)), ' days)') FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER' AND $DATE_COL < DATE_ADD('$DATE_FILTER_END', INTERVAL 1 DAY)\" $REMOTE_DB_NAME 2>/dev/null" || echo "ERROR")
 
     # Get local date range (apply same filter as production for fair comparison)
-    LOCAL_DATES=$(mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} -N -e \
+    LOCAL_DATES=$(mysql "${LOCAL_MYSQL_INIT[@]}" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} -N -e \
         "SELECT CONCAT(MIN(DATE($DATE_COL)), ' to ', MAX(DATE($DATE_COL)), ' (', COUNT(DISTINCT DATE($DATE_COL)), ' days)') FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER' AND $DATE_COL < DATE_ADD('$DATE_FILTER_END', INTERVAL 1 DAY)" "$LOCAL_DB_NAME" 2>/dev/null || echo "ERROR")
 
     if [ "$PROD_DATES" = "$LOCAL_DATES" ]; then
@@ -396,10 +403,10 @@ compare_row_count() {
 
     # Get production count
     PROD_COUNT=$(ssh -i "$SSH_KEY" "$REMOTE_HOST" \
-        "sudo mysql -u root -N -e \"SELECT COUNT(*) FROM $TABLE\" $REMOTE_DB_NAME 2>/dev/null" || echo "0")
+        "$REMOTE_MYSQL -N -e \"SELECT COUNT(*) FROM $TABLE\" $REMOTE_DB_NAME 2>/dev/null" || echo "0")
 
     # Get local count
-    LOCAL_COUNT=$(mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} -N -e \
+    LOCAL_COUNT=$(mysql "${LOCAL_MYSQL_INIT[@]}" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} -N -e \
         "SELECT COUNT(*) FROM $TABLE" "$LOCAL_DB_NAME" 2>/dev/null || echo "0")
 
     if [ "$PROD_COUNT" = "$LOCAL_COUNT" ]; then

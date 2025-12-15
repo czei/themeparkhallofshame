@@ -15,11 +15,20 @@
  *   - Make sure CORS is properly configured on the backend
  */
 
+// Helper: allow overriding backend port via URL param ?api_port=5002 for local dev
+function resolveLocalApiBase() {
+    const params = new URLSearchParams(window.location.search);
+    const apiPort = params.get('api_port') || '5001';
+    return `http://localhost:${apiPort}/api`;
+}
+
 const CONFIG = {
     // API Configuration
-    // For local development without proxy, point to backend port
-    // In production, nginx proxies /api to the backend
-    API_BASE_URL: window.location.port === '8080' ? 'http://localhost:5001/api' : '/api',
+    // Local: defaults to localhost:5001 unless overridden with ?api_port=PORT
+    // Prod: relies on reverse proxy for /api
+    API_BASE_URL: (['localhost', '127.0.0.1'].includes(window.location.hostname) || window.location.protocol === 'file:')
+        ? resolveLocalApiBase()
+        : '/api',
 
     // For production deployment, uncomment and set your backend URL:
     // API_BASE_URL: 'https://your-backend-api.com/api',

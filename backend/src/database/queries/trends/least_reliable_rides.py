@@ -282,6 +282,7 @@ class LeastReliableRidesQuery:
         period: str = 'today',
         filter_disney_universal: bool = False,
         limit: int = 10,
+        min_avg_shame: float = 1.0,
     ) -> List[Dict[str, Any]]:
         """
         Get parks ranked by total downtime hours (sum of all rides).
@@ -295,13 +296,13 @@ class LeastReliableRidesQuery:
             List of parks with total downtime hours
         """
         if period == 'today':
-            return self._get_parks_today(filter_disney_universal, limit)
+            return self._get_parks_today(filter_disney_universal, limit, min_avg_shame)
         elif period == 'yesterday':
-            return self._get_parks_yesterday(filter_disney_universal, limit)
+            return self._get_parks_yesterday(filter_disney_universal, limit, min_avg_shame)
         elif period == 'last_week' or period == '7days':
-            return self._get_parks_daily_aggregate(7, filter_disney_universal, limit)
+            return self._get_parks_daily_aggregate(7, filter_disney_universal, limit, min_avg_shame)
         elif period == 'last_month' or period == '30days':
-            return self._get_parks_daily_aggregate(30, filter_disney_universal, limit)
+            return self._get_parks_daily_aggregate(30, filter_disney_universal, limit, min_avg_shame)
         else:
             raise ValueError(f"Invalid period: {period}. Must be 'today', 'yesterday', 'last_week', or 'last_month'")
 
@@ -309,6 +310,7 @@ class LeastReliableRidesQuery:
         self,
         filter_disney_universal: bool = False,
         limit: int = 10,
+        min_avg_shame: float = 1.0,
     ) -> List[Dict[str, Any]]:
         """
         Get park-level reliability rankings from TODAY (snapshot data).
@@ -389,7 +391,7 @@ class LeastReliableRidesQuery:
                 ROUND(100.0 * SUM(operating_count) / NULLIF(SUM(total_snapshots), 0), 1) AS uptime_percentage
             FROM snapshot_shame
             GROUP BY park_id, park_name, city, state_province
-            HAVING AVG(weighted_down) > 0
+            HAVING AVG(weighted_down / NULLIF(total_park_weight, 0) * 10) >= :min_avg_shame
             ORDER BY avg_shame_score DESC
             LIMIT :limit
         """)
@@ -399,6 +401,7 @@ class LeastReliableRidesQuery:
             'now_utc': now_utc,
             'end_utc': now_utc,  # has_operated_subquery uses :end_utc
             'limit': limit,
+            'min_avg_shame': min_avg_shame,
         })
 
         return [dict(row._mapping) for row in result]
@@ -407,6 +410,7 @@ class LeastReliableRidesQuery:
         self,
         filter_disney_universal: bool = False,
         limit: int = 10,
+        min_avg_shame: float = 1.0,
     ) -> List[Dict[str, Any]]:
         """
         Get park-level reliability rankings from YESTERDAY (snapshot data).
@@ -482,7 +486,7 @@ class LeastReliableRidesQuery:
                 ROUND(100.0 * SUM(operating_count) / NULLIF(SUM(total_snapshots), 0), 1) AS uptime_percentage
             FROM snapshot_shame
             GROUP BY park_id, park_name, city, state_province
-            HAVING AVG(weighted_down) > 0
+            HAVING AVG(weighted_down / NULLIF(total_park_weight, 0) * 10) >= :min_avg_shame
             ORDER BY avg_shame_score DESC
             LIMIT :limit
         """)
@@ -491,6 +495,7 @@ class LeastReliableRidesQuery:
             'start_utc': start_utc,
             'end_utc': end_utc,
             'limit': limit,
+            'min_avg_shame': min_avg_shame,
         })
 
         return [dict(row._mapping) for row in result]
@@ -500,6 +505,7 @@ class LeastReliableRidesQuery:
         days: int,
         filter_disney_universal: bool = False,
         limit: int = 10,
+        min_avg_shame: float = 1.0,
     ) -> List[Dict[str, Any]]:
         """
         Get park-level reliability rankings from daily stats (7days/30days).
@@ -525,7 +531,7 @@ class LeastReliableRidesQuery:
             INNER JOIN park_daily_stats pds ON p.park_id = pds.park_id
             WHERE pds.stat_date >= :start_date
               AND pds.stat_date <= :end_date
-              AND pds.shame_score > 0
+              AND pds.shame_score >= :min_avg_shame
               AND p.is_active = TRUE
               {filter_clause}
             GROUP BY p.park_id, p.name, p.city, p.state_province
@@ -537,6 +543,7 @@ class LeastReliableRidesQuery:
             'start_date': start_date,
             'end_date': today,
             'limit': limit,
+            'min_avg_shame': min_avg_shame,
         })
 
         return [dict(row._mapping) for row in result]

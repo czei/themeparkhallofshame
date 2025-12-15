@@ -7,8 +7,8 @@ Endpoints for park-level downtime rankings and statistics.
 Query File Mapping
 ------------------
 GET /parks/downtime?period=live       → database/queries/live/fast_live_park_rankings.py (instantaneous via cache table)
-GET /parks/downtime?period=today      → database/queries/today/today_park_rankings.py (cumulative)
-GET /parks/downtime?period=yesterday  → database/queries/yesterday/yesterday_park_rankings.py (full prev day)
+GET /parks/downtime?period=today      → database/queries/today/today_park_rankings.py (cumulative today)
+GET /parks/downtime?period=yesterday  → StatsRepository.get_park_daily_rankings(stat_date=yesterday)
 GET /parks/downtime?period=last_week  → database/queries/rankings/park_downtime_rankings.py
 GET /parks/downtime?period=last_month → database/queries/rankings/park_downtime_rankings.py
 GET /parks/waittimes?period=live      → StatsRepository.get_park_live_wait_time_rankings()
@@ -20,6 +20,8 @@ GET /parks/<id>/details               → (uses multiple repositories)
 """
 
 from flask import Blueprint, request, jsonify
+from datetime import timedelta
+from decimal import Decimal
 
 from database.connection import get_db_connection
 from database.repositories.park_repository import ParkRepository
@@ -28,8 +30,8 @@ from utils.cache import get_query_cache, generate_cache_key
 
 # New query imports - each file handles one specific data source
 from database.queries.rankings import ParkDowntimeRankingsQuery, ParkWaitTimeRankingsQuery
-from database.queries.today import TodayParkRankingsQuery, TodayParkWaitTimesQuery
-from database.queries.yesterday import YesterdayParkRankingsQuery, YesterdayParkWaitTimesQuery
+from database.queries.today import TodayParkWaitTimesQuery, TodayParkRankingsQuery
+from database.queries.yesterday import YesterdayParkWaitTimesQuery
 from database.queries.charts import ParkShameHistoryQuery, ParkRidesComparisonQuery
 from database.queries.live.fast_live_park_rankings import FastLiveParkRankingsQuery
 from database.calculators.shame_score import ShameScoreCalculator
@@ -77,10 +79,11 @@ def get_park_downtime_rankings():
     sort_by = request.args.get('sort_by', 'shame_score')
 
     # Validate period
-    if period not in ['live', 'today', 'yesterday', 'last_week', 'last_month']:
+    valid_periods = ['live', 'today', 'yesterday', '7days', '30days', 'last_week', 'last_month']
+    if period not in valid_periods:
         return jsonify({
             "success": False,
-            "error": "Invalid period. Must be 'live', 'today', 'yesterday', 'last_week', or 'last_month'"
+            "error": "Invalid period. Must be one of: live, today, yesterday, 7days, 30days, last_week, last_month"
         }), 400
 
     # Validate filter
@@ -105,7 +108,8 @@ def get_park_downtime_rankings():
             period=period,
             filter=filter_type,
             limit=str(limit),
-            sort_by=sort_by
+            sort_by=sort_by,
+            weighted=str(weighted).lower()
         )
         cache = get_query_cache()
         cached_result = cache.get(cache_key)
@@ -118,6 +122,7 @@ def get_park_downtime_rankings():
             stats_repo = StatsRepository(conn)
 
             # Route to appropriate query based on period
+            today_pacific = get_today_pacific()
             if period == 'live':
                 # LIVE: True instantaneous data - rides down RIGHT NOW
                 # Uses pre-aggregated park_live_rankings table for instant performance
@@ -128,8 +133,7 @@ def get_park_downtime_rankings():
                     sort_by=sort_by
                 )
             elif period == 'today':
-                # TODAY: Cumulative totals from midnight Pacific to now
-                # Uses hourly aggregation tables for fast performance
+                # TODAY: Use pre-aggregated hourly stats (live-updating)
                 query = TodayParkRankingsQuery(conn)
                 rankings = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
@@ -137,12 +141,27 @@ def get_park_downtime_rankings():
                     sort_by=sort_by
                 )
             elif period == 'yesterday':
-                # YESTERDAY: Full previous Pacific day (immutable, highly cacheable)
-                query = YesterdayParkRankingsQuery(conn)
-                rankings = query.get_rankings(
+                rankings = stats_repo.get_park_daily_rankings(
+                    stat_date=today_pacific - timedelta(days=1),
                     filter_disney_universal=filter_disney_universal,
                     limit=limit,
-                    sort_by=sort_by
+                    weighted=weighted
+                )
+            elif period == '7days':
+                rankings = stats_repo.get_park_weekly_rankings(
+                    year=today_pacific.year,
+                    week_number=today_pacific.isocalendar()[1],
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit,
+                    weighted=weighted
+                )
+            elif period == '30days':
+                rankings = stats_repo.get_park_monthly_rankings(
+                    year=today_pacific.year,
+                    month=today_pacific.month,
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit,
+                    weighted=weighted
                 )
             else:
                 # Historical data from aggregated stats (calendar-based periods)
@@ -160,8 +179,9 @@ def get_park_downtime_rankings():
                         limit=limit,
                         sort_by=sort_by
                     )
+            aggregate_period = 'last_week' if period == '7days' else ('last_month' if period == '30days' else period)
             aggregate_stats = stats_repo.get_aggregate_park_stats(
-                period=period,
+                period=aggregate_period,
                 filter_disney_universal=filter_disney_universal
             )
 
@@ -172,6 +192,21 @@ def get_park_downtime_rankings():
                 park_dict['rank'] = rank_idx
                 if 'queue_times_id' in park_dict:
                     park_dict['queue_times_url'] = f"https://queue-times.com/parks/{park_dict['queue_times_id']}"
+
+                numeric_fields = {
+                    'shame_score': float,
+                    'total_downtime_hours': float,
+                    'weighted_downtime_hours': float,
+                    'rides_operating': int,
+                    'rides_down': int,
+                    'uptime_percentage': float,
+                    'effective_park_weight': float,
+                    'snapshot_count': int,
+                }
+                for field, caster in numeric_fields.items():
+                    if field in park_dict and isinstance(park_dict[field], Decimal):
+                        park_dict[field] = caster(park_dict[field])
+
                 rankings_with_urls.append(park_dict)
 
             # Build response
@@ -184,8 +219,8 @@ def get_park_downtime_rankings():
                 "aggregate_stats": aggregate_stats,
                 "data": rankings_with_urls,
                 "attribution": {
-                    "data_source": "ThemeParks.wiki",
-                    "url": "https://themeparks.wiki"
+                    "data_source": "Queue-Times.com",
+                    "url": "https://queue-times.com"
                 }
             }
 

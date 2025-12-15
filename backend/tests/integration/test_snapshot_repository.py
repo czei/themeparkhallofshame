@@ -40,7 +40,9 @@ class TestRideStatusSnapshotRepository:
             'recorded_at': datetime.now(),
             'wait_time': 45,
             'is_open': True,
-            'computed_is_open': True
+            'computed_is_open': True,
+            'status': 'OPERATING',
+            'last_updated_api': datetime.now()
         }
 
         snapshot_id = repo.insert(snapshot_data)
@@ -62,9 +64,11 @@ class TestRideStatusSnapshotRepository:
         from datetime import timedelta
         base_time = datetime.now()
         repo.insert({'ride_id': ride_id, 'recorded_at': base_time - timedelta(seconds=10),
-                    'wait_time': 30, 'is_open': 1, 'computed_is_open': 1})
+                    'wait_time': 30, 'is_open': 1, 'computed_is_open': 1,
+                    'status': 'OPERATING', 'last_updated_api': base_time - timedelta(seconds=10)})
         repo.insert({'ride_id': ride_id, 'recorded_at': base_time,
-                    'wait_time': 45, 'is_open': 1, 'computed_is_open': 1})
+                    'wait_time': 45, 'is_open': 1, 'computed_is_open': 1,
+                    'status': 'OPERATING', 'last_updated_api': base_time})
 
         latest = repo.get_latest_by_ride(ride_id)
 
@@ -112,7 +116,8 @@ class TestParkActivitySnapshotRepository:
             'rides_closed': 5,
             'total_rides_tracked': 30,
             'avg_wait_time': 42.5,
-            'max_wait_time': 90
+            'max_wait_time': 90,
+            'shame_score': 1.5
         }
 
         activity_id = repo.insert(activity_data)
@@ -133,10 +138,12 @@ class TestParkActivitySnapshotRepository:
         base_time = datetime.now()
         repo.insert({'park_id': park_id, 'recorded_at': base_time - timedelta(seconds=10),
                     'park_appears_open': 1, 'rides_open': 20, 'rides_closed': 10,
-                    'total_rides_tracked': 30, 'avg_wait_time': 35.0, 'max_wait_time': 60})
+                    'total_rides_tracked': 30, 'avg_wait_time': 35.0, 'max_wait_time': 60,
+                    'shame_score': 1.0})
         repo.insert({'park_id': park_id, 'recorded_at': base_time,
                     'park_appears_open': 1, 'rides_open': 25, 'rides_closed': 5,
-                    'total_rides_tracked': 30, 'avg_wait_time': 42.5, 'max_wait_time': 90})
+                    'total_rides_tracked': 30, 'avg_wait_time': 42.5, 'max_wait_time': 90,
+                    'shame_score': 1.5})
 
         latest = repo.get_latest_by_park(park_id)
 

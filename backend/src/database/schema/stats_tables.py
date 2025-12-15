@@ -228,8 +228,9 @@ ride_yearly_stats = Table(
 #   - rides_with_downtime: Count of rides that had any downtime
 #   - trend_vs_previous_*: Percentage change vs previous period
 #
-# Note: Shame score is NOT stored here - it's computed at query time
-# from weighted downtime and park weights. See queries/builders/ctes.py
+# park_daily_stats now stores shame_score directly so AggregationService
+# can persist the weighted downtime metric. This keeps downstream queries
+# aligned with the API contracts that read pds.shame_score.
 # =============================================================================
 
 park_daily_stats = Table(
@@ -240,6 +241,7 @@ park_daily_stats = Table(
     Column("stat_date", Date, nullable=False),
     Column("total_rides_tracked", Integer, nullable=False, server_default="0"),
     Column("avg_uptime_percentage", Numeric(5, 2), nullable=True),
+    Column("shame_score", Numeric(6, 3), nullable=True),
     Column("total_downtime_hours", Numeric(8, 2), nullable=False, server_default="0.00"),
     Column("rides_with_downtime", Integer, nullable=False, server_default="0"),
     Column("avg_wait_time", Numeric(5, 2), nullable=True),

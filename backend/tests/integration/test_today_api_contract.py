@@ -92,7 +92,10 @@ def today_api_test_data(mysql_connection):
             ride_id_counter += 1
 
     for ride in rides_to_create:
-        conn.execute(text("INSERT INTO rides (ride_id, park_id, name, is_active, category) VALUES (:ride_id, :park_id, :name, TRUE, 'ATTRACTION')"), ride)
+        conn.execute(text("""
+            INSERT INTO rides (ride_id, queue_times_id, park_id, name, is_active, category)
+            VALUES (:ride_id, :qt_id, :park_id, :name, TRUE, 'ATTRACTION')
+        """), ride)
         conn.execute(text("INSERT INTO ride_classifications (ride_id, tier, tier_weight) VALUES (:ride_id, :tier, :tier_weight)"), ride)
 
     # Generate snapshots and hourly stats
@@ -136,7 +139,44 @@ def today_api_test_data(mysql_connection):
             if is_t1_down: shame_score = (3 / scenario['total_weight']) * 10
             if is_t2_down: shame_score = (2 / scenario['total_weight']) * 10
 
-            conn.execute(text("INSERT INTO park_activity_snapshots (park_id, recorded_at, park_appears_open, shame_score, effective_park_weight) VALUES (:pid, :ts, TRUE, :ss, :w)"), {'pid': park_id, 'ts': ts, 'ss': shame_score, 'w': scenario['total_weight']})
+            rides_open = (0 if is_t1_down else 1) + (0 if is_t2_down else 1)
+            rides_closed = 2 - rides_open
+            avg_wait = 10 + i
+            conn.execute(
+                text("""
+                    INSERT INTO park_activity_snapshots (
+                        park_id,
+                        recorded_at,
+                        total_rides_tracked,
+                        rides_open,
+                        rides_closed,
+                        avg_wait_time,
+                        max_wait_time,
+                        park_appears_open,
+                        shame_score
+                    ) VALUES (
+                        :pid,
+                        :ts,
+                        :total_tracked,
+                        :open_count,
+                        :closed_count,
+                        :avg_wait,
+                        :max_wait,
+                        TRUE,
+                        :shame
+                    )
+                """),
+                {
+                    'pid': park_id,
+                    'ts': ts,
+                    'total_tracked': 2,
+                    'open_count': rides_open,
+                    'closed_count': rides_closed,
+                    'avg_wait': avg_wait,
+                    'max_wait': avg_wait + 5,
+                    'shame': shame_score,
+                }
+            )
             conn.execute(text("INSERT INTO ride_status_snapshots (ride_id, recorded_at, status, computed_is_open) VALUES (:rid, :ts, :st, :cio)"), {'rid': ride_t1, 'ts': ts, 'st': 'DOWN' if is_t1_down else 'OPERATING', 'cio': not is_t1_down})
             conn.execute(text("INSERT INTO ride_status_snapshots (ride_id, recorded_at, status, computed_is_open) VALUES (:rid, :ts, :st, :cio)"), {'rid': ride_t2, 'ts': ts, 'st': 'DOWN' if is_t2_down else 'OPERATING', 'cio': not is_t2_down})
 
@@ -160,9 +200,43 @@ def today_api_test_data(mysql_connection):
             if not stats['shame_scores']: continue
             avg_shame = sum(stats['shame_scores']) / len(stats['shame_scores'])
             conn.execute(text("""
-                INSERT INTO park_hourly_stats (park_id, hour_start_utc, shame_score, snapshot_count, total_downtime_hours, weighted_downtime_hours, rides_operating, rides_down)
-                VALUES (:pid, :hour, :shame, :sc, :tdh, :wdh, :ro, :rd)
-            """), {'pid': park_id, 'hour': hour, 'shame': avg_shame, 'sc': stats['snapshot_count'], 'tdh': stats['total_downtime_hours'], 'wdh': stats['weighted_downtime_hours'], 'ro': stats['rides_operating'], 'rd': stats['rides_down']})
+                INSERT INTO park_hourly_stats (
+                    park_id,
+                    hour_start_utc,
+                    shame_score,
+                    avg_wait_time_minutes,
+                    rides_operating,
+                    rides_down,
+                    total_downtime_hours,
+                    weighted_downtime_hours,
+                    effective_park_weight,
+                    snapshot_count,
+                    park_was_open
+                ) VALUES (
+                    :pid,
+                    :hour,
+                    :shame,
+                    :avg_wait,
+                    :ro,
+                    :rd,
+                    :tdh,
+                    :wdh,
+                    :weight,
+                    :sc,
+                    TRUE
+                )
+            """), {
+                'pid': park_id,
+                'hour': hour,
+                'shame': avg_shame,
+                'avg_wait': 10.0,
+                'ro': stats['rides_operating'],
+                'rd': stats['rides_down'],
+                'tdh': stats['total_downtime_hours'],
+                'wdh': stats['weighted_downtime_hours'],
+                'weight': scenario['total_weight'],
+                'sc': stats['snapshot_count'],
+            })
 
     conn.commit()
     yield scenarios

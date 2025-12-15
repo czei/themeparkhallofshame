@@ -18,7 +18,7 @@ GET /trends/least-reliable            → database/queries/trends/least_reliable
 
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from database.connection import get_db_connection
 
@@ -86,7 +86,7 @@ def get_trends():
         # Validate parameter values
         # Note: 'live' is intentionally excluded - trends require comparison between periods,
         # which doesn't make sense for instantaneous data. Frontend defaults to 'today' if 'live'.
-        valid_periods = ['today', 'yesterday', 'last_week', 'last_month']
+        valid_periods = ['today', 'yesterday', 'last_week', 'last_month', '7days', '30days']
         valid_categories = ['parks-improving', 'parks-declining', 'rides-improving', 'rides-declining']
         valid_filters = ['disney-universal', 'all-parks']
 
@@ -114,8 +114,11 @@ def get_trends():
                 "error": "Limit must be between 1 and 100"
             }), 400
 
+        period_aliases = {'7days': 'last_week', '30days': 'last_month'}
+        normalized_period = period_aliases.get(period, period)
+
         # Calculate period dates
-        period_info = _calculate_period_dates(period)
+        period_info = _calculate_period_dates(normalized_period)
         filter_disney_universal = (park_filter == 'disney-universal')
 
         # Get database connection using context manager
@@ -125,7 +128,7 @@ def get_trends():
                 # See: database/queries/trends/improving_parks.py
                 query = ImprovingParksQuery(conn)
                 results = query.get_improving(
-                    period=period,
+                    period=normalized_period,
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
@@ -133,7 +136,7 @@ def get_trends():
                 # See: database/queries/trends/declining_parks.py
                 query = DecliningParksQuery(conn)
                 results = query.get_declining(
-                    period=period,
+                    period=normalized_period,
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
@@ -141,7 +144,7 @@ def get_trends():
                 # See: database/queries/trends/improving_rides.py
                 query = ImprovingRidesQuery(conn)
                 results = query.get_improving(
-                    period=period,
+                    period=normalized_period,
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
@@ -149,10 +152,12 @@ def get_trends():
                 # See: database/queries/trends/declining_rides.py
                 query = DecliningRidesQuery(conn)
                 results = query.get_declining(
-                    period=period,
+                    period=normalized_period,
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
+
+        results = _attach_queue_times_urls(category, results)
 
         # Build response
         response = {
@@ -165,7 +170,7 @@ def get_trends():
                 "previous_period": period_info['previous_period_label']
             },
             "count": len(results),
-            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
+            "attribution": "Data powered by Queue-Times.com - https://queue-times.com",
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }
 
@@ -280,31 +285,25 @@ def get_chart_data():
                         minutes=60
                     )
                 elif data_type == 'waittimes':
-                    # Wait times don't have LIVE granularity yet, fall back to hourly
-                    granularity = 'hourly'
                     query = ParkWaitTimeHistoryQuery(conn)
-                    chart_data = query.get_hourly(
-                        target_date=today,
+                    chart_data = query.get_live(
                         filter_disney_universal=filter_disney_universal,
-                        limit=limit
+                        limit=limit,
+                        minutes=60
                     )
                 elif data_type == 'rides':
-                    # Rides downtime don't have LIVE granularity yet, fall back to hourly
-                    granularity = 'hourly'
                     query = RideDowntimeHistoryQuery(conn)
-                    chart_data = query.get_hourly(
-                        target_date=today,
+                    chart_data = query.get_live(
                         filter_disney_universal=filter_disney_universal,
-                        limit=limit
+                        limit=limit,
+                        minutes=60
                     )
                 else:  # ridewaittimes
-                    # Ride wait times don't have LIVE granularity yet, fall back to hourly
-                    granularity = 'hourly'
                     query = RideWaitTimeHistoryQuery(conn)
-                    chart_data = query.get_hourly(
-                        target_date=today,
+                    chart_data = query.get_live(
                         filter_disney_universal=filter_disney_universal,
-                        limit=limit
+                        limit=limit,
+                        minutes=60
                     )
 
                 # Generate mock data if empty for LIVE
@@ -446,7 +445,7 @@ def get_chart_data():
             "chart_data": chart_data,
             "mock": is_mock,
             "granularity": granularity,
-            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
+            "attribution": "Data powered by Queue-Times.com - https://queue-times.com",
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }), 200
 
@@ -563,7 +562,7 @@ def get_longest_wait_times():
             "count": len(ranked_results),
             "data": ranked_results,
             "cached": True,
-            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
+            "attribution": "Data powered by Queue-Times.com - https://queue-times.com",
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }), 200
 
@@ -677,7 +676,7 @@ def get_least_reliable():
             "count": len(ranked_results),
             "data": ranked_results,
             "cached": True,
-            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
+            "attribution": "Data powered by Queue-Times.com - https://queue-times.com",
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }), 200
 
@@ -950,34 +949,36 @@ def _calculate_period_dates(period: str) -> Dict[str, str]:
     Calculate current and previous period date ranges.
 
     Args:
-        period: 'today', 'yesterday', 'last_week', or 'last_month'
+        period: 'today', 'yesterday', 'last_week', or 'last_month' (aliases like '7days' map to last_week)
 
     Returns:
         Dict with current_period_label and previous_period_label
     """
     today = get_today_pacific()  # Pacific Time for US parks
+    alias_map = {'7days': 'last_week', '30days': 'last_month'}
+    normalized_period = alias_map.get(period, period)
 
-    if period == 'today':
+    if normalized_period == 'today':
         current_start = today
         current_end = today
         previous_start = today - timedelta(days=1)
         previous_end = today - timedelta(days=1)
 
-    elif period == 'yesterday':
+    elif normalized_period == 'yesterday':
         yesterday = today - timedelta(days=1)
         current_start = yesterday
         current_end = yesterday
         previous_start = today - timedelta(days=2)
         previous_end = today - timedelta(days=2)
 
-    elif period == 'last_week':
+    elif normalized_period == 'last_week':
         # Calendar-based: previous complete week (Sunday-Saturday)
         current_start, current_end, _ = get_last_week_date_range()
         # Previous week is the week before that
         previous_end = current_start - timedelta(days=1)
         previous_start = previous_end - timedelta(days=6)
 
-    elif period == 'last_month':
+    elif normalized_period == 'last_month':
         # Calendar-based: previous complete calendar month
         current_start, current_end, _ = get_last_month_date_range()
         # Previous month is the month before that
@@ -993,3 +994,22 @@ def _calculate_period_dates(period: str) -> Dict[str, str]:
         'previous_start': previous_start,
         'previous_end': previous_end
     }
+def _attach_queue_times_urls(category: str, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Ensure each result includes a Queue-Times URL so the API contract stays stable.
+    """
+    enriched: List[Dict[str, Any]] = []
+    for row in results:
+        entry = dict(row) if hasattr(row, "_mapping") else dict(row)
+        if category.startswith("rides-"):
+            park_qt_id = entry.get("park_queue_times_id")
+            ride_qt_id = entry.get("queue_times_id")
+            if park_qt_id and ride_qt_id:
+                entry["queue_times_url"] = f"https://queue-times.com/parks/{park_qt_id}/rides/{ride_qt_id}"
+            else:
+                entry["queue_times_url"] = None
+        else:
+            park_qt_id = entry.get("queue_times_id")
+            entry["queue_times_url"] = f"https://queue-times.com/parks/{park_qt_id}" if park_qt_id else None
+        enriched.append(entry)
+    return enriched

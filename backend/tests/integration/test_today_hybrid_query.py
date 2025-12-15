@@ -227,11 +227,11 @@ def _seed_single_park_with_hourly_and_raw(
     conn.execute(
         text(
             """
-        INSERT INTO rides (ride_id, park_id, name, category, is_active)
-        VALUES (:ride_id, :park_id, 'Test Ride', 'ATTRACTION', TRUE)
+        INSERT INTO rides (ride_id, queue_times_id, park_id, name, is_active)
+        VALUES (:ride_id, :queue_times_id, :park_id, 'Test Ride', TRUE)
         """
         ),
-        {"ride_id": 1000 + park_id, "park_id": park_id},
+        {"ride_id": 1000 + park_id, "queue_times_id": 9000 + park_id, "park_id": park_id},
     )
 
     # Give it a classification (weight doesn't matter for shame_score here)
@@ -239,7 +239,7 @@ def _seed_single_park_with_hourly_and_raw(
         text(
             """
         INSERT INTO ride_classifications (ride_id, tier, tier_weight, classification_method, confidence_score)
-        VALUES (:ride_id, 2, 2.0, 'manual', 1.0)
+        VALUES (:ride_id, 2, 2.0, 'manual_override', 1.0)
         """
         ),
         {"ride_id": 1000 + park_id},
@@ -777,8 +777,8 @@ def test_today_hybrid_rides_down_ignores_current_hour(today_hybrid_schema, monke
     conn.execute(
         text(
             """
-        INSERT INTO rides (ride_id, park_id, name, category, is_active)
-        VALUES (3030, 30, 'DownRide', 'ATTRACTION', TRUE)
+        INSERT INTO rides (ride_id, queue_times_id, park_id, name, is_active)
+        VALUES (3030, 9030, 30, 'DownRide', TRUE)
         """
         )
     )
@@ -787,7 +787,7 @@ def test_today_hybrid_rides_down_ignores_current_hour(today_hybrid_schema, monke
         text(
             """
         INSERT INTO ride_classifications (ride_id, tier, tier_weight, classification_method, confidence_score)
-        VALUES (3030, 2, 2.0, 'manual', 1.0)
+        VALUES (3030, 2, 2.0, 'manual_override', 1.0)
         """
         )
     )

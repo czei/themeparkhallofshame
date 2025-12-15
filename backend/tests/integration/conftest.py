@@ -137,10 +137,16 @@ def mysql_connection(mysql_engine):
 @pytest.fixture
 def mysql_with_schema(mysql_connection):
     """
-    Provide MySQL connection with schema created.
+    Provide MySQL connection with schema already set up.
 
-    Creates all required tables in the test database.
-    Tables are dropped after the test completes (via rollback).
+    IMPORTANT: This fixture assumes the test database has already been
+    set up with the correct schema by running setup-test-database.sh
+    before running tests. It does NOT create tables - the migrations
+    have already done that.
+
+    The mysql_connection fixture wraps everything in a transaction that
+    gets rolled back after each test, ensuring test isolation without
+    needing to drop/recreate tables.
 
     Args:
         mysql_connection: MySQL connection fixture
@@ -148,32 +154,10 @@ def mysql_with_schema(mysql_connection):
     Yields:
         SQLAlchemy connection with schema
     """
-    # Create schema (read from migrations or schema.sql)
-    # For now, this is a placeholder
-    # TODO: Load schema from database/schema.sql or migrations
-
-    # Example table creation (minimal for testing)
-    mysql_connection.execute(text("""
-        CREATE TABLE IF NOT EXISTS parks (
-            park_id INT AUTO_INCREMENT PRIMARY KEY,
-            queue_times_id INT UNIQUE NOT NULL,
-            name VARCHAR(255) NOT NULL,
-            timezone VARCHAR(50) NOT NULL,
-            latitude DECIMAL(10, 8),
-            longitude DECIMAL(11, 8),
-            is_active BOOLEAN DEFAULT TRUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        )
-    """))
-
-    mysql_connection.commit()
-
+    # Schema is already created by setup-test-database.sh which runs all migrations.
+    # We just yield the connection - no table creation or cleanup needed.
+    # Transaction rollback in mysql_connection handles test isolation.
     yield mysql_connection
-
-    # Cleanup (drop tables)
-    mysql_connection.execute(text("DROP TABLE IF EXISTS parks"))
-    mysql_connection.commit()
 
 
 # Sample data fixtures (similar to unit test fixtures)

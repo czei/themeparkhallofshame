@@ -52,9 +52,9 @@ def sample_park_id(mysql_connection):
 
     # Create new park
     mysql_connection.execute(text("""
-        INSERT INTO parks (queue_times_id, themeparks_wiki_id, name, city, state_province,
+        INSERT INTO parks (park_id, queue_times_id, themeparks_wiki_id, name, city, state_province,
                           country, timezone, operator, is_disney, is_universal, is_active)
-        VALUES (99901, 'test-uuid-12345', 'Test Schedule Park', 'Orlando', 'FL',
+        VALUES (99901, 99901, 'test-uuid-12345', 'Test Schedule Park', 'Orlando', 'FL',
                 'US', 'America/New_York', 'Test', 0, 0, 1)
     """))
     mysql_connection.commit()
@@ -294,9 +294,10 @@ class TestScheduleRepositoryHasRecent:
         # Create a separate test park for this test to avoid interference
         from sqlalchemy import text
         mysql_connection.execute(text("""
-            INSERT IGNORE INTO parks (queue_times_id, name, city, country, timezone, is_active)
-            VALUES (99902, 'Old Schedule Park', 'Test', 'US', 'America/New_York', 1)
+            INSERT IGNORE INTO parks (park_id, queue_times_id, name, city, country, timezone, is_active, is_disney, is_universal)
+            VALUES (99902, 99902, 'Old Schedule Park', 'Test', 'US', 'America/New_York', 1, 0, 0)
         """))
+        mysql_connection.commit()
         result = mysql_connection.execute(
             text("SELECT park_id FROM parks WHERE queue_times_id = 99902")
         )

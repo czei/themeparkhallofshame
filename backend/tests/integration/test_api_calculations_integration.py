@@ -80,8 +80,32 @@ def comprehensive_api_test_data(mysql_connection):
             'is_disney': park[8], 'is_universal': park[9], 'is_active': park[10]
         })
 
+    def build_weekly_series(base_minutes: int):
+        """Distribute 20% of base downtime across 5 extra days to keep weekly totals exact."""
+        extra_total = int(round(base_minutes * 0.2))
+        base_increment = extra_total // 5
+        remainder = extra_total % 5
+        series = []
+        for idx in range(5):
+            inc = base_increment + (1 if idx < remainder else 0)
+            series.append(base_minutes + inc)
+        return series
+
+    tier_weekly_series = {
+        1: build_weekly_series(180),
+        2: build_weekly_series(60),
+        3: build_weekly_series(30)
+    }
+
     # === CREATE 100 RIDES (10 per park: 2 Tier1, 5 Tier2, 3 Tier3) ===
     ride_id = 1
+    park_weekly_minutes = [
+        2 * tier_weekly_series[1][idx] +
+        5 * tier_weekly_series[2][idx] +
+        3 * tier_weekly_series[3][idx]
+        for idx in range(5)
+    ]
+
     for park_id in range(1, 11):
         # Each park gets: 2 Tier 1, 5 Tier 2, 3 Tier 3
         tiers = [1, 1, 2, 2, 2, 2, 2, 3, 3, 3]
@@ -142,20 +166,22 @@ def comprehensive_api_test_data(mysql_connection):
 
             conn.execute(text("""
                 INSERT INTO ride_daily_stats (
-                    ride_id, stat_date, downtime_minutes, uptime_percentage,
-                    avg_wait_time, peak_wait_time, status_changes
+                    ride_id, stat_date, downtime_minutes, uptime_minutes, uptime_percentage,
+                    avg_wait_time, peak_wait_time, status_changes, operating_hours_minutes
                 ) VALUES (
-                    :ride_id, :stat_date, :downtime, :uptime,
-                    :avg_wait, :peak_wait, :status_changes
+                    :ride_id, :stat_date, :downtime, :uptime_minutes, :uptime,
+                    :avg_wait, :peak_wait, :status_changes, :operating_minutes
                 )
             """), {
                 'ride_id': ride_id,
                 'stat_date': today,
                 'downtime': downtime_today,
+                'uptime_minutes': 600 - downtime_today,
                 'uptime': uptime_pct_today,
                 'avg_wait': 45 if tier == 1 else (30 if tier == 2 else 15),
                 'peak_wait': 90 if tier == 1 else (60 if tier == 2 else 30),
                 'status_changes': 3,
+                'operating_minutes': 600,
                 'observations': 60
             })
 
@@ -166,22 +192,52 @@ def comprehensive_api_test_data(mysql_connection):
 
             conn.execute(text("""
                 INSERT INTO ride_daily_stats (
-                    ride_id, stat_date, downtime_minutes, uptime_percentage,
-                    avg_wait_time, peak_wait_time, status_changes
+                    ride_id, stat_date, downtime_minutes, uptime_minutes, uptime_percentage,
+                    avg_wait_time, peak_wait_time, status_changes, operating_hours_minutes
                 ) VALUES (
-                    :ride_id, :stat_date, :downtime, :uptime,
-                    :avg_wait, :peak_wait, :status_changes
+                    :ride_id, :stat_date, :downtime, :uptime_minutes, :uptime,
+                    :avg_wait, :peak_wait, :status_changes, :operating_minutes
                 )
             """), {
                 'ride_id': ride_id,
                 'stat_date': yesterday,
                 'downtime': downtime_yesterday,
+                'uptime_minutes': 600 - downtime_yesterday,
                 'uptime': uptime_pct_yesterday,
                 'avg_wait': 40 if tier == 1 else (25 if tier == 2 else 12),
                 'peak_wait': 80 if tier == 1 else (50 if tier == 2 else 25),
                 'status_changes': 2,
+                'operating_minutes': 600,
                 'observations': 60
             })
+
+            # Additional days to support weekly aggregations (keep trend data intact)
+            weekly_series = tier_weekly_series[tier]
+            for idx, days_back in enumerate(range(2, 7)):
+                stat_date = today - timedelta(days=days_back)
+                extra_downtime = weekly_series[idx]
+                extra_uptime_pct = ((600 - extra_downtime) / 600.0) * 100
+
+                conn.execute(text("""
+                    INSERT INTO ride_daily_stats (
+                        ride_id, stat_date, downtime_minutes, uptime_minutes, uptime_percentage,
+                        avg_wait_time, peak_wait_time, status_changes, operating_hours_minutes
+                    ) VALUES (
+                        :ride_id, :stat_date, :downtime, :uptime_minutes, :uptime,
+                        :avg_wait, :peak_wait, :status_changes, :operating_minutes
+                    )
+                """), {
+                    'ride_id': ride_id,
+                    'stat_date': stat_date,
+                    'downtime': extra_downtime,
+                    'uptime_minutes': 600 - extra_downtime,
+                    'uptime': extra_uptime_pct,
+                    'avg_wait': 45 if tier == 1 else (30 if tier == 2 else 15),
+                    'peak_wait': 90 if tier == 1 else (60 if tier == 2 else 30),
+                    'status_changes': 3,
+                    'operating_minutes': 600,
+                    'observations': 60
+                })
 
             # Weekly stats
             downtime_week = downtime_today * 7
@@ -278,28 +334,47 @@ def comprehensive_api_test_data(mysql_connection):
     for park_id in range(1, 11):
         conn.execute(text("""
             INSERT INTO park_daily_stats (
-                park_id, stat_date, total_downtime_hours, rides_with_downtime, avg_uptime_percentage
-            ) VALUES (:park_id, :stat_date, :downtime_hours, :rides_down, :avg_uptime)
+                park_id, stat_date, total_downtime_hours, rides_with_downtime,
+                avg_uptime_percentage, operating_hours_minutes
+            ) VALUES (:park_id, :stat_date, :downtime_hours, :rides_down, :avg_uptime, :operating_minutes)
         """), {
             'park_id': park_id,
             'stat_date': today,
             'downtime_hours': 750 / 60.0,  # 12.5 hours
             'rides_down': 10,
-            'avg_uptime': 77.78
+            'avg_uptime': 77.78,
+            'operating_minutes': 900
         })
 
         # Yesterday: 20% less = 600 min = 10 hours
         conn.execute(text("""
             INSERT INTO park_daily_stats (
-                park_id, stat_date, total_downtime_hours, rides_with_downtime, avg_uptime_percentage
-            ) VALUES (:park_id, :stat_date, :downtime_hours, :rides_down, :avg_uptime)
+                park_id, stat_date, total_downtime_hours, rides_with_downtime,
+                avg_uptime_percentage, operating_hours_minutes
+            ) VALUES (:park_id, :stat_date, :downtime_hours, :rides_down, :avg_uptime, :operating_minutes)
         """), {
             'park_id': park_id,
             'stat_date': yesterday,
             'downtime_hours': 600 / 60.0,  # 10 hours
             'rides_down': 10,
-            'avg_uptime': 80.0
+            'avg_uptime': 80.0,
+            'operating_minutes': 900
         })
+
+        for idx, days_back in enumerate(range(2, 7)):
+            conn.execute(text("""
+                INSERT INTO park_daily_stats (
+                    park_id, stat_date, total_downtime_hours, rides_with_downtime,
+                    avg_uptime_percentage, operating_hours_minutes
+                ) VALUES (:park_id, :stat_date, :downtime_hours, :rides_down, :avg_uptime, :operating_minutes)
+            """), {
+                'park_id': park_id,
+                'stat_date': today - timedelta(days=days_back),
+                'downtime_hours': park_weekly_minutes[idx] / 60.0,
+                'rides_down': 10,
+                'avg_uptime': 75.0,
+                'operating_minutes': 900
+            })
 
     # === CREATE PARK WEEKLY STATS ===
     for park_id in range(1, 11):

@@ -26,7 +26,7 @@ Output Format:
 }
 """
 
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone
 from typing import List, Dict, Any
 
 from sqlalchemy import select, func, and_, text
@@ -35,6 +35,7 @@ from sqlalchemy.engine import Connection
 from database.schema import parks, rides, ride_daily_stats
 from database.queries.builders import Filters
 from utils.timezone import get_pacific_day_range_utc
+from utils.sql_helpers import timestamp_match_condition
 
 
 class RideWaitTimeHistoryQuery:
@@ -224,6 +225,101 @@ class RideWaitTimeHistoryQuery:
             "end_utc": end_utc
         })
         return [dict(row._mapping) for row in result]
+
+    def get_live(
+        self,
+        filter_disney_universal: bool = False,
+        limit: int = 5,
+        minutes: int = 60,
+    ) -> Dict[str, Any]:
+        """
+        Get live 5-minute wait time data for rides (last N minutes).
+        """
+        now_utc = datetime.now(timezone.utc)
+        start_utc = now_utc - timedelta(minutes=minutes)
+        ts_match = timestamp_match_condition("pas.recorded_at", "rss.recorded_at")
+
+        labels = []
+        current = start_utc
+        while current <= now_utc:
+            labels.append(current.strftime("%H:%M"))
+            current += timedelta(minutes=5)
+
+        disney_filter = (
+            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"
+            if filter_disney_universal
+            else ""
+        )
+
+        top_rides_query = text(f"""
+            SELECT
+                r.ride_id,
+                p.park_id,
+                r.name AS ride_name,
+                p.name AS park_name,
+                AVG(rss.wait_time) AS overall_avg_wait
+            FROM rides r
+            INNER JOIN parks p ON r.park_id = p.park_id
+            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
+                AND {ts_match}
+            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at <= :end_utc
+                AND pas.park_appears_open = TRUE
+                AND rss.wait_time IS NOT NULL
+                AND rss.wait_time > 0
+                AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+                AND p.is_active = TRUE
+                {disney_filter}
+            GROUP BY r.ride_id, p.park_id, r.name, p.name
+            HAVING overall_avg_wait > 0
+            ORDER BY overall_avg_wait DESC
+            LIMIT :limit
+        """)
+
+        result = self.conn.execute(top_rides_query, {
+            "start_utc": start_utc,
+            "end_utc": now_utc,
+            "limit": limit
+        })
+        top_rides = [dict(row._mapping) for row in result]
+
+        if not top_rides:
+            return {"labels": labels, "datasets": [], "granularity": "minutes"}
+
+        datasets = []
+        for ride in top_rides:
+            series_query = text(f"""
+                SELECT
+                    DATE_FORMAT(rss.recorded_at, '%H:%i') AS minute_label,
+                    AVG(rss.wait_time) AS avg_wait
+                FROM ride_status_snapshots rss
+                INNER JOIN rides r ON rss.ride_id = r.ride_id
+                INNER JOIN parks p ON r.park_id = p.park_id
+                INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
+                    AND {ts_match}
+                WHERE rss.ride_id = :ride_id
+                    AND rss.recorded_at >= :start_utc AND rss.recorded_at <= :end_utc
+                    AND pas.park_appears_open = TRUE
+                    AND rss.wait_time IS NOT NULL
+                    AND rss.wait_time > 0
+                GROUP BY minute_label
+                ORDER BY minute_label
+            """)
+            series_result = self.conn.execute(series_query, {
+                "ride_id": ride["ride_id"],
+                "start_utc": start_utc,
+                "end_utc": now_utc
+            })
+            points = {row.minute_label: float(row.avg_wait) for row in series_result}
+            aligned = [points.get(label) for label in labels]
+            datasets.append({
+                "label": ride["ride_name"],
+                "park": ride["park_name"],
+                "data": aligned,
+            })
+
+        return {"labels": labels, "datasets": datasets, "granularity": "minutes"}
 
     def _get_top_rides_by_wait_time(
         self,

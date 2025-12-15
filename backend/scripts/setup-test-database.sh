@@ -1,5 +1,8 @@
 #!/bin/bash
 # Setup MySQL test database for integration tests
+#
+# This script clones the SCHEMA from themepark_tracker_dev (no data)
+# to ensure tests run against the same structure as development.
 
 set -e
 
@@ -10,8 +13,10 @@ DB_ROOT_PASSWORD="294e043ww"
 DB_NAME="themepark_test"
 DB_USER="themepark_test"
 DB_PASSWORD="test_password"
+SOURCE_DB="themepark_tracker_dev"
 
 # Drop and recreate database (ensures clean state), create user
+echo "Creating database and user..."
 mysql -u root -p${DB_ROOT_PASSWORD} <<SQL
 DROP DATABASE IF EXISTS ${DB_NAME};
 CREATE DATABASE ${DB_NAME};
@@ -22,15 +27,11 @@ SQL
 
 echo "Database and user created"
 
-# Run migrations
-echo "Running database migrations..."
-cd "$(dirname "$0")/.."
-for file in src/database/migrations/00{1,2,3,4,5}_*.sql; do
-    if [ -f "$file" ]; then
-        echo "  Running $file..."
-        mysql -u ${DB_USER} -p${DB_PASSWORD} ${DB_NAME} < "$file" 2>&1 | grep -v "Warning" || true
-    fi
-done
+# Clone schema from dev database (structure only, no data)
+echo "Cloning schema from ${SOURCE_DB}..."
+mysqldump -u root -p${DB_ROOT_PASSWORD} --no-data ${SOURCE_DB} 2>/dev/null > /tmp/schema_dump.sql
+mysql -u root -p${DB_ROOT_PASSWORD} ${DB_NAME} < /tmp/schema_dump.sql
+rm /tmp/schema_dump.sql
 
 echo "✅ Test database setup complete!"
 echo ""

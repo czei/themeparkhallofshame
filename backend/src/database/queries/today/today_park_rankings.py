@@ -99,11 +99,16 @@ class TodayParkRankingsQuery:
                 -- Weighted downtime hours: sum across today
                 ROUND(SUM(phs.weighted_downtime_hours), 2) AS weighted_downtime_hours,
 
-                -- Rides currently down: from live rankings (current status)
-                COALESCE(plr.rides_down, 0) AS rides_down,
+                -- Rides operating/down totals derived from today's aggregates
+                ROUND(SUM(phs.rides_operating), 0) AS rides_operating,
+                ROUND(SUM(phs.rides_down), 0) AS rides_down,
 
-                -- Park is open: from live rankings (current status)
-                COALESCE(plr.park_is_open, 0) AS park_is_open,
+                -- Effective park weight + snapshots for contract parity
+                ROUND(AVG(phs.effective_park_weight), 1) AS effective_park_weight,
+                SUM(phs.snapshot_count) AS snapshot_count,
+
+                -- Park open flag derived from hourly aggregates
+                MAX(phs.park_was_open) AS park_is_open,
 
                 -- Uptime percentage: calculated from hourly aggregates
                 ROUND(
@@ -114,13 +119,11 @@ class TodayParkRankingsQuery:
 
             FROM park_hourly_stats phs
             INNER JOIN parks p ON phs.park_id = p.park_id
-            LEFT JOIN park_live_rankings plr ON p.park_id = plr.park_id
             WHERE phs.hour_start_utc >= :start_utc
               AND phs.hour_start_utc < :end_utc
               AND p.is_active = TRUE
               {filter_clause}
-            GROUP BY p.park_id, p.queue_times_id, p.name, p.city, p.state_province,
-                     plr.rides_down, plr.park_is_open
+            GROUP BY p.park_id, p.queue_times_id, p.name, p.city, p.state_province
             HAVING AVG(phs.shame_score) > 0
             ORDER BY {sort_column} DESC
             LIMIT :limit

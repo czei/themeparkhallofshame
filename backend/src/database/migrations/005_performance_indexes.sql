@@ -30,8 +30,22 @@
 -- Note: This is a covering index - the query can be satisfied entirely from
 -- the index without accessing the main table data (Using index in EXPLAIN).
 
-CREATE INDEX IF NOT EXISTS idx_rss_time_range_covering
-ON ride_status_snapshots (recorded_at, ride_id, computed_is_open, wait_time);
+SET @idx_name := 'idx_rss_time_range_covering';
+SET @idx_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'ride_status_snapshots'
+      AND index_name = @idx_name
+);
+SET @ddl := IF(
+    @idx_exists = 0,
+    'CREATE INDEX idx_rss_time_range_covering ON ride_status_snapshots (recorded_at, ride_id, computed_is_open, wait_time);',
+    'SELECT "idx_rss_time_range_covering already exists" AS message;'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- ===========================================================================
 -- park_activity_snapshots: Covering index for JOIN optimization
@@ -47,8 +61,22 @@ ON ride_status_snapshots (recorded_at, ride_id, computed_is_open, wait_time);
 -- - park_id: JOIN condition with parks table
 -- - park_appears_open: Filter condition (covering)
 
-CREATE INDEX IF NOT EXISTS idx_pas_time_range_covering
-ON park_activity_snapshots (recorded_at, park_id, park_appears_open);
+SET @idx_name := 'idx_pas_time_range_covering';
+SET @idx_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'park_activity_snapshots'
+      AND index_name = @idx_name
+);
+SET @ddl := IF(
+    @idx_exists = 0,
+    'CREATE INDEX idx_pas_time_range_covering ON park_activity_snapshots (recorded_at, park_id, park_appears_open);',
+    'SELECT "idx_pas_time_range_covering already exists" AS message;'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- ===========================================================================
 -- Verify indexes were created

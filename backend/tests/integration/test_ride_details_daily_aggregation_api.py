@@ -4,13 +4,120 @@ Ride Details Daily Aggregation API Integration Tests
 
 Integration tests that verify the actual API returns daily-aggregated data
 for weekly and monthly periods.
-
-These tests will FAIL until we implement the daily aggregation feature.
 """
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
+from sqlalchemy import text
+
 from api.app import create_app
-from database.connection import get_db_connection
+
+
+TEST_RIDE_ID = 4128
+TEST_PARK_ID = 94128
+
+
+@pytest.fixture(scope="module", autouse=True)
+def seed_ride_details_data(mysql_engine):
+    """
+    Seed deterministic ride + hourly stats so the API can respond with data.
+
+    The Flask app runs in a separate connection, so we must commit after inserts.
+    """
+    with mysql_engine.connect() as conn:
+        # Clean existing scaffolding for this test ride/park
+        conn.execute(text("DELETE FROM ride_hourly_stats WHERE ride_id = :ride_id"), {"ride_id": TEST_RIDE_ID})
+        conn.execute(text("DELETE FROM rides WHERE ride_id = :ride_id"), {"ride_id": TEST_RIDE_ID})
+        conn.execute(text("DELETE FROM parks WHERE park_id = :park_id"), {"park_id": TEST_PARK_ID})
+        conn.commit()
+
+        # Insert park and ride records
+        conn.execute(text("""
+            INSERT INTO parks (
+                park_id, queue_times_id, name, city, state_province, country,
+                latitude, longitude, timezone, operator, is_disney, is_universal, is_active
+            ) VALUES (
+                :park_id, :queue_times_id, :name, :city, :state, :country,
+                :lat, :lon, :timezone, :operator, :is_disney, :is_universal, :is_active
+            )
+        """), {
+            "park_id": TEST_PARK_ID,
+            "queue_times_id": 904128,
+            "name": "Test Park - Ride Details",
+            "city": "Anaheim",
+            "state": "CA",
+            "country": "US",
+            "lat": 33.8121,
+            "lon": -117.9190,
+            "timezone": "America/Los_Angeles",
+            "operator": "Test Operator",
+            "is_disney": True,
+            "is_universal": False,
+            "is_active": True
+        })
+
+        conn.execute(text("""
+            INSERT INTO rides (
+                ride_id, queue_times_id, park_id, name, land_area, tier, entity_type, category, is_active
+            ) VALUES (
+                :ride_id, :queue_times_id, :park_id, :name, :land_area, :tier, 'ATTRACTION', 'ATTRACTION', TRUE
+            )
+        """), {
+            "ride_id": TEST_RIDE_ID,
+            "queue_times_id": 9904128,
+            "park_id": TEST_PARK_ID,
+            "name": "Pirates of the Caribbean (Test)",
+            "land_area": "Adventureland",
+            "tier": 1
+        })
+        conn.commit()
+
+        base_hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        rows = []
+        for day_offset in range(0, 35):
+            hour_start = base_hour - timedelta(days=day_offset)
+            hour_start = hour_start.replace(hour=20)  # Noon Pacific for consistent DATE conversion
+            hour_start = hour_start.astimezone(timezone.utc).replace(tzinfo=None)
+            down_snapshots = (day_offset % 3) + 1
+            operating_snapshots = 12 - down_snapshots
+            snapshot_count = operating_snapshots + down_snapshots
+            uptime_percentage = round((operating_snapshots / snapshot_count) * 100, 2)
+
+            rows.append({
+                "ride_id": TEST_RIDE_ID,
+                "park_id": TEST_PARK_ID,
+                "hour_start_utc": hour_start,
+                "avg_wait": 20 + (day_offset % 5) * 5,
+                "operating": operating_snapshots,
+                "down": down_snapshots,
+                "downtime_hours": round(down_snapshots * 0.5, 2),
+                "uptime_pct": uptime_percentage,
+                "snapshot_count": snapshot_count,
+                "ride_operated": 1
+            })
+
+        conn.execute(text("""
+            INSERT INTO ride_hourly_stats (
+                ride_id, park_id, hour_start_utc, avg_wait_time_minutes,
+                operating_snapshots, down_snapshots, downtime_hours,
+                uptime_percentage, snapshot_count, ride_operated
+            ) VALUES (
+                :ride_id, :park_id, :hour_start_utc, :avg_wait,
+                :operating, :down, :downtime_hours,
+                :uptime_pct, :snapshot_count, :ride_operated
+            )
+        """), rows)
+        conn.commit()
+
+    yield
+
+    # Cleanup after tests so other suites aren't polluted
+    with mysql_engine.connect() as conn:
+        conn.execute(text("DELETE FROM ride_hourly_stats WHERE ride_id = :ride_id"), {"ride_id": TEST_RIDE_ID})
+        conn.execute(text("DELETE FROM rides WHERE ride_id = :ride_id"), {"ride_id": TEST_RIDE_ID})
+        conn.execute(text("DELETE FROM parks WHERE park_id = :park_id"), {"park_id": TEST_PARK_ID})
+        conn.commit()
 
 
 @pytest.fixture
@@ -36,7 +143,7 @@ class TestRideDetailsAPIDailyAggregation:
         Validates that daily aggregation is working (count << 168).
         """
         # Use Pirates of the Caribbean (ride_id=4128) for testing
-        response = client.get('/api/rides/4128/details?period=last_week')
+        response = client.get(f'/api/rides/{TEST_RIDE_ID}/details?period=last_week')
 
         assert response.status_code == 200
         data = response.get_json()
@@ -60,7 +167,7 @@ class TestRideDetailsAPIDailyAggregation:
 
         Validates that daily aggregation is working (count << 720).
         """
-        response = client.get('/api/rides/4128/details?period=last_month')
+        response = client.get(f'/api/rides/{TEST_RIDE_ID}/details?period=last_month')
 
         assert response.status_code == 200
         data = response.get_json()
@@ -83,7 +190,7 @@ class TestRideDetailsAPIDailyAggregation:
 
         This test should PASS even before implementing daily aggregation.
         """
-        response = client.get('/api/rides/4128/details?period=today')
+        response = client.get(f'/api/rides/{TEST_RIDE_ID}/details?period=today')
 
         assert response.status_code == 200
         data = response.get_json()
@@ -100,7 +207,7 @@ class TestRideDetailsAPIDailyAggregation:
 
         This test should PASS even before implementing daily aggregation.
         """
-        response = client.get('/api/rides/4128/details?period=yesterday')
+        response = client.get(f'/api/rides/{TEST_RIDE_ID}/details?period=yesterday')
 
         assert response.status_code == 200
         data = response.get_json()
@@ -122,7 +229,7 @@ class TestRideDetailsAPIDailyAggregation:
 
         This test will FAIL until we implement daily aggregation.
         """
-        response = client.get('/api/rides/4128/details?period=last_week')
+        response = client.get(f'/api/rides/{TEST_RIDE_ID}/details?period=last_week')
 
         assert response.status_code == 200
         data = response.get_json()
@@ -144,7 +251,7 @@ class TestRideDetailsAPIDailyAggregation:
 
         This test will FAIL until we implement daily aggregation.
         """
-        response = client.get('/api/rides/4128/details?period=last_week')
+        response = client.get(f'/api/rides/{TEST_RIDE_ID}/details?period=last_week')
 
         assert response.status_code == 200
         data = response.get_json()
@@ -164,7 +271,7 @@ class TestRideDetailsAPIDailyAggregation:
 
         Validates that breakdown matches chart granularity.
         """
-        response = client.get('/api/rides/4128/details?period=last_week')
+        response = client.get(f'/api/rides/{TEST_RIDE_ID}/details?period=last_week')
 
         assert response.status_code == 200
         data = response.get_json()
@@ -187,7 +294,7 @@ class TestRideDetailsAPIDailyAggregation:
 
         This test will FAIL until we implement daily aggregation.
         """
-        response = client.get('/api/rides/4128/details?period=last_week')
+        response = client.get(f'/api/rides/{TEST_RIDE_ID}/details?period=last_week')
 
         assert response.status_code == 200
         data = response.get_json()

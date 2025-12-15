@@ -657,6 +657,7 @@ class StatsRepository:
                 )
                 SELECT
                     p.park_id,
+                    p.queue_times_id,
                     p.name AS park_name,
                     CONCAT(p.city, ', ', p.state_province) AS location,
                     wd.total_weighted_downtime_hours AS total_downtime_hours,
@@ -695,6 +696,7 @@ class StatsRepository:
             query = text(f"""
                 SELECT
                     p.park_id,
+                    p.queue_times_id,
                     p.name AS park_name,
                     CONCAT(p.city, ', ', p.state_province) AS location,
                     pds.total_downtime_hours,
@@ -749,70 +751,89 @@ class StatsRepository:
         """
         disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
 
-        # Calculate date range for the week (last 7 days including today)
-        end_date = date.today()
-        start_date = end_date - timedelta(days=6)
-
-        # Aggregate from daily stats instead of weekly stats table
-        # Include shame_score calculation using tier weights
-        query = text(f"""
-            WITH park_weights AS (
-                -- Calculate total weight for each park based on tier classifications
+        if weighted:
+            query = text(f"""
+                WITH park_weights AS (
+                    SELECT
+                        p.park_id,
+                        SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
+                    FROM parks p
+                    INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
+                        AND r.category = 'ATTRACTION'
+                    LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                    WHERE p.is_active = TRUE
+                        {disney_filter}
+                    GROUP BY p.park_id
+                ),
+                weighted_downtime AS (
+                    SELECT
+                        r.park_id,
+                        SUM(rws.downtime_minutes / 60.0 * COALESCE(rc.tier_weight, 2)) AS total_weighted_downtime_hours
+                    FROM ride_weekly_stats rws
+                    INNER JOIN rides r ON rws.ride_id = r.ride_id
+                    INNER JOIN parks p ON r.park_id = p.park_id
+                    LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                    WHERE rws.year = :year
+                        AND rws.week_number = :week_number
+                        AND p.is_active = TRUE
+                        {disney_filter}
+                    GROUP BY r.park_id
+                )
                 SELECT
                     p.park_id,
-                    SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
+                    p.queue_times_id,
+                    p.name AS park_name,
+                    CONCAT(p.city, ', ', p.state_province) AS location,
+                    pws.total_downtime_hours,
+                    ROUND((wd.total_weighted_downtime_hours / pw.total_park_weight) * 10, 1) AS shame_score,
+                    pws.rides_with_downtime AS affected_rides_count,
+                    pws.avg_uptime_percentage AS uptime_percentage,
+                    pws.trend_vs_previous_week AS trend_percentage
                 FROM parks p
-                INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE p.is_active = TRUE
-                    {disney_filter}
-                GROUP BY p.park_id
-            ),
-            weighted_downtime AS (
-                -- Calculate weighted downtime from ride daily stats
-                SELECT
-                    p.park_id,
-                    SUM(rds.downtime_minutes / 60.0 * COALESCE(rc.tier_weight, 2)) AS total_weighted_downtime_hours
-                FROM parks p
-                INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                INNER JOIN ride_daily_stats rds ON r.ride_id = rds.ride_id
-                WHERE rds.stat_date BETWEEN :start_date AND :end_date
+                INNER JOIN park_weekly_stats pws ON p.park_id = pws.park_id
+                LEFT JOIN park_weights pw ON p.park_id = pw.park_id
+                LEFT JOIN weighted_downtime wd ON p.park_id = wd.park_id
+                WHERE pws.year = :year
+                    AND pws.week_number = :week_number
                     AND p.is_active = TRUE
                     {disney_filter}
-                GROUP BY p.park_id
-            )
-            SELECT
-                p.park_id,
-                p.name AS park_name,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-                ROUND(SUM(pds.total_downtime_hours), 2) AS total_downtime_hours,
-                ROUND((wd.total_weighted_downtime_hours / pw.total_park_weight) * 10, 1) AS shame_score,
-                MAX(pds.rides_with_downtime) AS affected_rides_count,
-                ROUND(AVG(pds.avg_uptime_percentage), 2) AS uptime_percentage,
-                NULL AS trend_percentage
-            FROM parks p
-            INNER JOIN park_daily_stats pds ON p.park_id = pds.park_id
-            LEFT JOIN park_weights pw ON p.park_id = pw.park_id
-            LEFT JOIN weighted_downtime wd ON p.park_id = wd.park_id
-            WHERE pds.stat_date BETWEEN :start_date AND :end_date
-                AND p.is_active = TRUE
-                AND pds.operating_hours_minutes > 0
-                {disney_filter}
-            GROUP BY p.park_id, p.name, p.city, p.state_province, pw.total_park_weight, wd.total_weighted_downtime_hours
-            HAVING SUM(pds.total_downtime_hours) > 0
-            ORDER BY shame_score DESC
-            LIMIT :limit
-        """)
+                ORDER BY shame_score DESC
+                LIMIT :limit
+            """)
 
-        result = self.conn.execute(query, {
-            "start_date": start_date,
-            "end_date": end_date,
-            "limit": limit
-        })
-        return [dict(row._mapping) for row in result]
+            params = {
+                "year": year,
+                "week_number": week_number,
+                "limit": limit
+            }
+        else:
+            query = text(f"""
+                SELECT
+                    p.park_id,
+                    p.queue_times_id,
+                    p.name AS park_name,
+                    CONCAT(p.city, ', ', p.state_province) AS location,
+                    pws.total_downtime_hours,
+                    pws.rides_with_downtime AS affected_rides_count,
+                    pws.avg_uptime_percentage AS uptime_percentage,
+                    pws.trend_vs_previous_week AS trend_percentage
+                FROM parks p
+                INNER JOIN park_weekly_stats pws ON p.park_id = pws.park_id
+                WHERE pws.year = :year
+                    AND pws.week_number = :week_number
+                    AND p.is_active = TRUE
+                    {disney_filter}
+                ORDER BY pws.total_downtime_hours DESC
+                LIMIT :limit
+            """)
+            params = {
+                "year": year,
+                "week_number": week_number,
+                "limit": limit
+            }
+
+        result = self.conn.execute(query, params)
+        return [dict(row._mapping) for row in result.fetchall()]
 
     def get_park_monthly_rankings(
         self,
@@ -869,6 +890,7 @@ class StatsRepository:
             )
             SELECT
                 p.park_id,
+                p.queue_times_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
                 pms.total_downtime_hours,
@@ -927,20 +949,59 @@ class StatsRepository:
         else:  # last_month
             date_interval = 30
 
+        count_filter = None
+        if period == 'today':
+            count_filter = "pds.stat_date = CURDATE()"
+        elif period == 'yesterday':
+            count_filter = "pds.stat_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY)"
+        elif period == 'last_week':
+            count_filter = "pds.stat_date BETWEEN DATE_SUB(CURDATE(), INTERVAL 6 DAY) AND CURDATE()"
+        elif period == 'last_month':
+            count_filter = "pds.stat_date BETWEEN DATE_SUB(CURDATE(), INTERVAL 29 DAY) AND CURDATE()"
+
+        if period == 'today':
+            total_parks_expr = f"""(
+                SELECT COUNT(DISTINCT phs.park_id)
+                FROM park_hourly_stats phs
+                INNER JOIN parks p ON phs.park_id = p.park_id
+                WHERE phs.hour_start_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)
+                    AND p.is_active = TRUE
+                    {disney_filter}
+            )"""
+        elif count_filter:
+            total_parks_expr = f"""(
+                SELECT COUNT(DISTINCT pds.park_id)
+                FROM park_daily_stats pds
+                INNER JOIN parks p ON pds.park_id = p.park_id
+                WHERE {count_filter}
+                    AND p.is_active = TRUE
+                    {disney_filter}
+            )"""
+        else:
+            total_parks_expr = f"""(
+                SELECT COUNT(DISTINCT p.park_id)
+                FROM parks p
+                WHERE p.is_active = TRUE
+                {disney_filter}
+            )"""
+
+        if period == 'today':
+            peak_clause = "phs.hour_start_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL :date_interval DAY)"
+        elif count_filter:
+            peak_clause = count_filter
+        else:
+            peak_clause = "pds.stat_date >= DATE_SUB(CURDATE(), INTERVAL :date_interval DAY)"
+
         # Simple, fast query using indexed columns only
         # disney_filter applied to all subqueries for consistency
         query = text(f"""
             SELECT
-                (SELECT COUNT(DISTINCT p.park_id)
-                 FROM parks p
-                 WHERE p.is_active = TRUE
-                 {disney_filter}) AS total_parks_tracked,
+                {total_parks_expr} AS total_parks_tracked,
                 COALESCE((
-                    SELECT ROUND(MAX(rds.downtime_minutes) / 60.0, 2)
-                    FROM ride_daily_stats rds
-                    INNER JOIN rides r ON rds.ride_id = r.ride_id
-                    INNER JOIN parks p ON r.park_id = p.park_id
-                    WHERE rds.stat_date >= DATE_SUB(CURDATE(), INTERVAL :date_interval DAY)
+                    SELECT ROUND(MAX({('phs.total_downtime_hours' if period=='today' else 'pds.total_downtime_hours')}), 2)
+                    FROM {('park_hourly_stats phs' if period=='today' else 'park_daily_stats pds')}
+                    INNER JOIN parks p ON {('phs.park_id' if period=='today' else 'pds.park_id')} = p.park_id
+                    WHERE {peak_clause}
                     {disney_filter}
                 ), 0) AS peak_downtime_hours,
                 -- Use sum of rides_down from park_hourly_stats (fast, indexed)
@@ -1806,11 +1867,6 @@ class StatsRepository:
         current_status_sq = RideStatusSQL.current_status_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
         current_is_open_sq = RideStatusSQL.current_is_open_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
 
-        # Calculate date range for the week (last 7 days including today)
-        end_date = date.today()
-        start_date = end_date - timedelta(days=6)
-
-        # Aggregate from daily stats instead of weekly stats table
         query = text(f"""
             SELECT
                 r.ride_id,
@@ -1821,34 +1877,30 @@ class StatsRepository:
                 p.park_id,
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
-                ROUND(SUM(rds.downtime_minutes) / 60.0, 2) AS downtime_hours,
-                ROUND(AVG(rds.uptime_percentage), 2) AS uptime_percentage,
-                ROUND(AVG(rds.avg_wait_time), 2) AS avg_wait_time,
-                MAX(rds.peak_wait_time) AS peak_wait_time,
-                -- Get current status using centralized helper
+                ROUND(rws.downtime_minutes / 60.0, 2) AS downtime_hours,
+                rws.uptime_percentage,
+                rws.avg_wait_time,
+                rws.peak_wait_time,
                 {current_status_sq},
-                -- Boolean for frontend compatibility using centralized helper
                 {current_is_open_sq},
                 NULL AS trend_percentage
-            FROM ride_daily_stats rds
-            JOIN rides r ON rds.ride_id = r.ride_id
+            FROM ride_weekly_stats rws
+            JOIN rides r ON rws.ride_id = r.ride_id
             JOIN parks p ON r.park_id = p.park_id
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE rds.stat_date BETWEEN :start_date AND :end_date
+            WHERE rws.year = :year
+                AND rws.week_number = :week_number
                 AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'
                 AND p.is_active = TRUE
-                AND rds.operating_hours_minutes > 0
                 {disney_filter}
-            GROUP BY r.ride_id, r.queue_times_id, p.queue_times_id, r.name, rc.tier, p.park_id, p.name, p.city, p.state_province
-            HAVING SUM(rds.downtime_minutes) > 0
             ORDER BY downtime_hours DESC
             LIMIT :limit
         """)
 
         result = self.conn.execute(query, {
-            "start_date": start_date,
-            "end_date": end_date,
+            "year": year,
+            "week_number": week_number,
             "limit": limit
         })
 

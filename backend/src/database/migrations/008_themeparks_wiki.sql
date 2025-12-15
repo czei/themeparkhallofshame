@@ -79,8 +79,21 @@ AFTER new_status;
 DROP TABLE IF EXISTS ride_operating_schedules;
 
 -- Drop disney_slug column from rides (no longer needed for screen scraping)
-ALTER TABLE rides
-DROP COLUMN IF EXISTS disney_slug;
+SET @col_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'rides'
+      AND column_name = 'disney_slug'
+);
+SET @ddl := IF(
+    @col_exists = 1,
+    'ALTER TABLE rides DROP COLUMN disney_slug;',
+    'SELECT "disney_slug column already removed" AS message;'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- ============================================
 -- VERIFICATION QUERIES (run manually)

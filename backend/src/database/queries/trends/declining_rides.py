@@ -23,7 +23,7 @@ Example Response:
 }
 """
 
-from datetime import date
+from datetime import date, timedelta
 from typing import List, Dict, Any
 
 from sqlalchemy import select, func, and_
@@ -65,6 +65,10 @@ class DecliningRidesQuery:
         today = date.today()
         year = today.year
         week_number = today.isocalendar()[1]
+        prev_week_date = today - timedelta(weeks=1)
+        prev_year = prev_week_date.year
+        prev_week_number = prev_week_date.isocalendar()[1]
+        prev_week = ride_weekly_stats.alias("prev_week")
 
         conditions = [
             rides.c.is_active == True,
@@ -82,6 +86,8 @@ class DecliningRidesQuery:
         stmt = (
             select(
                 rides.c.ride_id,
+                rides.c.queue_times_id,
+                parks.c.queue_times_id.label("park_queue_times_id"),
                 rides.c.name.label("ride_name"),
                 parks.c.name.label("park_name"),
                 ride_weekly_stats.c.uptime_percentage.label("current_uptime"),
@@ -91,10 +97,19 @@ class DecliningRidesQuery:
                     2,
                 ).label("previous_uptime"),
                 ride_weekly_stats.c.trend_vs_previous_week.label("decline_percentage"),
+                (ride_weekly_stats.c.downtime_minutes / 60.0).label("current_downtime_hours"),
+                (prev_week.c.downtime_minutes / 60.0).label("previous_downtime_hours"),
             )
             .select_from(
                 rides.join(parks, rides.c.park_id == parks.c.park_id).join(
                     ride_weekly_stats, rides.c.ride_id == ride_weekly_stats.c.ride_id
+                ).outerjoin(
+                    prev_week,
+                    and_(
+                        prev_week.c.ride_id == ride_weekly_stats.c.ride_id,
+                        prev_week.c.year == prev_year,
+                        prev_week.c.week_number == prev_week_number,
+                    ),
                 )
             )
             .where(and_(*conditions))

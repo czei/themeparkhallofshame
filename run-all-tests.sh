@@ -103,13 +103,18 @@ export TEST_DB_USER=themepark_test
 export TEST_DB_PASSWORD=test_password
 
 # OpenAI API key for AI classification tests (use from environment or .env)
-export OPENAI_API_KEY="${OPENAI_API_KEY:-your-openai-api-key-here}"
+# Note: If no real API key is set, tests requiring it will be skipped
+export OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 
 print_success "Environment variables configured"
 echo "  TEST_DB_HOST: $TEST_DB_HOST"
 echo "  TEST_DB_NAME: $TEST_DB_NAME"
 echo "  TEST_DB_USER: $TEST_DB_USER"
-echo "  OPENAI_API_KEY: sk-proj-...${OPENAI_API_KEY: -10}"
+if [ -n "$OPENAI_API_KEY" ]; then
+    echo "  OPENAI_API_KEY: ***${OPENAI_API_KEY: -4}"
+else
+    echo "  OPENAI_API_KEY: (not set - AI tests will be skipped)"
+fi
 
 # Validate test environment (safety check)
 if ! validate_test_environment; then

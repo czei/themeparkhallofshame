@@ -122,6 +122,7 @@ rides = Table(
     Index("idx_rides_category", "category"),
     Index("idx_entity_type", "entity_type"),
     Index("idx_rides_themeparks_wiki_id", "themeparks_wiki_id"),
+    Index("idx_rides_last_operated_at", "last_operated_at"),
 )
 
 

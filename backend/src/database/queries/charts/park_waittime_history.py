@@ -25,7 +25,7 @@ Output Format:
 }
 """
 
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone
 from typing import List, Dict, Any
 
 from sqlalchemy import select, func, and_, text
@@ -34,6 +34,7 @@ from sqlalchemy.engine import Connection
 from database.schema import parks, park_daily_stats
 from database.queries.builders import Filters
 from utils.timezone import get_pacific_day_range_utc
+from utils.sql_helpers import timestamp_match_condition
 
 
 class ParkWaitTimeHistoryQuery:
@@ -181,6 +182,96 @@ class ParkWaitTimeHistoryQuery:
             })
 
         return {"labels": labels, "datasets": datasets}
+
+    def get_live(
+        self,
+        filter_disney_universal: bool = False,
+        limit: int = 4,
+        minutes: int = 60,
+    ) -> Dict[str, Any]:
+        """
+        Get live 5-minute average wait times for parks (last N minutes).
+        """
+        now_utc = datetime.now(timezone.utc)
+        start_utc = now_utc - timedelta(minutes=minutes)
+        ts_match = timestamp_match_condition("pas.recorded_at", "rss.recorded_at")
+
+        # Build 5-minute labels
+        labels = []
+        current = start_utc
+        while current <= now_utc:
+            labels.append(current.strftime("%H:%M"))
+            current += timedelta(minutes=5)
+
+        disney_filter = (
+            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"
+            if filter_disney_universal
+            else ""
+        )
+
+        top_parks_query = text(f"""
+            SELECT
+                p.park_id,
+                p.name AS park_name,
+                AVG(rss.wait_time) AS avg_wait
+            FROM parks p
+            INNER JOIN rides r ON p.park_id = r.park_id
+                AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
+                AND {ts_match}
+            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at <= :end_utc
+                AND p.is_active = TRUE
+                AND pas.park_appears_open = TRUE
+                AND rss.wait_time IS NOT NULL
+                {disney_filter}
+            GROUP BY p.park_id, p.name
+            HAVING avg_wait > 0
+            ORDER BY avg_wait DESC
+            LIMIT :limit
+        """)
+
+        result = self.conn.execute(top_parks_query, {
+            "start_utc": start_utc,
+            "end_utc": now_utc,
+            "limit": limit
+        })
+        parks_in_view = [dict(row._mapping) for row in result]
+
+        if not parks_in_view:
+            return {"labels": labels, "datasets": [], "granularity": "minutes"}
+
+        datasets = []
+        for park in parks_in_view:
+            series_query = text(f"""
+                SELECT
+                    DATE_FORMAT(rss.recorded_at, '%H:%i') AS minute_label,
+                    AVG(rss.wait_time) AS avg_wait
+                FROM ride_status_snapshots rss
+                INNER JOIN rides r ON rss.ride_id = r.ride_id
+                INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
+                    AND {ts_match}
+                WHERE r.park_id = :park_id
+                    AND rss.recorded_at >= :start_utc AND rss.recorded_at <= :end_utc
+                    AND pas.park_appears_open = TRUE
+                    AND rss.wait_time IS NOT NULL
+                GROUP BY minute_label
+                ORDER BY minute_label
+            """)
+            series_result = self.conn.execute(series_query, {
+                "park_id": park["park_id"],
+                "start_utc": start_utc,
+                "end_utc": now_utc
+            })
+            points = {row.minute_label: float(row.avg_wait) for row in series_result}
+            aligned = [points.get(label) for label in labels]
+            datasets.append({
+                "label": park["park_name"],
+                "data": aligned,
+            })
+
+        return {"labels": labels, "datasets": datasets, "granularity": "minutes"}
 
     def _get_park_hourly_wait_data(
         self,

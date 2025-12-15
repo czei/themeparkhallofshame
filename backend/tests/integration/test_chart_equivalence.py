@@ -26,113 +26,19 @@ def hourly_equivalence_schema(mysql_connection):
     """
     conn = mysql_connection
 
-    # Clean any existing test data in our ID range
-    conn.execute(text("SET FOREIGN_KEY_CHECKS=0"))
-    conn.execute(text("DROP TABLE IF EXISTS park_hourly_stats"))
-    conn.execute(text("DROP TABLE IF EXISTS ride_hourly_stats"))
-    conn.execute(text("DROP TABLE IF EXISTS park_activity_snapshots"))
-    conn.execute(text("DROP TABLE IF EXISTS ride_status_snapshots"))
-    conn.execute(text("DROP TABLE IF EXISTS ride_classifications"))
-    conn.execute(text("DROP TABLE IF EXISTS rides"))
-    conn.execute(text("DROP TABLE IF EXISTS parks"))
-    conn.execute(text("SET FOREIGN_KEY_CHECKS=1"))
-
-    # Core tables
-    conn.execute(text("""
-        CREATE TABLE parks (
-            park_id INT PRIMARY KEY,
-            queue_times_id INT NOT NULL,
-            name VARCHAR(255) NOT NULL,
-            city VARCHAR(255),
-            state_province VARCHAR(255),
-            country VARCHAR(2) DEFAULT 'US',
-            timezone VARCHAR(64) NOT NULL,
-            operator VARCHAR(255),
-            is_active BOOLEAN DEFAULT TRUE
-        )
-    """))
-
-    conn.execute(text("""
-        CREATE TABLE rides (
-            ride_id INT PRIMARY KEY,
-            park_id INT NOT NULL,
-            name VARCHAR(255) NOT NULL,
-            category VARCHAR(32) NOT NULL DEFAULT 'ATTRACTION',
-            is_active BOOLEAN DEFAULT TRUE,
-            last_operated_at DATETIME(6)
-        )
-    """))
-
-    conn.execute(text("""
-        CREATE TABLE ride_classifications (
-            ride_id INT PRIMARY KEY,
-            tier INT,
-            tier_weight DECIMAL(5,2)
-        )
-    """))
-
-    conn.execute(text("""
-        CREATE TABLE park_activity_snapshots (
-            park_id INT NOT NULL,
-            recorded_at DATETIME(6) NOT NULL,
-            park_appears_open BOOLEAN NOT NULL,
-            shame_score DECIMAL(6,3),
-            avg_wait_time DECIMAL(8,3),
-            rides_open INT,
-            rides_closed INT,
-            effective_park_weight DECIMAL(10,3),
-            PRIMARY KEY (park_id, recorded_at)
-        )
-    """))
-
-    conn.execute(text("""
-        CREATE TABLE ride_status_snapshots (
-            ride_id INT NOT NULL,
-            recorded_at DATETIME(6) NOT NULL,
-            status VARCHAR(32),
-            computed_is_open BOOLEAN,
-            wait_time INT,
-            PRIMARY KEY (ride_id, recorded_at)
-        )
-    """))
-
-    # Hourly aggregation tables (must match aggregate_hourly.py expectations)
-    conn.execute(text("""
-        CREATE TABLE ride_hourly_stats (
-            ride_id INT NOT NULL,
-            park_id INT NOT NULL,
-            hour_start_utc DATETIME(6) NOT NULL,
-            avg_wait_time_minutes DECIMAL(8,3),
-            operating_snapshots INT,
-            down_snapshots INT,
-            downtime_hours DECIMAL(8,3),
-            uptime_percentage DECIMAL(5,2),
-            snapshot_count INT,
-            ride_operated TINYINT(1),
-            created_at DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6),
-            updated_at DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-            PRIMARY KEY (ride_id, hour_start_utc)
-        )
-    """))
-
-    conn.execute(text("""
-        CREATE TABLE park_hourly_stats (
-            park_id INT NOT NULL,
-            hour_start_utc DATETIME(6) NOT NULL,
-            shame_score DECIMAL(6,3),
-            avg_wait_time_minutes DECIMAL(8,3),
-            rides_operating INT,
-            rides_down INT,
-            total_downtime_hours DECIMAL(8,3),
-            weighted_downtime_hours DECIMAL(8,3),
-            effective_park_weight DECIMAL(10,3),
-            snapshot_count INT,
-            park_was_open TINYINT(1),
-            created_at DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6),
-            updated_at DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-            PRIMARY KEY (park_id, hour_start_utc)
-        )
-    """))
+    # Ensure tables exist (they come from migrations)
+    # Just clean the specific test data we insert so other schema stays intact.
+    tables_to_clean = [
+        "park_hourly_stats",
+        "ride_hourly_stats",
+        "park_activity_snapshots",
+        "ride_status_snapshots",
+        "ride_classifications",
+        "rides",
+        "parks",
+    ]
+    for table in tables_to_clean:
+        conn.execute(text(f"DELETE FROM {table}"))
 
     mysql_connection.commit()
     return mysql_connection
@@ -157,10 +63,10 @@ def _insert_core_test_data(conn, base_hour_utc: datetime):
 
     # Two rides with different tier weights
     conn.execute(text("""
-        INSERT INTO rides (ride_id, park_id, name, category, is_active)
+        INSERT INTO rides (ride_id, queue_times_id, park_id, name, category, is_active)
         VALUES
-            (2001, 1001, 'Ride A', 'ATTRACTION', TRUE),
-            (2002, 1001, 'Ride B', 'ATTRACTION', TRUE)
+            (2001, 92001, 1001, 'Ride A', 'ATTRACTION', TRUE),
+            (2002, 92002, 1001, 'Ride B', 'ATTRACTION', TRUE)
     """))
 
     conn.execute(text("""
@@ -192,9 +98,9 @@ def _insert_core_test_data(conn, base_hour_utc: datetime):
             "park_appears_open": True,
             "shame_score": shame_value,
             "avg_wait": 10.0 + i,  # arbitrary but monotonic
+            "max_wait": 15.0 + i,
             "rides_open": 2 if i < 8 else 1,
             "rides_closed": 0 if i < 8 else 1,
-            "effective_weight": 5.0,
         })
 
         # ride snapshots - keep them consistent with park_appears_open
@@ -228,15 +134,40 @@ def _insert_core_test_data(conn, base_hour_utc: datetime):
             })
 
     for s in snapshots:
+        payload = {
+            "park_id": s["park_id"],
+            "recorded_at": s["recorded_at"],
+            "park_appears_open": s["park_appears_open"],
+            "shame_score": s["shame_score"],
+            "avg_wait": s["avg_wait"],
+            "max_wait": s["max_wait"],
+            "rides_open": s["rides_open"],
+            "rides_closed": s["rides_closed"],
+            "total_tracked": s["rides_open"] + s["rides_closed"],
+        }
         conn.execute(text("""
             INSERT INTO park_activity_snapshots (
-                park_id, recorded_at, park_appears_open,
-                shame_score, avg_wait_time, rides_open, rides_closed, effective_park_weight
+                park_id,
+                recorded_at,
+                total_rides_tracked,
+                rides_open,
+                rides_closed,
+                avg_wait_time,
+                max_wait_time,
+                park_appears_open,
+                shame_score
             ) VALUES (
-                :park_id, :recorded_at, :park_appears_open,
-                :shame_score, :avg_wait, :rides_open, :rides_closed, :effective_weight
+                :park_id,
+                :recorded_at,
+                :total_tracked,
+                :rides_open,
+                :rides_closed,
+                :avg_wait,
+                :max_wait,
+                :park_appears_open,
+                :shame_score
             )
-        """), s)
+        """), payload)
 
     for r in ride_snaps:
         conn.execute(text("""
@@ -559,7 +490,6 @@ def test_hourly_aggregation_matches_raw_group_by_hour_single_park(hourly_equival
                 WHERE r.park_id = :park_id
                   AND r.is_active = TRUE
                   AND r.category = 'ATTRACTION'
-                  AND r.last_operated_at IS NULL  -- not used in this test dataset
             ), 0) AS effective_park_weight,
             COUNT(*) AS snapshot_count,
             MAX(pas.park_appears_open) AS park_was_open,

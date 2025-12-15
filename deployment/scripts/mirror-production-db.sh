@@ -39,6 +39,9 @@ FULL=false
 SCHEMA_ONLY=false
 DRY_RUN=false
 SKIP_CONFIRM=false
+# Date window (computed later for partial mirrors)
+DATE_FILTER=""
+DATE_FILTER_END=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -208,8 +211,22 @@ echo "  Database recreated: $LOCAL_DB_NAME"
 
 # Calculate date filter
 if [ "$FULL" = false ] && [ "$SCHEMA_ONLY" = false ]; then
-    DATE_FILTER=$(date -v-${DAYS}d +%Y-%m-%d 2>/dev/null || date -d "-${DAYS} days" +%Y-%m-%d)
-    info "Date filter: >= $DATE_FILTER"
+    # Anchor the window to production's most recent park_activity_snapshots date
+    LAST_PROD_DATE=$(ssh -i "$SSH_KEY" "$REMOTE_HOST" \
+        "sudo mysql -u root -N -e \"SELECT DATE(MAX(recorded_at)) FROM park_activity_snapshots\" $REMOTE_DB_NAME 2>/dev/null" || true)
+    if [ -z "$LAST_PROD_DATE" ]; then
+        LAST_PROD_DATE=$(date +%Y-%m-%d)
+        warn "Could not determine last prod snapshot date, defaulting to today ($LAST_PROD_DATE)"
+    fi
+    DATE_FILTER_END="$LAST_PROD_DATE"
+    DATE_FILTER=$(python - <<PY
+import datetime
+end = datetime.date.fromisoformat("$LAST_PROD_DATE")
+start = end - datetime.timedelta(days=int("$DAYS")-1)
+print(start.isoformat())
+PY
+)
+    info "Date filter: $DATE_FILTER to $DATE_FILTER_END (inclusive)"
 fi
 
 # Build and execute mysqldump
@@ -300,14 +317,13 @@ FIXSQL
 
         echo -n "    $TABLE... "
 
-        # Export with WHERE clause
-        QUERY="SELECT * FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER'"
+        # Export with WHERE clause (bounded window to match prod exactly)
         ROW_COUNT=$(ssh -i "$SSH_KEY" "$REMOTE_HOST" \
-            "sudo mysql -u root -N -e \"SELECT COUNT(*) FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER'\" $REMOTE_DB_NAME 2>/dev/null || echo 0")
+            "sudo mysql -u root -N -e \"SELECT COUNT(*) FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER' AND $DATE_COL < DATE_ADD('$DATE_FILTER_END', INTERVAL 1 DAY)\" $REMOTE_DB_NAME 2>/dev/null || echo 0")
 
         if [ "$ROW_COUNT" -gt 0 ]; then
             ssh -i "$SSH_KEY" "$REMOTE_HOST" \
-                "sudo mysqldump -u root --tz-utc --no-create-info --single-transaction --where=\"$DATE_COL >= '$DATE_FILTER'\" $REMOTE_DB_NAME $TABLE 2>/dev/null" \
+                "sudo mysqldump -u root --tz-utc --no-create-info --single-transaction --where=\"$DATE_COL >= '$DATE_FILTER' AND $DATE_COL < DATE_ADD('$DATE_FILTER_END', INTERVAL 1 DAY)\" $REMOTE_DB_NAME $TABLE 2>/dev/null" \
                 | mysql --init-command="SET TIME_ZONE='+00:00';" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
             echo "$ROW_COUNT rows"
         else
@@ -355,11 +371,11 @@ compare_date_range() {
 
     # Get production date range
     PROD_DATES=$(ssh -i "$SSH_KEY" "$REMOTE_HOST" \
-        "sudo mysql -u root -N -e \"SELECT CONCAT(MIN(DATE($DATE_COL)), ' to ', MAX(DATE($DATE_COL)), ' (', COUNT(DISTINCT DATE($DATE_COL)), ' days)') FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER'\" $REMOTE_DB_NAME 2>/dev/null" || echo "ERROR")
+        "sudo mysql -u root -N -e \"SELECT CONCAT(MIN(DATE($DATE_COL)), ' to ', MAX(DATE($DATE_COL)), ' (', COUNT(DISTINCT DATE($DATE_COL)), ' days)') FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER' AND $DATE_COL < DATE_ADD('$DATE_FILTER_END', INTERVAL 1 DAY)\" $REMOTE_DB_NAME 2>/dev/null" || echo "ERROR")
 
     # Get local date range (apply same filter as production for fair comparison)
     LOCAL_DATES=$(mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} -N -e \
-        "SELECT CONCAT(MIN(DATE($DATE_COL)), ' to ', MAX(DATE($DATE_COL)), ' (', COUNT(DISTINCT DATE($DATE_COL)), ' days)') FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER'" "$LOCAL_DB_NAME" 2>/dev/null || echo "ERROR")
+        "SELECT CONCAT(MIN(DATE($DATE_COL)), ' to ', MAX(DATE($DATE_COL)), ' (', COUNT(DISTINCT DATE($DATE_COL)), ' days)') FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER' AND $DATE_COL < DATE_ADD('$DATE_FILTER_END', INTERVAL 1 DAY)" "$LOCAL_DB_NAME" 2>/dev/null || echo "ERROR")
 
     if [ "$PROD_DATES" = "$LOCAL_DATES" ]; then
         echo -e "${GREEN}✓ MATCH${NC} ($LOCAL_DATES)"

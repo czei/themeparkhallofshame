@@ -31,6 +31,117 @@ Python 3.11+: Follow standard conventions
 
 <!-- MANUAL ADDITIONS START -->
 
+## Production Deployment Configuration
+
+### SSH Access to Production Server
+
+**CRITICAL: All SSH and rsync commands to production MUST use the SSH key.**
+
+**Production Server:** `ec2-user@webperformance.com`
+**SSH Key:** `~/.ssh/michael-2.pem`
+
+**SSH Command Pattern:**
+```bash
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "<command>"
+```
+
+**Rsync Command Pattern:**
+```bash
+rsync -av -e "ssh -i ~/.ssh/michael-2.pem" <local-file> ec2-user@webperformance.com:<remote-path>
+```
+
+**Common Production Commands:**
+```bash
+# Restart API service
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "sudo systemctl restart themepark-api"
+
+# Check service status
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "sudo systemctl status themepark-api"
+
+# View service logs
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "sudo journalctl -u themepark-api -f"
+
+# Test API health
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "curl -s http://127.0.0.1:5001/api/health | python3 -m json.tool"
+
+# Check cron jobs
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "crontab -l"
+```
+
+### Deployment Process
+
+**Standard Deployment:**
+```bash
+# Use the deployment script (includes validation and rollback)
+./deployment/deploy.sh all
+```
+
+**Emergency Deployment (skip validation):**
+```bash
+# Only use for critical hotfixes
+SKIP_VALIDATION=1 ./deployment/deploy.sh all
+```
+
+**Manual Deployment Steps:**
+1. Pre-flight validation runs locally (syntax, imports, dependencies)
+2. Deployment snapshot created on production (for rollback)
+3. Code deployed via rsync
+4. Database migrations run
+5. Service restarted (pre-service validation runs before gunicorn starts)
+6. Smoke tests verify deployment (automatic rollback if tests fail)
+
+**Rollback:**
+```bash
+# List available snapshots
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "/opt/themeparkhallofshame/deployment/scripts/snapshot-manager.sh list"
+
+# Restore a snapshot
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "/opt/themeparkhallofshame/deployment/scripts/snapshot-manager.sh restore <snapshot-name>"
+```
+
+### Environment Configuration
+
+Production environment variables are in: `/opt/themeparkhallofshame/backend/.env`
+
+**Required Variables:**
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` - Database connection
+- `FLASK_ENV`, `SECRET_KEY`, `ENVIRONMENT` - Flask configuration
+- `SENDGRID_API_KEY` - Email alerts (optional, for cron failure notifications)
+- `ALERT_EMAIL_FROM`, `ALERT_EMAIL_TO` - Alert email addresses
+
+### Monitoring
+
+**Health Endpoint:**
+```bash
+curl http://127.0.0.1:5001/api/health
+```
+
+Monitors:
+- Database connectivity
+- Data collection freshness
+- Hourly/daily aggregation status and lag
+- Disk space usage
+
+**Cron Job Logs:**
+- `/opt/themeparkhallofshame/logs/cron_wrapper.log` - All cron job execution logs
+- `/opt/themeparkhallofshame/logs/collect_snapshots.log` - Data collection logs
+- `/opt/themeparkhallofshame/logs/aggregate_hourly.log` - Hourly aggregation logs
+- `/opt/themeparkhallofshame/logs/aggregate_daily.log` - Daily aggregation logs
+
+**Service Logs:**
+```bash
+# Real-time service logs
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "sudo journalctl -u themepark-api -f"
+
+# API error logs
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "tail -f /opt/themeparkhallofshame/logs/error.log"
+
+# API access logs
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "tail -f /opt/themeparkhallofshame/logs/access.log"
+```
+
+---
+
 ## Canonical Business Rules
 
 These are the authoritative rules that govern how ride and park data is interpreted. All queries and calculations MUST follow these rules. The single source of truth for implementation is `src/utils/sql_helpers.py`.

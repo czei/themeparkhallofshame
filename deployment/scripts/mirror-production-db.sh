@@ -368,7 +368,7 @@ log "Running audit verification..."
 
 AUDIT_PASSED=true
 
-# Function to compare date ranges
+# Function to compare date ranges AND actual timestamp freshness
 compare_date_range() {
     local TABLE=$1
     local DATE_COL=$2
@@ -376,20 +376,27 @@ compare_date_range() {
 
     echo -n "  $DESCRIPTION... "
 
-    # Get production date range
-    PROD_DATES=$(ssh -i "$SSH_KEY" "$REMOTE_HOST" \
-        "$REMOTE_MYSQL -N -e \"SELECT CONCAT(MIN(DATE($DATE_COL)), ' to ', MAX(DATE($DATE_COL)), ' (', COUNT(DISTINCT DATE($DATE_COL)), ' days)') FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER' AND $DATE_COL < DATE_ADD('$DATE_FILTER_END', INTERVAL 1 DAY)\" $REMOTE_DB_NAME 2>/dev/null" || echo "ERROR")
+    # Get production timestamp range (ACTUAL timestamps, not just dates)
+    PROD_DATA=$(ssh -i "$SSH_KEY" "$REMOTE_HOST" \
+        "$REMOTE_MYSQL -N -e \"SELECT CONCAT(MIN($DATE_COL), '|', MAX($DATE_COL), '|', COUNT(*)) FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER' AND $DATE_COL < DATE_ADD('$DATE_FILTER_END', INTERVAL 1 DAY)\" $REMOTE_DB_NAME 2>/dev/null" || echo "ERROR")
 
-    # Get local date range (apply same filter as production for fair comparison)
-    LOCAL_DATES=$(mysql "${LOCAL_MYSQL_INIT[@]}" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} -N -e \
-        "SELECT CONCAT(MIN(DATE($DATE_COL)), ' to ', MAX(DATE($DATE_COL)), ' (', COUNT(DISTINCT DATE($DATE_COL)), ' days)') FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER' AND $DATE_COL < DATE_ADD('$DATE_FILTER_END', INTERVAL 1 DAY)" "$LOCAL_DB_NAME" 2>/dev/null || echo "ERROR")
+    # Get local timestamp range (ACTUAL timestamps, not just dates)
+    LOCAL_DATA=$(mysql "${LOCAL_MYSQL_INIT[@]}" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} -N -e \
+        "SELECT CONCAT(MIN($DATE_COL), '|', MAX($DATE_COL), '|', COUNT(*)) FROM $TABLE WHERE $DATE_COL >= '$DATE_FILTER' AND $DATE_COL < DATE_ADD('$DATE_FILTER_END', INTERVAL 1 DAY)" "$LOCAL_DB_NAME" 2>/dev/null || echo "ERROR")
 
-    if [ "$PROD_DATES" = "$LOCAL_DATES" ]; then
-        echo -e "${GREEN}✓ MATCH${NC} ($LOCAL_DATES)"
+    if [ "$PROD_DATA" = "$LOCAL_DATA" ]; then
+        # Extract max timestamp for display
+        MAX_TS=$(echo "$LOCAL_DATA" | cut -d'|' -f2)
+        ROW_COUNT=$(echo "$LOCAL_DATA" | cut -d'|' -f3)
+        echo -e "${GREEN}✓ MATCH${NC} (${ROW_COUNT} rows, latest: ${MAX_TS})"
     else
         echo -e "${RED}✗ MISMATCH${NC}"
-        echo "      Production: $PROD_DATES"
-        echo "      Local:      $LOCAL_DATES"
+        PROD_MAX=$(echo "$PROD_DATA" | cut -d'|' -f2)
+        PROD_COUNT=$(echo "$PROD_DATA" | cut -d'|' -f3)
+        LOCAL_MAX=$(echo "$LOCAL_DATA" | cut -d'|' -f2)
+        LOCAL_COUNT=$(echo "$LOCAL_DATA" | cut -d'|' -f3)
+        echo "      Production: ${PROD_COUNT} rows, latest: ${PROD_MAX}"
+        echo "      Local:      ${LOCAL_COUNT} rows, latest: ${LOCAL_MAX}"
         AUDIT_PASSED=false
     fi
 }

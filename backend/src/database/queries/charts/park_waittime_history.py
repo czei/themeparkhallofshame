@@ -196,12 +196,17 @@ class ParkWaitTimeHistoryQuery:
         start_utc = now_utc - timedelta(minutes=minutes)
         ts_match = timestamp_match_condition("pas.recorded_at", "rss.recorded_at")
 
-        # Build 5-minute labels
+        # Build 10-minute labels aligned to :00, :10, :20, :30, :40, :50
+        # Data is collected every 10 minutes at these marks
+        # Round start_utc down to nearest 10-minute boundary
+        start_minute = (start_utc.minute // 10) * 10
+        aligned_start = start_utc.replace(minute=start_minute, second=0, microsecond=0)
+
         labels = []
-        current = start_utc
+        current = aligned_start
         while current <= now_utc:
             labels.append(current.strftime("%H:%M"))
-            current += timedelta(minutes=5)
+            current += timedelta(minutes=10)
 
         disney_filter = (
             "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"

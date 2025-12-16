@@ -164,6 +164,24 @@ class Charts {
             ? '<span class="mock-data-indicator">Sample data shown - real data accumulating</span>'
             : '';
 
+        // CRITICAL: Downtime chart is meaningless for LIVE period (only 1 hour of data)
+        // Cumulative downtime doesn't provide useful insights in such a short window
+        const isLivePeriod = this.state.period === 'live';
+        const downtimeChartHtml = isLivePeriod
+            ? `<div class="chart-container">
+                   <h3>Worst 5 Rides - Downtime (${this.getPeriodLabel()})</h3>
+                   <div class="chart-wrapper chart-not-applicable">
+                       <p class="na-message">Downtime data not applicable for LIVE period.<br>
+                       Switch to TODAY, YESTERDAY, or other periods to view cumulative downtime trends.</p>
+                   </div>
+               </div>`
+            : `<div class="chart-container">
+                   <h3>Worst 5 Rides - Downtime (${this.getPeriodLabel()})</h3>
+                   <div class="chart-wrapper">
+                       <canvas id="rides-downtime-chart"></canvas>
+                   </div>
+               </div>`;
+
         return `
             <div class="section-header">
                 <h2 class="section-title">Performance Charts</h2>
@@ -182,12 +200,7 @@ class Charts {
                         <canvas id="parks-waittimes-chart"></canvas>
                     </div>
                 </div>
-                <div class="chart-container">
-                    <h3>Worst 5 Rides - Downtime (${this.getPeriodLabel()})</h3>
-                    <div class="chart-wrapper">
-                        <canvas id="rides-downtime-chart"></canvas>
-                    </div>
-                </div>
+                ${downtimeChartHtml}
                 <div class="chart-container">
                     <h3>Worst 5 Rides - Wait Times (${this.getPeriodLabel()})</h3>
                     <div class="chart-wrapper">
@@ -281,6 +294,7 @@ class Charts {
         const chartData = this.state.waitTimesChartData;
 
         // Add colors to datasets
+        // CRITICAL: spanGaps=true for LIVE period to connect sparse data points
         const datasets = chartData.datasets.map((dataset, index) => ({
             ...dataset,
             borderColor: MARY_BLAIR_COLORS[index % MARY_BLAIR_COLORS.length],
@@ -289,7 +303,8 @@ class Charts {
             borderWidth: 3,
             pointRadius: 4,
             pointHoverRadius: 6,
-            fill: false
+            fill: false,
+            spanGaps: true  // Connect points even when data is missing (important for LIVE)
         }));
 
         this.waitTimesChart = new Chart(ctx, {
@@ -355,6 +370,7 @@ class Charts {
         const chartData = this.state.ridesWaitTimesChartData;
 
         // Add colors to datasets
+        // CRITICAL: spanGaps=true for LIVE period to connect sparse data points
         const datasets = chartData.datasets.map((dataset, index) => ({
             ...dataset,
             borderColor: MARY_BLAIR_COLORS[index % MARY_BLAIR_COLORS.length],
@@ -363,7 +379,8 @@ class Charts {
             borderWidth: 3,
             pointRadius: 4,
             pointHoverRadius: 6,
-            fill: false
+            fill: false,
+            spanGaps: true  // Connect points even when data is missing (important for LIVE)
         }));
 
         this.ridesWaitTimesChart = new Chart(ctx, {

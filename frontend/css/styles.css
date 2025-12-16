@@ -3065,6 +3065,25 @@ footer a:hover,
     border-left: 3px solid var(--gold);
 }
 
+/* N/A message for charts not applicable to current period */
+.chart-not-applicable {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.02);
+    border: 1px dashed rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+}
+
+.na-message {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    padding: 20px;
+    font-style: italic;
+}
+
 /* Chart legend styling override */
 .trends-charts canvas {
     font-family: 'Inter', sans-serif !important;

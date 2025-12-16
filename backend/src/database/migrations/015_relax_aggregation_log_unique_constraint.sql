@@ -1,5 +1,6 @@
 -- Migration: Relax aggregation_log unique constraint for hourly aggregations
 -- Date: 2025-12-08
+-- Updated: 2025-12-16 - Made idempotent
 -- Feature: 001-aggregation-tables
 -- Purpose: Allow multiple hourly aggregation log entries per day
 
@@ -12,14 +13,15 @@ START TRANSACTION;
 -- Daily/weekly/monthly/yearly still have unique entries per date, but hourly
 -- needs multiple entries (one per hour).
 
-ALTER TABLE aggregation_log
-DROP INDEX unique_aggregation;
+DROP INDEX IF EXISTS unique_aggregation ON aggregation_log;
 
 -- Add regular index for query performance (non-unique)
+DROP INDEX IF EXISTS idx_aggregation_date_type ON aggregation_log;
 CREATE INDEX idx_aggregation_date_type
 ON aggregation_log(aggregation_date, aggregation_type);
 
 -- Add index on aggregated_until_ts for efficient per-hour lookups
+DROP INDEX IF EXISTS idx_aggregated_until_ts ON aggregation_log;
 CREATE INDEX idx_aggregated_until_ts
 ON aggregation_log(aggregated_until_ts);
 

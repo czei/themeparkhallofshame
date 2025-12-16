@@ -1,15 +1,63 @@
+# ==============================================================================
+# Theme Park Hall of Shame API - Systemd Service Configuration
+# ==============================================================================
+# Purpose: Manage the Flask API as a systemd service with automatic restarts,
+#          resource limits, security hardening, and pre-service validation.
+#
+# Usage:
+#   sudo systemctl start themepark-api    # Start the service
+#   sudo systemctl stop themepark-api     # Stop the service
+#   sudo systemctl restart themepark-api  # Restart the service
+#   sudo systemctl status themepark-api   # Check service status
+#   journalctl -u themepark-api -f        # View logs in real-time
+#
+# Installation:
+#   sudo cp deployment/config/themepark-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable themepark-api
+# ==============================================================================
+
 [Unit]
+# Service metadata and dependencies
 Description=Theme Park Hall of Shame API
 Documentation=https://github.com/YOUR_REPO/ThemeParkHallOfShame
+
+# Wait for network and MariaDB to be available before starting
+# This prevents startup failures if database isn't ready
 After=network.target mariadb.service
 
 [Service]
+# Service execution configuration
+# Type=exec means systemd waits for the main process to start before continuing
 Type=exec
+
+# Run as non-root user for security (ec2-user has limited privileges)
 User=ec2-user
 Group=ec2-user
-WorkingDirectory=/opt/themeparkhallofshame/backend/src
+
+# Working directory where gunicorn runs (contains wsgi.py)
+WorkingDirectory=/opt/themeparkhallofshame/backend
+
+# Add venv/bin to PATH so gunicorn can find Python packages
 Environment="PATH=/opt/themeparkhallofshame/venv/bin:/usr/local/bin:/usr/bin"
+
+# Load environment variables from .env file (DB credentials, secrets, etc.)
+# Variables: DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, SECRET_KEY, etc.
 EnvironmentFile=/opt/themeparkhallofshame/backend/.env
+
+# Pre-service validation (runs BEFORE gunicorn starts)
+# Validates: environment variables, Python imports, database schema, dependencies
+# If validation fails, service will NOT start (fail-fast)
+ExecStartPre=/opt/themeparkhallofshame/deployment/scripts/pre-service-validate.sh
+
+# Main command: Start Gunicorn WSGI server
+# --bind 127.0.0.1:5001       Listen only on localhost (Apache proxies to this)
+# --workers 2                 Number of worker processes (CPU cores * 2 + 1 recommended)
+# --timeout 120               Request timeout in seconds
+# --access-logfile            Log all HTTP requests
+# --error-logfile             Log errors and exceptions
+# --capture-output            Capture stdout/stderr from Flask app
+# wsgi:application            Import path to Flask app (wsgi.py:application)
 ExecStart=/opt/themeparkhallofshame/venv/bin/gunicorn \
     --bind 127.0.0.1:5001 \
     --workers 2 \
@@ -19,19 +67,29 @@ ExecStart=/opt/themeparkhallofshame/venv/bin/gunicorn \
     --capture-output \
     wsgi:application
 
-# Restart on failure
+# Automatic restart configuration
+# Restart=on-failure         Restart if process exits with non-zero code or crashes
+# RestartSec=5               Wait 5 seconds before restarting (prevents rapid restart loops)
 Restart=on-failure
 RestartSec=5
 
-# Resource limits (co-located server safeguard)
+# Resource limits (prevents API from consuming too many resources on shared server)
+# CPUQuota=30%               Limit to 30% of one CPU core
+# MemoryMax=512M             Hard limit of 512MB RAM (OOM killer triggers if exceeded)
 CPUQuota=30%
 MemoryMax=512M
 
-# Security hardening
+# Security hardening (defense in depth)
+# NoNewPrivileges=yes        Process can't gain new privileges (prevents privilege escalation)
+# ProtectSystem=strict       Make /usr, /boot, /efi read-only (prevents system tampering)
+# ProtectHome=yes            Make /home inaccessible (prevents accessing other users' data)
+# ReadWritePaths=...         Whitelist paths that need write access (logs, /tmp for gunicorn workers)
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/opt/themeparkhallofshame/logs
+ReadWritePaths=/opt/themeparkhallofshame/logs /tmp
 
 [Install]
+# Enable service to start automatically on boot
+# multi-user.target = standard system startup target (equivalent to runlevel 3)
 WantedBy=multi-user.target

@@ -2,6 +2,7 @@
 -- Migration: 009_park_schedules.sql
 -- Purpose: Store official park operating schedules from ThemeParks.wiki API
 -- Date: 2025-12-01
+-- Updated: 2025-12-16 - Made index creation idempotent
 
 -- ============================================
 -- PARK SCHEDULES TABLE
@@ -41,10 +42,17 @@ CREATE TABLE IF NOT EXISTS park_schedules (
     UNIQUE KEY uk_park_date_type (park_id, schedule_date, schedule_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Indexes for common queries
+-- Indexes for common queries (idempotent with DROP IF EXISTS)
+DROP INDEX IF EXISTS idx_ps_park_date ON park_schedules;
 CREATE INDEX idx_ps_park_date ON park_schedules (park_id, schedule_date);
+
+DROP INDEX IF EXISTS idx_ps_date ON park_schedules;
 CREATE INDEX idx_ps_date ON park_schedules (schedule_date);
+
+DROP INDEX IF EXISTS idx_ps_fetched ON park_schedules;
 CREATE INDEX idx_ps_fetched ON park_schedules (fetched_at);
+
+DROP INDEX IF EXISTS idx_ps_type ON park_schedules;
 CREATE INDEX idx_ps_type ON park_schedules (schedule_type);
 
 -- ============================================

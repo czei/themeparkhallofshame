@@ -4,9 +4,9 @@
 -- Date: 2025-11-23
 -- IMPORTANT: This requires the MySQL Event Scheduler to be enabled:
 --   SET GLOBAL event_scheduler = ON;
-
--- Enable event scheduler (if not already enabled)
-SET GLOBAL event_scheduler = ON;
+-- NOTE: Event scheduler must be enabled by database administrator with SUPER privilege.
+--       Application user does not have permission to enable it.
+--       To enable: mysql -u root -p -e "SET GLOBAL event_scheduler = ON;"
 
 -- Drop existing events if they exist (for idempotency)
 DROP EVENT IF EXISTS cleanup_ride_snapshots;

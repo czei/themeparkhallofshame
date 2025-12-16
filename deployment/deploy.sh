@@ -49,6 +49,68 @@ remote_exec() {
     ssh -i "$SSH_KEY" "$REMOTE_HOST" "$@"
 }
 
+# NEW: Pre-flight validation (runs on local machine)
+pre_flight_validate() {
+    if [ "${SKIP_VALIDATION:-0}" = "1" ]; then
+        warn "SKIPPING PRE-FLIGHT VALIDATION (SKIP_VALIDATION=1)"
+        warn "This bypasses safety checks - use only for emergency hotfixes!"
+        return 0
+    fi
+
+    log "Running pre-flight validation..."
+    if "${SCRIPT_DIR}/scripts/pre-flight-validate.sh" "$PROJECT_ROOT"; then
+        log "Pre-flight validation passed"
+        return 0
+    else
+        error "Pre-flight validation failed. Fix errors before deploying."
+    fi
+}
+
+# NEW: Create deployment snapshot
+create_deployment_snapshot() {
+    local git_sha=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    local snapshot_name="deploy-$(date +%Y%m%d-%H%M%S)-${git_sha}"
+
+    log "Creating deployment snapshot: ${snapshot_name}"
+    remote_exec "cd ${REMOTE_APP_DIR}/deployment && ./scripts/snapshot-manager.sh create ${snapshot_name}"
+
+    # Store snapshot name for potential rollback
+    echo "$snapshot_name" > /tmp/themepark_deploy_snapshot.txt
+
+    log "Deployment snapshot created"
+}
+
+# NEW: Run smoke tests
+run_smoke_tests() {
+    log "Running smoke tests..."
+    if remote_exec "cd ${REMOTE_APP_DIR}/deployment && ./scripts/smoke-tests.sh"; then
+        log "Smoke tests passed"
+        return 0
+    else
+        error "Smoke tests failed"
+        return 1
+    fi
+}
+
+# NEW: Rollback deployment
+rollback_deployment() {
+    if [ ! -f /tmp/themepark_deploy_snapshot.txt ]; then
+        error "No snapshot found for rollback. Manual recovery required."
+    fi
+
+    local snapshot_name=$(cat /tmp/themepark_deploy_snapshot.txt)
+    warn "ROLLBACK: Restoring snapshot: ${snapshot_name}"
+
+    # Restore snapshot (note: this will prompt for confirmation on remote)
+    remote_exec "cd ${REMOTE_APP_DIR}/deployment && echo 'yes' | ./scripts/snapshot-manager.sh restore ${snapshot_name}"
+
+    # Restart services with old code
+    log "Restarting services with previous deployment..."
+    restart_services
+
+    error "Deployment failed and was rolled back to: ${snapshot_name}"
+}
+
 # Deploy backend code
 deploy_backend() {
     log "Deploying backend code..."
@@ -116,7 +178,8 @@ deploy_migrations() {
         "${REMOTE_HOST}:${REMOTE_APP_DIR}/backend/src/database/migrations/"
 
     # Run migration script (source .env for DB credentials)
-    remote_exec "cd ${REMOTE_APP_DIR}/backend && source .env && cd ${REMOTE_APP_DIR}/deployment && ./scripts/setup-database.sh production"
+    # Use set -a to export all variables from .env file
+    remote_exec "bash -c 'set -a; source ${REMOTE_APP_DIR}/backend/.env; set +a; cd ${REMOTE_APP_DIR}/deployment && ./scripts/setup-database.sh production'"
 
     log "Migrations completed successfully"
 }
@@ -142,6 +205,7 @@ usage() {
     echo ""
     echo "Commands:"
     echo "  all         Full deployment (backend + frontend + migrations + restart)"
+    echo "              Includes: pre-flight validation, snapshot creation, smoke tests, auto-rollback"
     echo "  backend     Deploy backend code only"
     echo "  frontend    Deploy frontend static files only"
     echo "  migrations  Run database migrations only"
@@ -149,7 +213,18 @@ usage() {
     echo "  health      Run health checks"
     echo ""
     echo "Environment Variables:"
-    echo "  SSH_KEY     Path to SSH private key (default: ~/.ssh/michael-2.pem)"
+    echo "  SSH_KEY           Path to SSH private key (default: ~/.ssh/michael-2.pem)"
+    echo "  SKIP_VALIDATION   Set to 1 to bypass pre-flight validation (emergency use only)"
+    echo ""
+    echo "Safety Features (in 'all' deployment):"
+    echo "  1. Pre-flight validation - Validates code on local machine before deploy"
+    echo "  2. Deployment snapshot - Creates rollback point before changes"
+    echo "  3. Pre-service validation - Systemd validates before starting gunicorn"
+    echo "  4. Smoke tests - Validates deployment with real API requests"
+    echo "  5. Auto-rollback - Automatically restores previous version if smoke tests fail"
+    echo ""
+    echo "Emergency Bypass (use with caution):"
+    echo "  SKIP_VALIDATION=1 ./deploy.sh all"
     echo ""
 }
 
@@ -166,11 +241,20 @@ main() {
 
     case "$DEPLOY_TARGET" in
         all)
-            deploy_backend
+            # NEW ENHANCED DEPLOYMENT FLOW WITH VALIDATION & ROLLBACK
+            pre_flight_validate                    # Validate on local machine
+            create_deployment_snapshot             # Create snapshot before changes
+            deploy_backend                         # Deploy code
             deploy_frontend
             deploy_migrations
-            restart_services
-            health_check
+            restart_services                       # Service starts with pre-service validation (systemd)
+
+            # Run smoke tests and rollback if they fail
+            if ! run_smoke_tests; then
+                rollback_deployment                # Auto-rollback on failure
+            fi
+
+            health_check                           # Final health check
             ;;
         backend)
             deploy_backend

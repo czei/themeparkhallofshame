@@ -103,6 +103,27 @@ pytest tests/ -v
 
 ---
 
+## Production Operations (webperformance.com)
+
+- Code lives at `/opt/themeparkhallofshame` (backend in `/opt/themeparkhallofshame/backend`).
+- Virtualenv: `/opt/themeparkhallofshame/backend/venv`.
+- App entrypoint: `src.api.app:app` (no `wsgi.py` module).
+- Gunicorn start script: `/opt/themeparkhallofshame/run_gunicorn.sh` (sets `PYTHONPATH=/opt/themeparkhallofshame/backend/src` and runs gunicorn bound to `127.0.0.1:5001`).
+- Restart gunicorn manually:
+  ```bash
+  ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com
+  pkill -f gunicorn
+  /opt/themeparkhallofshame/run_gunicorn.sh >/opt/themeparkhallofshame/logs/gunicorn.nohup 2>&1 &
+  ```
+- Logs: `/opt/themeparkhallofshame/logs/error.log`, `/opt/themeparkhallofshame/logs/access.log`, `/opt/themeparkhallofshame/logs/gunicorn.nohup`.
+- Cron (ec2-user, CRON_TZ=America/Los_Angeles) lives in crontab:
+  - Snapshots every 10 min → `collect_snapshots`
+  - Daily aggregation 1:05 AM PT → `aggregate_daily`
+  - Hourly aggregation :05 past → `aggregate_hourly`
+  - Live rankings every 10 min (after snapshots) → `aggregate_live_rankings`
+  - Health checks: hourly `check_data_collection`, daily `check_daily_aggregates` (stale daily stats), 8 AM PT `send_data_quality_alert`
+  - Log rotation weekly.
+
 ## Development Workflow
 
 This section covers the complete development lifecycle, from writing code to deploying to production.

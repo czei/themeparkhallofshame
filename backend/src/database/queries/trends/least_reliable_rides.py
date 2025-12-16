@@ -413,92 +413,16 @@ class LeastReliableRidesQuery:
         min_avg_shame: float = 1.0,
     ) -> List[Dict[str, Any]]:
         """
-        Get park-level reliability rankings from YESTERDAY (snapshot data).
-
-        Same logic as _get_parks_today() but for yesterday's full day UTC range.
+        Get park-level reliability rankings from YESTERDAY using daily aggregates
+        for performance (avoids full-day snapshot scan).
         """
-        start_utc, end_utc, _ = get_yesterday_range_utc()
-
-        filter_clause = ""
-        park_filter_clause = ""
-        if filter_disney_universal:
-            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"
-            park_filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"
-
-        # Use centralized helpers for consistent status checks
-        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
-        park_open = ParkStatusSQL.park_appears_open_filter("pas")
-        is_operating = RideStatusSQL.is_operating("rss")
-
-        # Use centralized CTE for rides that operated (includes park-open check)
-        rides_operated_cte = RideStatusSQL.rides_that_operated_cte(
-            start_param=":start_utc",
-            end_param=":end_utc",
-            filter_clause=filter_clause
+        # Use 1-day aggregate window (yesterday)
+        return self._get_parks_daily_aggregate(
+            days=1,
+            filter_disney_universal=filter_disney_universal,
+            limit=limit,
+            min_avg_shame=min_avg_shame,
         )
-
-        sql = text(f"""
-            WITH {rides_operated_cte},
-            park_weights AS (
-                -- Calculate total weight for each park (for shame score denominator)
-                SELECT
-                    r.park_id,
-                    SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
-                FROM rides r
-                INNER JOIN parks p ON r.park_id = p.park_id
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE r.is_active = TRUE
-                  AND r.category = 'ATTRACTION'
-                  AND p.is_active = TRUE
-                  AND r.ride_id IN (SELECT ride_id FROM rides_that_operated)
-                GROUP BY r.park_id
-            ),
-            snapshot_shame AS (
-                -- Calculate shame score at each snapshot
-                SELECT
-                    p.park_id,
-                    p.name AS park_name,
-                    p.city,
-                    p.state_province,
-                    rss.recorded_at,
-                    pw.total_park_weight,
-                    SUM(CASE WHEN {is_down} AND {park_open} THEN COALESCE(rc.tier_weight, 2) ELSE 0 END) AS weighted_down,
-                    SUM(CASE WHEN {is_operating} THEN 1 ELSE 0 END) AS operating_count,
-                    COUNT(*) AS total_snapshots
-                FROM ride_status_snapshots rss
-                INNER JOIN rides r ON rss.ride_id = r.ride_id
-                INNER JOIN parks p ON r.park_id = p.park_id
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                LEFT JOIN park_activity_snapshots pas
-                    ON p.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
-                INNER JOIN park_weights pw ON p.park_id = pw.park_id
-                WHERE rss.recorded_at >= :start_utc
-                  AND rss.recorded_at < :end_utc
-                  AND r.ride_id IN (SELECT ride_id FROM rides_that_operated)
-                GROUP BY p.park_id, p.name, p.city, p.state_province, rss.recorded_at, pw.total_park_weight
-            )
-            SELECT
-                park_id,
-                park_name,
-                CONCAT(city, ', ', COALESCE(state_province, '')) AS location,
-                ROUND(AVG(weighted_down / NULLIF(total_park_weight, 0) * 10), 1) AS avg_shame_score,
-                ROUND(100.0 * SUM(operating_count) / NULLIF(SUM(total_snapshots), 0), 1) AS uptime_percentage
-            FROM snapshot_shame
-            GROUP BY park_id, park_name, city, state_province
-            HAVING AVG(weighted_down / NULLIF(total_park_weight, 0) * 10) >= :min_avg_shame
-            ORDER BY avg_shame_score DESC
-            LIMIT :limit
-        """)
-
-        result = self.conn.execute(sql, {
-            'start_utc': start_utc,
-            'end_utc': end_utc,
-            'limit': limit,
-            'min_avg_shame': min_avg_shame,
-        })
-
-        return [dict(row._mapping) for row in result]
 
     def _get_parks_daily_aggregate(
         self,

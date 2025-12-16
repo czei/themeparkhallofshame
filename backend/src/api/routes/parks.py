@@ -31,7 +31,7 @@ from utils.cache import get_query_cache, generate_cache_key
 # New query imports - each file handles one specific data source
 from database.queries.rankings import ParkDowntimeRankingsQuery, ParkWaitTimeRankingsQuery
 from database.queries.today import TodayParkWaitTimesQuery, TodayParkRankingsQuery
-from database.queries.yesterday import YesterdayParkWaitTimesQuery
+from database.queries.yesterday import YesterdayParkWaitTimesQuery, YesterdayParkRankingsQuery
 from database.queries.charts import ParkShameHistoryQuery, ParkRidesComparisonQuery
 from database.queries.live.fast_live_park_rankings import FastLiveParkRankingsQuery
 from database.calculators.shame_score import ShameScoreCalculator
@@ -141,11 +141,12 @@ def get_park_downtime_rankings():
                     sort_by=sort_by
                 )
             elif period == 'yesterday':
-                rankings = stats_repo.get_park_daily_rankings(
-                    stat_date=today_pacific - timedelta(days=1),
+                # YESTERDAY: Use pre-aggregated hourly stats (full previous day)
+                query = YesterdayParkRankingsQuery(conn)
+                rankings = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit,
-                    weighted=weighted
+                    sort_by=sort_by
                 )
             elif period == '7days':
                 rankings = stats_repo.get_park_weekly_rankings(

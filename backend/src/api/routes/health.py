@@ -3,6 +3,8 @@ Theme Park Downtime Tracker - Health Check Endpoint
 Provides API health status, database connectivity, and data freshness.
 """
 
+import os
+import shutil
 from flask import Blueprint, jsonify
 from datetime import datetime
 from sqlalchemy import text
@@ -149,6 +151,39 @@ def health_check():
                 health_data["checks"]["hourly_aggregation"] = {
                     "status": "no_data",
                     "message": "No hourly aggregation runs in last 24 hours"
+                }
+
+            # Check disk space for logs directory
+            try:
+                logs_dir = "/opt/themeparkhallofshame/logs"
+                if os.path.exists(logs_dir):
+                    disk_usage = shutil.disk_usage(logs_dir)
+                    usage_percent = (disk_usage.used / disk_usage.total) * 100
+
+                    status = "healthy"
+                    if usage_percent > 90:
+                        status = "critical"
+                    elif usage_percent > 80:
+                        status = "warning"
+
+                    health_data["checks"]["disk_space"] = {
+                        "status": status,
+                        "usage_percent": round(usage_percent, 1),
+                        "total_gb": round(disk_usage.total / (1024**3), 2),
+                        "used_gb": round(disk_usage.used / (1024**3), 2),
+                        "free_gb": round(disk_usage.free / (1024**3), 2),
+                        "message": f"Disk {usage_percent:.1f}% full"
+                    }
+                else:
+                    health_data["checks"]["disk_space"] = {
+                        "status": "unknown",
+                        "message": "Logs directory not found (running locally?)"
+                    }
+            except Exception as disk_err:
+                logger.warning(f"Could not check disk space: {disk_err}")
+                health_data["checks"]["disk_space"] = {
+                    "status": "unknown",
+                    "message": f"Disk check failed: {str(disk_err)}"
                 }
 
     except Exception as e:

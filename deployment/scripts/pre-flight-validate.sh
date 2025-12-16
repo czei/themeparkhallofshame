@@ -123,14 +123,35 @@ validate_imports() {
         local install_exit=$?
         set -e
 
-        # Check if installation failed
-        if [ $install_exit -ne 0 ]; then
+        # Check if installation actually succeeded by looking for "Successfully installed"
+        # Note: Newer pip versions can return exit code 0 even when builds fail
+        local install_succeeded=false
+        if echo "$install_output" | grep -q "Successfully installed"; then
+            install_succeeded=true
+        fi
+
+        # Check if installation failed or didn't actually install anything
+        if [ $install_exit -ne 0 ] || [ "$install_succeeded" = false ]; then
             # Check if it's just mysqlclient (expected on macOS)
             if echo "$install_output" | grep -q "mysqlclient"; then
                 log_warn "mysqlclient build failed (expected on macOS)"
-                log_info "Installing pymysql as fallback..."
+                log_info "Retrying installation without mysqlclient..."
+
+                # Retry pip install excluding mysqlclient
+                set +e
+                grep -v "^mysqlclient" "${BACKEND_DIR}/requirements.txt" | pip install -r /dev/stdin -q 2>&1
+                local retry_exit=$?
+                set -e
+
+                if [ $retry_exit -ne 0 ]; then
+                    log_error "Failed to install dependencies even without mysqlclient"
+                    deactivate
+                    return 1
+                fi
+
+                # Install pymysql as MySQL driver fallback
                 pip install -q pymysql
-                log_info "Dependencies installed (using pymysql fallback)"
+                log_info "Dependencies installed (using pymysql instead of mysqlclient)"
             else
                 log_error "Failed to install dependencies"
                 echo "$install_output" >&2

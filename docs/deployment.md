@@ -19,91 +19,18 @@ rsync -av -e "ssh -i ~/.ssh/michael-2.pem" <local> ec2-user@webperformance.com:<
 
 | Documentation | Purpose |
 |---------------|---------|
-| **This file** | Overview and initial setup |
+| **This file** | Deployment procedures and troubleshooting |
+| [architecture.md](architecture.md#system-architecture-diagram) | System architecture diagram and technology decisions |
 | [CLAUDE.md](../CLAUDE.md#production-deployment-configuration) | Deployment commands and monitoring |
 | [database/REPLICATION_SETUP.md](../deployment/database/REPLICATION_SETUP.md) | Master-replica database setup |
 | [database/TEST_CONFIGURATION.md](../deployment/database/TEST_CONFIGURATION.md) | Testing against replica database |
 | [config/SENDGRID_SETUP.md](../deployment/config/SENDGRID_SETUP.md) | Email alert configuration |
 
-## System Architecture Diagram
-
-```mermaid
-graph TB
-    subgraph "Production Server: ec2-user@webperformance.com"
-        subgraph "Apache (Port 80/443)"
-            Apache[Apache VirtualHost]
-            Static[Static Files<br/>/var/www/themeparkhallofshame]
-            Proxy[API Proxy<br/>/api → 127.0.0.1:5001]
-        end
-
-        subgraph "Systemd Service: themepark-api.service"
-            PreValidation[ExecStartPre<br/>pre-service-validate.sh]
-            Gunicorn[Gunicorn WSGI Server<br/>2 workers, port 5001<br/>CPU: 30%, RAM: 512MB]
-            Flask[Flask API Application<br/>wsgi:application]
-        end
-
-        subgraph "Data Storage"
-            MariaDB[(MariaDB<br/>themepark_tracker)]
-            Logs[/opt/.../logs/<br/>access.log<br/>error.log<br/>cron_wrapper.log]
-        end
-
-        subgraph "Cron Jobs (Wrapped)"
-            Collect[Every 10 min<br/>collect_snapshots<br/>timeout: 300s]
-            HourlyAgg[":05 each hour<br/>aggregate_hourly<br/>timeout: 1800s"]
-            DailyAgg[1 AM PT<br/>aggregate_daily<br/>timeout: 1800s]
-            HealthCheck[Every hour<br/>check_data_collection<br/>timeout: 300s]
-            QualityAlert[8 AM PT<br/>send_data_quality_alert<br/>timeout: 180s]
-        end
-
-        CronWrapper[cron_wrapper.py<br/>Captures failures<br/>Sends email alerts]
-    end
-
-    subgraph "External Services"
-        SendGrid[SendGrid Email API<br/>Failure Alerts]
-        QueueTimes[Queue-Times.com API<br/>Ride Status Data]
-    end
-
-    subgraph "Client"
-        Browser[Web Browser<br/>themeparkhallofshame.com]
-    end
-
-    %% Connections
-    Browser -->|HTTP/HTTPS| Apache
-    Apache --> Static
-    Apache --> Proxy
-    Proxy -->|127.0.0.1:5001| Gunicorn
-    PreValidation -.->|validates before start| Gunicorn
-    Gunicorn --> Flask
-    Flask --> MariaDB
-    Flask --> Logs
-
-    Collect --> CronWrapper
-    HourlyAgg --> CronWrapper
-    DailyAgg --> CronWrapper
-    HealthCheck --> CronWrapper
-    QualityAlert --> CronWrapper
-
-    CronWrapper -->|on failure| SendGrid
-    CronWrapper --> Logs
-    CronWrapper --> MariaDB
-
-    Collect -->|fetches data| QueueTimes
-
-    %% Styling
-    classDef validation fill:#ff9999,stroke:#cc0000,stroke-width:2px
-    classDef security fill:#99ccff,stroke:#0066cc,stroke-width:2px
-    classDef monitoring fill:#99ff99,stroke:#00cc00,stroke-width:2px
-
-    class PreValidation validation
-    class Gunicorn security
-    class CronWrapper,SendGrid monitoring
-```
-
-## Deployment Process Flow
+## How to Make Modifications (Deployment Process)
 
 ```mermaid
 flowchart TD
-    Start([Developer: Code Changes]) --> LocalTest{Run Tests Locally<br/>pytest}
+    Start([Developer: Code Changes]) --> LocalTest{Run Tests Locally<br>pytest}
 
     LocalTest -->|Tests Fail| FixCode[Fix Code]
     FixCode --> LocalTest
@@ -111,54 +38,54 @@ flowchart TD
 
     Commit --> Deploy[Run deploy.sh]
 
-    Deploy --> PreFlight[Pre-Flight Validation<br/>LOCAL MACHINE]
+    Deploy --> PreFlight[Pre-Flight Validation<br>LOCAL MACHINE]
 
     subgraph "Pre-Flight Checks (Local)"
-        PreFlight --> Syntax[Python Syntax Check<br/>AST parsing]
-        Syntax --> Imports[Import Validation<br/>isolated venv]
-        Imports --> WSGI[WSGI App Creation<br/>wsgi:application]
-        WSGI --> Deps[Dependency Check<br/>pip check]
+        PreFlight --> Syntax[Python Syntax Check<br>AST parsing]
+        Syntax --> Imports[Import Validation<br>isolated venv]
+        Imports --> WSGI[WSGI App Creation<br>wsgi:application]
+        WSGI --> Deps[Dependency Check<br>pip check]
     end
 
-    Deps -->|Validation Fails| RollbackLocal[❌ STOP<br/>Fix issues locally]
+    Deps -->|Validation Fails| RollbackLocal[❌ STOP<br>Fix issues locally]
     RollbackLocal --> LocalTest
 
-    Deps -->|Validation Passes| Snapshot[Create Deployment Snapshot<br/>PRODUCTION]
+    Deps -->|Validation Passes| Snapshot[Create Deployment Snapshot<br>PRODUCTION]
 
-    Snapshot --> Rsync[Deploy Code via rsync<br/>SSH with key]
-    Rsync --> InstallDeps[Install Dependencies<br/>pip install]
+    Snapshot --> Rsync[Deploy Code via rsync<br>SSH with key]
+    Rsync --> InstallDeps[Install Dependencies<br>pip install]
     InstallDeps --> Migrations[Run Database Migrations]
 
-    Migrations --> PreService[Pre-Service Validation<br/>PRODUCTION]
+    Migrations --> PreService[Pre-Service Validation<br>PRODUCTION]
 
     subgraph "Pre-Service Checks (Production)"
-        PreService --> EnvVars[Environment Variables<br/>Check .env]
-        EnvVars --> ImportsCheck[Python Imports<br/>api.app.create_app]
-        ImportsCheck --> DBSchema[Database Schema<br/>Required tables exist]
-        DBSchema --> DepCheck[Dependencies<br/>pip check]
+        PreService --> EnvVars[Environment Variables<br>Check .env]
+        EnvVars --> ImportsCheck[Python Imports<br>api.app.create_app]
+        ImportsCheck --> DBSchema[Database Schema<br>Required tables exist]
+        DBSchema --> DepCheck[Dependencies<br>pip check]
     end
 
-    DepCheck -->|Validation Fails| ServiceFail[❌ Service Fails to Start<br/>systemd blocks startup]
+    DepCheck -->|Validation Fails| ServiceFail[❌ Service Fails to Start<br>systemd blocks startup]
     ServiceFail --> RestoreSnap[Restore Snapshot]
     RestoreSnap --> End1([Deployment Failed])
 
-    DepCheck -->|Validation Passes| StartService[Start Gunicorn<br/>systemd service]
+    DepCheck -->|Validation Passes| StartService[Start Gunicorn<br>systemd service]
 
-    StartService --> Smoke[Run Smoke Tests<br/>PRODUCTION]
+    StartService --> Smoke[Run Smoke Tests<br>PRODUCTION]
 
     subgraph "Smoke Tests"
-        Smoke --> HealthEndpoint[GET /api/health<br/>200 OK?]
-        HealthEndpoint --> ParksAPI[GET /api/parks<br/>returns data?]
-        ParksAPI --> RidesAPI[GET /api/rides<br/>returns data?]
-        RidesAPI --> DBQuery[Database Query<br/>recent snapshots?]
-        DBQuery --> Apache[Apache Proxy<br/>works?]
+        Smoke --> HealthEndpoint[GET /api/health<br>200 OK?]
+        HealthEndpoint --> ParksAPI[GET /api/parks<br>returns data?]
+        ParksAPI --> RidesAPI[GET /api/rides<br>returns data?]
+        RidesAPI --> DBQuery[Database Query<br>recent snapshots?]
+        DBQuery --> Apache[Apache Proxy<br>works?]
     end
 
-    Apache -->|Smoke Tests Fail| AutoRollback[🔄 Automatic Rollback<br/>Restore snapshot]
-    AutoRollback --> RestartOld[Restart Service<br/>with old code]
-    RestartOld --> End2([Deployment Failed<br/>Service Restored])
+    Apache -->|Smoke Tests Fail| AutoRollback[🔄 Automatic Rollback<br>Restore snapshot]
+    AutoRollback --> RestartOld[Restart Service<br>with old code]
+    RestartOld --> End2([Deployment Failed<br>Service Restored])
 
-    Apache -->|Smoke Tests Pass| Monitor[Monitor Health<br/>journalctl -f]
+    Apache -->|Smoke Tests Pass| Monitor[Monitor Health<br>journalctl -f]
 
     Monitor --> Success([✅ Deployment Complete])
 

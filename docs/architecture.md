@@ -29,6 +29,87 @@ This document outlines technology decisions for building a production-ready them
 
 ---
 
+## System Architecture Diagram
+
+```mermaid
+graph TB
+    subgraph prod["Production Server"]
+        subgraph apache["Apache Port 80/443"]
+            Apache[Apache VirtualHost]
+            Static["Static Files<br>var/www/themeparkhallofshame"]
+            Proxy["API Proxy<br>/api to 127.0.0.1:5001"]
+        end
+
+        subgraph systemd["Systemd Service"]
+            PreValidation["ExecStartPre<br>pre-service-validate.sh"]
+            Gunicorn["Gunicorn WSGI Server<br>2 workers port 5001<br>CPU 30% RAM 512MB"]
+            Flask["Flask API Application<br>wsgi:application"]
+        end
+
+        subgraph storage["Data Storage"]
+            MariaDB[("MariaDB<br>themepark_tracker")]
+            Logs["Logs Directory<br>access.log<br>error.log<br>cron_wrapper.log"]
+        end
+
+        subgraph cron["Cron Jobs Wrapped"]
+            Collect["Every 10 min<br>collect_snapshots<br>timeout 300s"]
+            HourlyAgg["Hourly at 05 past<br>aggregate_hourly<br>timeout 1800s"]
+            DailyAgg["Daily 1 AM PT<br>aggregate_daily<br>timeout 1800s"]
+            HealthCheck["Every hour<br>check_data_collection<br>timeout 300s"]
+            QualityAlert["Daily 8 AM PT<br>send_data_quality_alert<br>timeout 180s"]
+        end
+
+        CronWrapper["cron_wrapper.py<br>Captures failures<br>Sends email alerts"]
+    end
+
+    subgraph external["External Services"]
+        SendGrid["SendGrid Email API<br>Failure Alerts"]
+        QueueTimes["Queue-Times.com API<br>Ride Status Data"]
+    end
+
+    subgraph client["Client"]
+        Browser["Web Browser<br>themeparkhallofshame.com"]
+    end
+
+    %% Connections
+    Browser -->|HTTP/HTTPS| Apache
+    Apache --> Static
+    Apache --> Proxy
+    Proxy -->|127.0.0.1:5001| Gunicorn
+    PreValidation -.->|validates before start| Gunicorn
+    Gunicorn --> Flask
+    Flask --> MariaDB
+    Flask --> Logs
+
+    Collect --> CronWrapper
+    HourlyAgg --> CronWrapper
+    DailyAgg --> CronWrapper
+    HealthCheck --> CronWrapper
+    QualityAlert --> CronWrapper
+
+    CronWrapper -->|on failure| SendGrid
+    CronWrapper --> Logs
+    CronWrapper --> MariaDB
+
+    Collect -->|fetches data| QueueTimes
+
+    %% Styling
+    classDef validation fill:#ff9999,stroke:#cc0000,stroke-width:2px
+    classDef security fill:#99ccff,stroke:#0066cc,stroke-width:2px
+    classDef monitoring fill:#99ff99,stroke:#00cc00,stroke-width:2px
+
+    class PreValidation validation
+    class Gunicorn security
+    class CronWrapper,SendGrid monitoring
+```
+
+**Legend:**
+- 🔴 Red: Validation components (pre-service checks)
+- 🔵 Blue: Security hardening (resource limits)
+- 🟢 Green: Monitoring (failure alerts)
+
+---
+
 ## 1. REST API Framework: Flask vs FastAPI
 
 ### Decision: **Flask**

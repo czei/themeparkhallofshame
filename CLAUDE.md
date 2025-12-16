@@ -31,6 +31,54 @@ Python 3.11+: Follow standard conventions
 
 <!-- MANUAL ADDITIONS START -->
 
+## 🚨 CRITICAL: Git Commit Policy 🚨
+
+**NEVER commit files without explicit user approval.**
+
+### The Rule
+
+1. **Make changes** to files as requested
+2. **Show the user** what was changed (using `git diff` or explaining the changes)
+3. **WAIT for explicit approval** - User must say "commit", "looks good, commit", or similar
+4. **NEVER auto-commit** after completing work
+5. **NEVER batch commits** - If user says "commit and continue", commit ONLY the current changes, then wait for approval on the next set of changes
+
+### Why This Matters
+
+- The user needs to review all changes before they go into git history
+- Automated commits are annoying and disrespectful of the user's workflow
+- The user may want to:
+  - Review the changes in their editor
+  - Test the changes first
+  - Make additional modifications
+  - Write their own commit message
+
+### What to Do Instead
+
+```
+✅ CORRECT:
+Claude: "I've updated docs/deployment.md with the Mermaid diagrams. Here's what changed:"
+Claude: [Shows git diff or explains changes]
+Claude: "Would you like to review these changes before committing?"
+User: "looks good, commit it"
+Claude: [NOW commits]
+
+❌ WRONG:
+Claude: "I've updated the file and committed the changes."
+[User never had a chance to review!]
+```
+
+### Exceptions
+
+The ONLY time you can commit without asking is if the user explicitly says:
+- "commit these changes"
+- "commit and push"
+- "make the change and commit it"
+
+Even then, show what you're committing!
+
+---
+
 ## Production Deployment Configuration
 
 ### SSH Access to Production Server

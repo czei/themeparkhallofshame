@@ -335,9 +335,104 @@ ruff check .
 tests/
 ├── unit/           # Fast, isolated tests (mock dependencies)
 ├── integration/    # Tests with real database/services
+├── contract/       # API contract validation tests
+├── golden_data/    # Hand-computed expected values for regression testing
+├── performance/    # Query timing and performance tests
 ├── fixtures/       # Shared test fixtures
 └── conftest.py     # Pytest configuration
 ```
+
+### Layered Testing Philosophy
+
+This project uses a **layered testing strategy** with 935+ tests across 64 files. **BOTH unit and integration tests are necessary** - they serve different purposes.
+
+#### Unit Tests (43 files, ~800 tests)
+
+**Purpose:** Fast verification of business logic
+
+- **Database:** Mocked (`mock_db_connection` fixture with `MagicMock`)
+- **Speed:** <5 seconds for all 800 unit tests
+- **Value:** Catch logic errors, enable TDD red-green-refactor cycle
+- **Focus:** Pure business logic, calculations, transformations, error handling
+
+**Why mocking is NOT useless:**
+- Enables **fast TDD iteration** - instant feedback during development
+- Tests **pure logic** without infrastructure dependencies
+- **Isolates** the code under test from database, network, or file system issues
+- Makes tests **deterministic** - no flaky failures from external systems
+
+**Example:**
+```python
+def test_shame_score_calculation(mock_db_connection):
+    # Fast, isolated, tests pure calculation logic
+    calculator = ShameScoreCalculator(mock_db_connection)
+    score = calculator.calculate(downtime_hours=10, tier=1)
+    assert score == 100  # 10 hours * tier 1 weight (10) = 100
+```
+
+#### Integration Tests (21 files, ~135 tests)
+
+**Purpose:** Verify database interactions and queries work correctly
+
+- **Database:** Real MySQL with automatic transaction rollback
+- **Speed:** ~30 seconds for all 135 integration tests
+- **Value:** Catch SQL errors, schema issues, real-world data patterns
+- **Focus:** Database queries, schema assumptions, aggregations, API endpoints
+
+**Why integration tests matter:**
+- Catch **SQL syntax errors** and **schema mismatches**
+- Verify **real data patterns** (NULL handling, edge cases, time zones)
+- Test **complex joins** and **subqueries** that can't be mocked
+- Validate **end-to-end** API flows (request → business logic → database → response)
+
+**Transaction safety:**
+Each integration test runs in a transaction that rolls back automatically, ensuring test isolation without recreating tables.
+
+**Example:**
+```python
+def test_park_rankings_query(mysql_connection):
+    # Real MySQL, verifies actual query results
+    insert_test_park(mysql_connection, name="Test Park")
+    insert_test_rides(mysql_connection, park_id=1, count=10)
+
+    result = execute_park_rankings_query(mysql_connection, period="today")
+
+    assert result[0]['park_name'] == "Test Park"
+    assert result[0]['shame_score'] > 0
+    assert result[0]['total_rides'] == 10
+```
+
+#### When to Use Each Test Type
+
+**Write unit tests when:**
+- Testing business logic (calculations, transformations)
+- Testing pure functions without side effects
+- Testing error handling and edge cases
+- You need fast feedback during TDD (<5 second cycle)
+
+**Write integration tests when:**
+- Testing SQL queries against real MySQL
+- Testing database schema assumptions
+- Testing aggregations that depend on actual data
+- Testing API endpoints end-to-end
+- Verifying complex joins, subqueries, or window functions
+
+**BOTH are necessary:**
+- **Unit tests** enable fast iteration during development
+- **Integration tests** catch real-world bugs that mocks miss
+- Together they provide **comprehensive coverage** (935+ tests, 80% minimum)
+
+#### Contract Tests (1 file)
+
+Validate that API responses match declared OpenAPI schema.
+
+#### Golden Data Tests (4 files)
+
+Regression testing with hand-computed expected values to catch calculation discrepancies.
+
+#### Performance Tests (1 file)
+
+Query timing baselines marked with `@pytest.mark.performance`.
 
 ### Test Naming Convention
 

@@ -25,16 +25,82 @@ rsync -av -e "ssh -i ~/.ssh/michael-2.pem" <local> ec2-user@webperformance.com:<
 | [database/REPLICATION_SETUP.md](../deployment/database/REPLICATION_SETUP.md) | Master-replica database setup |
 | [database/TEST_CONFIGURATION.md](../deployment/database/TEST_CONFIGURATION.md) | Testing against replica database |
 | [config/SENDGRID_SETUP.md](../deployment/config/SENDGRID_SETUP.md) | Email alert configuration |
+| [development.md](development.md#testing-strategy) | Development workflow and testing strategy |
+
+## Pre-Deployment Testing
+
+**CRITICAL: All tests must pass before deploying to production.**
+
+### Run Full Test Suite
+
+```bash
+cd backend
+
+# Run all tests
+pytest
+
+# Run specific test categories
+pytest tests/unit/           # Unit tests only (fast, <5 sec)
+pytest tests/integration/    # Integration tests (requires test DB, ~30 sec)
+pytest tests/contract/       # API contract validation
+
+# Run with coverage report
+pytest --cov=src --cov-report=term-missing
+```
+
+### Test Requirements
+
+Before deployment, verify:
+- ✅ **935+ tests pass** - All unit, integration, and contract tests
+- ✅ **No skipped tests** - Unless documented with reason
+- ✅ **80% minimum coverage** - Code coverage meets threshold
+- ✅ **Linting passes** - `ruff check .` shows no errors
+- ✅ **Manual browser verification** - See [CLAUDE.md](../CLAUDE.md#mandatory-local-testing-before-production-deployment)
+
+### Integration Test Database Setup
+
+Integration tests require a local test database:
+
+```bash
+# Set up test database (one-time setup)
+./deployment/scripts/setup-test-database.sh
+
+# Configure environment
+export TEST_DB_HOST=localhost
+export TEST_DB_PORT=3306
+export TEST_DB_NAME=themepark_test
+export TEST_DB_USER=root
+export TEST_DB_PASSWORD=your_password
+```
+
+### Test Execution Flow
+
+1. **Unit tests** (~800 tests, <5 sec) - Fast, mocked, verify business logic
+2. **Integration tests** (~135 tests, ~30 sec) - Real MySQL, verify database interactions
+3. **Contract tests** - Validate API responses match OpenAPI schema
+4. **Manual browser testing** - Verify UI works with real data
+
+**If ANY test fails, deployment is blocked.**
+
+See [Development Guide](development.md#testing-strategy) for detailed testing documentation.
+
+---
 
 ## How to Make Modifications (Deployment Process)
 
 ```mermaid
 flowchart TD
-    Start([Developer: Code Changes]) --> LocalTest{Run Tests Locally<br>pytest}
+    Start([Developer: Code Changes]) --> RunTests[Run Test Suite<br>pytest]
 
-    LocalTest -->|Tests Fail| FixCode[Fix Code]
-    FixCode --> LocalTest
-    LocalTest -->|Tests Pass| Commit[Git Commit]
+    RunTests -->|Tests Fail| FixCode[Fix Code]
+    FixCode --> RunTests
+    RunTests -->|All 935+ Tests Pass| RunLint[Run Linting<br>ruff check .]
+
+    RunLint -->|Linting Fails| FixCode
+    RunLint -->|Linting Passes| ManualTest[Manual Browser Testing<br>Verify all periods]
+
+    ManualTest -->|Issues Found| FixCode
+    ManualTest -->|Verified| Commit[Git Commit]
 
     Commit --> Deploy[Run deploy.sh]
 

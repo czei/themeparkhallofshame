@@ -182,6 +182,75 @@ Monitors:
 
 See [CLAUDE.md](CLAUDE.md#production-deployment-configuration) for complete deployment documentation.
 
+## Testing
+
+This project has comprehensive test coverage with **935+ tests across 64 files**:
+
+- **Unit tests** (43 files, ~800 tests) - Fast, isolated business logic verification
+- **Integration tests** (21 files, ~135 tests) - Real MySQL database interaction tests
+- **Contract tests** - API schema validation
+- **Golden data tests** - Regression testing with hand-computed values
+- **Performance tests** - Query timing baselines
+
+### Quick Start
+
+```bash
+# Run all tests (unit + integration + contract)
+cd backend && pytest
+
+# Run specific test categories
+pytest tests/unit/           # Fast unit tests (<5 sec)
+pytest tests/integration/    # Integration tests (~30 sec, requires test DB)
+pytest tests/contract/       # API contract validation
+
+# Run with coverage report
+pytest --cov=src --cov-report=term-missing
+pytest --cov=src --cov-report=html  # Generate HTML report in htmlcov/
+
+# Run linting
+ruff check .
+```
+
+### Test Categories
+
+| Type | Count | Speed | Database | Purpose |
+|------|-------|-------|----------|---------|
+| Unit | ~800 tests | <5 sec | Mocked | Business logic verification |
+| Integration | ~135 tests | ~30 sec | Real MySQL | Database interaction tests |
+| Contract | Small | <1 sec | None | API schema validation |
+
+### Why Both Unit and Integration Tests?
+
+**Unit tests** (with mocks):
+- ✅ Enable fast TDD iteration (<5 second feedback)
+- ✅ Test pure business logic without infrastructure
+- ✅ Make tests deterministic (no flaky failures)
+
+**Integration tests** (real MySQL):
+- ✅ Catch SQL syntax errors and schema mismatches
+- ✅ Verify real data patterns (NULLs, time zones, edge cases)
+- ✅ Test complex joins and aggregations
+- ✅ Validate end-to-end API flows
+
+**Both are necessary** for comprehensive coverage. See [Development Guide](docs/development.md#testing-strategy) for detailed documentation.
+
+### Before Committing
+
+All tests must pass before committing:
+
+```bash
+# 1. Run full test suite
+pytest  # Must pass all 935+ tests
+
+# 2. Run linting
+ruff check .  # Must show no errors
+
+# 3. Manual browser testing (for UI changes)
+# See CLAUDE.md for detailed manual testing requirements
+```
+
+---
+
 ## Development Workflow
 
 This section covers the complete development lifecycle, from writing code to deploying to production.

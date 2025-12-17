@@ -404,7 +404,7 @@
 
         // API base URL - match config.js pattern
         // In production, nginx proxies /api to the backend
-        const API_BASE_URL = window.location.port === '8080'
+        const API_BASE_URL = (window.location.port === '8080' || window.location.port === '8000')
             ? 'http://localhost:5001/api'
             : '/api';
 

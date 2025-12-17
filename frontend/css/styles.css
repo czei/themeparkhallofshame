@@ -2584,6 +2584,63 @@ td {
     color: white;
 }
 
+/* Chart mode toggle (reuses chart-type-toggle styles) */
+.chart-mode-toggle {
+    display: flex;
+    gap: 0;
+    border: 2px solid var(--charcoal);
+}
+
+.chart-mode-toggle .toggle-btn {
+    padding: 0.5rem 1.25rem;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    background: white;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: var(--charcoal);
+}
+
+.chart-mode-toggle .toggle-btn:first-child {
+    border-right: 2px solid var(--charcoal);
+}
+
+.chart-mode-toggle .toggle-btn:hover {
+    background: #f0f0f0;
+}
+
+.chart-mode-toggle .toggle-btn.active {
+    background: var(--deep-teal);
+    color: white;
+}
+
+/* Section header layout for toggle */
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+/* Heatmap grid layout */
+.heatmaps-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2rem;
+}
+
+.heatmap-wrapper {
+    overflow-x: auto;
+    padding: 1rem 0;
+}
+
+.heatmap-container {
+    min-width: fit-content;
+}
+
 .ride-comparison-chart-container {
     position: relative;
     height: 300px;

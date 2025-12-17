@@ -32,6 +32,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Initialize Park Details modal (for Charts component)
+    const parkDetailsModal = new ParkDetailsModal(apiClient);
+
     // Initialize Search component
     if (typeof Search !== 'undefined') {
         const searchComponent = new Search(apiClient);
@@ -325,7 +328,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 case 'charts':
                     if (typeof Charts !== 'undefined') {
-                        currentComponent = new Charts(apiClient, 'view-container', globalState.filter);
+                        currentComponent = new Charts(apiClient, 'view-container', globalState.filter, parkDetailsModal);
                         // Sync the period before fetching data
                         currentComponent.state.period = globalState.period;
                         await currentComponent.init();

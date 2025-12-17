@@ -96,6 +96,8 @@ class ParkWaitTimeHistoryQuery:
 
             datasets.append({
                 "label": park["park_name"],
+                "entity_id": park["park_id"],
+                "location": park["location"],
                 "data": aligned_data,
             })
 
@@ -140,6 +142,7 @@ class ParkWaitTimeHistoryQuery:
             SELECT
                 p.park_id,
                 p.name AS park_name,
+                CONCAT(p.city, ', ', p.state_province) AS location,
                 AVG(pas.avg_wait_time) AS overall_avg_wait
             FROM parks p
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
@@ -149,7 +152,7 @@ class ParkWaitTimeHistoryQuery:
                 AND pas.avg_wait_time > 0
                 AND p.is_active = TRUE
                 {disney_filter}
-            GROUP BY p.park_id, p.name
+            GROUP BY p.park_id, p.name, p.city, p.state_province
             HAVING overall_avg_wait > 0
             ORDER BY overall_avg_wait DESC
             LIMIT :limit
@@ -178,6 +181,8 @@ class ParkWaitTimeHistoryQuery:
 
             datasets.append({
                 "label": park["park_name"],
+                "entity_id": park["park_id"],
+                "location": park["location"],
                 "data": aligned_data,
             })
 
@@ -329,6 +334,7 @@ class ParkWaitTimeHistoryQuery:
             select(
                 parks.c.park_id,
                 parks.c.name.label("park_name"),
+                func.concat(parks.c.city, ', ', parks.c.state_province).label("location"),
                 func.avg(park_daily_stats.c.avg_wait_time).label("overall_avg_wait"),
             )
             .select_from(
@@ -338,7 +344,7 @@ class ParkWaitTimeHistoryQuery:
                 )
             )
             .where(and_(*conditions))
-            .group_by(parks.c.park_id, parks.c.name)
+            .group_by(parks.c.park_id, parks.c.name, parks.c.city, parks.c.state_province)
             .having(func.avg(park_daily_stats.c.avg_wait_time) > 0)
             .order_by(func.avg(park_daily_stats.c.avg_wait_time).desc())
             .limit(limit)

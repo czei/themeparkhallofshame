@@ -12,6 +12,8 @@ GET /trends?category=rides-improving  → database/queries/trends/improving_ride
 GET /trends?category=rides-declining  → database/queries/trends/declining_rides.py
 GET /trends/chart-data?type=parks     → database/queries/charts/park_shame_history.py
 GET /trends/chart-data?type=rides     → database/queries/charts/ride_downtime_history.py
+GET /trends/heatmap-data?type=parks   → Reuses park_waittime_history.py + transforms to matrix
+GET /trends/heatmap-data?type=rides-* → Reuses ride_*_history.py + transforms to matrix
 GET /trends/longest-wait-times        → database/queries/trends/longest_wait_times.py
 GET /trends/least-reliable            → database/queries/trends/least_reliable_rides.py
 """
@@ -41,6 +43,7 @@ from database.queries.charts import (
 from utils.logger import logger
 from utils.timezone import get_today_pacific, get_now_pacific, get_last_week_date_range, get_last_month_date_range
 from utils.cache import get_query_cache, generate_cache_key
+from utils.heatmap_helpers import transform_chart_to_heatmap, validate_heatmap_period
 
 # Create Blueprint
 trends_bp = Blueprint('trends', __name__)
@@ -689,6 +692,210 @@ def get_least_reliable():
 
     except Exception as e:
         logger.error(f"Error in get_least_reliable: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "Internal server error"
+        }), 500
+
+
+@trends_bp.route('/trends/heatmap-data', methods=['GET'])
+def get_heatmap_data():
+    """
+    GET /api/trends/heatmap-data
+
+    Returns heatmap matrix data by reusing existing chart queries and transforming the response.
+
+    ARCHITECTURE: This endpoint calls existing chart query classes (ParkWaitTimeHistoryQuery,
+    RideDowntimeHistoryQuery, RideWaitTimeHistoryQuery) and transforms their Chart.js format
+    into heatmap matrix format using transform_chart_to_heatmap().
+
+    Query Parameters:
+        - period: today | yesterday | last_week | last_month (LIVE NOT SUPPORTED)
+        - type: parks | rides-downtime | rides-waittimes (required)
+        - filter: disney-universal | all-parks (default: all-parks)
+        - limit: max entities to return (default: 10, max: 20)
+
+    Returns:
+        JSON response with heatmap matrix format:
+        {
+            "success": true,
+            "period": "last_week",
+            "granularity": "daily",
+            "title": "Top 10 Parks by Average Wait Time (Last Week)",
+            "metric": "avg_wait_time_minutes",
+            "metric_unit": "minutes",
+            "timezone": "America/Los_Angeles",
+            "entities": [
+                {"entity_id": 1, "entity_name": "Magic Kingdom", "rank": 1, "total_value": 55.0}
+            ],
+            "time_labels": ["Dec 09", "Dec 10", ...],
+            "matrix": [[45, 52, 68, ...], [38, 41, 55, ...]]
+        }
+    """
+    try:
+        # Parse query parameters
+        period = request.args.get('period')
+        heatmap_type = request.args.get('type')
+        park_filter = request.args.get('filter', 'all-parks')
+        limit = int(request.args.get('limit', 10))
+
+        # Validate required parameters
+        if not period:
+            return jsonify({
+                "success": False,
+                "error": "Missing required parameter: period"
+            }), 400
+
+        if not heatmap_type:
+            return jsonify({
+                "success": False,
+                "error": "Missing required parameter: type"
+            }), 400
+
+        # Validate period (LIVE NOT SUPPORTED for heatmaps)
+        if not validate_heatmap_period(period):
+            return jsonify({
+                "success": False,
+                "error": "Invalid period for heatmaps. LIVE period not supported. Use: today, yesterday, last_week, last_month"
+            }), 400
+
+        # Validate type
+        valid_types = ['parks', 'parks-shame', 'rides-downtime', 'rides-waittimes']
+        if heatmap_type not in valid_types:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid type. Must be one of: {', '.join(valid_types)}"
+            }), 400
+
+        # Validate filter
+        valid_filters = ['disney-universal', 'all-parks']
+        if park_filter not in valid_filters:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid filter. Must be one of: {', '.join(valid_filters)}"
+            }), 400
+
+        # Validate limit
+        if limit < 1 or limit > 20:
+            limit = min(max(limit, 1), 20)
+
+        today = get_today_pacific()
+        filter_disney_universal = (park_filter == 'disney-universal')
+
+        # Get database connection
+        with get_db_connection() as conn:
+            # Determine granularity and call appropriate method
+            if period in ['today', 'yesterday']:
+                # Hourly granularity
+                granularity = 'hourly'
+                target_date = today if period == 'today' else today - timedelta(days=1)
+
+                if heatmap_type == 'parks':
+                    query = ParkWaitTimeHistoryQuery(conn)
+                    chart_data = query.get_hourly(
+                        target_date=target_date,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                    metric = 'avg_wait_time_minutes'
+                    metric_unit = 'minutes'
+                elif heatmap_type == 'parks-shame':
+                    query = ParkShameHistoryQuery(conn)
+                    chart_data = query.get_hourly(
+                        target_date=target_date,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                    metric = 'shame_score'
+                    metric_unit = 'points'
+                elif heatmap_type == 'rides-downtime':
+                    query = RideDowntimeHistoryQuery(conn)
+                    chart_data = query.get_hourly(
+                        target_date=target_date,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                    metric = 'downtime_hours'
+                    metric_unit = 'hours'
+                else:  # rides-waittimes
+                    query = RideWaitTimeHistoryQuery(conn)
+                    chart_data = query.get_hourly(
+                        target_date=target_date,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                    metric = 'avg_wait_time_minutes'
+                    metric_unit = 'minutes'
+
+            else:  # last_week or last_month
+                # Daily granularity
+                granularity = 'daily'
+                if period == 'last_week':
+                    start_date, end_date, _ = get_last_week_date_range()
+                    days = (end_date - start_date).days + 1
+                else:  # last_month
+                    start_date, end_date, _ = get_last_month_date_range()
+                    days = (end_date - start_date).days + 1
+
+                if heatmap_type == 'parks':
+                    query = ParkWaitTimeHistoryQuery(conn)
+                    chart_data = query.get_daily(
+                        days=days,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                    metric = 'avg_wait_time_minutes'
+                    metric_unit = 'minutes'
+                elif heatmap_type == 'parks-shame':
+                    query = ParkShameHistoryQuery(conn)
+                    chart_data = query.get_daily(
+                        days=days,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                    metric = 'shame_score'
+                    metric_unit = 'points'
+                elif heatmap_type == 'rides-downtime':
+                    query = RideDowntimeHistoryQuery(conn)
+                    chart_data = query.get_daily(
+                        days=days,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                    metric = 'downtime_hours'
+                    metric_unit = 'hours'
+                else:  # rides-waittimes
+                    query = RideWaitTimeHistoryQuery(conn)
+                    chart_data = query.get_daily(
+                        days=days,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                    metric = 'avg_wait_time_minutes'
+                    metric_unit = 'minutes'
+
+            # Add granularity to chart_data for transformation
+            chart_data['granularity'] = granularity
+
+            # Transform Chart.js format to Heatmap matrix format
+            heatmap_data = transform_chart_to_heatmap(
+                chart_data=chart_data,
+                period=period,
+                metric=metric,
+                metric_unit=metric_unit
+            )
+
+        return jsonify(heatmap_data), 200
+
+    except ValueError as e:
+        logger.error(f"Validation error in get_heatmap_data: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 400
+
+    except Exception as e:
+        logger.error(f"Error in get_heatmap_data: {e}", exc_info=True)
         return jsonify({
             "success": False,
             "error": "Internal server error"

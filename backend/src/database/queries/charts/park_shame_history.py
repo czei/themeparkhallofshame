@@ -115,6 +115,8 @@ class ParkShameHistoryQuery:
 
             datasets.append({
                 "label": park["park_name"],
+                "entity_id": park["park_id"],
+                "location": park["location"],
                 "data": aligned_data,
             })
 
@@ -161,6 +163,7 @@ class ParkShameHistoryQuery:
             SELECT
                 p.park_id,
                 p.name AS park_name,
+                CONCAT(p.city, ', ', p.state_province) AS location,
                 AVG(pas.shame_score) AS avg_shame_score
             FROM parks p
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
@@ -170,7 +173,7 @@ class ParkShameHistoryQuery:
                 AND pas.shame_score IS NOT NULL
                 AND pas.shame_score > 0
                 {disney_filter}
-            GROUP BY p.park_id, p.name
+            GROUP BY p.park_id, p.name, p.city, p.state_province
             HAVING COUNT(*) > 0
             ORDER BY avg_shame_score DESC
             LIMIT :limit
@@ -205,6 +208,8 @@ class ParkShameHistoryQuery:
 
             datasets.append({
                 "label": park["park_name"],
+                "entity_id": park["park_id"],
+                "location": park["location"],
                 "data": aligned_data,
             })
 
@@ -577,6 +582,7 @@ class ParkShameHistoryQuery:
             select(
                 parks.c.park_id,
                 parks.c.name.label("park_name"),
+                func.concat(parks.c.city, ', ', parks.c.state_province).label("location"),
             )
             .select_from(
                 parks.join(park_daily_stats, parks.c.park_id == park_daily_stats.c.park_id)
@@ -584,7 +590,7 @@ class ParkShameHistoryQuery:
                 .outerjoin(wd, parks.c.park_id == wd.c.park_id)
             )
             .where(and_(*conditions))
-            .group_by(parks.c.park_id, parks.c.name, pw.c.total_park_weight, wd.c.total_weighted_downtime_hours)
+            .group_by(parks.c.park_id, parks.c.name, parks.c.city, parks.c.state_province, pw.c.total_park_weight, wd.c.total_weighted_downtime_hours)
             .having(func.sum(park_daily_stats.c.total_downtime_hours) > 0)
             .order_by(
                 (wd.c.total_weighted_downtime_hours / func.nullif(pw.c.total_park_weight, 0)).desc()

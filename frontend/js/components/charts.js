@@ -18,9 +18,10 @@ const MARY_BLAIR_COLORS = [
 ];
 
 class Charts {
-    constructor(apiClient, containerId, initialFilter = 'all-parks') {
+    constructor(apiClient, containerId, initialFilter = 'all-parks', parkDetailsModal = null) {
         this.apiClient = apiClient;
         this.container = document.getElementById(containerId);
+        this.parkDetailsModal = parkDetailsModal;  // For click handlers
         this.parksChart = null;  // Chart.js instance for parks shame score
         this.waitTimesChart = null;  // Chart.js instance for park wait times
         this.ridesDowntimeChart = null;  // Chart.js instance for ride downtime
@@ -28,12 +29,20 @@ class Charts {
         this.state = {
             period: 'last_week',
             filter: initialFilter,
+            chartMode: 'line',  // 'line' or 'heatmap'
             loading: false,
             error: null,
             parksChartData: null,
             waitTimesChartData: null,
             ridesDowntimeChartData: null,
             ridesWaitTimesChartData: null,
+            // Heatmap data (lazy loaded when toggle clicked)
+            parksShameHeatmap: null,
+            parksWaitTimesHeatmap: null,
+            ridesDowntimeHeatmap: null,
+            ridesWaitTimesHeatmap: null,
+            // Accordion state: track which heatmap sections are expanded
+            expandedHeatmaps: new Set(),  // e.g., Set(['parks-shame', 'parks-waittimes'])
             chartsMock: false,
             chartsGranularity: 'daily'  // 'hourly' for today, 'daily' for 7/30 days
         };
@@ -157,15 +166,46 @@ class Charts {
     }
 
     /**
-     * Render the charts section with canvas elements
+     * Render the charts section with toggle and canvas/heatmap elements
      */
     renderChartsSection() {
         const mockIndicator = this.state.chartsMock
             ? '<span class="mock-data-indicator">Sample data shown - real data accumulating</span>'
             : '';
 
-        // CRITICAL: Downtime chart is meaningless for LIVE period (only 1 hour of data)
-        // Cumulative downtime doesn't provide useful insights in such a short window
+        const isLivePeriod = this.state.period === 'live';
+
+        // Toggle button (hidden for LIVE period - heatmaps don't support LIVE)
+        const toggleHtml = isLivePeriod
+            ? ''
+            : `<div class="chart-mode-toggle">
+                   <button class="toggle-btn ${this.state.chartMode === 'line' ? 'active' : ''}"
+                           onclick="window.chartsComponent?.toggleChartMode('line')">
+                       LINE CHARTS
+                   </button>
+                   <button class="toggle-btn ${this.state.chartMode === 'heatmap' ? 'active' : ''}"
+                           onclick="window.chartsComponent?.toggleChartMode('heatmap')">
+                       HEATMAPS
+                   </button>
+               </div>`;
+
+        return `
+            <div class="section-header">
+                <h2 class="section-title">Performance Charts</h2>
+                ${toggleHtml}
+            </div>
+            ${this.state.chartMode === 'line' ? this.renderLineChartsContent() : this.renderHeatmapsContent()}
+        `;
+    }
+
+    /**
+     * Render line charts content
+     */
+    renderLineChartsContent() {
+        const mockIndicator = this.state.chartsMock
+            ? '<span class="mock-data-indicator">Sample data shown - real data accumulating</span>'
+            : '';
+
         const isLivePeriod = this.state.period === 'live';
         const downtimeChartHtml = isLivePeriod
             ? `<div class="chart-container">
@@ -183,9 +223,6 @@ class Charts {
                </div>`;
 
         return `
-            <div class="section-header">
-                <h2 class="section-title">Performance Charts</h2>
-            </div>
             <div class="charts-grid">
                 <div class="chart-container">
                     <h3>Park Shame Scores (${this.getPeriodLabel()})</h3>
@@ -207,6 +244,72 @@ class Charts {
                         <canvas id="rides-waittimes-chart"></canvas>
                     </div>
                 </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render heatmaps content with accordion sections
+     */
+    renderHeatmapsContent() {
+        const heatmaps = [
+            {
+                id: 'parks-shame',
+                title: `Top 10 Parks by Shame Score (${this.getPeriodLabel()})`,
+                dataKey: 'parksShameHeatmap'
+            },
+            {
+                id: 'parks-waittimes',
+                title: `Top 10 Parks by Wait Times (${this.getPeriodLabel()})`,
+                dataKey: 'parksWaitTimesHeatmap'
+            },
+            {
+                id: 'rides-downtime',
+                title: `Top 10 Rides by Downtime (${this.getPeriodLabel()})`,
+                dataKey: 'ridesDowntimeHeatmap'
+            },
+            {
+                id: 'rides-waittimes',
+                title: `Top 10 Rides by Wait Times (${this.getPeriodLabel()})`,
+                dataKey: 'ridesWaitTimesHeatmap'
+            }
+        ];
+
+        const sectionsHtml = heatmaps.map(heatmap => {
+            const isExpanded = this.state.expandedHeatmaps.has(heatmap.id);
+            const hasData = this.state[heatmap.dataKey];
+
+            return `
+                <div class="heatmap-accordion-section">
+                    <button class="heatmap-accordion-header ${isExpanded ? 'expanded' : ''}"
+                            onclick="window.chartsComponent?.toggleHeatmapSection('${heatmap.id}')"
+                            aria-expanded="${isExpanded}">
+                        <h3>${heatmap.title}</h3>
+                        <span class="chevron">${isExpanded ? '▲' : '▼'}</span>
+                    </button>
+                    <div class="heatmap-accordion-content ${isExpanded ? 'expanded' : ''}"
+                         data-section="${heatmap.id}">
+                        <div class="heatmap-wrapper">
+                            <div id="${heatmap.id}-heatmap" class="heatmap-container">
+                                ${!hasData && isExpanded ? '<p style="text-align: center; padding: 2rem; color: #6c757d;">Loading heatmap data...</p>' : ''}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="heatmap-accordion-controls">
+                <button class="accordion-control-btn" onclick="window.chartsComponent?.expandAllHeatmaps()">
+                    Expand All
+                </button>
+                <button class="accordion-control-btn" onclick="window.chartsComponent?.collapseAllHeatmaps()">
+                    Collapse All
+                </button>
+            </div>
+            <div class="heatmaps-accordion">
+                ${sectionsHtml}
             </div>
         `;
     }
@@ -604,6 +707,255 @@ class Charts {
         if (newPeriod !== this.state.period) {
             this.state.period = newPeriod;
             this.fetchChartData();
+            // Reset heatmap data when period changes
+            this.setState({
+                parksShameHeatmap: null,
+                parksWaitTimesHeatmap: null,
+                ridesDowntimeHeatmap: null,
+                ridesWaitTimesHeatmap: null
+            });
+        }
+    }
+
+    /**
+     * Toggle between line charts and heatmaps
+     */
+    toggleChartMode(newMode) {
+        if (newMode === this.state.chartMode) return;
+
+        this.setState({ chartMode: newMode });
+
+        // Lazy load heatmap data if switching to heatmap mode
+        if (newMode === 'heatmap' && !this.state.parksShameHeatmap) {
+            this.fetchHeatmapData();
+        }
+    }
+
+    /**
+     * Fetch all heatmap data
+     */
+    async fetchHeatmapData() {
+        try {
+            const baseParams = {
+                period: this.getEffectivePeriod(),
+                filter: this.state.filter,
+                limit: 10
+            };
+
+            // Fetch all four heatmap types in parallel
+            const [parksShame, parksWaitTimes, ridesDowntime, ridesWaitTimes] = await Promise.all([
+                this.apiClient.get('/trends/heatmap-data', { ...baseParams, type: 'parks-shame' }),
+                this.apiClient.get('/trends/heatmap-data', { ...baseParams, type: 'parks' }),
+                this.apiClient.get('/trends/heatmap-data', { ...baseParams, type: 'rides-downtime' }),
+                this.apiClient.get('/trends/heatmap-data', { ...baseParams, type: 'rides-waittimes' })
+            ]);
+
+            this.setState({
+                parksShameHeatmap: parksShame.success ? parksShame : null,
+                parksWaitTimesHeatmap: parksWaitTimes.success ? parksWaitTimes : null,
+                ridesDowntimeHeatmap: ridesDowntime.success ? ridesDowntime : null,
+                ridesWaitTimesHeatmap: ridesWaitTimes.success ? ridesWaitTimes : null
+            });
+
+            // Render heatmaps after data is loaded
+            this.renderHeatmaps();
+        } catch (error) {
+            console.error('Failed to fetch heatmap data:', error);
+            this.setState({ error: error.message });
+        }
+    }
+
+    /**
+     * Render all heatmaps using HeatmapRenderer (lazy rendering - only expanded sections)
+     */
+    renderHeatmaps() {
+        if (typeof HeatmapRenderer === 'undefined') {
+            console.error('HeatmapRenderer not loaded');
+            return;
+        }
+
+        // Only render heatmaps that are currently expanded
+        if (this.state.expandedHeatmaps.has('parks-shame')) {
+            this.renderParksShameHeatmap();
+        }
+        if (this.state.expandedHeatmaps.has('parks-waittimes')) {
+            this.renderParksWaitTimesHeatmap();
+        }
+        if (this.state.expandedHeatmaps.has('rides-downtime')) {
+            this.renderRidesDowntimeHeatmap();
+        }
+        if (this.state.expandedHeatmaps.has('rides-waittimes')) {
+            this.renderRidesWaitTimesHeatmap();
+        }
+    }
+
+    /**
+     * Toggle accordion section (expand/collapse)
+     */
+    toggleHeatmapSection(sectionId) {
+        const expanded = new Set(this.state.expandedHeatmaps);
+
+        if (expanded.has(sectionId)) {
+            expanded.delete(sectionId);
+        } else {
+            expanded.add(sectionId);
+        }
+
+        this.setState({ expandedHeatmaps: expanded });
+
+        // Re-render to update UI
+        this.render();
+
+        // Render the heatmap if it was just expanded
+        if (expanded.has(sectionId)) {
+            setTimeout(() => {
+                this.renderHeatmaps();
+            }, 100);  // Small delay to ensure DOM is updated
+        }
+    }
+
+    /**
+     * Expand all heatmap sections
+     */
+    expandAllHeatmaps() {
+        const expanded = new Set(['parks-shame', 'parks-waittimes', 'rides-downtime', 'rides-waittimes']);
+        this.setState({ expandedHeatmaps: expanded });
+        this.render();
+
+        // Render all heatmaps after DOM updates
+        setTimeout(() => {
+            this.renderHeatmaps();
+        }, 100);
+    }
+
+    /**
+     * Collapse all heatmap sections
+     */
+    collapseAllHeatmaps() {
+        this.setState({ expandedHeatmaps: new Set() });
+        this.render();
+    }
+
+    /**
+     * Render parks shame score heatmap
+     */
+    renderParksShameHeatmap() {
+        const container = document.getElementById('parks-shame-heatmap');
+        if (!container || !this.state.parksShameHeatmap) return;
+
+        const data = this.state.parksShameHeatmap;
+
+        const renderer = new HeatmapRenderer({
+            entities: data.entities,
+            timeLabels: data.time_labels,
+            matrix: data.matrix,
+            metric: data.metric,
+            metricUnit: data.metric_unit,
+            granularity: data.granularity,
+            getEntityLabel: (entity) => entity.entity_name,
+            getTierBadge: null,  // Parks don't have tiers
+            onCellClick: (entityId, entityType, timeLabel) => {
+                this.handleHeatmapCellClick(entityId, entityType, timeLabel);
+            }
+        });
+
+        renderer.render(container);
+    }
+
+    /**
+     * Render parks wait times heatmap
+     */
+    renderParksWaitTimesHeatmap() {
+        const container = document.getElementById('parks-waittimes-heatmap');
+        if (!container || !this.state.parksWaitTimesHeatmap) return;
+
+        const data = this.state.parksWaitTimesHeatmap;
+
+        const renderer = new HeatmapRenderer({
+            entities: data.entities,
+            timeLabels: data.time_labels,
+            matrix: data.matrix,
+            metric: data.metric,
+            metricUnit: data.metric_unit,
+            granularity: data.granularity,
+            getEntityLabel: (entity) => entity.entity_name,
+            getTierBadge: null,  // Parks don't have tiers
+            onCellClick: (entityId, entityType, timeLabel) => {
+                this.handleHeatmapCellClick(entityId, entityType, timeLabel);
+            }
+        });
+
+        renderer.render(container);
+    }
+
+    /**
+     * Render rides downtime heatmap
+     */
+    renderRidesDowntimeHeatmap() {
+        const container = document.getElementById('rides-downtime-heatmap');
+        if (!container || !this.state.ridesDowntimeHeatmap) return;
+
+        const data = this.state.ridesDowntimeHeatmap;
+
+        const renderer = new HeatmapRenderer({
+            entities: data.entities,
+            timeLabels: data.time_labels,
+            matrix: data.matrix,
+            metric: data.metric,
+            metricUnit: data.metric_unit,
+            granularity: data.granularity,
+            getEntityLabel: (entity) => entity.entity_name,
+            getTierBadge: (entity) => {
+                if (!entity.tier) return '';
+                return `<span class="tier-badge tier-${entity.tier}">T${entity.tier}</span>`;
+            },
+            onCellClick: (entityId, entityType, timeLabel) => {
+                this.handleHeatmapCellClick(entityId, entityType, timeLabel);
+            }
+        });
+
+        renderer.render(container);
+    }
+
+    /**
+     * Render rides wait times heatmap
+     */
+    renderRidesWaitTimesHeatmap() {
+        const container = document.getElementById('rides-waittimes-heatmap');
+        if (!container || !this.state.ridesWaitTimesHeatmap) return;
+
+        const data = this.state.ridesWaitTimesHeatmap;
+
+        const renderer = new HeatmapRenderer({
+            entities: data.entities,
+            timeLabels: data.time_labels,
+            matrix: data.matrix,
+            metric: data.metric,
+            metricUnit: data.metric_unit,
+            granularity: data.granularity,
+            getEntityLabel: (entity) => entity.entity_name,
+            getTierBadge: (entity) => {
+                if (!entity.tier) return '';
+                return `<span class="tier-badge tier-${entity.tier}">T${entity.tier}</span>`;
+            },
+            onCellClick: (entityId, entityType, timeLabel) => {
+                this.handleHeatmapCellClick(entityId, entityType, timeLabel);
+            }
+        });
+
+        renderer.render(container);
+    }
+
+    /**
+     * Handle heatmap cell click - navigates to detail pages
+     */
+    handleHeatmapCellClick(entityId, entityType, timeLabel) {
+        if (entityType === 'park') {
+            // Navigate to park detail page
+            window.location.href = `park-detail.html?park_id=${entityId}&period=${this.state.period}`;
+        } else if (entityType === 'ride') {
+            // Navigate to ride detail page
+            window.location.href = `ride-detail.html?ride_id=${entityId}&period=${this.state.period}`;
         }
     }
 

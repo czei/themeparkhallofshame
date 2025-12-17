@@ -28,7 +28,7 @@ from typing import List, Dict, Any
 from sqlalchemy import select, func, and_, text
 from sqlalchemy.engine import Connection
 
-from database.schema import parks, rides, ride_daily_stats
+from database.schema import parks, rides, ride_daily_stats, ride_classifications
 from database.queries.builders import Filters
 from utils.timezone import get_pacific_day_range_utc
 from utils.sql_helpers import ParkStatusSQL, RideStatusSQL, timestamp_match_condition
@@ -89,7 +89,9 @@ class RideDowntimeHistoryQuery:
 
             datasets.append({
                 "label": ride["ride_name"],
-                "park": ride["park_name"],
+                "entity_id": ride["ride_id"],
+                "park_name": ride["park_name"],
+                "tier": ride["tier"],
                 "data": aligned_data,
             })
 
@@ -133,6 +135,7 @@ class RideDowntimeHistoryQuery:
                 p.park_id,
                 r.name AS ride_name,
                 p.name AS park_name,
+                rc.tier,
                 SUM(CASE
                     WHEN rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0)
                     THEN 5  -- 5-minute interval
@@ -141,13 +144,14 @@ class RideDowntimeHistoryQuery:
             FROM rides r
             INNER JOIN parks p ON r.park_id = p.park_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             {open_parks_join}
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'
                 AND p.is_active = TRUE
                 {disney_filter}
-            GROUP BY r.ride_id, p.park_id, r.name, p.name
+            GROUP BY r.ride_id, p.park_id, r.name, p.name, rc.tier
             HAVING total_downtime_hours > 0
             ORDER BY total_downtime_hours DESC
             LIMIT :limit
@@ -176,7 +180,9 @@ class RideDowntimeHistoryQuery:
 
             datasets.append({
                 "label": ride["ride_name"],
-                "park": ride["park_name"],
+                "entity_id": ride["ride_id"],
+                "park_name": ride["park_name"],
+                "tier": ride["tier"],
                 "data": aligned_data,
             })
 
@@ -367,14 +373,15 @@ class RideDowntimeHistoryQuery:
                 rides.c.ride_id,
                 rides.c.name.label("ride_name"),
                 parks.c.name.label("park_name"),
+                ride_classifications.c.tier,
             )
             .select_from(
-                rides.join(parks, rides.c.park_id == parks.c.park_id).join(
-                    ride_daily_stats, rides.c.ride_id == ride_daily_stats.c.ride_id
-                )
+                rides.join(parks, rides.c.park_id == parks.c.park_id)
+                .join(ride_daily_stats, rides.c.ride_id == ride_daily_stats.c.ride_id)
+                .outerjoin(ride_classifications, rides.c.ride_id == ride_classifications.c.ride_id)
             )
             .where(and_(*conditions))
-            .group_by(rides.c.ride_id, rides.c.name, parks.c.name)
+            .group_by(rides.c.ride_id, rides.c.name, parks.c.name, ride_classifications.c.tier)
             .having(func.sum(ride_daily_stats.c.downtime_minutes) > 0)
             .order_by(func.sum(ride_daily_stats.c.downtime_minutes).desc())
             .limit(limit)

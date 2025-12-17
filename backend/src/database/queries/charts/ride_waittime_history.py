@@ -32,7 +32,7 @@ from typing import List, Dict, Any
 from sqlalchemy import select, func, and_, text
 from sqlalchemy.engine import Connection
 
-from database.schema import parks, rides, ride_daily_stats
+from database.schema import parks, rides, ride_daily_stats, ride_classifications
 from database.queries.builders import Filters
 from utils.timezone import get_pacific_day_range_utc
 from utils.sql_helpers import timestamp_match_condition
@@ -97,7 +97,9 @@ class RideWaitTimeHistoryQuery:
 
             datasets.append({
                 "label": ride["ride_name"],
-                "park": ride["park_name"],
+                "entity_id": ride["ride_id"],
+                "park_name": ride["park_name"],
+                "tier": ride["tier"],
                 "data": aligned_data,
             })
 
@@ -144,12 +146,14 @@ class RideWaitTimeHistoryQuery:
                 p.park_id,
                 r.name AS ride_name,
                 p.name AS park_name,
+                rc.tier,
                 AVG(rss.wait_time) AS overall_avg_wait
             FROM rides r
             INNER JOIN parks p ON r.park_id = p.park_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
                 AND rss.recorded_at = pas.recorded_at
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND pas.park_appears_open = TRUE
                 AND rss.wait_time IS NOT NULL
@@ -158,7 +162,7 @@ class RideWaitTimeHistoryQuery:
                 AND r.category = 'ATTRACTION'
                 AND p.is_active = TRUE
                 {disney_filter}
-            GROUP BY r.ride_id, p.park_id, r.name, p.name
+            GROUP BY r.ride_id, p.park_id, r.name, p.name, rc.tier
             HAVING overall_avg_wait > 0
             ORDER BY overall_avg_wait DESC
             LIMIT :limit
@@ -187,7 +191,9 @@ class RideWaitTimeHistoryQuery:
 
             datasets.append({
                 "label": ride["ride_name"],
-                "park": ride["park_name"],
+                "entity_id": ride["ride_id"],
+                "park_name": ride["park_name"],
+                "tier": ride["tier"],
                 "data": aligned_data,
             })
 
@@ -353,15 +359,16 @@ class RideWaitTimeHistoryQuery:
                 rides.c.ride_id,
                 rides.c.name.label("ride_name"),
                 parks.c.name.label("park_name"),
+                ride_classifications.c.tier,
                 func.avg(ride_daily_stats.c.avg_wait_time).label("overall_avg_wait"),
             )
             .select_from(
-                rides.join(parks, rides.c.park_id == parks.c.park_id).join(
-                    ride_daily_stats, rides.c.ride_id == ride_daily_stats.c.ride_id
-                )
+                rides.join(parks, rides.c.park_id == parks.c.park_id)
+                .join(ride_daily_stats, rides.c.ride_id == ride_daily_stats.c.ride_id)
+                .outerjoin(ride_classifications, rides.c.ride_id == ride_classifications.c.ride_id)
             )
             .where(and_(*conditions))
-            .group_by(rides.c.ride_id, rides.c.name, parks.c.name)
+            .group_by(rides.c.ride_id, rides.c.name, parks.c.name, ride_classifications.c.tier)
             .having(func.avg(ride_daily_stats.c.avg_wait_time) > 0)
             .order_by(func.avg(ride_daily_stats.c.avg_wait_time).desc())
             .limit(limit)

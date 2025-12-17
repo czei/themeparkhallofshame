@@ -45,6 +45,7 @@ class TestWeatherCollector:
                 'temperature_2m': [75.2],
                 'apparent_temperature': [72.1],
                 'precipitation': [0.0],
+                'precipitation_probability': [0],
                 'rain': [0.0],
                 'snowfall': [0.0],
                 'weather_code': [0],

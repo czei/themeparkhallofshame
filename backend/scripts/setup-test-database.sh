@@ -8,11 +8,16 @@ set -e
 
 echo "Setting up MySQL test database..."
 
-# Database credentials
-DB_ROOT_PASSWORD="294e043ww"
+# Database credentials from environment variables
+if [ -z "${DB_ROOT_PASSWORD}" ]; then
+    echo "Error: DB_ROOT_PASSWORD environment variable is not set"
+    echo "Add to ~/.zshrc: export DB_ROOT_PASSWORD='your_password'"
+    exit 1
+fi
+
 DB_NAME="themepark_test"
 DB_USER="themepark_test"
-DB_PASSWORD="test_password"
+DB_PASSWORD="${TEST_DB_PASSWORD:-test_password}"
 SOURCE_DB="themepark_tracker_dev"
 
 # Drop and recreate database (ensures clean state), create user

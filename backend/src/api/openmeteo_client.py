@@ -44,6 +44,7 @@ class OpenMeteoClient:
         "temperature_2m",
         "apparent_temperature",
         "precipitation",
+        "precipitation_probability",
         "rain",
         "snowfall",
         "weather_code",
@@ -241,6 +242,7 @@ class OpenMeteoClient:
         temps_f = hourly_data.get('temperature_2m', [])
         apparent_temps_f = hourly_data.get('apparent_temperature', [])
         precipitation_in = hourly_data.get('precipitation', [])
+        precipitation_prob = hourly_data.get('precipitation_probability', [])
         rain_in = hourly_data.get('rain', [])
         snow_in = hourly_data.get('snowfall', [])
         weather_codes = hourly_data.get('weather_code', [])
@@ -278,7 +280,7 @@ class OpenMeteoClient:
                 'precipitation_mm': self._inches_to_mm(self._safe_get(precipitation_in, i)),
                 'rain_mm': self._inches_to_mm(self._safe_get(rain_in, i)),
                 'snowfall_mm': self._inches_to_mm(self._safe_get(snow_in, i)),
-                'precipitation_probability': None,  # Not in current obs, only forecasts
+                'precipitation_probability': self._safe_get(precipitation_prob, i),
 
                 # Atmospheric
                 'cloud_cover_percent': self._safe_get(cloud_cover, i),

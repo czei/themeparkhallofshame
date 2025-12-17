@@ -100,7 +100,7 @@ export TEST_DB_HOST=localhost
 export TEST_DB_PORT=3306
 export TEST_DB_NAME=themepark_test
 export TEST_DB_USER=themepark_test
-export TEST_DB_PASSWORD=test_password
+export TEST_DB_PASSWORD="${TEST_DB_PASSWORD:-test_password}"
 
 # OpenAI API key for AI classification tests (use from environment or .env)
 # Note: If no real API key is set, tests requiring it will be skipped

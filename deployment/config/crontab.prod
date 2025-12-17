@@ -17,6 +17,11 @@ BASH_ENV=/opt/themeparkhallofshame/backend/.env
 # Wrapped with cron_wrapper for failure alerts (timeout: 5 minutes)
 */10 * * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.cron_wrapper collect_snapshots --timeout=300 >> /opt/themeparkhallofshame/logs/collect_snapshots.log 2>&1
 
+# Collect weather observations every 10 minutes (synchronized with park data)
+# This captures current weather conditions from Open-Meteo API
+# Wrapped with cron_wrapper for failure alerts (timeout: 5 minutes)
+*/10 * * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.cron_wrapper collect_weather --timeout=300 >> /opt/themeparkhallofshame/logs/collect_weather.log 2>&1
+
 # =============================================================================
 # DATA AGGREGATION
 # =============================================================================

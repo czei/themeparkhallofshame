@@ -293,7 +293,7 @@ def main():
     parser.add_argument(
         '--current',
         action='store_true',
-        help='Collect current weather observations'
+        help='Collect current weather observations (default when no flags specified)'
     )
     parser.add_argument(
         '--forecast',
@@ -308,9 +308,9 @@ def main():
 
     args = parser.parse_args()
 
-    # Validate arguments
+    # Default to --current if no mode specified (for cron job compatibility)
     if not args.current and not args.forecast:
-        parser.error("Must specify --current or --forecast (or both)")
+        args.current = True
 
     # Connect to database
     try:

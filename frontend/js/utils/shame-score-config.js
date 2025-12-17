@@ -1,9 +1,9 @@
 /**
- * Shame Score Configuration
- * =========================
+ * Metrics Color Configuration
+ * ============================
  *
- * Centralized configuration for shame score color thresholds and styling.
- * Used by both downtime tables and heatmap visualizations.
+ * Centralized configuration for metric color thresholds and styling.
+ * Used by both tables and heatmap visualizations.
  */
 
 const ShameScoreConfig = {
@@ -82,5 +82,60 @@ const ShameScoreConfig = {
         }
 
         return 'None';
+    }
+};
+
+/**
+ * Wait Time Color Configuration
+ * ==============================
+ *
+ * Centralized color configuration for wait time heatmaps.
+ * Applies to both park and ride wait time visualizations.
+ */
+const WaitTimeConfig = {
+    /**
+     * Get color for wait time value (in minutes).
+     * >= 60 minutes: Red
+     * < 60 minutes: Smooth gradient from white to orange
+     *
+     * @param {number} minutes - Wait time in minutes
+     * @returns {string} - Hex color code
+     */
+    getColor(minutes) {
+        if (minutes === null || minutes === undefined || isNaN(minutes) || minutes === 0) {
+            return '#ffffff'; // White for zero/no data
+        }
+
+        const numMinutes = Number(minutes);
+
+        // >= 60 minutes: Red
+        if (numMinutes >= 60) {
+            return '#FF6B5A'; // Red
+        }
+
+        // 0-60 minutes: Smooth gradient from white to orange
+        // White (#ffffff) → Light Yellow → Yellow → Light Orange → Orange (#FFB627)
+        const ratio = numMinutes / 60; // 0.0 to 1.0
+
+        if (ratio < 0.25) {
+            // White to light yellow (0-15 minutes)
+            const t = ratio / 0.25;
+            return `rgb(255, 255, ${Math.round(255 - t * 50)})`;
+        } else if (ratio < 0.5) {
+            // Light yellow to yellow (15-30 minutes)
+            const t = (ratio - 0.25) / 0.25;
+            return `rgb(255, ${Math.round(255 - t * 50)}, ${Math.round(205 - t * 105)})`;
+        } else if (ratio < 0.75) {
+            // Yellow to light orange (30-45 minutes)
+            const t = (ratio - 0.5) / 0.25;
+            return `rgb(255, ${Math.round(205 - t * 24)}, ${Math.round(100 - t * 61)})`;
+        } else {
+            // Light orange to orange (45-60 minutes)
+            const t = (ratio - 0.75) / 0.25;
+            const r = 255;
+            const g = Math.round(181 - t * 0); // Keep at 181 (0xB5)
+            const b = Math.round(39 - t * 0);  // Keep at 39 (0x27)
+            return `rgb(${r}, ${g}, ${b})`; // #FFB527 ≈ #FFB627
+        }
     }
 };

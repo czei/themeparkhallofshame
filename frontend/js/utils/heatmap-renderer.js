@@ -217,21 +217,27 @@ class HeatmapRenderer {
     }
 
     /**
-     * Get color for a value based on ratio to max value.
-     * For shame_score: Uses centralized ShameScoreConfig.
-     * For other metrics: Gradient based on ratio (white → light yellow → yellow → orange → red)
+     * Get color for a value.
+     * - shame_score: Uses centralized ShameScoreConfig (absolute thresholds)
+     * - avg_wait_time_minutes: Uses centralized WaitTimeConfig (absolute thresholds)
+     * - Other metrics: Gradient based on ratio (white → light yellow → yellow → orange → red)
      */
     _getColor(value, max) {
         if (value === null || value === undefined || value === 0) {
             return '#ffffff'; // White for zero/no data
         }
 
-        // Special handling for shame_score: Use centralized config
+        // Shame score: Use centralized config with absolute thresholds
         if (this.metric === 'shame_score') {
             return ShameScoreConfig.getColor(value);
         }
 
-        // Default: Relative gradient based on max value
+        // Wait time: Use centralized config with absolute thresholds (>= 60 = red)
+        if (this.metric === 'avg_wait_time_minutes') {
+            return WaitTimeConfig.getColor(value);
+        }
+
+        // Default: Relative gradient based on max value (for downtime, etc.)
         const ratio = Math.min(value / max, 1);
 
         if (ratio < 0.25) {

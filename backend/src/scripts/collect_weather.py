@@ -141,17 +141,18 @@ class WeatherCollector:
         Returns:
             List of park dictionaries with park_id, latitude, longitude
         """
-        sql = """
-            SELECT park_id, latitude, longitude, park_name
+        from sqlalchemy import text
+
+        sql = text("""
+            SELECT park_id, latitude, longitude, name
             FROM parks
             WHERE latitude IS NOT NULL
               AND longitude IS NOT NULL
             ORDER BY park_id
-        """
+        """)
 
-        with self.db.cursor() as cursor:
-            cursor.execute(sql)
-            parks = cursor.fetchall()
+        result = self.db.execute(sql)
+        parks = [dict(row._mapping) for row in result]
 
         logger.info(f"Found {len(parks)} parks to collect")
         return parks
@@ -226,7 +227,7 @@ class WeatherCollector:
                 # For forecast mode, insert all observations
                 self.obs_repo.batch_insert_observations(observations)
 
-            self.db.commit()
+            # Note: No explicit commit needed - connection context manager handles it
 
             logger.info(
                 f"Successfully collected weather for park {park_id}",
@@ -312,34 +313,33 @@ def main():
         parser.error("Must specify --current or --forecast (or both)")
 
     # Connect to database
-    db = get_db_connection()
-
     try:
-        collector = WeatherCollector(db)
+        with get_db_connection() as conn:
+            collector = WeatherCollector(conn)
 
-        # Collect current weather
-        if args.current:
+            # Collect current weather
+            if args.current:
+                logger.info("=" * 60)
+                logger.info("COLLECTING CURRENT WEATHER")
+                logger.info("=" * 60)
+                results = collector.run(mode='current', test_mode=args.test)
+
+                successful = sum(1 for r in results if r['success'])
+                logger.info(f"Current weather: {successful}/{len(results)} parks successful")
+
+            # Collect forecasts
+            if args.forecast:
+                logger.info("=" * 60)
+                logger.info("COLLECTING WEATHER FORECASTS")
+                logger.info("=" * 60)
+                results = collector.run(mode='forecast', test_mode=args.test)
+
+                successful = sum(1 for r in results if r['success'])
+                logger.info(f"Forecasts: {successful}/{len(results)} parks successful")
+
             logger.info("=" * 60)
-            logger.info("COLLECTING CURRENT WEATHER")
+            logger.info("COLLECTION COMPLETE")
             logger.info("=" * 60)
-            results = collector.run(mode='current', test_mode=args.test)
-
-            successful = sum(1 for r in results if r['success'])
-            logger.info(f"Current weather: {successful}/{len(results)} parks successful")
-
-        # Collect forecasts
-        if args.forecast:
-            logger.info("=" * 60)
-            logger.info("COLLECTING WEATHER FORECASTS")
-            logger.info("=" * 60)
-            results = collector.run(mode='forecast', test_mode=args.test)
-
-            successful = sum(1 for r in results if r['success'])
-            logger.info(f"Forecasts: {successful}/{len(results)} parks successful")
-
-        logger.info("=" * 60)
-        logger.info("COLLECTION COMPLETE")
-        logger.info("=" * 60)
 
     except Exception as e:
         logger.error(
@@ -347,9 +347,6 @@ def main():
             extra={'error': str(e), 'error_type': type(e).__name__}
         )
         sys.exit(1)
-
-    finally:
-        db.close()
 
 
 if __name__ == '__main__':

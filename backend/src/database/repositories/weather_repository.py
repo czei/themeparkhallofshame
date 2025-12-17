@@ -145,7 +145,7 @@ class WeatherObservationRepository:
 
         # Backtick field names to prevent SQL keyword conflicts
         safe_fields = [f'`{field}`' for field in fields]
-        placeholders = [f'%({field})s' for field in fields]
+        placeholders = [f':{field}' for field in fields]  # SQLAlchemy uses :param syntax
         update_fields = [f'`{field}`=VALUES(`{field}`)' for field in fields
                         if field not in ('park_id', 'observation_time')]
 
@@ -158,8 +158,10 @@ class WeatherObservationRepository:
         """
 
         try:
-            with self.db.cursor() as cursor:
-                cursor.executemany(sql, observations)
+            from sqlalchemy import text
+            # Execute batch insert using SQLAlchemy (one observation at a time for now)
+            for obs in observations:
+                self.db.execute(text(sql), obs)
 
             logger.info(
                 "Batch inserted weather observations",

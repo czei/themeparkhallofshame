@@ -24,9 +24,9 @@
 
 **Purpose**: Project initialization and dependency management
 
-- [ ] T001 Add new Python dependencies to backend/requirements.txt (requests>=2.31.0, tenacity>=8.2.3)
-- [ ] T002 Install Python dependencies via pip install -r backend/requirements.txt
-- [ ] T003 [P] Verify existing utilities exist (backend/src/utils/timezone.py, backend/src/utils/config.py)
+- [X] T001 Add new Python dependencies to backend/requirements.txt (requests>=2.31.0, tenacity>=8.2.3)
+- [X] T002 Install Python dependencies via pip install -r backend/requirements.txt
+- [X] T003 [P] Verify existing utilities exist (backend/src/utils/timezone.py, backend/src/utils/config.py)
 
 ---
 
@@ -38,11 +38,11 @@
 
 ### Database Migration
 
-- [ ] T004 Create migration file backend/src/database/migrations/018_weather_schema.sql
-- [ ] T005 Define weather_observations table with all fields, indexes, and foreign keys in 018_weather_schema.sql
-- [ ] T006 Define weather_forecasts table with all fields, indexes, and foreign keys in 018_weather_schema.sql
-- [ ] T007 Test migration on local dev database (mysql < 018_weather_schema.sql)
-- [ ] T008 Verify tables created and indexes exist (SHOW CREATE TABLE weather_observations;)
+- [X] T004 Create migration file backend/src/database/migrations/018_weather_schema.sql
+- [X] T005 Define weather_observations table with all fields, indexes, and foreign keys in 018_weather_schema.sql
+- [X] T006 Define weather_forecasts table with all fields, indexes, and foreign keys in 018_weather_schema.sql
+- [ ] T007 Test migration on local dev database (mysql < 018_weather_schema.sql) [USER ACTION REQUIRED]
+- [ ] T008 Verify tables created and indexes exist (SHOW CREATE TABLE weather_observations;) [USER ACTION REQUIRED]
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 

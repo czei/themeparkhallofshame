@@ -542,18 +542,10 @@ class Downtime {
 
     /**
      * Get CSS class for shame score coloring
-     * Higher scores = more shame = worse
+     * Uses centralized ShameScoreConfig
      */
     getShameClass(shameScore) {
-        if (shameScore === null || shameScore === undefined) return '';
-        const score = Number(shameScore);
-        if (isNaN(score)) return '';
-
-        // Thresholds for shame levels (these are weighted downtime hours per weight point)
-        if (score >= 1.0) return 'shame-high';      // 1+ hour weighted downtime per point = very bad
-        if (score >= 0.5) return 'shame-medium';    // 0.5-1 hour = concerning
-        if (score >= 0.1) return 'shame-low';       // 0.1-0.5 = minor issues
-        return 'shame-none';                         // < 0.1 = negligible
+        return ShameScoreConfig.getCssClass(shameScore);
     }
 
     /**

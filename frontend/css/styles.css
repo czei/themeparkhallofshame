@@ -1331,24 +1331,24 @@ td {
     border-radius: 4px;
 }
 
-.shame-high {
-    background: var(--coral);
+.shame-critical {
+    background: #FF6B5A;  /* Red for >= 2.0 */
     color: white;
 }
 
+.shame-high {
+    background: #FFB627;  /* Orange for >= 1.0 */
+    color: var(--charcoal);
+}
+
 .shame-medium {
-    background: var(--gold);
+    background: #FFE066;  /* Yellow for >= 0.5 */
     color: var(--charcoal);
 }
 
 .shame-low {
-    background: var(--light-gray);
+    background: #E8F7F8;  /* Very light blue for < 0.5 */
     color: var(--charcoal);
-}
-
-.shame-none {
-    background: var(--turquoise);
-    color: white;
 }
 
 .clickable-shame {

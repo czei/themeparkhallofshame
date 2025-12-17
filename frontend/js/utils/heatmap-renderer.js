@@ -218,13 +218,20 @@ class HeatmapRenderer {
 
     /**
      * Get color for a value based on ratio to max value.
-     * Gradient: white → light yellow → yellow → orange → red
+     * For shame_score: Uses centralized ShameScoreConfig.
+     * For other metrics: Gradient based on ratio (white → light yellow → yellow → orange → red)
      */
     _getColor(value, max) {
         if (value === null || value === undefined || value === 0) {
             return '#ffffff'; // White for zero/no data
         }
 
+        // Special handling for shame_score: Use centralized config
+        if (this.metric === 'shame_score') {
+            return ShameScoreConfig.getColor(value);
+        }
+
+        // Default: Relative gradient based on max value
         const ratio = Math.min(value / max, 1);
 
         if (ratio < 0.25) {

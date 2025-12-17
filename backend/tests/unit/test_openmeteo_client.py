@@ -53,22 +53,26 @@ class TestOpenMeteoClient:
     @pytest.fixture
     def client(self):
         """Create fresh OpenMeteoClient instance for each test."""
-        # Reset singleton for testing
-        OpenMeteoClient._instance = None
+        # Create a fresh instance directly (bypassing singleton)
         return OpenMeteoClient()
 
     def test_singleton_pattern(self):
-        """OpenMeteoClient should be a singleton."""
-        OpenMeteoClient._instance = None
-        client1 = OpenMeteoClient()
-        client2 = OpenMeteoClient()
+        """OpenMeteoClient should be a singleton via get_openmeteo_client()."""
+        # Reset module-level singleton for testing
+        import api.openmeteo_client
+        api.openmeteo_client._client_instance = None
+
+        client1 = get_openmeteo_client()
+        client2 = get_openmeteo_client()
 
         assert client1 is client2, \
             "Multiple instances created - singleton broken"
 
     def test_get_openmeteo_client_returns_singleton(self):
         """get_openmeteo_client() should return singleton instance."""
-        OpenMeteoClient._instance = None
+        import api.openmeteo_client
+        api.openmeteo_client._client_instance = None
+
         client1 = get_openmeteo_client()
         client2 = get_openmeteo_client()
 

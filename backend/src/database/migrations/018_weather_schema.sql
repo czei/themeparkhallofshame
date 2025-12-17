@@ -46,7 +46,14 @@ CREATE TABLE IF NOT EXISTS weather_observations (
     INDEX idx_park_time (park_id, observation_time),
     INDEX idx_weather_code (weather_code),
     INDEX idx_observation_time (observation_time),
-    UNIQUE KEY unique_observation (park_id, observation_time)
+    UNIQUE KEY unique_observation (park_id, observation_time),
+
+    -- CHECK constraints for data integrity
+    CONSTRAINT chk_obs_precip_prob CHECK (precipitation_probability IS NULL OR (precipitation_probability BETWEEN 0 AND 100)),
+    CONSTRAINT chk_obs_cloud_cover CHECK (cloud_cover_percent IS NULL OR (cloud_cover_percent BETWEEN 0 AND 100)),
+    CONSTRAINT chk_obs_humidity CHECK (humidity_percent IS NULL OR (humidity_percent BETWEEN 0 AND 100)),
+    CONSTRAINT chk_obs_wind_direction CHECK (wind_direction_degrees IS NULL OR (wind_direction_degrees BETWEEN 0 AND 360)),
+    CONSTRAINT chk_obs_weather_code CHECK (weather_code IS NULL OR (weather_code BETWEEN 0 AND 99))
 ) ENGINE=InnoDB COMMENT='Hourly weather observations for parks (2-year retention)';
 
 -- Table: weather_forecasts
@@ -92,7 +99,14 @@ CREATE TABLE IF NOT EXISTS weather_forecasts (
     INDEX idx_park_forecast_time (park_id, forecast_time),
     INDEX idx_weather_code (weather_code),
     INDEX idx_issued_at (issued_at),
-    UNIQUE KEY unique_forecast (park_id, issued_at, forecast_time)
+    UNIQUE KEY unique_forecast (park_id, issued_at, forecast_time),
+
+    -- CHECK constraints for data integrity
+    CONSTRAINT chk_fcst_precip_prob CHECK (precipitation_probability IS NULL OR (precipitation_probability BETWEEN 0 AND 100)),
+    CONSTRAINT chk_fcst_cloud_cover CHECK (cloud_cover_percent IS NULL OR (cloud_cover_percent BETWEEN 0 AND 100)),
+    CONSTRAINT chk_fcst_humidity CHECK (humidity_percent IS NULL OR (humidity_percent BETWEEN 0 AND 100)),
+    CONSTRAINT chk_fcst_wind_direction CHECK (wind_direction_degrees IS NULL OR (wind_direction_degrees BETWEEN 0 AND 360)),
+    CONSTRAINT chk_fcst_weather_code CHECK (weather_code IS NULL OR (weather_code BETWEEN 0 AND 99))
 ) ENGINE=InnoDB COMMENT='Hourly weather forecasts for parks (90-day retention)';
 
 -- Verification queries (run after migration)

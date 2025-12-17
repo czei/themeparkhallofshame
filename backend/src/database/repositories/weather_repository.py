@@ -45,6 +45,21 @@ class WeatherObservationRepository:
         ```
     """
 
+    # Allowlist of valid field names (prevents SQL injection)
+    ALLOWED_FIELDS = {
+        'park_id', 'observation_time', 'collected_at',
+        'temperature_c', 'temperature_f',
+        'apparent_temperature_c', 'apparent_temperature_f',
+        'wind_speed_kmh', 'wind_speed_mph',
+        'wind_gusts_kmh', 'wind_gusts_mph',
+        'wind_direction_degrees',
+        'precipitation_mm', 'precipitation_probability',
+        'rain_mm', 'snowfall_mm',
+        'cloud_cover_percent', 'visibility_meters',
+        'humidity_percent', 'pressure_hpa',
+        'weather_code'
+    }
+
     def __init__(self, db: Any):
         """Initialize repository with database connection.
 
@@ -61,15 +76,24 @@ class WeatherObservationRepository:
 
         Args:
             observation: Dictionary with observation data
+
+        Raises:
+            ValueError: If no valid fields found in observation data
         """
-        # Build field lists dynamically from observation dict
-        fields = list(observation.keys())
+        # Validate and filter fields against allowlist (prevents SQL injection)
+        fields = [key for key in observation.keys() if key in self.ALLOWED_FIELDS]
+        if not fields:
+            raise ValueError("No valid fields found in observation data")
+
+        # Backtick field names to prevent SQL keyword conflicts
+        safe_fields = [f'`{field}`' for field in fields]
         placeholders = [f'%({field})s' for field in fields]
-        update_fields = [f'{field}=VALUES({field})' for field in fields if field not in ('park_id', 'observation_time')]
+        update_fields = [f'`{field}`=VALUES(`{field}`)' for field in fields
+                        if field not in ('park_id', 'observation_time')]
 
         sql = f"""
             INSERT INTO weather_observations
-            ({', '.join(fields)})
+            ({', '.join(safe_fields)})
             VALUES ({', '.join(placeholders)})
             ON DUPLICATE KEY UPDATE
             {', '.join(update_fields)}
@@ -106,19 +130,28 @@ class WeatherObservationRepository:
 
         Args:
             observations: List of observation dictionaries
+
+        Raises:
+            ValueError: If no valid fields found in observation data
         """
         if not observations:
             logger.debug("No observations to insert")
             return
 
-        # All observations should have same fields
-        fields = list(observations[0].keys())
+        # Validate and filter fields against allowlist (prevents SQL injection)
+        fields = [key for key in observations[0].keys() if key in self.ALLOWED_FIELDS]
+        if not fields:
+            raise ValueError("No valid fields found in observation data")
+
+        # Backtick field names to prevent SQL keyword conflicts
+        safe_fields = [f'`{field}`' for field in fields]
         placeholders = [f'%({field})s' for field in fields]
-        update_fields = [f'{field}=VALUES({field})' for field in fields if field not in ('park_id', 'observation_time')]
+        update_fields = [f'`{field}`=VALUES(`{field}`)' for field in fields
+                        if field not in ('park_id', 'observation_time')]
 
         sql = f"""
             INSERT INTO weather_observations
-            ({', '.join(fields)})
+            ({', '.join(safe_fields)})
             VALUES ({', '.join(placeholders)})
             ON DUPLICATE KEY UPDATE
             {', '.join(update_fields)}
@@ -208,6 +241,21 @@ class WeatherForecastRepository:
         ```
     """
 
+    # Allowlist of valid field names (prevents SQL injection)
+    ALLOWED_FIELDS = {
+        'park_id', 'issued_at', 'forecast_time',
+        'temperature_c', 'temperature_f',
+        'apparent_temperature_c', 'apparent_temperature_f',
+        'wind_speed_kmh', 'wind_speed_mph',
+        'wind_gusts_kmh', 'wind_gusts_mph',
+        'wind_direction_degrees',
+        'precipitation_mm', 'precipitation_probability',
+        'rain_mm', 'snowfall_mm',
+        'cloud_cover_percent', 'visibility_meters',
+        'humidity_percent', 'pressure_hpa',
+        'weather_code'
+    }
+
     def __init__(self, db: Any):
         """Initialize repository with database connection.
 
@@ -224,15 +272,24 @@ class WeatherForecastRepository:
 
         Args:
             forecast: Dictionary with forecast data
+
+        Raises:
+            ValueError: If no valid fields found in forecast data
         """
-        # Build field lists dynamically from forecast dict
-        fields = list(forecast.keys())
+        # Validate and filter fields against allowlist (prevents SQL injection)
+        fields = [key for key in forecast.keys() if key in self.ALLOWED_FIELDS]
+        if not fields:
+            raise ValueError("No valid fields found in forecast data")
+
+        # Backtick field names to prevent SQL keyword conflicts
+        safe_fields = [f'`{field}`' for field in fields]
         placeholders = [f'%({field})s' for field in fields]
-        update_fields = [f'{field}=VALUES({field})' for field in fields if field not in ('park_id', 'issued_at', 'forecast_time')]
+        update_fields = [f'`{field}`=VALUES(`{field}`)' for field in fields
+                        if field not in ('park_id', 'issued_at', 'forecast_time')]
 
         sql = f"""
             INSERT INTO weather_forecasts
-            ({', '.join(fields)})
+            ({', '.join(safe_fields)})
             VALUES ({', '.join(placeholders)})
             ON DUPLICATE KEY UPDATE
             {', '.join(update_fields)}
@@ -270,19 +327,28 @@ class WeatherForecastRepository:
 
         Args:
             forecasts: List of forecast dictionaries
+
+        Raises:
+            ValueError: If no valid fields found in forecast data
         """
         if not forecasts:
             logger.debug("No forecasts to insert")
             return
 
-        # All forecasts should have same fields
-        fields = list(forecasts[0].keys())
+        # Validate and filter fields against allowlist (prevents SQL injection)
+        fields = [key for key in forecasts[0].keys() if key in self.ALLOWED_FIELDS]
+        if not fields:
+            raise ValueError("No valid fields found in forecast data")
+
+        # Backtick field names to prevent SQL keyword conflicts
+        safe_fields = [f'`{field}`' for field in fields]
         placeholders = [f'%({field})s' for field in fields]
-        update_fields = [f'{field}=VALUES({field})' for field in fields if field not in ('park_id', 'issued_at', 'forecast_time')]
+        update_fields = [f'`{field}`=VALUES(`{field}`)' for field in fields
+                        if field not in ('park_id', 'issued_at', 'forecast_time')]
 
         sql = f"""
             INSERT INTO weather_forecasts
-            ({', '.join(fields)})
+            ({', '.join(safe_fields)})
             VALUES ({', '.join(placeholders)})
             ON DUPLICATE KEY UPDATE
             {', '.join(update_fields)}

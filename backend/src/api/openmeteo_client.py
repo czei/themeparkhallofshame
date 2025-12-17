@@ -15,6 +15,7 @@ API Documentation: https://open-meteo.com/en/docs
 """
 
 import logging
+import threading
 import requests
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timezone
@@ -32,10 +33,9 @@ class OpenMeteoClient:
         client = get_openmeteo_client()
         weather_data = client.fetch_weather(latitude=28.41777, longitude=-81.58116)
         ```
-    """
 
-    _instance: Optional['OpenMeteoClient'] = None
-    _lock = __import__('threading').Lock()
+    Note: Use get_openmeteo_client() to obtain the singleton instance.
+    """
 
     BASE_URL = "https://api.open-meteo.com/v1/forecast"
 
@@ -56,23 +56,16 @@ class OpenMeteoClient:
         "visibility",
     ]
 
-    def __new__(cls):
-        """Singleton pattern: only one instance exists."""
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-        return cls._instance
-
     def __init__(self):
-        """Initialize API client (called once due to singleton)."""
-        if not hasattr(self, 'initialized'):
-            self.session = requests.Session()
-            self.session.headers.update({
-                'User-Agent': 'ThemeParkHallOfShame/1.0 (weather-collection)'
-            })
-            self.initialized = True
-            logger.info("OpenMeteoClient initialized")
+        """Initialize API client.
+
+        Note: Typically called once via get_openmeteo_client().
+        """
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'ThemeParkHallOfShame/1.0 (weather-collection)'
+        })
+        logger.info("OpenMeteoClient initialized")
 
     @retry(
         stop=stop_after_attempt(3),
@@ -341,17 +334,22 @@ class OpenMeteoClient:
         return round(inches * 25.4, 2)
 
 
-# Global instance and getter function
+# Module-level singleton instance and lock
 _client_instance: Optional[OpenMeteoClient] = None
+_client_lock = threading.Lock()
 
 
 def get_openmeteo_client() -> OpenMeteoClient:
     """Get global OpenMeteo API client instance (singleton).
+
+    Thread-safe singleton using double-checked locking pattern.
 
     Returns:
         OpenMeteoClient singleton instance
     """
     global _client_instance
     if _client_instance is None:
-        _client_instance = OpenMeteoClient()
+        with _client_lock:
+            if _client_instance is None:
+                _client_instance = OpenMeteoClient()
     return _client_instance

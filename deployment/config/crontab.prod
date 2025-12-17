@@ -59,3 +59,9 @@ BASH_ENV=/opt/themeparkhallofshame/backend/.env
 
 # Clean up old compressed logs (older than 30 days)
 0 3 * * 0 find /opt/themeparkhallofshame/logs -name "*.gz" -mtime +30 -delete 2>/dev/null
+
+# Clean up raw snapshot data and weather observations (daily at 4 AM)
+# - Ride/park snapshots: Deleted after successful daily aggregation
+# - Weather observations: Retained for 30 days
+# Wrapped with cron_wrapper for failure alerts (timeout: 10 minutes)
+0 4 * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python scripts/cleanup_raw_data.py --force >> /opt/themeparkhallofshame/logs/cleanup.log 2>&1

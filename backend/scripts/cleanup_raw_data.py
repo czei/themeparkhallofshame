@@ -2,6 +2,7 @@
 """
 Theme Park Downtime Tracker - Raw Data Cleanup Script
 Safely deletes raw snapshots older than 24 hours after successful aggregation.
+Also cleans up weather observations older than 30 days.
 
 Usage:
     python cleanup_raw_data.py [--dry-run] [--force]
@@ -10,6 +11,7 @@ Safety features:
 - Only deletes data AFTER successful aggregation (checks aggregation_log)
 - Uses aggregated_until_ts to determine safe deletion threshold
 - Defaults to keeping 48 hours if no successful aggregation found
+- Weather observations retained for 30 days
 - Provides detailed summary before deletion
 """
 
@@ -29,7 +31,7 @@ from sqlalchemy import text
 
 def get_safe_deletion_threshold(conn) -> datetime:
     """
-    Determine safe timestamp threshold for deletion.
+    Determine safe timestamp threshold for deletion of ride/park snapshots.
 
     Returns:
         UTC timestamp - safe to delete snapshots older than this
@@ -56,13 +58,28 @@ def get_safe_deletion_threshold(conn) -> datetime:
         return threshold
 
 
-def preview_deletion(conn, threshold: datetime) -> dict:
+def get_weather_retention_threshold() -> datetime:
+    """
+    Determine weather data retention threshold.
+
+    Weather observations are retained for 30 days.
+
+    Returns:
+        UTC timestamp - safe to delete weather observations older than this
+    """
+    threshold = datetime.utcnow() - timedelta(days=30)
+    logger.info(f"Weather retention threshold: {threshold} (30 days)")
+    return threshold
+
+
+def preview_deletion(conn, threshold: datetime, weather_threshold: datetime) -> dict:
     """
     Preview what will be deleted.
 
     Args:
         conn: Database connection
-        threshold: Deletion threshold
+        threshold: Deletion threshold for ride/park data
+        weather_threshold: Deletion threshold for weather data
 
     Returns:
         Dictionary with counts
@@ -97,21 +114,33 @@ def preview_deletion(conn, threshold: datetime) -> dict:
     result = conn.execute(park_activity_query, {"threshold": threshold})
     park_activity_count = result.fetchone().count
 
+    # Weather observations
+    weather_query = text("""
+        SELECT COUNT(*) AS count
+        FROM weather_observations
+        WHERE observation_time < :threshold
+    """)
+
+    result = conn.execute(weather_query, {"threshold": weather_threshold})
+    weather_count = result.fetchone().count
+
     return {
         "ride_status_snapshots": snapshots_count,
         "ride_status_changes": changes_count,
         "park_activity_snapshots": park_activity_count,
-        "total": snapshots_count + changes_count + park_activity_count
+        "weather_observations": weather_count,
+        "total": snapshots_count + changes_count + park_activity_count + weather_count
     }
 
 
-def execute_cleanup(conn, threshold: datetime) -> dict:
+def execute_cleanup(conn, threshold: datetime, weather_threshold: datetime) -> dict:
     """
     Execute cleanup of raw data.
 
     Args:
         conn: Database connection
-        threshold: Deletion threshold
+        threshold: Deletion threshold for ride/park data
+        weather_threshold: Deletion threshold for weather data
 
     Returns:
         Dictionary with deleted counts
@@ -148,6 +177,16 @@ def execute_cleanup(conn, threshold: datetime) -> dict:
     deleted["park_activity_snapshots"] = result.rowcount
     logger.info(f"Deleted {result.rowcount} park activity snapshots")
 
+    # Delete weather observations
+    weather_delete = text("""
+        DELETE FROM weather_observations
+        WHERE observation_time < :threshold
+    """)
+
+    result = conn.execute(weather_delete, {"threshold": weather_threshold})
+    deleted["weather_observations"] = result.rowcount
+    logger.info(f"Deleted {result.rowcount} weather observations")
+
     deleted["total"] = sum(deleted.values())
 
     return deleted
@@ -176,16 +215,19 @@ def main():
     logger.info("=" * 60)
 
     with get_db_connection() as conn:
-        # Determine safe deletion threshold
+        # Determine safe deletion thresholds
         threshold = get_safe_deletion_threshold(conn)
+        weather_threshold = get_weather_retention_threshold()
 
-        logger.info(f"Safe deletion threshold: {threshold}")
-        logger.info(f"Will delete data older than: {threshold.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        logger.info(f"Ride/park data threshold: {threshold}")
+        logger.info(f"Weather data threshold: {weather_threshold}")
+        logger.info(f"Will delete ride/park data older than: {threshold.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        logger.info(f"Will delete weather data older than: {weather_threshold.strftime('%Y-%m-%d %H:%M:%S UTC')}")
 
         # Preview deletion
         logger.info("")
         logger.info("Previewing deletion...")
-        preview = preview_deletion(conn, threshold)
+        preview = preview_deletion(conn, threshold, weather_threshold)
 
         logger.info("=" * 60)
         logger.info("DELETION PREVIEW")
@@ -193,6 +235,7 @@ def main():
         logger.info(f"Ride status snapshots: {preview['ride_status_snapshots']:,}")
         logger.info(f"Ride status changes: {preview['ride_status_changes']:,}")
         logger.info(f"Park activity snapshots: {preview['park_activity_snapshots']:,}")
+        logger.info(f"Weather observations: {preview['weather_observations']:,}")
         logger.info(f"TOTAL records to delete: {preview['total']:,}")
         logger.info("=" * 60)
 
@@ -216,7 +259,7 @@ def main():
         # Execute cleanup
         logger.info("")
         logger.info("Executing cleanup...")
-        deleted = execute_cleanup(conn, threshold)
+        deleted = execute_cleanup(conn, threshold, weather_threshold)
 
         logger.info("=" * 60)
         logger.info("CLEANUP COMPLETE")
@@ -224,6 +267,7 @@ def main():
         logger.info(f"Ride status snapshots deleted: {deleted['ride_status_snapshots']:,}")
         logger.info(f"Ride status changes deleted: {deleted['ride_status_changes']:,}")
         logger.info(f"Park activity snapshots deleted: {deleted['park_activity_snapshots']:,}")
+        logger.info(f"Weather observations deleted: {deleted['weather_observations']:,}")
         logger.info(f"TOTAL records deleted: {deleted['total']:,}")
         logger.info("=" * 60)
 

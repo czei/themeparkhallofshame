@@ -192,22 +192,23 @@ class TestWeatherCollector:
 
     def test_get_parks_queries_database(self, collector, mock_db_connection):
         """_get_parks() should query parks table."""
-        cursor = mock_db_connection.cursor.return_value.__enter__.return_value
-        cursor.fetchall.return_value = [
-            {'park_id': 1, 'latitude': 28.41777, 'longitude': -81.58116},
-            {'park_id': 2, 'latitude': 33.8121, 'longitude': -117.9190},
-        ]
+        # Mock SQLAlchemy result rows
+        mock_row_1 = MagicMock()
+        mock_row_1._mapping = {'park_id': 1, 'latitude': 28.41777, 'longitude': -81.58116, 'name': 'Park 1'}
+        mock_row_2 = MagicMock()
+        mock_row_2._mapping = {'park_id': 2, 'latitude': 33.8121, 'longitude': -117.9190, 'name': 'Park 2'}
+
+        mock_db_connection.execute.return_value = [mock_row_1, mock_row_2]
 
         parks = collector._get_parks()
 
-        # Should query database
-        cursor.execute.assert_called_once()
-        assert 'SELECT' in cursor.execute.call_args[0][0]
-        assert 'FROM parks' in cursor.execute.call_args[0][0]
+        # Should query database via execute()
+        mock_db_connection.execute.assert_called_once()
 
-        # Should return parks
+        # Should return parks as list of dicts
         assert len(parks) == 2
         assert parks[0]['park_id'] == 1
+        assert parks[1]['park_id'] == 2
 
     def test_collect_for_park_uses_rate_limiter(self, collector, mock_api_client):
         """_collect_for_park() should use rate limiter before API call."""

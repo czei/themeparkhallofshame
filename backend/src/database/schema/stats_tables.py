@@ -320,3 +320,79 @@ park_yearly_stats = Table(
     Index("idx_pys_park_year", "park_id", "year"),
     Index("idx_pys_year", "year"),
 )
+
+
+# =============================================================================
+# HOURLY STATISTICS TABLES
+# =============================================================================
+# Per-park and per-ride hourly aggregates for sub-daily granularity.
+#
+# Purpose:
+#   - Power TODAY/YESTERDAY heatmaps with hourly columns
+#   - Replace slow snapshot GROUP BY HOUR queries
+#   - Provide hourly trending data
+#
+# Key columns (park_hourly_stats):
+#   - shame_score: Averaged across hour (0-10 scale)
+#   - avg_wait_time_minutes: Average wait across all rides
+#   - total_downtime_hours: Unweighted ride-hours of downtime
+#   - weighted_downtime_hours: Tier-weighted downtime
+#
+# Key columns (ride_hourly_stats):
+#   - avg_wait_time_minutes: Average wait when operating
+#   - downtime_hours: Hours ride was down
+#   - uptime_percentage: Percentage of time operating
+# =============================================================================
+
+park_hourly_stats = Table(
+    "park_hourly_stats",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("park_id", Integer, ForeignKey("parks.park_id", ondelete="CASCADE"), nullable=False),
+    Column("hour_start_utc", DateTime, nullable=False),
+    # Aggregated metrics
+    Column("shame_score", Numeric(3, 1), nullable=True),
+    Column("avg_wait_time_minutes", Numeric(6, 2), nullable=True),
+    Column("rides_operating", Integer, nullable=True),
+    Column("rides_down", Integer, nullable=True),
+    Column("total_downtime_hours", Numeric(8, 2), nullable=True),
+    Column("weighted_downtime_hours", Numeric(8, 2), nullable=True),
+    Column("effective_park_weight", Numeric(10, 2), nullable=True),
+    # Quality metadata
+    Column("snapshot_count", Integer, nullable=False),
+    Column("park_was_open", Integer, nullable=False),  # Boolean stored as TINYINT(1)
+    # Audit
+    Column("created_at", DateTime, server_default=func.now()),
+    Column("updated_at", DateTime, server_default=func.now(), onupdate=func.now()),
+    # Constraints and indexes
+    UniqueConstraint("park_id", "hour_start_utc", name="unique_park_hour"),
+    Index("idx_hour_start", "hour_start_utc"),
+    Index("idx_park_hour", "park_id", "hour_start_utc"),
+)
+
+
+ride_hourly_stats = Table(
+    "ride_hourly_stats",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("ride_id", Integer, ForeignKey("rides.ride_id", ondelete="CASCADE"), nullable=False),
+    Column("park_id", Integer, ForeignKey("parks.park_id", ondelete="CASCADE"), nullable=False),
+    Column("hour_start_utc", DateTime, nullable=False),
+    # Aggregated metrics
+    Column("avg_wait_time_minutes", Numeric(6, 2), nullable=True),
+    Column("operating_snapshots", Integer, nullable=True),
+    Column("down_snapshots", Integer, nullable=True),
+    Column("downtime_hours", Numeric(6, 2), nullable=True),
+    Column("uptime_percentage", Numeric(5, 2), nullable=True),
+    # Quality metadata
+    Column("snapshot_count", Integer, nullable=False),
+    Column("ride_operated", Integer, nullable=False),  # Boolean stored as TINYINT(1)
+    # Audit
+    Column("created_at", DateTime, server_default=func.now()),
+    Column("updated_at", DateTime, server_default=func.now(), onupdate=func.now()),
+    # Constraints and indexes
+    UniqueConstraint("ride_id", "hour_start_utc", name="unique_ride_hour"),
+    Index("idx_hour_start", "hour_start_utc"),
+    Index("idx_park_hour", "park_id", "hour_start_utc"),
+    Index("idx_ride_hour", "ride_id", "hour_start_utc"),
+)

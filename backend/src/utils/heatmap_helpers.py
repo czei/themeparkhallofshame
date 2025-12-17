@@ -117,7 +117,15 @@ def transform_chart_to_heatmap(
     # Generate title
     period_display = period.replace("_", " ").title()
     entity_type = "Parks" if ("park" in metric or (datasets and "location" in datasets[0])) else "Rides"
-    metric_display = "Wait Time" if "wait" in metric else "Downtime"
+
+    # Determine metric display name
+    if "wait" in metric:
+        metric_display = "Wait Time"
+    elif "shame" in metric:
+        metric_display = "Shame Score"
+    else:
+        metric_display = "Downtime"
+
     title = f"Top {len(entities)} {entity_type} by {metric_display} ({period_display})"
 
     return {

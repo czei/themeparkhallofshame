@@ -264,6 +264,16 @@ class TestHeatmapTypes:
         assert data['metric_unit'] == 'minutes'
         assert 'wait' in data['title'].lower()
 
+    def test_parks_shame_score_heatmap(self, client):
+        """Parks shame score heatmap should return shame_score metric."""
+        response = client.get('/api/trends/heatmap-data?period=today&type=parks-shame')
+        assert response.status_code == 200
+        data = response.get_json()
+
+        assert data['metric'] == 'shame_score'
+        assert data['metric_unit'] == 'points'
+        assert 'shame' in data['title'].lower()
+
 
 @freeze_time(MOCKED_NOW_UTC)
 class TestHeatmapFiltersAndLimits:

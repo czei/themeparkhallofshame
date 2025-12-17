@@ -13,6 +13,7 @@ from api.routes.parks import parks_bp
 from api.routes.rides import rides_bp
 from api.routes.trends import trends_bp
 from api.routes.audit import audit_bp
+from api.routes.search import search_bp
 from api.middleware.error_handler import register_error_handlers
 
 
@@ -46,6 +47,7 @@ def create_app() -> Flask:
     app.register_blueprint(rides_bp, url_prefix='/api')
     app.register_blueprint(trends_bp, url_prefix='/api')
     app.register_blueprint(audit_bp, url_prefix='/api')
+    app.register_blueprint(search_bp, url_prefix='/api')
 
     # Register error handlers
     register_error_handlers(app)
@@ -66,7 +68,8 @@ def create_app() -> Flask:
                 "parks": "/api/parks",
                 "rides": "/api/rides",
                 "trends": "/api/trends",
-                "audit": "/api/audit"
+                "audit": "/api/audit",
+                "search": "/api/search"
             }
         })
 
@@ -82,6 +85,6 @@ if __name__ == '__main__':
     app = create_app()
     app.run(
         host='0.0.0.0',
-        port=5000,
+        port=5001,
         debug=FLASK_DEBUG
     )

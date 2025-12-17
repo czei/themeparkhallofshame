@@ -61,7 +61,10 @@ class DatabaseConnection:
                     host=DB_HOST,
                     port=DB_PORT,
                     database=DB_NAME,
-                    query={"charset": "utf8mb4"},
+                    query={
+                        "charset": "utf8mb4",
+                        "init_command": "SET time_zone='+00:00'",  # Force UTC for all connections
+                    },
                 )
 
                 # Create engine with connection pooling

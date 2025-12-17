@@ -2,6 +2,7 @@
 -- Migration: 010_data_quality_issues.sql
 -- Purpose: Track stale/suspicious data from external APIs for reporting
 -- Date: 2025-12-01
+-- Updated: 2025-12-16 - Made index creation idempotent
 
 -- ============================================
 -- DATA QUALITY ISSUES TABLE
@@ -49,12 +50,48 @@ CREATE TABLE IF NOT EXISTS data_quality_issues (
         REFERENCES rides(ride_id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Indexes for common queries
+-- Indexes for common queries (idempotent)
+DROP INDEX IF EXISTS idx_dqi_detected ON data_quality_issues;
 CREATE INDEX idx_dqi_detected ON data_quality_issues (detected_at);
+
+DROP INDEX IF EXISTS idx_dqi_source ON data_quality_issues;
 CREATE INDEX idx_dqi_source ON data_quality_issues (data_source, issue_type);
-CREATE INDEX idx_dqi_park ON data_quality_issues (park_id, detected_at);
-CREATE INDEX idx_dqi_ride ON data_quality_issues (ride_id, detected_at);
+
+-- Indexes on foreign key columns - can't be dropped if FK uses them, so check before creating
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'data_quality_issues'
+      AND index_name = 'idx_dqi_park'
+);
+SET @ddl := IF(
+    @idx_exists = 0,
+    'CREATE INDEX idx_dqi_park ON data_quality_issues (park_id, detected_at);',
+    'SELECT "idx_dqi_park already exists" AS message;'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'data_quality_issues'
+      AND index_name = 'idx_dqi_ride'
+);
+SET @ddl := IF(
+    @idx_exists = 0,
+    'CREATE INDEX idx_dqi_ride ON data_quality_issues (ride_id, detected_at);',
+    'SELECT "idx_dqi_ride already exists" AS message;'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+DROP INDEX IF EXISTS idx_dqi_unresolved ON data_quality_issues;
 CREATE INDEX idx_dqi_unresolved ON data_quality_issues (is_resolved, detected_at);
+
+DROP INDEX IF EXISTS idx_dqi_wiki_id ON data_quality_issues;
 CREATE INDEX idx_dqi_wiki_id ON data_quality_issues (themeparks_wiki_id);
 
 -- ============================================

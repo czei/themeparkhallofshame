@@ -2,8 +2,20 @@
 
 class APIClient {
     constructor() {
-        // Get API base URL from config, fallback to '/api' if not available
-        this.baseUrl = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || '/api';
+        // Get API base URL from config, with port-based auto-detection for local dev
+        // This handles cases where config.js hasn't loaded yet or is cached
+        let configUrl = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL);
+
+        // Auto-detect local development: if on port 8080, use backend on 5001
+        if (!configUrl || configUrl === '/api') {
+            if (window.location.port === '8080') {
+                this.baseUrl = 'http://localhost:5001/api';
+            } else {
+                this.baseUrl = '/api';
+            }
+        } else {
+            this.baseUrl = configUrl;
+        }
 
         // Response cache: { url: { data, timestamp } }
         this._cache = {};

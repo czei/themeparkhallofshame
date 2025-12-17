@@ -22,16 +22,16 @@ Output Format:
 }
 """
 
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone
 from typing import List, Dict, Any
 
 from sqlalchemy import select, func, and_, text
 from sqlalchemy.engine import Connection
 
-from database.schema import parks, rides, ride_daily_stats
+from database.schema import parks, rides, ride_daily_stats, ride_classifications
 from database.queries.builders import Filters
 from utils.timezone import get_pacific_day_range_utc
-from utils.sql_helpers import ParkStatusSQL
+from utils.sql_helpers import ParkStatusSQL, RideStatusSQL, timestamp_match_condition
 
 
 class RideDowntimeHistoryQuery:
@@ -89,7 +89,9 @@ class RideDowntimeHistoryQuery:
 
             datasets.append({
                 "label": ride["ride_name"],
-                "park": ride["park_name"],
+                "entity_id": ride["ride_id"],
+                "park_name": ride["park_name"],
+                "tier": ride["tier"],
                 "data": aligned_data,
             })
 
@@ -133,6 +135,7 @@ class RideDowntimeHistoryQuery:
                 p.park_id,
                 r.name AS ride_name,
                 p.name AS park_name,
+                rc.tier,
                 SUM(CASE
                     WHEN rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0)
                     THEN 5  -- 5-minute interval
@@ -141,13 +144,14 @@ class RideDowntimeHistoryQuery:
             FROM rides r
             INNER JOIN parks p ON r.park_id = p.park_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             {open_parks_join}
             WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
                 AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'
                 AND p.is_active = TRUE
                 {disney_filter}
-            GROUP BY r.ride_id, p.park_id, r.name, p.name
+            GROUP BY r.ride_id, p.park_id, r.name, p.name, rc.tier
             HAVING total_downtime_hours > 0
             ORDER BY total_downtime_hours DESC
             LIMIT :limit
@@ -176,11 +180,103 @@ class RideDowntimeHistoryQuery:
 
             datasets.append({
                 "label": ride["ride_name"],
-                "park": ride["park_name"],
+                "entity_id": ride["ride_id"],
+                "park_name": ride["park_name"],
+                "tier": ride["tier"],
                 "data": aligned_data,
             })
 
         return {"labels": labels, "datasets": datasets}
+
+    def get_live(
+        self,
+        filter_disney_universal: bool = False,
+        limit: int = 5,
+        minutes: int = 60,
+    ) -> Dict[str, Any]:
+        """
+        Get live 5-minute downtime data for rides (last N minutes).
+        """
+        now_utc = datetime.now(timezone.utc)
+        start_utc = now_utc - timedelta(minutes=minutes)
+        ts_match = timestamp_match_condition("pas.recorded_at", "rss.recorded_at")
+        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
+
+        labels = []
+        current = start_utc
+        while current <= now_utc:
+            labels.append(current.strftime("%H:%M"))
+            current += timedelta(minutes=5)
+
+        disney_filter = (
+            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"
+            if filter_disney_universal
+            else ""
+        )
+
+        top_rides_query = text(f"""
+            SELECT
+                r.ride_id,
+                p.park_id,
+                r.name AS ride_name,
+                p.name AS park_name,
+                SUM(CASE WHEN {is_down} AND pas.park_appears_open = TRUE THEN 5 ELSE 0 END) / 60.0 AS total_downtime_hours
+            FROM rides r
+            INNER JOIN parks p ON r.park_id = p.park_id
+            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
+                AND {ts_match}
+            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at <= :end_utc
+                AND r.is_active = TRUE
+                AND r.category = 'ATTRACTION'
+                AND p.is_active = TRUE
+                {disney_filter}
+            GROUP BY r.ride_id, p.park_id, r.name, p.name
+            HAVING total_downtime_hours > 0
+            ORDER BY total_downtime_hours DESC
+            LIMIT :limit
+        """)
+
+        result = self.conn.execute(top_rides_query, {
+            "start_utc": start_utc,
+            "end_utc": now_utc,
+            "limit": limit
+        })
+        top_rides = [dict(row._mapping) for row in result]
+
+        if not top_rides:
+            return {"labels": labels, "datasets": [], "granularity": "minutes"}
+
+        datasets = []
+        for ride in top_rides:
+            series_query = text(f"""
+                SELECT
+                    DATE_FORMAT(rss.recorded_at, '%H:%i') AS minute_label,
+                    SUM(CASE WHEN {is_down} AND pas.park_appears_open = TRUE THEN 5 ELSE 0 END) / 60.0 AS downtime_hours
+                FROM ride_status_snapshots rss
+                INNER JOIN rides r ON rss.ride_id = r.ride_id
+                INNER JOIN parks p ON r.park_id = p.park_id
+                INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
+                    AND {ts_match}
+                WHERE rss.ride_id = :ride_id
+                    AND rss.recorded_at >= :start_utc AND rss.recorded_at <= :end_utc
+                GROUP BY minute_label
+                ORDER BY minute_label
+            """)
+            series_result = self.conn.execute(series_query, {
+                "ride_id": ride["ride_id"],
+                "start_utc": start_utc,
+                "end_utc": now_utc
+            })
+            points = {row.minute_label: float(row.downtime_hours) for row in series_result}
+            aligned = [points.get(label) for label in labels]
+            datasets.append({
+                "label": ride["ride_name"],
+                "park": ride["park_name"],
+                "data": aligned,
+            })
+
+        return {"labels": labels, "datasets": datasets, "granularity": "minutes"}
 
     def _get_ride_hourly_data(
         self,
@@ -217,7 +313,7 @@ class RideDowntimeHistoryQuery:
                 FROM park_activity_snapshots pas
                 WHERE pas.park_id = :park_id
                     AND pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
-                GROUP BY hour
+                GROUP BY HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR))
             )
             SELECT
                 HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) AS hour,
@@ -241,7 +337,7 @@ class RideDowntimeHistoryQuery:
                 AND pho.park_open = 1  -- Only include hours when park is open
                 AND rfo.first_op_time IS NOT NULL  -- Only if ride has operated
                 AND rss.recorded_at >= rfo.first_op_time
-            GROUP BY hour
+            GROUP BY HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR))
             ORDER BY hour
         """)
 
@@ -277,14 +373,15 @@ class RideDowntimeHistoryQuery:
                 rides.c.ride_id,
                 rides.c.name.label("ride_name"),
                 parks.c.name.label("park_name"),
+                ride_classifications.c.tier,
             )
             .select_from(
-                rides.join(parks, rides.c.park_id == parks.c.park_id).join(
-                    ride_daily_stats, rides.c.ride_id == ride_daily_stats.c.ride_id
-                )
+                rides.join(parks, rides.c.park_id == parks.c.park_id)
+                .join(ride_daily_stats, rides.c.ride_id == ride_daily_stats.c.ride_id)
+                .outerjoin(ride_classifications, rides.c.ride_id == ride_classifications.c.ride_id)
             )
             .where(and_(*conditions))
-            .group_by(rides.c.ride_id, rides.c.name, parks.c.name)
+            .group_by(rides.c.ride_id, rides.c.name, parks.c.name, ride_classifications.c.tier)
             .having(func.sum(ride_daily_stats.c.downtime_minutes) > 0)
             .order_by(func.sum(ride_daily_stats.c.downtime_minutes).desc())
             .limit(limit)

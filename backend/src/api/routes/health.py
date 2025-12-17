@@ -3,6 +3,8 @@ Theme Park Downtime Tracker - Health Check Endpoint
 Provides API health status, database connectivity, and data freshness.
 """
 
+import os
+import shutil
 from flask import Blueprint, jsonify
 from datetime import datetime
 from sqlalchemy import text
@@ -70,8 +72,8 @@ def health_check():
                     "message": "No data collected yet"
                 }
 
-            # Get last aggregation status
-            last_aggregation_query = text("""
+            # Get last daily aggregation status
+            last_daily_aggregation_query = text("""
                 SELECT
                     aggregation_type,
                     aggregation_date,
@@ -83,19 +85,105 @@ def health_check():
                 LIMIT 1
             """)
 
-            result = conn.execute(last_aggregation_query)
+            result = conn.execute(last_daily_aggregation_query)
             row = result.fetchone()
 
             if row:
-                health_data["checks"]["aggregation"] = {
+                health_data["checks"]["daily_aggregation"] = {
                     "status": row.status,
                     "aggregation_date": str(row.aggregation_date),
                     "completed_at": row.completed_at.isoformat() + 'Z' if row.completed_at else None
                 }
             else:
-                health_data["checks"]["aggregation"] = {
+                health_data["checks"]["daily_aggregation"] = {
                     "status": "no_data",
-                    "message": "No aggregation runs yet"
+                    "message": "No daily aggregation runs yet"
+                }
+
+            # Get hourly aggregation health status
+            hourly_health_query = text("""
+                SELECT
+                    COUNT(*) as total_runs,
+                    SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success_count,
+                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_count,
+                    MAX(aggregated_until_ts) as last_aggregated_until,
+                    MAX(completed_at) as last_completed_at
+                FROM aggregation_log
+                WHERE aggregation_type = 'hourly'
+                    AND started_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+            """)
+
+            result = conn.execute(hourly_health_query)
+            hourly_row = result.fetchone()
+
+            if hourly_row and hourly_row.total_runs > 0:
+                # Calculate lag (how far behind are we?)
+                lag_minutes = None
+                status = "healthy"
+
+                if hourly_row.last_aggregated_until:
+                    lag_seconds = (datetime.utcnow() - hourly_row.last_aggregated_until.replace(tzinfo=None)).total_seconds()
+                    lag_minutes = int(lag_seconds / 60)
+
+                    # Hourly job runs at :05 past the hour, so we expect ~65 min lag max (1 hour + 5 min)
+                    if lag_minutes > 125:  # More than 2 hours behind
+                        status = "stale"
+                    elif lag_minutes > 185:  # More than 3 hours behind
+                        status = "unhealthy"
+
+                # Check error rate
+                error_rate = (hourly_row.error_count / hourly_row.total_runs * 100) if hourly_row.total_runs > 0 else 0
+                if error_rate > 25:  # More than 25% errors
+                    status = "degraded" if status == "healthy" else status
+
+                health_data["checks"]["hourly_aggregation"] = {
+                    "status": status,
+                    "last_aggregated_until": hourly_row.last_aggregated_until.isoformat() + 'Z' if hourly_row.last_aggregated_until else None,
+                    "last_completed_at": hourly_row.last_completed_at.isoformat() + 'Z' if hourly_row.last_completed_at else None,
+                    "lag_minutes": lag_minutes,
+                    "runs_last_24h": hourly_row.total_runs,
+                    "success_count": hourly_row.success_count,
+                    "error_count": hourly_row.error_count,
+                    "error_rate_percent": round(error_rate, 1),
+                    "message": f"Last aggregation {lag_minutes} minutes behind" if lag_minutes else "Hourly aggregations running"
+                }
+            else:
+                health_data["checks"]["hourly_aggregation"] = {
+                    "status": "no_data",
+                    "message": "No hourly aggregation runs in last 24 hours"
+                }
+
+            # Check disk space for logs directory
+            try:
+                logs_dir = "/opt/themeparkhallofshame/logs"
+                if os.path.exists(logs_dir):
+                    disk_usage = shutil.disk_usage(logs_dir)
+                    usage_percent = (disk_usage.used / disk_usage.total) * 100
+
+                    status = "healthy"
+                    if usage_percent > 90:
+                        status = "critical"
+                    elif usage_percent > 80:
+                        status = "warning"
+
+                    health_data["checks"]["disk_space"] = {
+                        "status": status,
+                        "usage_percent": round(usage_percent, 1),
+                        "total_gb": round(disk_usage.total / (1024**3), 2),
+                        "used_gb": round(disk_usage.used / (1024**3), 2),
+                        "free_gb": round(disk_usage.free / (1024**3), 2),
+                        "message": f"Disk {usage_percent:.1f}% full"
+                    }
+                else:
+                    health_data["checks"]["disk_space"] = {
+                        "status": "unknown",
+                        "message": "Logs directory not found (running locally?)"
+                    }
+            except Exception as disk_err:
+                logger.warning(f"Could not check disk space: {disk_err}")
+                health_data["checks"]["disk_space"] = {
+                    "status": "unknown",
+                    "message": f"Disk check failed: {str(disk_err)}"
                 }
 
     except Exception as e:

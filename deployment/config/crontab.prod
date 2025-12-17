@@ -14,15 +14,36 @@ BASH_ENV=/opt/themeparkhallofshame/backend/.env
 
 # Collect ride status snapshots every 10 minutes
 # This captures wait times and ride operational status from Queue-Times.com
-*/10 * * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.collect_snapshots >> /opt/themeparkhallofshame/logs/collect_snapshots.log 2>&1
+# Wrapped with cron_wrapper for failure alerts (timeout: 5 minutes)
+*/10 * * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.cron_wrapper collect_snapshots --timeout=300 >> /opt/themeparkhallofshame/logs/collect_snapshots.log 2>&1
 
 # =============================================================================
 # DATA AGGREGATION
 # =============================================================================
 
+# Hourly aggregation at :05 past each hour (processes previous completed hour)
+# Computes hourly shame scores and ride/park rankings
+# Wrapped with cron_wrapper for failure alerts (timeout: 30 minutes)
+5 * * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.cron_wrapper aggregate_hourly --timeout=1800 >> /opt/themeparkhallofshame/logs/aggregate_hourly.log 2>&1
+
 # Daily aggregation at 1:00 AM server time
 # Processes 24-hour snapshot data into daily statistics
-0 1 * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.aggregate_daily >> /opt/themeparkhallofshame/logs/aggregate_daily.log 2>&1
+# Wrapped with cron_wrapper for failure alerts (timeout: 30 minutes)
+0 1 * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.cron_wrapper aggregate_daily --timeout=1800 >> /opt/themeparkhallofshame/logs/aggregate_daily.log 2>&1
+
+# =============================================================================
+# MONITORING & ALERTS
+# =============================================================================
+
+# Hourly data collection health check
+# Monitors that collect_snapshots is running and alerts if data collection stops
+# Wrapped with cron_wrapper for failure alerts (timeout: 5 minutes)
+0 * * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.cron_wrapper check_data_collection --timeout=300 >> /opt/themeparkhallofshame/logs/data_collection_check.log 2>&1
+
+# Daily data quality alert at 8:00 AM Pacific (16:00 UTC)
+# Reports stale data from ThemeParks.wiki and validates awards data
+# Wrapped with cron_wrapper for failure alerts (timeout: 3 minutes)
+0 16 * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.cron_wrapper send_data_quality_alert --timeout=180 >> /opt/themeparkhallofshame/logs/data_quality_alert.log 2>&1
 
 # =============================================================================
 # MAINTENANCE

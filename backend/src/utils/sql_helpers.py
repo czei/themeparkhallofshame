@@ -19,6 +19,31 @@ from utils.metrics import (
 )
 
 
+def timestamp_match_condition(col1: str, col2: str) -> str:
+    """
+    Generate SQL condition for matching timestamps at minute-level precision.
+
+    CRITICAL: The data collector inserts park_activity_snapshots and ride_status_snapshots
+    in separate transactions, causing timestamps to differ by 1-2 seconds. Using exact
+    timestamp equality (col1 = col2) causes ~70% of joins to fail.
+
+    This function generates a condition that matches timestamps within the same minute,
+    which correctly handles the timing drift while still ensuring data integrity.
+
+    Args:
+        col1: First timestamp column (e.g., "pas.recorded_at")
+        col2: Second timestamp column (e.g., "rss.recorded_at")
+
+    Returns:
+        SQL condition that matches timestamps at minute precision
+
+    Example:
+        >>> timestamp_match_condition("pas.recorded_at", "rss.recorded_at")
+        "pas.recorded_at = rss.recorded_at"
+    """
+    return f"DATE_FORMAT({col1}, '%Y-%m-%d %H:%i') = DATE_FORMAT({col2}, '%Y-%m-%d %H:%i')"
+
+
 class RideStatusSQL:
     """
     Centralized SQL fragments for ride status calculations.
@@ -196,11 +221,13 @@ class RideStatusSQL:
         """
         if park_id_expr:
             # CORRECT: Check both ride status AND park status
+            # NOTE: Uses minute-level timestamp matching due to 1-2 second drift between tables
+            ts_match = timestamp_match_condition("pas_op.recorded_at", "rss_op.recorded_at")
             return f"""EXISTS (
                 SELECT 1 FROM ride_status_snapshots rss_op
                 INNER JOIN park_activity_snapshots pas_op
                     ON pas_op.park_id = {park_id_expr}
-                    AND pas_op.recorded_at = rss_op.recorded_at
+                    AND {ts_match}
                 WHERE rss_op.ride_id = {ride_id_expr}
                 AND rss_op.recorded_at >= {start_param}
                 AND rss_op.recorded_at < {end_param}
@@ -293,10 +320,12 @@ class RideStatusSQL:
         min_snaps = RideStatusSQL.MIN_OPERATING_SNAPSHOTS_OTHER_PARKS
 
         # Build the park open check if park_id_expr is provided
+        # NOTE: Uses minute-level timestamp matching due to 1-2 second drift between tables
         if park_id_expr:
+            ts_match = timestamp_match_condition("pas_op.recorded_at", "rss_op.recorded_at")
             park_join = f"""INNER JOIN park_activity_snapshots pas_op
                             ON pas_op.park_id = {park_id_expr}
-                            AND pas_op.recorded_at = rss_op.recorded_at"""
+                            AND {ts_match}"""
             park_filter = "AND pas_op.park_appears_open = TRUE"
         else:
             park_join = ""
@@ -377,14 +406,17 @@ class RideStatusSQL:
                 WHERE rto.ride_id IS NOT NULL  -- Only rides that operated
             '''
         """
+        # NOTE: Uses minute-level timestamp matching due to 1-2 second drift between tables
+        ts_match = timestamp_match_condition("pas.recorded_at", "rss.recorded_at")
         return f"""{cte_name} AS (
             -- SINGLE SOURCE OF TRUTH: Rides that operated while park was open
             -- CRITICAL: Both ride status AND park status must indicate "open"
+            -- NOTE: Uses minute-level timestamp matching due to 1-2 second drift between tables
             SELECT DISTINCT r.ride_id, r.park_id
             FROM rides r
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
+                AND {ts_match}
             INNER JOIN parks p ON r.park_id = p.park_id
             WHERE rss.recorded_at >= {start_param}
                 AND rss.recorded_at < {end_param}
@@ -1014,6 +1046,8 @@ class ShameScoreSQL:
         """
         is_down = RideStatusSQL.is_down("rss_latest")
         park_open = ParkStatusSQL.park_appears_open_filter("pas_latest")
+        # NOTE: Uses minute-level timestamp matching due to 1-2 second drift between tables
+        ts_match = timestamp_match_condition("pas_latest.recorded_at", "rss_latest.recorded_at")
 
         return f"""latest_snapshot AS (
             -- Find the most recent snapshot timestamp for each ride
@@ -1024,13 +1058,14 @@ class ShameScoreSQL:
         ),
         rides_currently_down AS (
             -- Identify rides that are DOWN in their latest snapshot
+            -- NOTE: Uses minute-level timestamp matching due to 1-2 second drift between tables
             SELECT DISTINCT r_inner.ride_id, r_inner.park_id
             FROM rides r_inner
             INNER JOIN ride_status_snapshots rss_latest ON r_inner.ride_id = rss_latest.ride_id
             INNER JOIN latest_snapshot ls ON rss_latest.ride_id = ls.ride_id
                 AND rss_latest.recorded_at = ls.latest_recorded_at
             INNER JOIN park_activity_snapshots pas_latest ON r_inner.park_id = pas_latest.park_id
-                AND pas_latest.recorded_at = rss_latest.recorded_at
+                AND {ts_match}
             WHERE r_inner.is_active = TRUE
                 AND r_inner.category = 'ATTRACTION'
                 AND {is_down}

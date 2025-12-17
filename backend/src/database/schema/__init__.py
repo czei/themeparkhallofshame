@@ -39,6 +39,8 @@ from .stats_tables import (
     park_weekly_stats,
     park_monthly_stats,
     park_yearly_stats,
+    park_hourly_stats,
+    ride_hourly_stats,
 )
 
 __all__ = [
@@ -64,4 +66,6 @@ __all__ = [
     "park_weekly_stats",
     "park_monthly_stats",
     "park_yearly_stats",
+    "park_hourly_stats",
+    "ride_hourly_stats",
 ]

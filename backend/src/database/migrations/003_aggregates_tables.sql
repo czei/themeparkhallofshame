@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS park_daily_stats (
     stat_date DATE NOT NULL COMMENT 'Local date for this statistic',
     total_rides_tracked INT NOT NULL DEFAULT 0,
     avg_uptime_percentage DECIMAL(5,2) DEFAULT NULL COMMENT 'Average uptime % across all rides',
+    shame_score DECIMAL(6,3) DEFAULT NULL COMMENT 'Weighted downtime score on 0-10 scale',
     total_downtime_hours DECIMAL(8,2) NOT NULL DEFAULT 0.00 COMMENT 'Sum of all ride downtime in hours',
     rides_with_downtime INT NOT NULL DEFAULT 0 COMMENT 'Count of rides that had any downtime',
     avg_wait_time DECIMAL(5,2) DEFAULT NULL,

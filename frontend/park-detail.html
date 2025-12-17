@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Park Details - US Theme Park Hall of Shame</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css?v=23">
+    <!-- Chart.js for shame score visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        /* Park detail specific styles */
+        .park-header {
+            text-align: center;
+            padding: 2rem 1rem;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 8px;
+            margin-bottom: 2rem;
+        }
+
+        .park-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #212529;
+            margin-bottom: 0.5rem;
+        }
+
+        .park-subtitle {
+            font-size: 1.1rem;
+            color: #6c757d;
+            margin-bottom: 1rem;
+        }
+
+        .park-meta {
+            display: flex;
+            gap: 2rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+        }
+
+        .meta-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .meta-label {
+            font-size: 0.85rem;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .meta-value {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #212529;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-bottom: 1rem;
+            color: #007bff;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #212529;
+        }
+
+        .stat-unit {
+            font-size: 1rem;
+            font-weight: 400;
+            color: #6c757d;
+        }
+
+        .chart-container {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .chart-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #212529;
+        }
+
+        .data-table {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            overflow-x: auto;
+        }
+
+        .data-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .data-table th {
+            background: #f8f9fa;
+            padding: 0.75rem;
+            text-align: left;
+            font-weight: 600;
+            color: #495057;
+            border-bottom: 2px solid #dee2e6;
+        }
+
+        .data-table td {
+            padding: 0.75rem;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .data-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .ride-name-link {
+            color: #007bff;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .ride-name-link:hover {
+            text-decoration: underline;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-operating {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-down {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-closed {
+            background: #e2e3e5;
+            color: #383d41;
+        }
+
+        /* Info icon styles */
+        .info-icon {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            line-height: 18px;
+            text-align: center;
+            border-radius: 50%;
+            background: #007bff;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-left: 8px;
+            vertical-align: middle;
+            transition: background 0.2s;
+        }
+
+        .info-icon:hover {
+            background: #0056b3;
+        }
+
+        @media (max-width: 768px) {
+            .park-title {
+                font-size: 1.75rem;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Geometric Top Bar -->
+    <div class="geometric-bar"></div>
+
+    <!-- Beta Warning Banner - Mary Blair Collage Style -->
+    <div class="beta-section">
+        <!-- Base color blocks -->
+        <div class="geo-base-1"></div>
+        <div class="geo-base-2"></div>
+        <div class="geo-base-3"></div>
+
+        <!-- Overlapping rectangles - collage style -->
+        <div class="geo-rect-coral-1"></div>
+        <div class="geo-rect-coral-2"></div>
+        <div class="geo-rect-teal-1"></div>
+        <div class="geo-rect-teal-2"></div>
+        <div class="geo-rect-gold-1"></div>
+        <div class="geo-rect-gold-2"></div>
+        <div class="geo-rect-pink-1"></div>
+        <div class="geo-rect-pink-2"></div>
+
+        <!-- Small accent squares -->
+        <div class="geo-square-1"></div>
+        <div class="geo-square-2"></div>
+        <div class="geo-square-3"></div>
+
+        <!-- Vertical bars -->
+        <div class="geo-bar-1"></div>
+        <div class="geo-bar-2"></div>
+
+        <div class="beta-content">
+            <span class="beta-badge">BETA</span>
+            <span class="beta-message">Data accuracy under review. Some metrics may be incorrect.</span>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <div class="header-section">
+        <div class="established">Est. 2025</div>
+        <h1>
+            <div class="title-line-1">US THEME PARK</div>
+            <div class="title-line-2">HALL OF SHAME</div>
+        </h1>
+        <div class="subtitle">
+            Park Performance Details
+        </div>
+        <a href="index.html" class="about-link">← Back to Rankings</a>
+    </div>
+
+    <!-- Content Container -->
+    <div style="max-width: 1200px; margin: 0 auto; padding: 2rem 1rem;">
+
+        <!-- Loading State -->
+        <div id="loading" class="loading">
+            <p>Loading park details...</p>
+        </div>
+
+        <!-- Error State -->
+        <div id="error" class="error-message" style="display: none;">
+            <strong>Error:</strong> <span id="error-message"></span>
+        </div>
+
+        <!-- Content -->
+        <div id="content" style="display: none;">
+            <!-- Park Header -->
+            <div class="park-header">
+                <h1 class="park-title" id="park-name">--</h1>
+                <div class="park-subtitle" id="park-location">--</div>
+                <div class="park-meta">
+                    <div class="meta-item">
+                        <div class="meta-label">Operator</div>
+                        <div class="meta-value" id="park-operator">--</div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Period</div>
+                        <div class="meta-value" id="current-period">--</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Period Selector -->
+            <div class="time-selector" style="margin-bottom: 2rem;">
+                <button class="time-btn" data-period="live">Live</button>
+                <button class="time-btn" data-period="today">Today</button>
+                <button class="time-btn" data-period="yesterday">Yesterday</button>
+                <button class="time-btn" data-period="last_week">Last Week</button>
+                <button class="time-btn" data-period="last_month">Last Month</button>
+            </div>
+
+            <!-- Summary Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">
+                        Shame Score
+                        <span class="info-icon" id="shame-info-icon" title="Explain Shame Score">?</span>
+                    </div>
+                    <div class="stat-value">
+                        <span id="shame-score">--</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Worst Ride</div>
+                    <div class="stat-value" style="font-size: 1.2rem;">
+                        <span id="worst-ride">--</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Operating Rides</div>
+                    <div class="stat-value">
+                        <span id="operating-rides">--</span>
+                        <span class="stat-unit">rides</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Park Performance Chart -->
+            <div id="chart-section" class="chart-container" style="display: none;">
+                <h2 class="chart-title">Park Performance Metrics</h2>
+                <canvas id="shame-chart"></canvas>
+            </div>
+
+            <!-- Top Offenders Table -->
+            <div class="data-table">
+                <h2 class="chart-title">Problem Rides</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Ride</th>
+                            <th>Tier</th>
+                            <th>Status</th>
+                            <th>Shame Contribution</th>
+                            <th>Downtime</th>
+                        </tr>
+                    </thead>
+                    <tbody id="offenders-tbody">
+                        <tr>
+                            <td colspan="5" style="text-align: center; color: #6c757d;">No data available</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Ride Comparison Section (hidden for live period) -->
+            <div id="ride-comparison-section" class="ride-comparison-section" style="display: none; margin-top: 2rem;">
+                <div class="ride-comparison-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h2 class="chart-title" style="margin: 0;">Ride Comparison</h2>
+                    <div class="chart-type-toggle">
+                        <button class="toggle-btn active" id="toggle-downtime" data-chart-type="downtime">Downtime</button>
+                        <button class="toggle-btn" id="toggle-waittimes" data-chart-type="wait_times">Wait Times</button>
+                    </div>
+                </div>
+                <div id="ride-comparison-content">
+                    <p style="text-align: center; color: #6c757d;">Loading ride comparison data...</p>
+                </div>
+                <div id="ride-comparison-heatmap-container" style="display: none; overflow-x: auto;">
+                    <div id="ride-comparison-heatmap" class="heatmap-grid"></div>
+                </div>
+            </div>
+
+            <style>
+                .heatmap-grid {
+                    display: grid;
+                    gap: 1px;
+                    background: #e9ecef;
+                    border-radius: 8px;
+                    overflow: hidden;
+                    min-width: fit-content;
+                }
+                .heatmap-header-row {
+                    display: contents;
+                }
+                .heatmap-header-cell {
+                    background: #f8f9fa;
+                    padding: 6px 4px;
+                    font-size: 11px;
+                    font-weight: 600;
+                    text-align: center;
+                    color: #495057;
+                    white-space: nowrap;
+                }
+                .heatmap-header-cell.ride-name {
+                    text-align: left;
+                    padding-left: 10px;
+                    min-width: 180px;
+                    max-width: 220px;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+                .heatmap-header-cell.total-col {
+                    background: #dee2e6;
+                    min-width: 60px;
+                }
+                .heatmap-row {
+                    display: contents;
+                }
+                .heatmap-ride-name {
+                    background: #fff;
+                    padding: 8px 10px;
+                    font-size: 12px;
+                    color: #212529;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                }
+                .heatmap-ride-name .tier-badge {
+                    font-size: 9px;
+                    padding: 2px 5px;
+                    border-radius: 3px;
+                    font-weight: 600;
+                }
+                .heatmap-ride-name .tier-1 { background: #dc3545; color: white; }
+                .heatmap-ride-name .tier-2 { background: #fd7e14; color: white; }
+                .heatmap-ride-name .tier-3 { background: #6c757d; color: white; }
+                .heatmap-cell {
+                    min-width: 40px;
+                    height: 32px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 10px;
+                    cursor: default;
+                    transition: transform 0.1s;
+                    position: relative;
+                }
+                .heatmap-cell:hover {
+                    transform: scale(1.1);
+                    z-index: 10;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                }
+                .heatmap-cell.total-cell {
+                    font-weight: 600;
+                    font-size: 11px;
+                    min-width: 60px;
+                }
+                .heatmap-tooltip {
+                    position: absolute;
+                    bottom: 100%;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background: #212529;
+                    color: white;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                    white-space: nowrap;
+                    opacity: 0;
+                    pointer-events: none;
+                    transition: opacity 0.2s;
+                    z-index: 100;
+                }
+                .heatmap-cell:hover .heatmap-tooltip {
+                    opacity: 1;
+                }
+                .heatmap-legend {
+                    display: flex;
+                    align-items: center;
+                    justify-content: flex-end;
+                    gap: 8px;
+                    margin-top: 12px;
+                    font-size: 11px;
+                    color: #6c757d;
+                }
+                .heatmap-legend-scale {
+                    display: flex;
+                    height: 12px;
+                    border-radius: 2px;
+                    overflow: hidden;
+                }
+                .heatmap-legend-scale div {
+                    width: 20px;
+                }
+            </style>
+        </div>
+    </div>
+
+    <!-- Include Config, API Client and Park Details Modal -->
+    <script src="js/config.js?v=8"></script>
+    <script src="js/api-client.js?v=4"></script>
+    <script src="js/components/park-details-modal.js?v=12"></script>
+
+    <script>
+        // Get URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const parkId = urlParams.get('park_id') || urlParams.get('id');
+        let currentPeriod = urlParams.get('period') || 'live';
+
+        // Initialize Park Details Modal (apiClient is already created by api-client.js)
+        const parkDetailsModal = new ParkDetailsModal(apiClient);
+
+        // API base URL - use apiClient's baseUrl which has port detection for local dev
+        const API_BASE_URL = apiClient.baseUrl;
+
+        let chartInstance = null;
+
+        // Load park details
+        async function loadParkDetails() {
+            if (!parkId) {
+                showError('No park ID provided in URL');
+                return;
+            }
+
+            try {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('content').style.display = 'none';
+                document.getElementById('error').style.display = 'none';
+
+                const response = await fetch(`${API_BASE_URL}/parks/${parkId}/details?period=${currentPeriod}`);
+                const data = await response.json();
+
+                if (!data.success) {
+                    showError(data.error || 'Failed to load park details');
+                    return;
+                }
+
+                renderParkDetails(data);
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+            } catch (error) {
+                console.error('Error loading park details:', error);
+                showError('Failed to load park details. Please try again later.');
+            }
+        }
+
+        function renderParkDetails(data) {
+            // Park metadata
+            document.getElementById('park-name').textContent = data.park.name;
+            document.getElementById('park-location').textContent = data.park.location || 'Unknown Location';
+            document.getElementById('park-operator').textContent = data.park.operator || 'Unknown';
+            document.getElementById('current-period').textContent = data.period.replace('_', ' ').toUpperCase();
+
+            // Summary stats
+            const shameScore = data.shame_breakdown?.shame_score ?? data.chart_data?.current ?? 0;
+            document.getElementById('shame-score').textContent = shameScore.toFixed(1);
+
+            // Get rides list (different field names for live vs historical)
+            const ridesList = data.shame_breakdown?.rides_with_downtime || data.shame_breakdown?.rides_down || data.shame_breakdown?.rides || [];
+
+            // Worst ride
+            if (ridesList.length > 0) {
+                const worstRide = ridesList[0];
+                document.getElementById('worst-ride').textContent = worstRide.ride_name || 'None';
+            } else {
+                document.getElementById('worst-ride').textContent = 'None';
+            }
+
+            // Update third stat card based on period
+            const statLabel = document.querySelector('.stat-card:nth-child(3) .stat-label');
+            const statValue = document.getElementById('operating-rides');
+
+            if (currentPeriod === 'live') {
+                statLabel.textContent = 'Operating Rides';
+                const operatingCount = data.current_status?.operating ?? 0;
+                statValue.textContent = operatingCount;
+            } else {
+                statLabel.textContent = 'Rides with Issues';
+                statValue.textContent = ridesList.length;
+            }
+
+            // Render chart if data available
+            if (data.chart_data && data.chart_data.labels && data.chart_data.labels.length > 0) {
+                document.getElementById('chart-section').style.display = 'block';
+                renderChart(data.chart_data);
+            } else {
+                document.getElementById('chart-section').style.display = 'none';
+            }
+
+            // Render top offenders table
+            renderOffendersTable(ridesList);
+
+            // Update period selector
+            updatePeriodSelector();
+
+            // Load ride comparison (only for non-live periods)
+            if (currentPeriod !== 'live') {
+                loadRideComparison('downtime');
+            } else {
+                document.getElementById('ride-comparison-section').style.display = 'none';
+            }
+        }
+
+        function renderChart(chartData) {
+            const ctx = document.getElementById('shame-chart').getContext('2d');
+
+            // Destroy previous chart if exists
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            // Prepare datasets - order matters for layering (bars first, then lines on top)
+            const datasets = [];
+
+            // Rides Down as BAR chart (background layer, semi-transparent)
+            // Uses its own axis for proper scaling
+            if (chartData.rides_down && chartData.rides_down.length > 0) {
+                datasets.push({
+                    type: 'bar',
+                    label: 'Rides Down',
+                    data: chartData.rides_down,
+                    backgroundColor: 'rgba(253, 126, 20, 0.3)',
+                    borderColor: 'rgba(253, 126, 20, 0.6)',
+                    borderWidth: 1,
+                    yAxisID: 'y-rides',
+                    order: 2  // Higher order = rendered first (background)
+                });
+            }
+
+            // Shame Score (primary metric, left y-axis) - line with fill
+            if (chartData.data && chartData.data.length > 0) {
+                datasets.push({
+                    type: 'line',
+                    label: 'Shame Score',
+                    data: chartData.data,
+                    borderColor: '#dc3545',
+                    backgroundColor: 'rgba(220, 53, 69, 0.15)',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: true,
+                    yAxisID: 'y-shame',
+                    order: 1  // Lower order = rendered on top
+                });
+            }
+
+            // Average Wait Time (right y-axis) - line only
+            if (chartData.avg_wait && chartData.avg_wait.length > 0) {
+                datasets.push({
+                    type: 'line',
+                    label: 'Avg Wait (min)',
+                    data: chartData.avg_wait,
+                    borderColor: '#007bff',
+                    backgroundColor: 'transparent',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: false,
+                    yAxisID: 'y-wait',
+                    order: 0  // Rendered last (on top)
+                });
+            }
+
+            // Build scales configuration
+            const scales = {
+                'y-shame': {
+                    type: 'linear',
+                    position: 'left',
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Shame Score',
+                        color: '#dc3545'
+                    },
+                    ticks: {
+                        color: '#dc3545'
+                    },
+                    grid: {
+                        color: 'rgba(220, 53, 69, 0.1)'
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: chartData.granularity === 'minutes' ? 'Time' : 'Hour'
+                    }
+                }
+            };
+
+            // Add right y-axis for Wait Time (minutes)
+            if (chartData.avg_wait && chartData.avg_wait.length > 0) {
+                scales['y-wait'] = {
+                    type: 'linear',
+                    position: 'right',
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Wait Time (min)',
+                        color: '#007bff'
+                    },
+                    ticks: {
+                        color: '#007bff'
+                    },
+                    grid: {
+                        drawOnChartArea: false
+                    }
+                };
+            }
+
+            // Add hidden axis for Rides Down bars (scaled independently)
+            if (chartData.rides_down && chartData.rides_down.length > 0) {
+                scales['y-rides'] = {
+                    type: 'linear',
+                    position: 'right',
+                    beginAtZero: true,
+                    display: false,  // Hide this axis - bars are for context
+                    // Scale to make bars fill ~60% of chart height
+                    max: Math.max(...chartData.rides_down) * 1.7
+                };
+            }
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',  // Default type, overridden per dataset
+                data: {
+                    labels: chartData.labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            display: datasets.length > 1,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        if (context.dataset.label === 'Rides Down') {
+                                            label += context.parsed.y + ' rides';
+                                        } else if (context.dataset.label === 'Avg Wait (min)') {
+                                            label += context.parsed.y.toFixed(1) + ' min';
+                                        } else {
+                                            label += context.parsed.y.toFixed(1);
+                                        }
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    },
+                    scales: scales
+                }
+            });
+        }
+
+        function renderOffendersTable(rides) {
+            const tbody = document.getElementById('offenders-tbody');
+
+            if (!rides || rides.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #6c757d;">No problem rides for this period</td></tr>';
+                return;
+            }
+
+            // Show top 10 rides
+            const topRides = rides.slice(0, 10);
+
+            tbody.innerHTML = topRides.map(ride => {
+                const downtimeHours = ride.downtime_hours || ride.total_downtime_hours || 0;
+                const shameContrib = ride.weighted_contribution || ride.shame_contribution || 0;
+
+                return `
+                <tr>
+                    <td>
+                        <a href="ride-detail.html?ride_id=${ride.ride_id}&period=${currentPeriod}" class="ride-name-link">
+                            ${escapeHtml(ride.ride_name || 'Unknown Ride')}
+                        </a>
+                    </td>
+                    <td><span class="tier-badge tier-${ride.tier || 'unknown'}">${ride.tier || '?'}</span></td>
+                    <td><span class="status-badge status-${(ride.status || 'issue').toLowerCase()}">${ride.status || 'ISSUE'}</span></td>
+                    <td>${shameContrib.toFixed(2)}</td>
+                    <td>${downtimeHours.toFixed(1)} hrs</td>
+                </tr>
+                `;
+            }).join('');
+        }
+
+        function updatePeriodSelector() {
+            document.querySelectorAll('.time-btn').forEach(btn => {
+                if (btn.dataset.period === currentPeriod) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+        }
+
+        // Period selector event listeners
+        document.querySelectorAll('.time-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentPeriod = btn.dataset.period;
+
+                // Update URL without reload
+                const newUrl = new URL(window.location);
+                newUrl.searchParams.set('period', currentPeriod);
+                window.history.pushState({}, '', newUrl);
+
+                loadParkDetails();
+            });
+        });
+
+        function showError(message) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('content').style.display = 'none';
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('error-message').textContent = message;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // "?" icon click handler - opens Park Details Modal with shame score explanation
+        document.getElementById('shame-info-icon').addEventListener('click', () => {
+            if (parkId) {
+                const parkName = document.getElementById('park-name').textContent;
+                parkDetailsModal.open(parseInt(parkId), parkName, currentPeriod);
+            }
+        });
+
+        // ============ Ride Comparison Section ============
+        let rideComparisonChartInstance = null;
+        let currentChartType = 'downtime';
+        let rideComparisonData = null;
+
+        async function loadRideComparison(chartType) {
+            const section = document.getElementById('ride-comparison-section');
+            const content = document.getElementById('ride-comparison-content');
+            const heatmapContainer = document.getElementById('ride-comparison-heatmap-container');
+
+            // Show section
+            section.style.display = 'block';
+
+            // Show loading
+            content.innerHTML = '<p style="text-align: center; color: #6c757d;">Loading ride comparison data...</p>';
+            content.style.display = 'block';
+            heatmapContainer.style.display = 'none';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/parks/${parkId}/rides/charts?period=${currentPeriod}&type=${chartType}`);
+                const data = await response.json();
+
+                if (!data.success) {
+                    content.innerHTML = '<p style="text-align: center; color: #dc3545;">Failed to load ride comparison data</p>';
+                    return;
+                }
+
+                rideComparisonData = data;
+                currentChartType = chartType;
+
+                // Hide loading, show heatmap
+                content.style.display = 'none';
+                heatmapContainer.style.display = 'block';
+
+                renderRideComparisonHeatmap(data);
+            } catch (error) {
+                console.error('Error loading ride comparison:', error);
+                content.innerHTML = '<p style="text-align: center; color: #dc3545;">Failed to load ride comparison data</p>';
+            }
+        }
+
+        function renderRideComparisonHeatmap(data) {
+            const heatmapEl = document.getElementById('ride-comparison-heatmap');
+
+            // Check if we have data
+            if (!data.datasets || data.datasets.length === 0) {
+                document.getElementById('ride-comparison-content').innerHTML = '<p style="text-align: center; color: #6c757d;">No ride comparison data available for this period</p>';
+                document.getElementById('ride-comparison-content').style.display = 'block';
+                document.getElementById('ride-comparison-heatmap-container').style.display = 'none';
+                return;
+            }
+
+            const isDowntime = currentChartType === 'downtime';
+            const labels = data.labels; // Time labels (e.g., "6:00", "7:00", ...)
+            const datasets = data.datasets; // Array of {label, data, tier}
+
+            // Find max value for color scaling
+            const allValues = datasets.flatMap(d => d.data).filter(v => v !== null && v !== undefined).map(v => parseFloat(v) || 0);
+            const maxValue = Math.max(...allValues, isDowntime ? 0.5 : 30);
+
+            // Color scale function - white to yellow to orange to red
+            function getColor(value, max) {
+                if (value === null || value === undefined || value === 0) {
+                    return '#ffffff'; // White for zero/no data
+                }
+                const ratio = Math.min(value / max, 1);
+
+                if (ratio < 0.25) {
+                    // White to light yellow
+                    const t = ratio / 0.25;
+                    return `rgb(255, 255, ${Math.round(255 - t * 50)})`;
+                } else if (ratio < 0.5) {
+                    // Light yellow to yellow
+                    const t = (ratio - 0.25) / 0.25;
+                    return `rgb(255, ${Math.round(255 - t * 50)}, ${Math.round(205 - t * 105)})`;
+                } else if (ratio < 0.75) {
+                    // Yellow to orange
+                    const t = (ratio - 0.5) / 0.25;
+                    return `rgb(255, ${Math.round(205 - t * 80)}, ${Math.round(100 - t * 50)})`;
+                } else {
+                    // Orange to red
+                    const t = (ratio - 0.75) / 0.25;
+                    return `rgb(${Math.round(255 - t * 35)}, ${Math.round(125 - t * 80)}, ${Math.round(50 - t * 30)})`;
+                }
+            }
+
+            // Calculate total for each ride
+            function calculateTotal(dataArray) {
+                return dataArray.reduce((sum, v) => sum + (parseFloat(v) || 0), 0);
+            }
+
+            // Sort datasets by total (worst first)
+            const sortedDatasets = [...datasets].sort((a, b) => {
+                const totalA = calculateTotal(a.data);
+                const totalB = calculateTotal(b.data);
+                return totalB - totalA;
+            });
+
+            // Build grid HTML
+            const numCols = labels.length + 2; // ride name + time columns + total
+            // Calculate column width: use wider columns for daily data (fewer columns)
+            // Target total grid width of ~900px for the data columns
+            // Hourly (18 cols) = 40px each, Daily (7 cols) = ~100px each
+            const dataColWidth = labels.length <= 7 ? 100 : (labels.length <= 14 ? 60 : 40);
+            heatmapEl.style.gridTemplateColumns = `180px repeat(${labels.length}, ${dataColWidth}px) 60px`;
+
+            let html = '';
+
+            // Header row
+            html += '<div class="heatmap-header-cell ride-name">Ride</div>';
+            labels.forEach(label => {
+                html += `<div class="heatmap-header-cell">${label}</div>`;
+            });
+            html += '<div class="heatmap-header-cell total-col">Total</div>';
+
+            // Data rows
+            sortedDatasets.forEach(dataset => {
+                const tier = dataset.tier || 2;
+                const total = calculateTotal(dataset.data);
+                const maxTotal = isDowntime ? labels.length : labels.length * 120; // Max possible
+
+                // Ride name cell with tier badge
+                html += `<div class="heatmap-ride-name" title="${dataset.label}">
+                    <span class="tier-badge tier-${tier}">T${tier}</span>
+                    <span style="overflow: hidden; text-overflow: ellipsis;">${dataset.label}</span>
+                </div>`;
+
+                // Time cells
+                dataset.data.forEach((value, idx) => {
+                    const numValue = parseFloat(value) || 0;
+                    const color = getColor(numValue, maxValue);
+                    const textColor = numValue > maxValue * 0.5 ? '#fff' : '#212529';
+                    const displayValue = isDowntime
+                        ? (numValue > 0 ? numValue.toFixed(1) : '')
+                        : (numValue > 0 ? Math.round(numValue) : '');
+                    const tooltipText = isDowntime
+                        ? `${dataset.label} @ ${labels[idx]}: ${numValue.toFixed(2)}h down`
+                        : `${dataset.label} @ ${labels[idx]}: ${Math.round(numValue)} min wait`;
+
+                    html += `<div class="heatmap-cell" style="background: ${color}; color: ${textColor};">
+                        ${displayValue}
+                        <div class="heatmap-tooltip">${tooltipText}</div>
+                    </div>`;
+                });
+
+                // Total cell
+                const totalColor = getColor(total, maxValue * labels.length * 0.3);
+                const totalTextColor = total > maxValue * labels.length * 0.15 ? '#fff' : '#212529';
+                const totalDisplay = isDowntime ? total.toFixed(1) + 'h' : Math.round(total) + 'm';
+
+                html += `<div class="heatmap-cell total-cell" style="background: ${totalColor}; color: ${totalTextColor};">
+                    ${totalDisplay}
+                </div>`;
+            });
+
+            // Add legend
+            html += `
+                <div style="grid-column: 1 / -1; padding: 12px 0 4px 0;">
+                    <div class="heatmap-legend">
+                        <span>${isDowntime ? 'Downtime:' : 'Wait Time:'}</span>
+                        <span>None</span>
+                        <div class="heatmap-legend-scale">
+                            <div style="background: #ffffff;"></div>
+                            <div style="background: #ffffc8;"></div>
+                            <div style="background: #ffeb64;"></div>
+                            <div style="background: #ffcd32;"></div>
+                            <div style="background: #ff7d14;"></div>
+                            <div style="background: #dc3514;"></div>
+                        </div>
+                        <span>${isDowntime ? 'High' : 'Long'}</span>
+                    </div>
+                </div>
+            `;
+
+            heatmapEl.innerHTML = html;
+        }
+
+        // Toggle button handlers
+        document.getElementById('toggle-downtime').addEventListener('click', () => {
+            if (currentChartType !== 'downtime') {
+                document.getElementById('toggle-downtime').classList.add('active');
+                document.getElementById('toggle-waittimes').classList.remove('active');
+                loadRideComparison('downtime');
+            }
+        });
+
+        document.getElementById('toggle-waittimes').addEventListener('click', () => {
+            if (currentChartType !== 'wait_times') {
+                document.getElementById('toggle-waittimes').classList.add('active');
+                document.getElementById('toggle-downtime').classList.remove('active');
+                loadRideComparison('wait_times');
+            }
+        });
+
+        // Load on page load
+        loadParkDetails();
+    </script>
+</body>
+</html>

@@ -75,6 +75,14 @@ SHAME_SCORE_MULTIPLIER = 10
 # Default of 2 assumes unclassified rides are "major" attractions
 DEFAULT_TIER_WEIGHT = 2
 
+# Feature flag for hourly aggregation tables
+# When True: Use pre-computed hourly tables (park_hourly_stats, ride_hourly_stats)
+# When False: Use original GROUP BY HOUR queries on raw snapshots (rollback path)
+# Default: False for safe rollback during initial deployment
+# Set via environment variable: USE_HOURLY_TABLES=true
+import os
+USE_HOURLY_TABLES = os.getenv('USE_HOURLY_TABLES', 'false').lower() in ('true', '1', 'yes')
+
 
 # =============================================================================
 # CORE METRIC CALCULATIONS

@@ -291,14 +291,8 @@ class WaitTimes {
                     <span class="rank-number">${park.rank}</span>
                 </td>
                 <td class="park-col">
-                    <a
-                        href="${park.queue_times_url}"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="park-link"
-                    >
+                    <a href="park-detail.html?park_id=${park.park_id}&period=${this.state.period}" class="park-link">
                         ${this.escapeHtml(park.park_name || 'Unknown Park')}
-                        <span class="external-icon">↗</span>
                     </a>
                     ${parkStatusBadge}
                 </td>
@@ -408,13 +402,11 @@ class WaitTimes {
                 </td>
                 <td class="ride-col">
                     <a
-                        href="${ride.queue_times_url}"
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        href="ride-detail.html?ride_id=${ride.ride_id}&period=${this.state.period === 'live' ? 'today' : this.state.period}"
                         class="ride-link"
                     >
                         ${this.escapeHtml(ride.ride_name || 'Unknown Ride')}
-                        <span class="external-icon">↗</span>
+                        <span class="external-icon">→</span>
                     </a>
                 </td>
                 <td class="tier-col">
@@ -549,7 +541,7 @@ class WaitTimes {
         const lastUpdateEl = document.getElementById('last-update-time');
         if (lastUpdateEl) {
             const now = new Date();
-            lastUpdateEl.textContent = now.toLocaleTimeString();
+            lastUpdateEl.textContent = now.toLocaleTimeString() + ' PST';
         }
     }
 

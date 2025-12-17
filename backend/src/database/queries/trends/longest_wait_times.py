@@ -23,13 +23,19 @@ Database Tables:
 - ride_daily_stats (last_week/last_month periods)
 """
 
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import List, Dict, Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from utils.timezone import get_today_range_to_now_utc, get_today_pacific, get_yesterday_range_utc
+from utils.timezone import (
+    get_today_range_to_now_utc,
+    get_today_pacific,
+    get_yesterday_range_utc,
+    get_last_week_date_range,
+    get_last_month_date_range,
+)
 from utils.sql_helpers import ParkStatusSQL
 
 
@@ -67,10 +73,21 @@ class LongestWaitTimesQuery:
         if period == 'today':
             return self._get_today(filter_disney_universal, limit)
         elif period == 'yesterday':
+            # Use snapshot data for yesterday (daily stats not yet aggregated)
             return self._get_yesterday(filter_disney_universal, limit)
-        elif period == 'last_week' or period == '7days':
+        elif period == 'last_week':
+            # Use previous calendar week (Sunday-Saturday)
+            start_date, end_date, _ = get_last_week_date_range()
+            return self._get_date_range_aggregate(start_date, end_date, filter_disney_universal, limit)
+        elif period == 'last_month':
+            # Use previous calendar month
+            start_date, end_date, _ = get_last_month_date_range()
+            return self._get_date_range_aggregate(start_date, end_date, filter_disney_universal, limit)
+        elif period == '7days':
+            # Rolling 7-day window (for backwards compatibility)
             return self._get_daily_aggregate(7, filter_disney_universal, limit)
-        elif period == 'last_month' or period == '30days':
+        elif period == '30days':
+            # Rolling 30-day window (for backwards compatibility)
             return self._get_daily_aggregate(30, filter_disney_universal, limit)
         else:
             raise ValueError(f"Invalid period: {period}. Must be 'today', 'yesterday', 'last_week', or 'last_month'")
@@ -219,19 +236,24 @@ class LongestWaitTimesQuery:
 
         return [dict(row._mapping) for row in result]
 
-    def _get_daily_aggregate(
+    def _get_date_range_aggregate(
         self,
-        days: int,
+        start_date: date,
+        end_date: date,
         filter_disney_universal: bool = False,
         limit: int = 10,
     ) -> List[Dict[str, Any]]:
         """
-        Get average wait times from daily stats (last_week/last_month).
+        Get average wait times from daily stats for a specific date range.
 
         Ranked by avg_wait_time to match the Wait Times table.
+
+        Args:
+            start_date: First date to include (inclusive)
+            end_date: Last date to include (inclusive)
+            filter_disney_universal: Only Disney/Universal parks
+            limit: Maximum results
         """
-        today = get_today_pacific()
-        start_date = today - timedelta(days=days - 1)
 
         filter_clause = ""
         if filter_disney_universal:
@@ -263,11 +285,32 @@ class LongestWaitTimesQuery:
 
         result = self.conn.execute(sql, {
             'start_date': start_date,
-            'end_date': today,
+            'end_date': end_date,
             'limit': limit,
         })
 
         return [dict(row._mapping) for row in result]
+
+    def _get_daily_aggregate(
+        self,
+        days: int,
+        filter_disney_universal: bool = False,
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get average wait times using a rolling N-day window.
+
+        Used for '7days' and '30days' periods (backwards compatibility).
+        For calendar periods, use _get_date_range_aggregate() instead.
+
+        Args:
+            days: Number of days to look back (inclusive of today)
+            filter_disney_universal: Only Disney/Universal parks
+            limit: Maximum results
+        """
+        today = get_today_pacific()
+        start_date = today - timedelta(days=days - 1)
+        return self._get_date_range_aggregate(start_date, today, filter_disney_universal, limit)
 
     # ========================================
     # PARK-LEVEL RANKINGS
@@ -294,9 +337,19 @@ class LongestWaitTimesQuery:
             return self._get_parks_today(filter_disney_universal, limit)
         elif period == 'yesterday':
             return self._get_parks_yesterday(filter_disney_universal, limit)
-        elif period == 'last_week' or period == '7days':
+        elif period == 'last_week':
+            # Use previous calendar week (Sunday-Saturday)
+            start_date, end_date, _ = get_last_week_date_range()
+            return self._get_parks_date_range_aggregate(start_date, end_date, filter_disney_universal, limit)
+        elif period == 'last_month':
+            # Use previous calendar month
+            start_date, end_date, _ = get_last_month_date_range()
+            return self._get_parks_date_range_aggregate(start_date, end_date, filter_disney_universal, limit)
+        elif period == '7days':
+            # Rolling 7-day window (for backwards compatibility)
             return self._get_parks_daily_aggregate(7, filter_disney_universal, limit)
-        elif period == 'last_month' or period == '30days':
+        elif period == '30days':
+            # Rolling 30-day window (for backwards compatibility)
             return self._get_parks_daily_aggregate(30, filter_disney_universal, limit)
         else:
             raise ValueError(f"Invalid period: {period}. Must be 'today', 'yesterday', 'last_week', or 'last_month'")
@@ -442,19 +495,24 @@ class LongestWaitTimesQuery:
 
         return [dict(row._mapping) for row in result]
 
-    def _get_parks_daily_aggregate(
+    def _get_parks_date_range_aggregate(
         self,
-        days: int,
+        start_date: date,
+        end_date: date,
         filter_disney_universal: bool = False,
         limit: int = 10,
     ) -> List[Dict[str, Any]]:
         """
-        Get park-level wait time rankings from daily stats (7days/30days).
+        Get park-level wait time rankings from daily stats for a specific date range.
 
         Sorted by avg_wait_time (not cumulative hours - that just shows parks with most rides).
+
+        Args:
+            start_date: First date to include (inclusive)
+            end_date: Last date to include (inclusive)
+            filter_disney_universal: Only Disney/Universal parks
+            limit: Maximum results
         """
-        today = get_today_pacific()
-        start_date = today - timedelta(days=days - 1)
 
         filter_clause = ""
         if filter_disney_universal:
@@ -484,8 +542,29 @@ class LongestWaitTimesQuery:
 
         result = self.conn.execute(sql, {
             'start_date': start_date,
-            'end_date': today,
+            'end_date': end_date,
             'limit': limit,
         })
 
         return [dict(row._mapping) for row in result]
+
+    def _get_parks_daily_aggregate(
+        self,
+        days: int,
+        filter_disney_universal: bool = False,
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get park-level wait times using a rolling N-day window.
+
+        Used for '7days' and '30days' periods (backwards compatibility).
+        For calendar periods, use _get_parks_date_range_aggregate() instead.
+
+        Args:
+            days: Number of days to look back (inclusive of today)
+            filter_disney_universal: Only Disney/Universal parks
+            limit: Maximum results
+        """
+        today = get_today_pacific()
+        start_date = today - timedelta(days=days - 1)
+        return self._get_parks_date_range_aggregate(start_date, today, filter_disney_universal, limit)

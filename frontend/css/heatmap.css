@@ -1,0 +1,299 @@
+/**
+ * Heatmap Visualization Styles
+ * ============================
+ *
+ * Extracted from park-detail.html for reuse across the application.
+ * Used by HeatmapRenderer utility class.
+ */
+
+/* Heatmap grid container */
+.heatmap-grid {
+    display: grid;
+    gap: 1px;
+    background: #e9ecef;
+    border-radius: 8px;
+    overflow: hidden;
+    min-width: fit-content;
+}
+
+/* Header row */
+.heatmap-header-row {
+    display: contents;
+}
+
+.heatmap-header-cell {
+    background: #f8f9fa;
+    padding: 6px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+    color: #495057;
+    white-space: nowrap;
+}
+
+.heatmap-header-cell.ride-name {
+    text-align: left;
+    padding-left: 10px;
+    min-width: 180px;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.heatmap-header-cell.total-col {
+    background: #dee2e6;
+    min-width: 60px;
+}
+
+/* Data rows */
+.heatmap-row {
+    display: contents;
+}
+
+.heatmap-ride-name {
+    background: #fff;
+    padding: 8px 10px;
+    font-size: 12px;
+    color: #212529;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.2s, color 0.2s;
+}
+
+.heatmap-ride-name:hover {
+    background: #e7f5ff;
+    color: #006d77;
+    font-weight: 600;
+}
+
+/* Tier badges */
+.heatmap-ride-name .tier-badge {
+    font-size: 9px;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-weight: 600;
+}
+
+.heatmap-ride-name .tier-1 {
+    background: #dc3545;
+    color: white;
+}
+
+.heatmap-ride-name .tier-2 {
+    background: #fd7e14;
+    color: white;
+}
+
+.heatmap-ride-name .tier-3 {
+    background: #6c757d;
+    color: white;
+}
+
+/* Heatmap cells */
+.heatmap-cell {
+    min-width: 40px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    cursor: default;
+    transition: transform 0.1s;
+    position: relative;
+}
+
+.heatmap-cell:hover {
+    transform: scale(1.1);
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.heatmap-cell.total-cell {
+    font-weight: 600;
+    font-size: 11px;
+    min-width: 60px;
+}
+
+/* Tooltips */
+.heatmap-tooltip {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #212529;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+    z-index: 100;
+}
+
+.heatmap-cell:hover .heatmap-tooltip {
+    opacity: 1;
+}
+
+/* Legend */
+.heatmap-legend {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+    font-size: 11px;
+    color: #6c757d;
+}
+
+.heatmap-legend-scale {
+    display: flex;
+    height: 12px;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.heatmap-legend-scale div {
+    width: 20px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .heatmap-header-cell {
+        font-size: 10px;
+        padding: 4px 2px;
+    }
+
+    .heatmap-ride-name {
+        font-size: 11px;
+        padding: 6px 8px;
+    }
+
+    .heatmap-cell {
+        font-size: 9px;
+        min-width: 35px;
+        height: 28px;
+    }
+
+    .heatmap-tooltip {
+        font-size: 10px;
+    }
+}
+
+/* ============================================
+   ACCORDION STYLES FOR COLLAPSIBLE HEATMAPS
+   ============================================ */
+
+/* Accordion controls (Expand All / Collapse All) */
+.heatmap-accordion-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    justify-content: flex-end;
+}
+
+.accordion-control-btn {
+    background: var(--charcoal, #2c3e50);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.accordion-control-btn:hover {
+    background: var(--deep-teal, #006d77);
+}
+
+/* Accordion container */
+.heatmaps-accordion {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* Accordion section */
+.heatmap-accordion-section {
+    border: 2px solid var(--charcoal, #2c3e50);
+    border-radius: 8px;
+    overflow: hidden;
+    background: white;
+}
+
+/* Accordion header (clickable) */
+.heatmap-accordion-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    background: var(--charcoal, #2c3e50);
+    color: white;
+    border: none;
+    cursor: pointer;
+    transition: background 0.2s;
+    text-align: left;
+}
+
+.heatmap-accordion-header:hover {
+    background: var(--deep-teal, #006d77);
+}
+
+.heatmap-accordion-header.expanded {
+    background: var(--deep-teal, #006d77);
+}
+
+.heatmap-accordion-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.heatmap-accordion-header .chevron {
+    font-size: 14px;
+    transition: transform 0.2s;
+}
+
+.heatmap-accordion-header.expanded .chevron {
+    transform: rotate(180deg);
+}
+
+/* Accordion content (collapsible) */
+.heatmap-accordion-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease-out;
+}
+
+.heatmap-accordion-content.expanded {
+    max-height: 5000px;  /* Large enough for any heatmap */
+    transition: max-height 0.5s ease-in;
+}
+
+.heatmap-accordion-content .heatmap-wrapper {
+    padding: 20px;
+}
+
+/* Responsive adjustments for accordion */
+@media (max-width: 768px) {
+    .heatmap-accordion-header h3 {
+        font-size: 16px;
+    }
+
+    .heatmap-accordion-controls {
+        justify-content: center;
+    }
+
+    .accordion-control-btn {
+        font-size: 12px;
+        padding: 6px 12px;
+    }
+}

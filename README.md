@@ -103,6 +103,154 @@ pytest tests/ -v
 
 ---
 
+## Production Operations (webperformance.com)
+
+### System Architecture
+- **Server**: ec2-user@webperformance.com
+- **SSH Key**: `~/.ssh/michael-2.pem` (required for all SSH/rsync commands)
+- **Installation**: `/opt/themeparkhallofshame/`
+- **Service Management**: systemd (`themepark-api.service`)
+- **API Server**: Gunicorn (2 workers) on `127.0.0.1:5001`
+- **Web Server**: Apache proxy to Gunicorn
+
+### Service Management
+
+```bash
+# Restart API service
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "sudo systemctl restart themepark-api"
+
+# Check service status
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "sudo systemctl status themepark-api"
+
+# View service logs (real-time)
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "sudo journalctl -u themepark-api -f"
+
+# Check API health
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "curl -s http://127.0.0.1:5001/api/health | python3 -m json.tool"
+```
+
+### Deployment System
+
+The production deployment includes **fail-fast validation** at multiple stages:
+
+1. **Pre-flight validation** (local): Syntax, imports, WSGI, dependencies
+2. **Deployment snapshot**: Automatic backup before changes
+3. **Pre-service validation**: Environment, imports, database schema
+4. **Smoke tests**: API endpoint validation with automatic rollback
+
+```bash
+# Standard deployment (with validation)
+./deployment/deploy.sh all
+
+# Emergency deployment (skip validation)
+SKIP_VALIDATION=1 ./deployment/deploy.sh all
+```
+
+### Logs
+
+| Log File | Purpose |
+|----------|---------|
+| `/opt/themeparkhallofshame/logs/error.log` | API errors |
+| `/opt/themeparkhallofshame/logs/access.log` | HTTP requests |
+| `/opt/themeparkhallofshame/logs/cron_wrapper.log` | Cron job execution |
+| `/opt/themeparkhallofshame/logs/aggregate_hourly.log` | Hourly aggregation |
+| `/opt/themeparkhallofshame/logs/aggregate_daily.log` | Daily aggregation |
+
+### Cron Jobs
+
+All cron jobs are wrapped with failure alerting:
+
+| Job | Schedule | Description |
+|-----|----------|-------------|
+| `collect_snapshots` | Every 10 min | Captures ride status from ThemeParks.wiki |
+| `aggregate_hourly` | :05 past each hour | Computes hourly stats |
+| `aggregate_daily` | 1:00 AM server time | Computes daily stats |
+| `check_data_collection` | Hourly | Monitors data collection health |
+| `send_data_quality_alert` | 8:00 AM PT | Reports stale data issues |
+
+### Monitoring
+
+**Health Endpoint**: `http://127.0.0.1:5001/api/health`
+
+Monitors:
+- Database connectivity
+- Data collection freshness
+- Hourly/daily aggregation lag
+- Disk space usage
+
+**Cron Failure Alerts**: All cron jobs automatically send email alerts on failure (<90 seconds).
+
+See [CLAUDE.md](CLAUDE.md#production-deployment-configuration) for complete deployment documentation.
+
+## Testing
+
+This project has comprehensive test coverage with **935+ tests across 64 files**:
+
+- **Unit tests** (43 files, ~800 tests) - Fast, isolated business logic verification
+- **Integration tests** (21 files, ~135 tests) - Real MySQL database interaction tests
+- **Contract tests** - API schema validation
+- **Golden data tests** - Regression testing with hand-computed values
+- **Performance tests** - Query timing baselines
+
+### Quick Start
+
+```bash
+# Run all tests (unit + integration + contract)
+cd backend && pytest
+
+# Run specific test categories
+pytest tests/unit/           # Fast unit tests (<5 sec)
+pytest tests/integration/    # Integration tests (~30 sec, requires test DB)
+pytest tests/contract/       # API contract validation
+
+# Run with coverage report
+pytest --cov=src --cov-report=term-missing
+pytest --cov=src --cov-report=html  # Generate HTML report in htmlcov/
+
+# Run linting
+ruff check .
+```
+
+### Test Categories
+
+| Type | Count | Speed | Database | Purpose |
+|------|-------|-------|----------|---------|
+| Unit | ~800 tests | <5 sec | Mocked | Business logic verification |
+| Integration | ~135 tests | ~30 sec | Real MySQL | Database interaction tests |
+| Contract | Small | <1 sec | None | API schema validation |
+
+### Why Both Unit and Integration Tests?
+
+**Unit tests** (with mocks):
+- ✅ Enable fast TDD iteration (<5 second feedback)
+- ✅ Test pure business logic without infrastructure
+- ✅ Make tests deterministic (no flaky failures)
+
+**Integration tests** (real MySQL):
+- ✅ Catch SQL syntax errors and schema mismatches
+- ✅ Verify real data patterns (NULLs, time zones, edge cases)
+- ✅ Test complex joins and aggregations
+- ✅ Validate end-to-end API flows
+
+**Both are necessary** for comprehensive coverage. See [Development Guide](docs/development.md#testing-strategy) for detailed documentation.
+
+### Before Committing
+
+All tests must pass before committing:
+
+```bash
+# 1. Run full test suite
+pytest  # Must pass all 935+ tests
+
+# 2. Run linting
+ruff check .  # Must show no errors
+
+# 3. Manual browser testing (for UI changes)
+# See CLAUDE.md for detailed manual testing requirements
+```
+
+---
+
 ## Development Workflow
 
 This section covers the complete development lifecycle, from writing code to deploying to production.

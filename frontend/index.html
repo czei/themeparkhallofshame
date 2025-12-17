@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>US Theme Park Hall of Shame</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=20">
+    <link rel="stylesheet" href="css/styles.css?v=27">
+    <link rel="stylesheet" href="css/heatmap.css?v=2">
     <!-- Chart.js for Trends visualization -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
@@ -55,7 +56,17 @@
         <div class="subtitle">
             Tracking operational performance across major theme parks
         </div>
-        <a href="#" class="about-link" id="about-link">About This Project</a>
+        <div class="header-actions">
+            <a href="#" class="about-link" id="about-link">About This Project</a>
+            <button class="search-trigger" id="search-trigger" aria-label="Search parks and rides">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.35-4.35"></path>
+                </svg>
+                <span>Search</span>
+                <span class="search-shortcut-hint"><kbd>Cmd</kbd><kbd>K</kbd></span>
+            </button>
+        </div>
     </div>
 
     <!-- Navigation -->
@@ -79,16 +90,17 @@
         </div>
 
         <div class="time-selector">
-            <button class="time-btn active" data-period="live" title="Current snapshot - rides down right now">Live</button>
-            <button class="time-btn" data-period="today" title="Average stats during operating hours today (Pacific time)">Today</button>
-            <button class="time-btn" data-period="yesterday" title="Full previous day (Pacific time)">Yesterday</button>
+            <button class="time-btn" data-period="live" title="Current snapshot - rides down right now">Live</button>
+            <button class="time-btn active" data-period="today" title="Today's stats (midnight to now, Pacific Time)">Today</button>
+            <button class="time-btn" data-period="yesterday" title="Yesterday's full day (midnight to midnight, Pacific Time)">Yesterday</button>
             <div class="history-dropdown">
                 <button class="history-btn" id="history-dropdown-btn">History <span class="chevron">▼</span></button>
                 <div class="dropdown-menu" id="history-dropdown-menu">
-                    <button class="dropdown-item" data-period="last_week" title="Previous complete week (Sunday-Saturday)">Last Week</button>
-                    <button class="dropdown-item" data-period="last_month" title="Previous complete calendar month">Last Month</button>
+                    <button class="dropdown-item" data-period="last_week" title="Previous complete week (Sunday-Saturday, Pacific Time)">Last Week</button>
+                    <button class="dropdown-item" data-period="last_month" title="Previous complete calendar month (Pacific Time)">Last Month</button>
                 </div>
             </div>
+            <span class="timezone-indicator">All times PST</span>
         </div>
     </div>
 
@@ -165,14 +177,19 @@
     </div>
 
     <!-- Scripts -->
-    <script src="js/config.js?v=6"></script>
-    <script src="js/api-client.js?v=3"></script>
-    <script src="js/components/downtime.js?v=5"></script>
-    <script src="js/components/wait-times.js?v=8"></script>
-    <script src="js/components/awards.js?v=8"></script>
-    <script src="js/components/charts.js?v=1"></script>
+    <!-- Fuse.js for client-side fuzzy search -->
+    <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
+    <script src="js/config.js?v=8"></script>
+    <script src="js/api-client.js?v=4"></script>
+    <script src="js/components/search.js?v=1"></script>
+    <script src="js/components/downtime.js?v=6"></script>
+    <script src="js/components/wait-times.js?v=9"></script>
+    <script src="js/components/awards.js?v=9"></script>
+    <script src="js/utils/shame-score-config.js?v=2"></script>
+    <script src="js/utils/heatmap-renderer.js?v=4"></script>
+    <script src="js/components/charts.js?v=5"></script>
     <script src="js/components/about-modal.js?v=3"></script>
-    <script src="js/components/park-details-modal.js?v=10"></script>
-    <script src="js/app.js?v=11"></script>
+    <script src="js/components/park-details-modal.js?v=12"></script>
+    <script src="js/app.js?v=13"></script>
 </body>
 </html>

@@ -238,7 +238,7 @@ class Downtime {
                             <th class="downtime-col sortable ${this.state.sortBy === 'total_downtime_hours' ? 'sorted' : ''}"
                                 data-sort="total_downtime_hours"
                                 title="Total accumulated ride downtime hours during the selected period. Click to sort.">
-                                Cumulative Downtime ${this.getSortIndicator('total_downtime_hours')}
+                                Total Ride-Hours Down ${this.getSortIndicator('total_downtime_hours')}
                             </th>
                             <th class="uptime-col sortable ${this.state.sortBy === 'uptime_percentage' ? 'sorted' : ''}"
                                 data-sort="uptime_percentage"
@@ -284,29 +284,17 @@ class Downtime {
                     </span>
                 </td>
                 <td class="park-col">
-                    <div class="park-name-cell">
-                        <span class="park-name">${this.escapeHtml(park.park_name || park.name || 'Unknown Park')}</span>
-                        <div class="park-actions">
-                            <button
-                                class="park-details-btn"
-                                data-park-id="${park.park_id}"
-                                data-park-name="${this.escapeHtml(park.park_name || park.name || 'Unknown Park')}"
-                                title="View park details"
-                            >Details</button>
-                            <a
-                                href="${park.queue_times_url}"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                class="park-external-link"
-                                title="View on Queue-Times.com"
-                            >
-                                <span class="external-icon">↗</span>
-                            </a>
-                        </div>
-                    </div>
+                    <a href="park-detail.html?park_id=${park.park_id}&period=${this.state.period}" class="park-link">
+                        ${this.escapeHtml(park.park_name || park.name || 'Unknown Park')}
+                    </a>
                 </td>
                 <td class="shame-col">
-                    <span class="shame-score ${this.getShameClass(park.shame_score)}">${park.shame_score !== null && park.shame_score !== undefined ? Number(park.shame_score).toFixed(2) : 'N/A'}</span>
+                    <span class="shame-score ${this.getShameClass(park.shame_score)} clickable-shame"
+                          data-park-id="${park.park_id}"
+                          data-park-name="${this.escapeHtml(park.park_name || park.name || 'Unknown Park')}"
+                          title="Explain Shame Score">
+                        ${park.shame_score !== null && park.shame_score !== undefined ? Number(park.shame_score).toFixed(2) : 'N/A'}
+                    </span>
                 </td>
                 <td class="location-col">${this.escapeHtml(park.location || 'Unknown')}</td>
                 ${this.state.period === 'live' ? `<td class="status-col">${parkStatusBadge}</td>` : ''}
@@ -370,7 +358,7 @@ class Downtime {
                             <th class="downtime-col sortable ${this.state.rideSortBy === 'downtime_hours' ? 'sorted' : ''}"
                                 data-ride-sort="downtime_hours"
                                 title="Total time the ride was non-operational. Click to sort (most downtime first).">
-                                Cumulative Downtime ${this.getRideSortIndicator('downtime_hours')}
+                                Total Ride-Hours Down ${this.getRideSortIndicator('downtime_hours')}
                             </th>
                             <th class="uptime-col sortable ${this.state.rideSortBy === 'uptime_percentage' ? 'sorted' : ''}"
                                 data-ride-sort="uptime_percentage"
@@ -418,16 +406,20 @@ class Downtime {
                 </td>
                 <td class="ride-col">
                     <div class="ride-name-cell">
-                        <span class="ride-name">${this.escapeHtml(ride.ride_name || 'Unknown Ride')}</span>
+                        <a
+                            href="ride-detail.html?ride_id=${ride.ride_id}&period=${this.state.period === 'live' ? 'today' : this.state.period}"
+                            class="ride-name-link"
+                            title="View ride details"
+                        >
+                            <span class="ride-name">${this.escapeHtml(ride.ride_name || 'Unknown Ride')}</span>
+                        </a>
                         <div class="ride-actions">
                             <a
-                                href="${ride.queue_times_url}"
-                                target="_blank"
-                                rel="noopener noreferrer"
+                                href="ride-detail.html?ride_id=${ride.ride_id}&period=${this.state.period === 'live' ? 'today' : this.state.period}"
                                 class="ride-external-link"
-                                title="View on Queue-Times.com"
+                                title="View ride details"
                             >
-                                <span class="external-icon">↗</span>
+                                <span class="external-icon">→</span>
                             </a>
                         </div>
                     </div>
@@ -550,18 +542,10 @@ class Downtime {
 
     /**
      * Get CSS class for shame score coloring
-     * Higher scores = more shame = worse
+     * Uses centralized ShameScoreConfig
      */
     getShameClass(shameScore) {
-        if (shameScore === null || shameScore === undefined) return '';
-        const score = Number(shameScore);
-        if (isNaN(score)) return '';
-
-        // Thresholds for shame levels (these are weighted downtime hours per weight point)
-        if (score >= 1.0) return 'shame-high';      // 1+ hour weighted downtime per point = very bad
-        if (score >= 0.5) return 'shame-medium';    // 0.5-1 hour = concerning
-        if (score >= 0.1) return 'shame-low';       // 0.1-0.5 = minor issues
-        return 'shame-none';                         // < 0.1 = negligible
+        return ShameScoreConfig.getCssClass(shameScore);
     }
 
     /**
@@ -640,7 +624,7 @@ class Downtime {
         const lastUpdateEl = document.getElementById('last-update-time');
         if (lastUpdateEl) {
             const now = new Date();
-            lastUpdateEl.textContent = now.toLocaleTimeString();
+            lastUpdateEl.textContent = now.toLocaleTimeString() + ' PST';
         }
     }
 
@@ -678,20 +662,6 @@ class Downtime {
                 }
             });
         });
-
-        // Park details buttons
-        const detailsBtns = this.container.querySelectorAll('.park-details-btn');
-        detailsBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const parkId = parseInt(btn.dataset.parkId);
-                const parkName = btn.dataset.parkName;
-                if (this.parkDetailsModal && parkId) {
-                    // Pass current period to modal so it can fetch appropriate breakdown
-                    this.parkDetailsModal.open(parkId, parkName, this.state.period);
-                }
-            });
-        });
-
         // Sortable column headers for park table (data-sort)
         const sortableHeaders = this.container.querySelectorAll('th.sortable[data-sort]');
         sortableHeaders.forEach(th => {
@@ -721,6 +691,19 @@ class Downtime {
                 this.fetchAllData();
             });
         }
+
+        // Clickable shame scores - open park details modal
+        const shameScores = this.container.querySelectorAll('.clickable-shame');
+        shameScores.forEach(span => {
+            span.addEventListener('click', (e) => {
+                e.preventDefault();
+                const parkId = span.dataset.parkId;
+                const parkName = span.dataset.parkName;
+                if (this.parkDetailsModal && parkId) {
+                    this.parkDetailsModal.open(parseInt(parkId), parkName, this.state.period);
+                }
+            });
+        });
     }
 }
 

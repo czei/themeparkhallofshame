@@ -22,7 +22,7 @@ Example Response:
 }
 """
 
-from datetime import date
+from datetime import date, timedelta
 from typing import List, Dict, Any
 
 from sqlalchemy import select, func, and_
@@ -64,6 +64,10 @@ class DecliningParksQuery:
         today = date.today()
         year = today.year
         week_number = today.isocalendar()[1]
+        prev_week_date = today - timedelta(weeks=1)
+        prev_year = prev_week_date.year
+        prev_week_number = prev_week_date.isocalendar()[1]
+        prev_week = park_weekly_stats.alias("prev_week")
 
         conditions = [
             parks.c.is_active == True,
@@ -79,6 +83,7 @@ class DecliningParksQuery:
         stmt = (
             select(
                 parks.c.park_id,
+                parks.c.queue_times_id,
                 parks.c.name.label("park_name"),
                 func.concat(parks.c.city, ", ", parks.c.state_province).label("location"),
                 park_weekly_stats.c.avg_uptime_percentage.label("current_uptime"),
@@ -88,10 +93,22 @@ class DecliningParksQuery:
                     2,
                 ).label("previous_uptime"),
                 park_weekly_stats.c.trend_vs_previous_week.label("decline_percentage"),
+                park_weekly_stats.c.total_downtime_hours.label("current_downtime_hours"),
+                func.coalesce(
+                    prev_week.c.total_downtime_hours,
+                    0,
+                ).label("previous_downtime_hours"),
             )
             .select_from(
                 parks.join(
                     park_weekly_stats, parks.c.park_id == park_weekly_stats.c.park_id
+                ).outerjoin(
+                    prev_week,
+                    and_(
+                        prev_week.c.park_id == park_weekly_stats.c.park_id,
+                        prev_week.c.year == prev_year,
+                        prev_week.c.week_number == prev_week_number,
+                    ),
                 )
             )
             .where(and_(*conditions))

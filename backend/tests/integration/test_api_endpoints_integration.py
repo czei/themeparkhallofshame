@@ -59,15 +59,15 @@ def comprehensive_test_data(mysql_connection):
 
     # Clean up any existing test data from this test file (queue_times_id 9000+)
     # This handles committed data from previous runs of these tests
-    conn.execute(text("DELETE FROM ride_status_snapshots WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 90000)"))
-    conn.execute(text("DELETE FROM ride_status_changes WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 90000)"))
-    conn.execute(text("DELETE FROM ride_daily_stats WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 90000)"))
-    conn.execute(text("DELETE FROM ride_weekly_stats WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 90000)"))
-    conn.execute(text("DELETE FROM ride_monthly_stats WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 90000)"))
-    conn.execute(text("DELETE FROM park_activity_snapshots WHERE park_id IN (SELECT park_id FROM parks WHERE queue_times_id >= 9000)"))
-    conn.execute(text("DELETE FROM park_daily_stats WHERE park_id IN (SELECT park_id FROM parks WHERE queue_times_id >= 9000)"))
-    conn.execute(text("DELETE FROM park_weekly_stats WHERE park_id IN (SELECT park_id FROM parks WHERE queue_times_id >= 9000)"))
-    conn.execute(text("DELETE FROM park_monthly_stats WHERE park_id IN (SELECT park_id FROM parks WHERE queue_times_id >= 9000)"))
+    conn.execute(text("DELETE FROM ride_status_snapshots"))
+    conn.execute(text("DELETE FROM ride_status_changes"))
+    conn.execute(text("DELETE FROM ride_daily_stats"))
+    conn.execute(text("DELETE FROM ride_weekly_stats"))
+    conn.execute(text("DELETE FROM ride_monthly_stats"))
+    conn.execute(text("DELETE FROM park_activity_snapshots"))
+    conn.execute(text("DELETE FROM park_daily_stats"))
+    conn.execute(text("DELETE FROM park_weekly_stats"))
+    conn.execute(text("DELETE FROM park_monthly_stats"))
     conn.execute(text("DELETE FROM ride_classifications WHERE ride_id IN (SELECT ride_id FROM rides WHERE queue_times_id >= 90000)"))
     conn.execute(text("DELETE FROM rides WHERE queue_times_id >= 90000"))
     conn.execute(text("DELETE FROM parks WHERE queue_times_id >= 9000"))
@@ -111,16 +111,17 @@ def comprehensive_test_data(mysql_connection):
         tiers = [1, 1, 2, 2, 2, 2, 2, 3, 3, 3]
         for i, tier in enumerate(tiers, 1):
             conn.execute(text("""
-                INSERT INTO rides (ride_id, queue_times_id, park_id, name, land_area, tier, is_active)
-                VALUES (:ride_id, :qt_id, :park_id, :name, :land, :tier, TRUE)
-            """), {
-                'ride_id': ride_id,
-                'qt_id': 90000 + ride_id,
-                'park_id': park_id,
-                'name': f'Ride_{park_id}_{i}_T{tier}',
-                'land': f'Land_{i}',
-                'tier': tier
-            })
+            INSERT INTO rides (ride_id, queue_times_id, park_id, name, land_area, tier, is_active, last_operated_at)
+            VALUES (:ride_id, :qt_id, :park_id, :name, :land, :tier, TRUE, :last_operated_at)
+        """), {
+            'ride_id': ride_id,
+            'qt_id': 90000 + ride_id,
+            'park_id': park_id,
+            'name': f'Ride_{park_id}_{i}_T{tier}',
+            'land': f'Land_{i}',
+            'tier': tier,
+            'last_operated_at': datetime.utcnow() - timedelta(days=i % 3)
+        })
 
             # Add classification
             tier_weights = {1: 3, 2: 2, 3: 1}
@@ -169,20 +170,22 @@ def comprehensive_test_data(mysql_connection):
 
             conn.execute(text("""
                 INSERT INTO ride_daily_stats (
-                    ride_id, stat_date, downtime_minutes, uptime_percentage,
-                    avg_wait_time, peak_wait_time, status_changes
+                    ride_id, stat_date, downtime_minutes, uptime_minutes, uptime_percentage,
+                    avg_wait_time, peak_wait_time, status_changes, operating_hours_minutes
                 ) VALUES (
-                    :ride_id, :stat_date, :downtime, :uptime,
-                    :avg_wait, :peak_wait, :status_changes
+                    :ride_id, :stat_date, :downtime, :uptime_minutes, :uptime,
+                    :avg_wait, :peak_wait, :status_changes, :operating_minutes
                 )
             """), {
                 'ride_id': ride_id,
                 'stat_date': today,
                 'downtime': downtime_today,
+                'uptime_minutes': uptime_today,
                 'uptime': uptime_pct_today,
                 'avg_wait': 45 if tier == 1 else (30 if tier == 2 else 15),
                 'peak_wait': 90 if tier == 1 else (60 if tier == 2 else 30),
                 'status_changes': 3 if tier == 1 else 2,
+                'operating_minutes': 600,
                 'observations': 60
             })
 
@@ -193,22 +196,48 @@ def comprehensive_test_data(mysql_connection):
 
             conn.execute(text("""
                 INSERT INTO ride_daily_stats (
-                    ride_id, stat_date, downtime_minutes, uptime_percentage,
-                    avg_wait_time, peak_wait_time, status_changes
+                    ride_id, stat_date, downtime_minutes, uptime_minutes, uptime_percentage,
+                    avg_wait_time, peak_wait_time, status_changes, operating_hours_minutes
                 ) VALUES (
-                    :ride_id, :stat_date, :downtime, :uptime,
-                    :avg_wait, :peak_wait, :status_changes
+                    :ride_id, :stat_date, :downtime, :uptime_minutes, :uptime,
+                    :avg_wait, :peak_wait, :status_changes, :operating_minutes
                 )
             """), {
                 'ride_id': ride_id,
                 'stat_date': yesterday,
                 'downtime': downtime_yesterday,
+                'uptime_minutes': uptime_yesterday,
                 'uptime': uptime_pct_yesterday,
                 'avg_wait': 40 if tier == 1 else (25 if tier == 2 else 12),
                 'peak_wait': 80 if tier == 1 else (50 if tier == 2 else 25),
                 'status_changes': 2 if tier == 1 else 1,
+                'operating_minutes': 600,
                 'observations': 60
             })
+
+            # Additional days to cover 7-day aggregations (use same profile as today)
+            for days_back in range(2, 7):
+                stat_date = today - timedelta(days=days_back)
+                conn.execute(text("""
+                    INSERT INTO ride_daily_stats (
+                        ride_id, stat_date, downtime_minutes, uptime_minutes, uptime_percentage,
+                        avg_wait_time, peak_wait_time, status_changes, operating_hours_minutes
+                    ) VALUES (
+                        :ride_id, :stat_date, :downtime, :uptime_minutes, :uptime,
+                        :avg_wait, :peak_wait, :status_changes, :operating_minutes
+                    )
+                """), {
+                    'ride_id': ride_id,
+                    'stat_date': stat_date,
+                    'downtime': downtime_today,
+                    'uptime_minutes': uptime_today,
+                    'uptime': uptime_pct_today,
+                    'avg_wait': 45 if tier == 1 else (30 if tier == 2 else 15),
+                    'peak_wait': 90 if tier == 1 else (60 if tier == 2 else 30),
+                    'status_changes': 3 if tier == 1 else 2,
+                    'operating_minutes': 600,
+                    'observations': 60
+                })
 
             # Weekly stats (current week) - average of 7 days
             downtime_week = downtime_today * 7
@@ -319,28 +348,47 @@ def comprehensive_test_data(mysql_connection):
 
         conn.execute(text("""
             INSERT INTO park_daily_stats (
-                park_id, stat_date, total_downtime_hours, rides_with_downtime, avg_uptime_percentage
-            ) VALUES (:park_id, :stat_date, :downtime_hours, :rides_down, :avg_uptime)
+                park_id, stat_date, total_downtime_hours, rides_with_downtime,
+                avg_uptime_percentage, operating_hours_minutes
+            ) VALUES (:park_id, :stat_date, :downtime_hours, :rides_down, :avg_uptime, :operating_minutes)
         """), {
             'park_id': park_id,
             'stat_date': today,
             'downtime_hours': total_downtime_today / 60.0,
             'rides_down': rides_with_downtime_today,
-            'avg_uptime': avg_uptime_today
+            'avg_uptime': avg_uptime_today,
+            'operating_minutes': 900
         })
 
         # Yesterday: 20% less
         conn.execute(text("""
             INSERT INTO park_daily_stats (
-                park_id, stat_date, total_downtime_hours, rides_with_downtime, avg_uptime_percentage
-            ) VALUES (:park_id, :stat_date, :downtime_hours, :rides_down, :avg_uptime)
+                park_id, stat_date, total_downtime_hours, rides_with_downtime,
+                avg_uptime_percentage, operating_hours_minutes
+            ) VALUES (:park_id, :stat_date, :downtime_hours, :rides_down, :avg_uptime, :operating_minutes)
         """), {
             'park_id': park_id,
             'stat_date': yesterday,
             'downtime_hours': (total_downtime_today * 0.8) / 60.0,
             'rides_down': rides_with_downtime_today,
-            'avg_uptime': 80.0
+            'avg_uptime': 80.0,
+            'operating_minutes': 900
         })
+
+        for days_back in range(2, 7):
+            conn.execute(text("""
+                INSERT INTO park_daily_stats (
+                    park_id, stat_date, total_downtime_hours, rides_with_downtime,
+                    avg_uptime_percentage, operating_hours_minutes
+                ) VALUES (:park_id, :stat_date, :downtime_hours, :rides_down, :avg_uptime, :operating_minutes)
+            """), {
+                'park_id': park_id,
+                'stat_date': today - timedelta(days=days_back),
+                'downtime_hours': total_downtime_today / 60.0,
+                'rides_down': rides_with_downtime_today,
+                'avg_uptime': avg_uptime_today,
+                'operating_minutes': 900
+            })
 
     # === CREATE PARK WEEKLY STATS ===
     for park_id in range(1, 11):
@@ -414,26 +462,43 @@ def comprehensive_test_data(mysql_connection):
 
     conn.commit()  # Commit all park stats so Flask app can see them
 
-    # === CREATE RIDE STATUS SNAPSHOTS (for current wait times) ===
-    now = datetime.now()
+    # === CREATE PARK & RIDE STATUS SNAPSHOTS (for live/waittime endpoints) ===
+    now = datetime.utcnow()
     ride_id = 1
     for park_id in range(1, 11):
+        # Snapshot representing park activity at "now"
+        conn.execute(text("""
+            INSERT INTO park_activity_snapshots (
+                park_id, recorded_at, total_rides_tracked, rides_open, rides_closed,
+                avg_wait_time, max_wait_time, park_appears_open
+            ) VALUES (
+                :park_id, :recorded_at, :total_rides, :rides_open, :rides_closed,
+                :avg_wait, :max_wait, :park_open
+            )
+        """), {
+            'park_id': park_id,
+            'recorded_at': now,
+            'total_rides': 10,
+            'rides_open': 10,
+            'rides_closed': 0,
+            'avg_wait': 40.0,
+            'max_wait': 60,
+            'park_open': True
+        })
+
         for i in range(10):
             tier = 1 if i < 2 else (2 if i < 7 else 3)
             # Tier 1 rides have longer wait times
             wait_time = 60 if tier == 1 else (40 if tier == 2 else 20)
-            is_open = True  # All rides currently open
 
             conn.execute(text("""
                 INSERT INTO ride_status_snapshots (
-                    ride_id, recorded_at, is_open, wait_time, computed_is_open
-                ) VALUES (:ride_id, :recorded_at, :is_open, :wait_time, :computed)
+                    ride_id, recorded_at, is_open, wait_time, computed_is_open, status
+                ) VALUES (:ride_id, :recorded_at, TRUE, :wait_time, TRUE, 'OPERATING')
             """), {
                 'ride_id': ride_id,
                 'recorded_at': now,
-                'is_open': is_open,
-                'wait_time': wait_time,
-                'computed': is_open
+                'wait_time': wait_time
             })
 
             ride_id += 1
@@ -1192,6 +1257,13 @@ def trends_test_data(mysql_connection):
     prev_month = current_month - 1 if current_month > 1 else 12
     prev_month_year = current_year if current_month > 1 else current_year - 1
 
+    default_total_rides = 5
+    default_rides_with_downtime = 5
+    default_operating_minutes = 600
+
+    weekly_operating_minutes = default_operating_minutes * 7
+    monthly_operating_minutes = default_operating_minutes * 30
+
     # Park 11-12: IMPROVING by >5% (previous uptime was lower)
     # Park 11: 90% today vs 80% yesterday = +10% improvement
     for park_id in [11, 12]:
@@ -1199,41 +1271,60 @@ def trends_test_data(mysql_connection):
 
         # Daily stats
         conn.execute(text("""
-            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_hours, avg_uptime_percentage)
-            VALUES (:park_id, :stat_date, :downtime, :uptime)
+            INSERT INTO park_daily_stats (
+                park_id, stat_date, total_rides_tracked, total_downtime_hours,
+                rides_with_downtime, avg_uptime_percentage, operating_hours_minutes
+            )
+            VALUES (:park_id, :stat_date, :total_rides, :downtime, :rides_down, :uptime, :operating_minutes)
         """), {
             'park_id': park_id,
             'stat_date': today,
+            'total_rides': default_total_rides,
             'downtime': 1.0,  # 1 hour
-            'uptime': 90.0
+            'rides_down': default_rides_with_downtime,
+            'uptime': 90.0,
+            'operating_minutes': default_operating_minutes
         })
 
         conn.execute(text("""
-            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_hours, avg_uptime_percentage)
-            VALUES (:park_id, :stat_date, :downtime, :uptime)
+            INSERT INTO park_daily_stats (
+                park_id, stat_date, total_rides_tracked, total_downtime_hours,
+                rides_with_downtime, avg_uptime_percentage, operating_hours_minutes
+            )
+            VALUES (:park_id, :stat_date, :total_rides, :downtime, :rides_down, :uptime, :operating_minutes)
         """), {
             'park_id': park_id,
             'stat_date': yesterday,
+            'total_rides': default_total_rides,
             'downtime': 2.0,  # 2 hours
-            'uptime': 90.0 - improvement
+            'rides_down': default_rides_with_downtime,
+            'uptime': 90.0 - improvement,
+            'operating_minutes': default_operating_minutes
         })
 
         # Weekly stats
         conn.execute(text("""
-            INSERT INTO park_weekly_stats (park_id, year, week_number, week_start_date, total_downtime_hours, avg_uptime_percentage)
-            VALUES (:park_id, :year, :week, :week_start, :downtime, :uptime)
+            INSERT INTO park_weekly_stats (
+                park_id, year, week_number, week_start_date, total_downtime_hours,
+                avg_uptime_percentage, trend_vs_previous_week
+            )
+            VALUES (:park_id, :year, :week, :week_start, :downtime, :uptime, :trend)
         """), {
             'park_id': park_id,
             'year': current_year,
             'week': current_week,
             'week_start': current_week_start,
             'downtime': 7.0,  # 7 hours for the week
-            'uptime': 90.0
+            'uptime': 90.0,
+            'trend': -improvement
         })
 
         conn.execute(text("""
-            INSERT INTO park_weekly_stats (park_id, year, week_number, week_start_date, total_downtime_hours, avg_uptime_percentage)
-            VALUES (:park_id, :year, :week, :week_start, :downtime, :uptime)
+            INSERT INTO park_weekly_stats (
+                park_id, year, week_number, week_start_date, total_downtime_hours,
+                avg_uptime_percentage, trend_vs_previous_week
+            )
+            VALUES (:park_id, :year, :week, :week_start, :downtime, :uptime, NULL)
         """), {
             'park_id': park_id,
             'year': prev_week_year,
@@ -1273,41 +1364,60 @@ def trends_test_data(mysql_connection):
 
         # Daily stats
         conn.execute(text("""
-            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_hours, avg_uptime_percentage)
-            VALUES (:park_id, :stat_date, :downtime, :uptime)
+            INSERT INTO park_daily_stats (
+                park_id, stat_date, total_rides_tracked, total_downtime_hours,
+                rides_with_downtime, avg_uptime_percentage, operating_hours_minutes
+            )
+            VALUES (:park_id, :stat_date, :total_rides, :downtime, :rides_down, :uptime, :operating_minutes)
         """), {
             'park_id': park_id,
             'stat_date': today,
+            'total_rides': default_total_rides,
             'downtime': 2.5,  # 2.5 hours
-            'uptime': 75.0
+            'rides_down': default_rides_with_downtime,
+            'uptime': 75.0,
+            'operating_minutes': default_operating_minutes
         })
 
         conn.execute(text("""
-            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_hours, avg_uptime_percentage)
-            VALUES (:park_id, :stat_date, :downtime, :uptime)
+            INSERT INTO park_daily_stats (
+                park_id, stat_date, total_rides_tracked, total_downtime_hours,
+                rides_with_downtime, avg_uptime_percentage, operating_hours_minutes
+            )
+            VALUES (:park_id, :stat_date, :total_rides, :downtime, :rides_down, :uptime, :operating_minutes)
         """), {
             'park_id': park_id,
             'stat_date': yesterday,
+            'total_rides': default_total_rides,
             'downtime': 1.5,  # 1.5 hours
-            'uptime': 75.0 + decline
+            'rides_down': default_rides_with_downtime,
+            'uptime': 75.0 + decline,
+            'operating_minutes': default_operating_minutes
         })
 
         # Weekly stats
         conn.execute(text("""
-            INSERT INTO park_weekly_stats (park_id, year, week_number, week_start_date, total_downtime_hours, avg_uptime_percentage)
-            VALUES (:park_id, :year, :week, :week_start, :downtime, :uptime)
+            INSERT INTO park_weekly_stats (
+                park_id, year, week_number, week_start_date, total_downtime_hours,
+                avg_uptime_percentage, trend_vs_previous_week
+            )
+            VALUES (:park_id, :year, :week, :week_start, :downtime, :uptime, :trend)
         """), {
             'park_id': park_id,
             'year': current_year,
             'week': current_week,
             'week_start': current_week_start,
             'downtime': 17.5,  # 17.5 hours
-            'uptime': 75.0
+            'uptime': 75.0,
+            'trend': decline
         })
 
         conn.execute(text("""
-            INSERT INTO park_weekly_stats (park_id, year, week_number, week_start_date, total_downtime_hours, avg_uptime_percentage)
-            VALUES (:park_id, :year, :week, :week_start, :downtime, :uptime)
+            INSERT INTO park_weekly_stats (
+                park_id, year, week_number, week_start_date, total_downtime_hours,
+                avg_uptime_percentage, trend_vs_previous_week
+            )
+            VALUES (:park_id, :year, :week, :week_start, :downtime, :uptime, NULL)
         """), {
             'park_id': park_id,
             'year': prev_week_year,
@@ -1347,23 +1457,35 @@ def trends_test_data(mysql_connection):
 
         # Daily stats
         conn.execute(text("""
-            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_hours, avg_uptime_percentage)
-            VALUES (:park_id, :stat_date, :downtime, :uptime)
+            INSERT INTO park_daily_stats (
+                park_id, stat_date, total_rides_tracked, total_downtime_hours,
+                rides_with_downtime, avg_uptime_percentage, operating_hours_minutes
+            )
+            VALUES (:park_id, :stat_date, :total_rides, :downtime, :rides_down, :uptime, :operating_minutes)
         """), {
             'park_id': park_id,
             'stat_date': today,
+            'total_rides': default_total_rides,
             'downtime': 2.0,
-            'uptime': 80.0
+            'rides_down': default_rides_with_downtime,
+            'uptime': 80.0,
+            'operating_minutes': default_operating_minutes
         })
 
         conn.execute(text("""
-            INSERT INTO park_daily_stats (park_id, stat_date, total_downtime_hours, avg_uptime_percentage)
-            VALUES (:park_id, :stat_date, :downtime, :uptime)
+            INSERT INTO park_daily_stats (
+                park_id, stat_date, total_rides_tracked, total_downtime_hours,
+                rides_with_downtime, avg_uptime_percentage, operating_hours_minutes
+            )
+            VALUES (:park_id, :stat_date, :total_rides, :downtime, :rides_down, :uptime, :operating_minutes)
         """), {
             'park_id': park_id,
             'stat_date': yesterday,
+            'total_rides': default_total_rides,
             'downtime': 1.8,
-            'uptime': 82.0
+            'rides_down': default_rides_with_downtime,
+            'uptime': 82.0,
+            'operating_minutes': default_operating_minutes
         })
 
     # === CREATE RIDES WITH TREND PATTERNS ===
@@ -1394,165 +1516,249 @@ def trends_test_data(mysql_connection):
             if park_id in [11, 12]:
                 # Daily: 95% today vs 85% yesterday = +10% improvement
                 conn.execute(text("""
-                    INSERT INTO ride_daily_stats (ride_id, stat_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
-                    VALUES (:ride_id, :stat_date, :downtime, :uptime, 30, 60, 2)
+                    INSERT INTO ride_daily_stats (
+                        ride_id, stat_date, downtime_minutes, uptime_minutes, uptime_percentage,
+                        avg_wait_time, peak_wait_time, status_changes, operating_hours_minutes
+                    )
+                    VALUES (:ride_id, :stat_date, :downtime, :uptime_minutes, :uptime, 30, 60, 2, :operating_minutes)
                 """), {
                     'ride_id': ride_id,
                     'stat_date': today,
                     'downtime': 30,
-                    'uptime': 95.0
+                    'uptime_minutes': default_operating_minutes - 30,
+                    'uptime': 95.0,
+                    'operating_minutes': default_operating_minutes
                 })
 
                 conn.execute(text("""
-                    INSERT INTO ride_daily_stats (ride_id, stat_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
-                    VALUES (:ride_id, :stat_date, :downtime, :uptime, 25, 50, 3)
+                    INSERT INTO ride_daily_stats (
+                        ride_id, stat_date, downtime_minutes, uptime_minutes, uptime_percentage,
+                        avg_wait_time, peak_wait_time, status_changes, operating_hours_minutes
+                    )
+                    VALUES (:ride_id, :stat_date, :downtime, :uptime_minutes, :uptime, 25, 50, 3, :operating_minutes)
                 """), {
                     'ride_id': ride_id,
                     'stat_date': yesterday,
                     'downtime': 90,
-                    'uptime': 85.0
+                    'uptime_minutes': default_operating_minutes - 90,
+                    'uptime': 85.0,
+                    'operating_minutes': default_operating_minutes
                 })
 
                 # Weekly stats
                 conn.execute(text("""
-                    INSERT INTO ride_weekly_stats (ride_id, year, week_number, week_start_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
-                    VALUES (:ride_id, :year, :week, :week_start, :downtime, :uptime, 30, 70, 10)
+                    INSERT INTO ride_weekly_stats (
+                        ride_id, year, week_number, week_start_date, downtime_minutes, uptime_minutes,
+                        uptime_percentage, avg_wait_time, peak_wait_time, status_changes,
+                        operating_hours_minutes, trend_vs_previous_week
+                    )
+                    VALUES (:ride_id, :year, :week, :week_start, :downtime, :uptime_minutes,
+                            :uptime, 30, 70, 10, :operating_minutes, :trend)
                 """), {
                     'ride_id': ride_id,
                     'year': current_year,
                     'week': current_week,
                     'week_start': current_week_start,
                     'downtime': 210,
-                    'uptime': 95.0
+                    'uptime_minutes': weekly_operating_minutes - 210,
+                    'uptime': 95.0,
+                    'operating_minutes': weekly_operating_minutes,
+                    'trend': -improvement
                 })
 
                 conn.execute(text("""
-                    INSERT INTO ride_weekly_stats (ride_id, year, week_number, week_start_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
-                    VALUES (:ride_id, :year, :week, :week_start, :downtime, :uptime, 25, 60, 12)
+                    INSERT INTO ride_weekly_stats (
+                        ride_id, year, week_number, week_start_date, downtime_minutes, uptime_minutes,
+                        uptime_percentage, avg_wait_time, peak_wait_time, status_changes,
+                        operating_hours_minutes, trend_vs_previous_week
+                    )
+                    VALUES (:ride_id, :year, :week, :week_start, :downtime, :uptime_minutes,
+                            :uptime, 25, 60, 12, :operating_minutes, NULL)
                 """), {
                     'ride_id': ride_id,
                     'year': prev_week_year,
                     'week': prev_week,
                     'week_start': prev_week_start,
                     'downtime': 630,
-                    'uptime': 85.0
+                    'uptime_minutes': weekly_operating_minutes - 630,
+                    'uptime': 85.0,
+                    'operating_minutes': weekly_operating_minutes
                 })
 
                 # Monthly stats
                 conn.execute(text("""
-                    INSERT INTO ride_monthly_stats (ride_id, year, month, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
-                    VALUES (:ride_id, :year, :month, :downtime, :uptime, 30, 75, 40)
+                    INSERT INTO ride_monthly_stats (
+                        ride_id, year, month, downtime_minutes, uptime_minutes, uptime_percentage,
+                        avg_wait_time, peak_wait_time, status_changes, operating_hours_minutes
+                    )
+                    VALUES (:ride_id, :year, :month, :downtime, :uptime_minutes, :uptime,
+                            30, 75, 40, :operating_minutes)
                 """), {
                     'ride_id': ride_id,
                     'year': current_year,
                     'month': current_month,
                     'downtime': 900,
-                    'uptime': 95.0
+                    'uptime_minutes': monthly_operating_minutes - 900,
+                    'uptime': 95.0,
+                    'operating_minutes': monthly_operating_minutes
                 })
 
                 conn.execute(text("""
-                    INSERT INTO ride_monthly_stats (ride_id, year, month, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
-                    VALUES (:ride_id, :year, :month, :downtime, :uptime, 25, 65, 45)
+                    INSERT INTO ride_monthly_stats (
+                        ride_id, year, month, downtime_minutes, uptime_minutes, uptime_percentage,
+                        avg_wait_time, peak_wait_time, status_changes, operating_hours_minutes
+                    )
+                    VALUES (:ride_id, :year, :month, :downtime, :uptime_minutes, :uptime,
+                            25, 65, 45, :operating_minutes)
                 """), {
                     'ride_id': ride_id,
                     'year': prev_month_year,
                     'month': prev_month,
                     'downtime': 2700,
-                    'uptime': 85.0
+                    'uptime_minutes': monthly_operating_minutes - 2700,
+                    'uptime': 85.0,
+                    'operating_minutes': monthly_operating_minutes
                 })
 
             # Rides in declining parks (13-14): rides also declining
             elif park_id in [13, 14]:
                 # Daily: 70% today vs 85% yesterday = -15% decline
                 conn.execute(text("""
-                    INSERT INTO ride_daily_stats (ride_id, stat_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
-                    VALUES (:ride_id, :stat_date, :downtime, :uptime, 35, 70, 5)
+                    INSERT INTO ride_daily_stats (
+                        ride_id, stat_date, downtime_minutes, uptime_minutes, uptime_percentage,
+                        avg_wait_time, peak_wait_time, status_changes, operating_hours_minutes
+                    )
+                    VALUES (:ride_id, :stat_date, :downtime, :uptime_minutes, :uptime, 35, 70, 5, :operating_minutes)
                 """), {
                     'ride_id': ride_id,
                     'stat_date': today,
                     'downtime': 180,
-                    'uptime': 70.0
+                    'uptime_minutes': default_operating_minutes - 180,
+                    'uptime': 70.0,
+                    'operating_minutes': default_operating_minutes
                 })
 
                 conn.execute(text("""
-                    INSERT INTO ride_daily_stats (ride_id, stat_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
-                    VALUES (:ride_id, :stat_date, :downtime, :uptime, 30, 60, 2)
+                    INSERT INTO ride_daily_stats (
+                        ride_id, stat_date, downtime_minutes, uptime_minutes, uptime_percentage,
+                        avg_wait_time, peak_wait_time, status_changes, operating_hours_minutes
+                    )
+                    VALUES (:ride_id, :stat_date, :downtime, :uptime_minutes, :uptime, 30, 60, 2, :operating_minutes)
                 """), {
                     'ride_id': ride_id,
                     'stat_date': yesterday,
                     'downtime': 90,
-                    'uptime': 85.0
+                    'uptime_minutes': default_operating_minutes - 90,
+                    'uptime': 85.0,
+                    'operating_minutes': default_operating_minutes
                 })
 
                 # Weekly stats
                 conn.execute(text("""
-                    INSERT INTO ride_weekly_stats (ride_id, year, week_number, week_start_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
-                    VALUES (:ride_id, :year, :week, :week_start, :downtime, :uptime, 35, 75, 20)
+                    INSERT INTO ride_weekly_stats (
+                        ride_id, year, week_number, week_start_date, downtime_minutes, uptime_minutes,
+                        uptime_percentage, avg_wait_time, peak_wait_time, status_changes,
+                        operating_hours_minutes, trend_vs_previous_week
+                    )
+                    VALUES (:ride_id, :year, :week, :week_start, :downtime, :uptime_minutes,
+                            :uptime, 35, 75, 20, :operating_minutes, :trend)
                 """), {
                     'ride_id': ride_id,
                     'year': current_year,
                     'week': current_week,
                     'week_start': current_week_start,
                     'downtime': 1260,
-                    'uptime': 70.0
+                    'uptime_minutes': weekly_operating_minutes - 1260,
+                    'uptime': 70.0,
+                    'operating_minutes': weekly_operating_minutes,
+                    'trend': decline
                 })
 
                 conn.execute(text("""
-                    INSERT INTO ride_weekly_stats (ride_id, year, week_number, week_start_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
-                    VALUES (:ride_id, :year, :week, :week_start, :downtime, :uptime, 30, 65, 12)
+                    INSERT INTO ride_weekly_stats (
+                        ride_id, year, week_number, week_start_date, downtime_minutes, uptime_minutes,
+                        uptime_percentage, avg_wait_time, peak_wait_time, status_changes,
+                        operating_hours_minutes, trend_vs_previous_week
+                    )
+                    VALUES (:ride_id, :year, :week, :week_start, :downtime, :uptime_minutes,
+                            :uptime, 30, 65, 12, :operating_minutes, NULL)
                 """), {
                     'ride_id': ride_id,
                     'year': prev_week_year,
                     'week': prev_week,
                     'week_start': prev_week_start,
                     'downtime': 630,
-                    'uptime': 85.0
+                    'uptime_minutes': weekly_operating_minutes - 630,
+                    'uptime': 85.0,
+                    'operating_minutes': weekly_operating_minutes
                 })
 
                 # Monthly stats
                 conn.execute(text("""
-                    INSERT INTO ride_monthly_stats (ride_id, year, month, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
-                    VALUES (:ride_id, :year, :month, :downtime, :uptime, 35, 80, 60)
+                    INSERT INTO ride_monthly_stats (
+                        ride_id, year, month, downtime_minutes, uptime_minutes, uptime_percentage,
+                        avg_wait_time, peak_wait_time, status_changes, operating_hours_minutes
+                    )
+                    VALUES (:ride_id, :year, :month, :downtime, :uptime_minutes, :uptime,
+                            35, 80, 60, :operating_minutes)
                 """), {
                     'ride_id': ride_id,
                     'year': current_year,
                     'month': current_month,
                     'downtime': 5400,
-                    'uptime': 70.0
+                    'uptime_minutes': monthly_operating_minutes - 5400,
+                    'uptime': 70.0,
+                    'operating_minutes': monthly_operating_minutes
                 })
 
                 conn.execute(text("""
-                    INSERT INTO ride_monthly_stats (ride_id, year, month, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
-                    VALUES (:ride_id, :year, :month, :downtime, :uptime, 30, 70, 45)
+                    INSERT INTO ride_monthly_stats (
+                        ride_id, year, month, downtime_minutes, uptime_minutes, uptime_percentage,
+                        avg_wait_time, peak_wait_time, status_changes, operating_hours_minutes
+                    )
+                    VALUES (:ride_id, :year, :month, :downtime, :uptime_minutes, :uptime,
+                            30, 70, 45, :operating_minutes)
                 """), {
                     'ride_id': ride_id,
                     'year': prev_month_year,
                     'month': prev_month,
                     'downtime': 2700,
-                    'uptime': 85.0
+                    'uptime_minutes': monthly_operating_minutes - 2700,
+                    'uptime': 85.0,
+                    'operating_minutes': monthly_operating_minutes
                 })
 
             # Rides in stable parks (15-16): small changes <5%
             else:
                 # Daily: 80% today vs 82% yesterday = -2% (below threshold)
                 conn.execute(text("""
-                    INSERT INTO ride_daily_stats (ride_id, stat_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
-                    VALUES (:ride_id, :stat_date, :downtime, :uptime, 30, 60, 2)
+                    INSERT INTO ride_daily_stats (
+                        ride_id, stat_date, downtime_minutes, uptime_minutes, uptime_percentage,
+                        avg_wait_time, peak_wait_time, status_changes, operating_hours_minutes
+                    )
+                    VALUES (:ride_id, :stat_date, :downtime, :uptime_minutes, :uptime, 30, 60, 2, :operating_minutes)
                 """), {
                     'ride_id': ride_id,
                     'stat_date': today,
                     'downtime': 120,
-                    'uptime': 80.0
+                    'uptime_minutes': default_operating_minutes - 120,
+                    'uptime': 80.0,
+                    'operating_minutes': default_operating_minutes
                 })
 
                 conn.execute(text("""
-                    INSERT INTO ride_daily_stats (ride_id, stat_date, downtime_minutes, uptime_percentage, avg_wait_time, peak_wait_time, status_changes)
-                    VALUES (:ride_id, :stat_date, :downtime, :uptime, 30, 60, 2)
+                    INSERT INTO ride_daily_stats (
+                        ride_id, stat_date, downtime_minutes, uptime_minutes, uptime_percentage,
+                        avg_wait_time, peak_wait_time, status_changes, operating_hours_minutes
+                    )
+                    VALUES (:ride_id, :stat_date, :downtime, :uptime_minutes, :uptime, 30, 60, 2, :operating_minutes)
                 """), {
                     'ride_id': ride_id,
                     'stat_date': yesterday,
                     'downtime': 108,
-                    'uptime': 82.0
+                    'uptime_minutes': default_operating_minutes - 108,
+                    'uptime': 82.0,
+                    'operating_minutes': default_operating_minutes
                 })
 
             ride_id += 1

@@ -6,7 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Global application state
     const globalState = {
         filter: 'all-parks',  // Global filter: 'all-parks' or 'disney-universal'
-        period: 'live',       // Time period: 'live', 'today', 'yesterday', 'last_week', 'last_month'
+        period: 'today',      // Time period: 'live', 'today', 'yesterday', 'last_week', 'last_month'
         currentView: 'downtime',  // Track current view for filter visibility
         entity: 'parks'       // Entity type: 'parks' or 'rides'
     };
@@ -30,6 +30,20 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             aboutModal.open();
         });
+    }
+
+    // Initialize Park Details modal (for Charts component)
+    const parkDetailsModal = new ParkDetailsModal(apiClient);
+
+    // Initialize Search component
+    if (typeof Search !== 'undefined') {
+        const searchComponent = new Search(apiClient);
+        const searchTrigger = document.getElementById('search-trigger');
+        if (searchTrigger) {
+            searchTrigger.addEventListener('click', () => {
+                searchComponent.open();
+            });
+        }
     }
 
     navItems.forEach(item => {
@@ -314,7 +328,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 case 'charts':
                     if (typeof Charts !== 'undefined') {
-                        currentComponent = new Charts(apiClient, 'view-container', globalState.filter);
+                        currentComponent = new Charts(apiClient, 'view-container', globalState.filter, parkDetailsModal);
                         // Sync the period before fetching data
                         currentComponent.state.period = globalState.period;
                         await currentComponent.init();

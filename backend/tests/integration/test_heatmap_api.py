@@ -288,15 +288,69 @@ class TestHeatmapFiltersAndLimits:
             yield client
 
     def test_disney_universal_filter(self, client):
-        """Disney/Universal filter should be applied."""
-        response = client.get('/api/trends/heatmap-data?period=today&type=parks&filter=disney-universal')
+        """Disney/Universal filter should only return Disney and Universal parks."""
+        response = client.get('/api/trends/heatmap-data?period=yesterday&type=parks&filter=disney-universal&limit=10')
         assert response.status_code == 200
-        # Just verify it doesn't error - actual filtering is tested in chart query tests
+        data = response.get_json()
+
+        # If there's data, verify only Disney/Universal parks are returned
+        if data['entities']:
+            for entity in data['entities']:
+                park_name = entity['entity_name'].lower()
+                # Disney parks contain 'disney' or specific Disney park names
+                # Universal parks contain 'universal'
+                is_disney = any(keyword in park_name for keyword in [
+                    'disney', 'disneyland', 'epcot', 'hollywood studios',
+                    'animal kingdom', 'magic kingdom'
+                ])
+                is_universal = 'universal' in park_name
+
+                assert is_disney or is_universal, \
+                    f"Park '{entity['entity_name']}' should not appear with disney-universal filter"
 
     def test_all_parks_filter(self, client):
-        """All parks filter should be applied."""
-        response = client.get('/api/trends/heatmap-data?period=today&type=parks&filter=all-parks')
+        """All parks filter should return parks from any operator."""
+        response = client.get('/api/trends/heatmap-data?period=yesterday&type=parks&filter=all-parks&limit=10')
         assert response.status_code == 200
+        # Endpoint should work - all parks are allowed
+
+    def test_filter_applies_to_all_heatmap_types(self, client):
+        """Filter should be applied to all heatmap types (parks and rides)."""
+        heatmap_types = ['parks', 'parks-shame', 'rides-downtime', 'rides-waittimes']
+
+        for heatmap_type in heatmap_types:
+            response = client.get(
+                f'/api/trends/heatmap-data?period=yesterday&type={heatmap_type}&filter=disney-universal&limit=10'
+            )
+            assert response.status_code == 200, \
+                f"Filter should work for {heatmap_type} heatmap"
+
+            data = response.get_json()
+            assert data['success'] is True
+
+            # If there's data, verify filter is respected
+            if data['entities']:
+                for entity in data['entities']:
+                    entity_name = entity['entity_name'].lower()
+
+                    # Check if entity is from Disney or Universal
+                    is_disney = any(keyword in entity_name for keyword in [
+                        'disney', 'disneyland', 'epcot', 'hollywood studios',
+                        'animal kingdom', 'magic kingdom'
+                    ])
+                    is_universal = 'universal' in entity_name
+
+                    # For ride heatmaps, also check park_name if available
+                    if 'park_name' in entity:
+                        park_name = entity['park_name'].lower()
+                        is_disney = is_disney or any(keyword in park_name for keyword in [
+                            'disney', 'disneyland', 'epcot', 'hollywood studios',
+                            'animal kingdom', 'magic kingdom'
+                        ])
+                        is_universal = is_universal or 'universal' in park_name
+
+                    assert is_disney or is_universal, \
+                        f"{heatmap_type}: '{entity['entity_name']}' should not appear with disney-universal filter"
 
     def test_limit_parameter(self, client):
         """Limit parameter should restrict number of entities."""

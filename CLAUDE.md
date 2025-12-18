@@ -455,6 +455,26 @@ def test_<unit>_<scenario>_<expected_result>():
 3. [ ] `ruff check .` passes
 4. [ ] No decrease in test coverage
 5. [ ] Integration tests pass against test database
+6. [ ] **Skipped test count is understood and acceptable** (see below)
+
+### Skipped Test Policy
+
+**CRITICAL: Understand WHY tests are being skipped before deploying.**
+
+Expected skipped tests:
+- **Integration tests (~250)**: Skip when `mysql_connection` fixture can't connect to test database
+- These are EXPECTED to skip in local development without test DB configured
+
+Unexpected skips that MUST be investigated:
+- Unit tests should NEVER be skipped
+- New skips that weren't there before
+- Skips due to missing files or imports
+
+**Before deployment:**
+1. Run `pytest -v 2>&1 | grep SKIPPED | head -20` to see what's being skipped
+2. If skipped count increased significantly, investigate why
+3. Integration tests skipping due to missing DB is acceptable
+4. Any other skips must be justified
 
 ### Test Failure Policy
 

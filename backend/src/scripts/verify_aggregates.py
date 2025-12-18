@@ -9,6 +9,8 @@ from raw snapshots to catch bugs like timezone issues or interval mismatches.
 Usage:
     python -m scripts.verify_aggregates --date 2025-12-17
     python -m scripts.verify_aggregates --date 2025-12-17 --table ride_daily
+    python -m scripts.verify_aggregates --date 2025-12-17 --hourly
+    python -m scripts.verify_aggregates --date 2025-12-17 --full
     python -m scripts.verify_aggregates --backfill --days 7
     python -m scripts.verify_aggregates --yesterday
 
@@ -17,9 +19,15 @@ Options:
     --yesterday          Verify yesterday's aggregations (default if no date)
     --backfill           Verify multiple days
     --days N             Number of days to backfill (default: 7)
-    --table TABLE        Specific table to verify (ride_daily, park_daily)
+    --table TABLE        Specific table to verify (ride_daily, park_daily, ride_hourly, park_hourly)
+    --hourly             Verify hourly stats only (including Disney DOWN check)
+    --full               Run full audit (daily + hourly + special checks)
     --verbose            Show detailed mismatch information
     --json               Output results as JSON
+
+Special Checks (included in --hourly and --full):
+    - Disney/Universal DOWN status: Verifies DOWN status is counted correctly
+    - Interval consistency: Verifies SNAPSHOT_INTERVAL_MINUTES matches reality
 
 Exit codes:
     0 = All verifications passed
@@ -44,25 +52,41 @@ from database.connection import get_db_connection
 from database.audit import AggregateVerifier, AuditSummary
 
 
-def verify_date(target_date: date, table: Optional[str] = None, verbose: bool = False) -> AuditSummary:
+def verify_date(
+    target_date: date,
+    table: Optional[str] = None,
+    hourly: bool = False,
+    full: bool = False,
+    verbose: bool = False
+) -> AuditSummary:
     """
     Verify aggregations for a specific date.
 
     Args:
         target_date: Pacific date to verify
         table: Optional specific table to verify
+        hourly: Run hourly verification only
+        full: Run full audit (daily + hourly + special checks)
         verbose: Show detailed output
 
     Returns:
         AuditSummary with verification results
     """
+    from datetime import datetime
+
     with get_db_connection() as conn:
         verifier = AggregateVerifier(conn)
 
-        if table == 'ride_daily':
+        if full:
+            # Run complete verification (daily + hourly + special checks)
+            summary = verifier.full_audit(target_date)
+        elif hourly:
+            # Run hourly verification only (includes Disney DOWN check)
+            summary = verifier.audit_hourly(target_date)
+        elif table == 'ride_daily':
             result = verifier.verify_ride_daily_stats(target_date)
             summary = AuditSummary(
-                audit_timestamp=result.target_date,
+                audit_timestamp=datetime.utcnow(),
                 target_date=target_date,
                 ride_daily_result=result,
                 overall_passed=result.passed,
@@ -73,7 +97,7 @@ def verify_date(target_date: date, table: Optional[str] = None, verbose: bool = 
         elif table == 'park_daily':
             result = verifier.verify_park_daily_stats(target_date)
             summary = AuditSummary(
-                audit_timestamp=result.target_date,
+                audit_timestamp=datetime.utcnow(),
                 target_date=target_date,
                 park_daily_result=result,
                 overall_passed=result.passed,
@@ -81,7 +105,11 @@ def verify_date(target_date: date, table: Optional[str] = None, verbose: bool = 
                 warnings=1 if result.severity == "WARNING" else 0,
                 issues_found=[result.message] if not result.passed else []
             )
+        elif table == 'ride_hourly' or table == 'park_hourly':
+            # For specific hourly tables, run hourly audit
+            summary = verifier.audit_hourly(target_date)
         else:
+            # Default: daily stats only (original behavior)
             summary = verifier.audit_date(target_date)
 
         if verbose:
@@ -118,8 +146,18 @@ def main():
     parser.add_argument(
         '--table',
         type=str,
-        choices=['ride_daily', 'park_daily'],
+        choices=['ride_daily', 'park_daily', 'ride_hourly', 'park_hourly'],
         help='Specific table to verify'
+    )
+    parser.add_argument(
+        '--hourly',
+        action='store_true',
+        help='Verify hourly stats only (includes Disney DOWN check and interval check)'
+    )
+    parser.add_argument(
+        '--full',
+        action='store_true',
+        help='Run full audit: daily + hourly + special checks'
     )
     parser.add_argument(
         '--verbose', '-v',
@@ -161,7 +199,13 @@ def main():
         if not args.json:
             logger.info(f"Verifying aggregations for {target_date}...")
 
-        summary = verify_date(target_date, args.table, args.verbose)
+        summary = verify_date(
+            target_date,
+            table=args.table,
+            hourly=args.hourly,
+            full=args.full,
+            verbose=args.verbose
+        )
         all_summaries.append(summary)
         total_critical += summary.critical_failures
         total_warnings += summary.warnings

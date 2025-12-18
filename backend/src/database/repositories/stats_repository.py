@@ -46,6 +46,8 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
+from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
+
 try:
     from ...utils.logger import logger
     from ...utils.timezone import get_today_pacific, get_pacific_day_range_utc
@@ -1265,8 +1267,7 @@ class StatsRepository:
         # The data collector inserts snapshots with 1-2 second drift between tables
         ts_match = timestamp_match_condition("pas.recorded_at", "rss.recorded_at")
 
-        # Snapshot interval in minutes
-        SNAPSHOT_INTERVAL_MINUTES = 5
+        # Snapshot interval imported from utils.metrics (10 minutes)
 
         # PARK-TYPE AWARE: Disney/Universal only count DOWN, others count CLOSED too
         is_down = RideStatusSQL.is_down("rss", parks_alias="p")
@@ -1463,8 +1464,7 @@ class StatsRepository:
         # The data collector inserts snapshots with 1-2 second drift between tables
         ts_match = timestamp_match_condition("pas.recorded_at", "rss.recorded_at")
 
-        # Snapshot interval in minutes
-        SNAPSHOT_INTERVAL_MINUTES = 5
+        # Snapshot interval imported from utils.metrics (10 minutes)
 
         # PARK-TYPE AWARE: Disney/Universal only count DOWN, others count CLOSED too
         is_down = RideStatusSQL.is_down("rss", parks_alias="p")

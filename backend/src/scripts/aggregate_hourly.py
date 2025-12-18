@@ -33,6 +33,7 @@ sys.path.insert(0, str(backend_src.absolute()))
 
 from utils.logger import logger
 from utils.sql_helpers import RideStatusSQL, ParkStatusSQL
+from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
 from database.repositories.park_repository import ParkRepository
 from database.repositories.ride_repository import RideRepository
 from database.repositories.aggregation_repository import AggregationLogRepository
@@ -240,17 +241,29 @@ class HourlyAggregator:
 
                 # Pre-calculate which rides operated today (fixes N+1 query problem)
                 # This runs ONCE instead of once per ride
+                #
+                # PARK-TYPE AWARE LOGIC (from CLAUDE.md Rule 3):
+                # - Disney/Universal: Trust DOWN status as valid breakdown signal
+                #   (they distinguish DOWN=breakdown vs CLOSED=scheduled)
+                # - Other parks: Require OPERATING status to filter out seasonal closures
+                #   (they only report CLOSED for all non-operating rides)
                 operated_today_result = conn.execute(text("""
                     SELECT DISTINCT rss_day.ride_id
                     FROM ride_status_snapshots rss_day
                     JOIN rides r_day ON rss_day.ride_id = r_day.ride_id
+                    JOIN parks p_day ON r_day.park_id = p_day.park_id
                     JOIN park_activity_snapshots pas_day
                         ON r_day.park_id = pas_day.park_id
                         AND pas_day.recorded_at = rss_day.recorded_at
                     WHERE rss_day.recorded_at >= :day_start_utc
                         AND rss_day.recorded_at < :day_end_utc
                         AND pas_day.park_appears_open = TRUE
-                        AND (rss_day.status = 'OPERATING' OR rss_day.computed_is_open = TRUE)
+                        AND (
+                            -- Standard: ride showed OPERATING
+                            rss_day.status = 'OPERATING' OR rss_day.computed_is_open = TRUE
+                            -- Disney/Universal: DOWN status is valid breakdown signal
+                            OR (rss_day.status = 'DOWN' AND (p_day.is_disney = TRUE OR p_day.is_universal = TRUE))
+                        )
                 """), {
                     'day_start_utc': day_start_utc,
                     'day_end_utc': day_end_utc
@@ -356,11 +369,11 @@ class HourlyAggregator:
                     ELSE 0
                 END) as down_snapshots,
 
-                -- Downtime hours: down_snapshots × 5 minutes / 60
+                -- Downtime hours: down_snapshots × SNAPSHOT_INTERVAL_MINUTES / 60
                 -- Uses RideStatusSQL.is_down() for consistency with canonical business rules
                 ROUND(SUM(CASE
                     WHEN {park_open_sql} AND ({is_down_sql})
-                    THEN 5.0 / 60.0
+                    THEN {SNAPSHOT_INTERVAL_MINUTES} / 60.0
                     ELSE 0
                 END), 2) as downtime_hours,
 

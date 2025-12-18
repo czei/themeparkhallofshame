@@ -37,6 +37,7 @@ from utils.timezone import (
     get_last_month_date_range,
 )
 from utils.sql_helpers import ParkStatusSQL
+from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
 
 
 class LongestWaitTimesQuery:
@@ -45,10 +46,9 @@ class LongestWaitTimesQuery:
 
     IMPORTANT: Rankings use avg_wait_time (not cumulative_wait_hours)
     to match the Wait Times table for consistency.
-    """
 
-    # Snapshot interval in minutes
-    SNAPSHOT_INTERVAL_MINUTES = 5
+    Uses SNAPSHOT_INTERVAL_MINUTES from utils.metrics (10 minutes).
+    """
 
     def __init__(self, connection: Connection):
         self.conn = connection

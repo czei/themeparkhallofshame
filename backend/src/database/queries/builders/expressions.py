@@ -35,6 +35,7 @@ from database.schema import (
     park_activity_snapshots,
 )
 from utils.timezone import get_today_pacific, get_pacific_day_range_utc
+from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
 
 
 class StatusExpressions:
@@ -142,10 +143,8 @@ class StatusExpressions:
     # DOWNTIME CALCULATIONS
     # =========================================================================
     # Note: These are used in aggregate queries to sum downtime.
-    # Each snapshot represents 5 minutes (SNAPSHOT_INTERVAL_MINUTES).
+    # Snapshot interval imported from utils.metrics (10 minutes).
     # =========================================================================
-
-    SNAPSHOT_INTERVAL_MINUTES = 5  # From metrics.py
 
     @staticmethod
     def downtime_minutes_case(
@@ -167,7 +166,7 @@ class StatusExpressions:
         park_open = StatusExpressions.park_is_open(pas)
 
         return case(
-            (and_(park_open, is_down), StatusExpressions.SNAPSHOT_INTERVAL_MINUTES),
+            (and_(park_open, is_down), SNAPSHOT_INTERVAL_MINUTES),
             else_=0,
         )
 
@@ -200,7 +199,7 @@ class StatusExpressions:
         return case(
             (
                 and_(park_open, is_down),
-                StatusExpressions.SNAPSHOT_INTERVAL_MINUTES * tier_weight_expr,
+                SNAPSHOT_INTERVAL_MINUTES * tier_weight_expr,
             ),
             else_=0,
         )

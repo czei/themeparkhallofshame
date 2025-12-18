@@ -1235,13 +1235,15 @@ class StatsRepository:
         """
         Get CUMULATIVE shame score breakdown for a park (today period).
 
+        SINGLE SOURCE OF TRUTH: Uses park_hourly_stats and ride_hourly_stats
+        tables - the SAME source as TodayParkRankingsQuery. This ensures the
+        shame score shown in the popup EXACTLY matches the rankings table.
+
         Unlike get_park_shame_breakdown() which shows LIVE/instantaneous data,
         this returns cumulative downtime data for the entire day:
         - All rides that had ANY downtime today (not just currently down)
         - Total downtime hours per ride
         - Cumulative shame score based on weighted downtime
-
-        This matches what the "Today" period shows in the rankings table.
 
         Args:
             park_id: Park ID
@@ -1252,53 +1254,18 @@ class StatsRepository:
             - total_park_weight: Sum of all tier weights for operated rides
             - total_downtime_hours: Total cumulative downtime hours
             - weighted_downtime_hours: Total weighted downtime hours
-            - shame_score: Cumulative shame score
+            - shame_score: Cumulative shame score (SAME as rankings table)
             - park_is_open: Whether park is currently open
         """
-        from utils.timezone import get_today_range_to_now_utc
-        from utils.sql_helpers import RideStatusSQL, ParkStatusSQL, timestamp_match_condition
-        from database.calculators.shame_score import ShameScoreCalculator
+        from utils.timezone import get_today_pacific, get_pacific_day_range_utc
+        from utils.sql_helpers import ParkStatusSQL
 
-        # Use get_today_range_to_now_utc() to match TodayParkRankingsQuery
-        # This returns midnight to NOW, not the full 24-hour day
-        start_utc, end_utc = get_today_range_to_now_utc()
-
-        # CRITICAL: Use minute-level timestamp matching for joining tables
-        # The data collector inserts snapshots with 1-2 second drift between tables
-        ts_match = timestamp_match_condition("pas.recorded_at", "rss.recorded_at")
-
-        # Snapshot interval imported from utils.metrics (10 minutes)
-
-        # PARK-TYPE AWARE: Disney/Universal only count DOWN, others count CLOSED too
-        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
-        # Use with_fallback=True to handle parks with missing schedule data but active rides
-        park_open = ParkStatusSQL.park_appears_open_filter("pas", with_fallback=True)
-        park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
-        # PARK-TYPE AWARE: Disney/Universal needs 1 snapshot, others need 6 (30 min)
-        # Must pass park_id_expr to check park_appears_open during operation
-        # Use with_fallback=True to handle parks with missing schedule data but active rides
-        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p", park_id_expr="r.park_id", with_fallback=True)
-
-        # Get total park weight - ONLY for rides that have operated today
-        weight_query = text(f"""
-            SELECT SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
-            FROM rides r
-            INNER JOIN parks p ON r.park_id = p.park_id
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE r.park_id = :park_id
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND {has_operated}
-        """)
-        weight_result = self.conn.execute(weight_query, {
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
-        weight_row = weight_result.fetchone()
-        total_park_weight = float(weight_row.total_park_weight) if weight_row and weight_row.total_park_weight else 0
+        # Use SAME time range as TodayParkRankingsQuery
+        today = get_today_pacific()
+        start_utc, end_utc = get_pacific_day_range_utc(today)
 
         # Check if park is currently open
+        park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
         park_open_query = text(f"""
             SELECT p.park_id, {park_is_open_sq}
             FROM parks p
@@ -1308,62 +1275,66 @@ class StatsRepository:
         park_open_row = park_open_result.fetchone()
         park_is_open = bool(park_open_row and park_open_row.park_is_open) if park_open_row else False
 
-        # Get rides that had ANY downtime today with cumulative hours
-        # CRITICAL: Only count rides that have operated at some point today
-        # PARK-TYPE AWARE: Disney/Universal needs 1 snapshot, others need 6 (30 min)
-        rides_query = text(f"""
-            WITH latest_snapshot AS (
-                SELECT ride_id, MAX(recorded_at) as latest_recorded_at
-                FROM ride_status_snapshots
-                WHERE recorded_at >= :start_utc AND recorded_at < :end_utc
-                GROUP BY ride_id
-            )
+        # Get park-level stats from park_hourly_stats - SAME source as rankings
+        # This ensures shame_score EXACTLY matches the rankings table
+        park_stats_query = text("""
+            SELECT
+                ROUND(AVG(phs.shame_score), 1) AS shame_score,
+                ROUND(SUM(phs.total_downtime_hours), 2) AS total_downtime_hours,
+                ROUND(SUM(phs.weighted_downtime_hours), 2) AS weighted_downtime_hours,
+                ROUND(AVG(phs.effective_park_weight), 1) AS effective_park_weight
+            FROM park_hourly_stats phs
+            WHERE phs.park_id = :park_id
+              AND phs.hour_start_utc >= :start_utc
+              AND phs.hour_start_utc < :end_utc
+        """)
+        park_stats_result = self.conn.execute(park_stats_query, {
+            "park_id": park_id,
+            "start_utc": start_utc,
+            "end_utc": end_utc
+        })
+        park_row = park_stats_result.fetchone()
+
+        shame_score = float(park_row.shame_score) if park_row and park_row.shame_score else 0.0
+        total_downtime_hours = float(park_row.total_downtime_hours) if park_row and park_row.total_downtime_hours else 0.0
+        weighted_downtime_hours = float(park_row.weighted_downtime_hours) if park_row and park_row.weighted_downtime_hours else 0.0
+        total_park_weight = float(park_row.effective_park_weight) if park_row and park_row.effective_park_weight else 0.0
+
+        # Get ride-level breakdown from ride_hourly_stats - SAME source as park aggregates
+        # Sum across hours to get total downtime per ride
+        rides_query = text("""
             SELECT
                 r.ride_id,
                 r.name AS ride_name,
                 COALESCE(rc.tier, 2) AS tier,
                 COALESCE(rc.tier_weight, 2) AS tier_weight,
-                -- Total downtime hours for this ride today
-                ROUND(
-                    SUM(CASE
-                        WHEN {is_down} AND {park_open}
-                        THEN {SNAPSHOT_INTERVAL_MINUTES} / 60.0
-                        ELSE 0
-                    END),
-                    2
-                ) AS downtime_hours,
-                -- Weighted downtime hours
-                ROUND(
-                    SUM(CASE
-                        WHEN {is_down} AND {park_open}
-                        THEN ({SNAPSHOT_INTERVAL_MINUTES} / 60.0) * COALESCE(rc.tier_weight, 2)
-                        ELSE 0
-                    END),
-                    2
-                ) AS weighted_downtime_hours,
-                -- Is this ride currently down?
+                -- Sum downtime across all hours today
+                ROUND(SUM(rhs.downtime_hours), 2) AS downtime_hours,
+                -- Weighted downtime (downtime × tier_weight)
+                ROUND(SUM(rhs.downtime_hours * COALESCE(rc.tier_weight, 2)), 2) AS weighted_downtime_hours,
+                -- Is currently down? Check latest hour's data
                 MAX(CASE
-                    WHEN rss.recorded_at = ls.latest_recorded_at AND {is_down}
+                    WHEN rhs.hour_start_utc = (
+                        SELECT MAX(hour_start_utc) FROM ride_hourly_stats
+                        WHERE ride_id = r.ride_id AND hour_start_utc >= :start_utc AND hour_start_utc < :end_utc
+                    ) AND rhs.down_snapshots > 0
                     THEN 1 ELSE 0
                 END) AS is_currently_down,
-                -- Latest status
-                (SELECT rss2.status FROM ride_status_snapshots rss2
-                 WHERE rss2.ride_id = r.ride_id
-                 ORDER BY rss2.recorded_at DESC LIMIT 1) AS current_status
+                -- Latest status from raw snapshots (for display)
+                (SELECT rss.status FROM ride_status_snapshots rss
+                 WHERE rss.ride_id = r.ride_id
+                 ORDER BY rss.recorded_at DESC LIMIT 1) AS current_status
             FROM rides r
-            INNER JOIN parks p ON r.park_id = p.park_id
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                AND {ts_match}
+            INNER JOIN ride_hourly_stats rhs ON r.ride_id = rhs.ride_id
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            LEFT JOIN latest_snapshot ls ON r.ride_id = ls.ride_id
             WHERE r.park_id = :park_id
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                AND {has_operated}
+              AND r.is_active = TRUE
+              AND r.category = 'ATTRACTION'
+              AND rhs.hour_start_utc >= :start_utc
+              AND rhs.hour_start_utc < :end_utc
+              AND rhs.ride_operated = 1
             GROUP BY r.ride_id, r.name, rc.tier, rc.tier_weight
-            HAVING downtime_hours > 0
+            HAVING SUM(rhs.downtime_hours) > 0
             ORDER BY weighted_downtime_hours DESC, downtime_hours DESC
         """)
 
@@ -1374,8 +1345,6 @@ class StatsRepository:
         })
 
         rides_with_downtime = []
-        total_downtime_hours = 0
-        total_weighted_downtime = 0
         for row in rides_result:
             ride_data = {
                 "ride_id": row.ride_id,
@@ -1389,38 +1358,13 @@ class StatsRepository:
                 "current_status": row.current_status
             }
             rides_with_downtime.append(ride_data)
-            total_downtime_hours += float(row.downtime_hours)
-            total_weighted_downtime += float(row.weighted_downtime_hours)
-
-        # READ AVERAGE of stored shame_score from park_activity_snapshots
-        # THE SINGLE SOURCE OF TRUTH - calculated during data collection
-        # This matches the pattern used in TodayParkRankingsQuery
-        # FALLBACK HEURISTIC: Include snapshots where EITHER:
-        # 1. park_appears_open = TRUE (schedule-based detection), OR
-        # 2. rides_open > 0 (rides are actually operating)
-        # This makes queries robust against schedule data gaps.
-        shame_score_query = text("""
-            SELECT ROUND(AVG(pas.shame_score), 1) AS avg_shame_score
-            FROM park_activity_snapshots pas
-            WHERE pas.park_id = :park_id
-                AND pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
-                AND (pas.park_appears_open = TRUE OR pas.rides_open > 0)
-                AND pas.shame_score IS NOT NULL
-        """)
-        shame_result = self.conn.execute(shame_score_query, {
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
-        shame_row = shame_result.fetchone()
-        shame_score = float(shame_row.avg_shame_score) if shame_row and shame_row.avg_shame_score else 0.0
 
         return {
             "rides_with_downtime": rides_with_downtime,
             "rides_affected_count": len(rides_with_downtime),
             "total_park_weight": total_park_weight,
-            "total_downtime_hours": round(total_downtime_hours, 2),
-            "weighted_downtime_hours": round(total_weighted_downtime, 2),
+            "total_downtime_hours": total_downtime_hours,
+            "weighted_downtime_hours": weighted_downtime_hours,
             "shame_score": shame_score,
             "park_is_open": park_is_open,
             "breakdown_type": "today",

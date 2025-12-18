@@ -95,7 +95,9 @@ class FastLiveParkRankingsQuery:
             FROM park_live_rankings plr
             INNER JOIN parks p ON plr.park_id = p.park_id
             WHERE p.is_active = TRUE
+              AND plr.park_is_open = TRUE  -- CRITICAL: Only show OPEN parks
               AND plr.shame_score > 0
+              AND (plr.rides_down > 0 OR plr.total_downtime_hours > 0)  -- Must have actual downtime
               {filter_clause}
             ORDER BY {sort_column} DESC
             LIMIT :limit

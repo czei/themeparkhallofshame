@@ -32,7 +32,7 @@ When modifying calculations, update:
 
 Key Concepts
 ------------
-- Snapshot: A 5-minute data point for each ride's status
+- Snapshot: A 10-minute data point for each ride's status
 - Tier Weight: Importance multiplier (Tier 1=3x, Tier 2=2x, Tier 3=1x)
 - Shame Score: Weighted downtime hours normalized by park's total weight
 - Park appears open: Determined by checking if any rides show as operating
@@ -57,9 +57,9 @@ from typing import Optional
 # CONSTANTS - Used by both Python calculations and SQL helpers
 # =============================================================================
 
-# Each snapshot represents approximately 5 minutes of data
-# The collector runs every 5 minutes, so each snapshot = 5 minutes of status
-SNAPSHOT_INTERVAL_MINUTES = 5
+# Each snapshot represents approximately 10 minutes of data
+# The collector runs every 10 minutes, so each snapshot = 10 minutes of status
+SNAPSHOT_INTERVAL_MINUTES = 10
 
 # Precision for different metric types (decimal places)
 SHAME_SCORE_PRECISION = 1   # e.g., 3.4 (on 0-10 scale)

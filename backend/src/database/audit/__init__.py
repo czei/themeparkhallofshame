@@ -10,6 +10,7 @@ Components:
 - validation_checks.py: Hard validation rules that halt on violations
 - anomaly_detector.py: Statistical anomaly detection (Z-scores, sudden changes)
 - computation_trace.py: Step-by-step calculation traces for user audits
+- aggregate_verification.py: Verify aggregates match raw snapshot calculations
 
 Usage:
     from database.audit import ValidationChecker, AnomalyDetector
@@ -31,10 +32,14 @@ How to Add Validation Rules:
 from .validation_checks import ValidationChecker, VALIDATION_RULES
 from .anomaly_detector import AnomalyDetector
 from .computation_trace import ComputationTracer
+from .aggregate_verification import AggregateVerifier, AggregateAuditResult, AuditSummary
 
 __all__ = [
     "ValidationChecker",
     "VALIDATION_RULES",
     "AnomalyDetector",
     "ComputationTracer",
+    "AggregateVerifier",
+    "AggregateAuditResult",
+    "AuditSummary",
 ]

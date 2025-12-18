@@ -293,7 +293,8 @@ class RideStatusSQL:
         parks_alias: str,
         start_param: str = ":start_utc",
         end_param: str = ":end_utc",
-        park_id_expr: str = None
+        park_id_expr: str = None,
+        with_fallback: bool = False
     ) -> str:
         """
         Get park-type-aware "has operated" check.
@@ -313,6 +314,10 @@ class RideStatusSQL:
             end_param: SQL parameter name for end time
             park_id_expr: Expression for park_id (e.g., "p.park_id"). If provided,
                          requires park_appears_open=TRUE for snapshots to count.
+            with_fallback: If True, also considers park "open" if rides_open > 0.
+                          This handles cases where schedule data is missing but
+                          rides are clearly operating. Default False for backwards
+                          compatibility.
 
         Returns:
             SQL condition that returns TRUE if ride has operated enough for its park type
@@ -326,7 +331,13 @@ class RideStatusSQL:
             park_join = f"""INNER JOIN park_activity_snapshots pas_op
                             ON pas_op.park_id = {park_id_expr}
                             AND {ts_match}"""
-            park_filter = "AND pas_op.park_appears_open = TRUE"
+            if with_fallback:
+                # FALLBACK HEURISTIC: Include snapshots where EITHER:
+                # 1. park_appears_open = TRUE (schedule-based detection), OR
+                # 2. rides_open > 0 (rides are actually operating)
+                park_filter = "AND (pas_op.park_appears_open = TRUE OR pas_op.rides_open > 0)"
+            else:
+                park_filter = "AND pas_op.park_appears_open = TRUE"
         else:
             park_join = ""
             park_filter = ""
@@ -617,7 +628,7 @@ class ParkStatusSQL:
         ) AS {alias}"""
 
     @staticmethod
-    def park_appears_open_filter(table_alias: str = "pas") -> str:
+    def park_appears_open_filter(table_alias: str = "pas", with_fallback: bool = False) -> str:
         """
         Get SQL condition for filtering to only open parks.
 
@@ -627,10 +638,20 @@ class ParkStatusSQL:
 
         Args:
             table_alias: The alias used for park_activity_snapshots table
+            with_fallback: If True, also considers park "open" if rides_open > 0.
+                          This handles cases where schedule data is missing but
+                          rides are clearly operating. Default False for backwards
+                          compatibility.
 
         Returns:
             SQL condition that is TRUE when park is open
         """
+        if with_fallback:
+            # FALLBACK HEURISTIC: Include snapshots where EITHER:
+            # 1. park_appears_open = TRUE (schedule-based detection), OR
+            # 2. rides_open > 0 (rides are actually operating)
+            # This makes queries robust against schedule data gaps.
+            return f"({table_alias}.park_appears_open = TRUE OR {table_alias}.rides_open > 0)"
         return f"{table_alias}.park_appears_open = TRUE"
 
     @staticmethod

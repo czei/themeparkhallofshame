@@ -1254,23 +1254,29 @@ class StatsRepository:
             - park_is_open: Whether park is currently open
         """
         from utils.timezone import get_today_range_to_now_utc
-        from utils.sql_helpers import RideStatusSQL, ParkStatusSQL
+        from utils.sql_helpers import RideStatusSQL, ParkStatusSQL, timestamp_match_condition
         from database.calculators.shame_score import ShameScoreCalculator
 
         # Use get_today_range_to_now_utc() to match TodayParkRankingsQuery
         # This returns midnight to NOW, not the full 24-hour day
         start_utc, end_utc = get_today_range_to_now_utc()
 
+        # CRITICAL: Use minute-level timestamp matching for joining tables
+        # The data collector inserts snapshots with 1-2 second drift between tables
+        ts_match = timestamp_match_condition("pas.recorded_at", "rss.recorded_at")
+
         # Snapshot interval in minutes
         SNAPSHOT_INTERVAL_MINUTES = 5
 
         # PARK-TYPE AWARE: Disney/Universal only count DOWN, others count CLOSED too
         is_down = RideStatusSQL.is_down("rss", parks_alias="p")
-        park_open = ParkStatusSQL.park_appears_open_filter("pas")
+        # Use with_fallback=True to handle parks with missing schedule data but active rides
+        park_open = ParkStatusSQL.park_appears_open_filter("pas", with_fallback=True)
         park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
         # PARK-TYPE AWARE: Disney/Universal needs 1 snapshot, others need 6 (30 min)
         # Must pass park_id_expr to check park_appears_open during operation
-        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p", park_id_expr="r.park_id")
+        # Use with_fallback=True to handle parks with missing schedule data but active rides
+        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p", park_id_expr="r.park_id", with_fallback=True)
 
         # Get total park weight - ONLY for rides that have operated today
         weight_query = text(f"""
@@ -1347,7 +1353,7 @@ class StatsRepository:
             INNER JOIN parks p ON r.park_id = p.park_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
+                AND {ts_match}
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             LEFT JOIN latest_snapshot ls ON r.ride_id = ls.ride_id
             WHERE r.park_id = :park_id
@@ -1388,12 +1394,16 @@ class StatsRepository:
         # READ AVERAGE of stored shame_score from park_activity_snapshots
         # THE SINGLE SOURCE OF TRUTH - calculated during data collection
         # This matches the pattern used in TodayParkRankingsQuery
+        # FALLBACK HEURISTIC: Include snapshots where EITHER:
+        # 1. park_appears_open = TRUE (schedule-based detection), OR
+        # 2. rides_open > 0 (rides are actually operating)
+        # This makes queries robust against schedule data gaps.
         shame_score_query = text("""
             SELECT ROUND(AVG(pas.shame_score), 1) AS avg_shame_score
             FROM park_activity_snapshots pas
             WHERE pas.park_id = :park_id
                 AND pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
-                AND pas.park_appears_open = TRUE
+                AND (pas.park_appears_open = TRUE OR pas.rides_open > 0)
                 AND pas.shame_score IS NOT NULL
         """)
         shame_result = self.conn.execute(shame_score_query, {
@@ -1444,19 +1454,25 @@ class StatsRepository:
             - breakdown_type: "yesterday"
         """
         from utils.timezone import get_yesterday_range_utc
-        from utils.sql_helpers import RideStatusSQL, ParkStatusSQL
+        from utils.sql_helpers import RideStatusSQL, ParkStatusSQL, timestamp_match_condition
         from database.calculators.shame_score import ShameScoreCalculator
 
         start_utc, end_utc, period_label = get_yesterday_range_utc()
+
+        # CRITICAL: Use minute-level timestamp matching for joining tables
+        # The data collector inserts snapshots with 1-2 second drift between tables
+        ts_match = timestamp_match_condition("pas.recorded_at", "rss.recorded_at")
 
         # Snapshot interval in minutes
         SNAPSHOT_INTERVAL_MINUTES = 5
 
         # PARK-TYPE AWARE: Disney/Universal only count DOWN, others count CLOSED too
         is_down = RideStatusSQL.is_down("rss", parks_alias="p")
-        park_open = ParkStatusSQL.park_appears_open_filter("pas")
+        # Use with_fallback=True to handle parks with missing schedule data but active rides
+        park_open = ParkStatusSQL.park_appears_open_filter("pas", with_fallback=True)
         # PARK-TYPE AWARE: Must pass park_id_expr to check park_appears_open during operation
-        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p", park_id_expr="r.park_id")
+        # Use with_fallback=True to handle parks with missing schedule data but active rides
+        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p", park_id_expr="r.park_id", with_fallback=True)
 
         # Get total park weight - ONLY for rides that have operated yesterday
         weight_query = text(f"""
@@ -1506,7 +1522,7 @@ class StatsRepository:
             INNER JOIN parks p ON r.park_id = p.park_id
             INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
             INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
+                AND {ts_match}
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             WHERE r.park_id = :park_id
                 AND r.is_active = TRUE
@@ -1544,12 +1560,16 @@ class StatsRepository:
         # READ AVERAGE of stored shame_score from park_activity_snapshots
         # THE SINGLE SOURCE OF TRUTH - calculated during data collection
         # This matches the pattern used in Yesterday Park Rankings Query
+        # FALLBACK HEURISTIC: Include snapshots where EITHER:
+        # 1. park_appears_open = TRUE (schedule-based detection), OR
+        # 2. rides_open > 0 (rides are actually operating)
+        # This makes queries robust against schedule data gaps.
         shame_score_query = text("""
             SELECT ROUND(AVG(pas.shame_score), 1) AS avg_shame_score
             FROM park_activity_snapshots pas
             WHERE pas.park_id = :park_id
                 AND pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
-                AND pas.park_appears_open = TRUE
+                AND (pas.park_appears_open = TRUE OR pas.rides_open > 0)
                 AND pas.shame_score IS NOT NULL
         """)
         shame_result = self.conn.execute(shame_score_query, {

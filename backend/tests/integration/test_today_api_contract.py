@@ -288,8 +288,8 @@ def _validate_today_downtime_response(response, expected_park_ids: list):
     assert 'sort_by' in data
     assert 'data' in data
     assert 'attribution' in data
-    assert data['attribution']['data_source'] == "ThemeParks.wiki"
-    assert data['attribution']['url'] == "https://themeparks.wiki"
+    assert data['attribution']['data_source'] == "Queue-Times.com"
+    assert data['attribution']['url'] == "https://queue-times.com"
 
     # Check that only the expected parks are present and in the correct order
     assert len(data['data']) == len(expected_park_ids)

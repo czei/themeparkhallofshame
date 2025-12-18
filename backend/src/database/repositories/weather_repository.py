@@ -17,6 +17,7 @@ Design Pattern:
 
 import logging
 from typing import Dict, List, Optional, Any
+from sqlalchemy import text
 
 # Configure structured logging
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ class WeatherObservationRepository:
 
         # Backtick field names to prevent SQL keyword conflicts
         safe_fields = [f'`{field}`' for field in fields]
-        placeholders = [f'%({field})s' for field in fields]
+        placeholders = [f':{field}' for field in fields]  # SQLAlchemy uses :param syntax
         update_fields = [f'`{field}`=VALUES(`{field}`)' for field in fields
                         if field not in ('park_id', 'observation_time')]
 
@@ -100,8 +101,7 @@ class WeatherObservationRepository:
         """
 
         try:
-            with self.db.cursor() as cursor:
-                cursor.execute(sql, observation)
+            self.db.execute(text(sql), observation)
 
             logger.debug(
                 "Inserted weather observation",
@@ -158,7 +158,6 @@ class WeatherObservationRepository:
         """
 
         try:
-            from sqlalchemy import text
             # Execute batch insert using SQLAlchemy (one observation at a time for now)
             for obs in observations:
                 self.db.execute(text(sql), obs)
@@ -195,17 +194,16 @@ class WeatherObservationRepository:
         sql = """
             SELECT *
             FROM weather_observations
-            WHERE park_id = %(park_id)s
+            WHERE park_id = :park_id
             ORDER BY observation_time DESC
             LIMIT 1
         """
 
         try:
-            with self.db.cursor() as cursor:
-                cursor.execute(sql, {'park_id': park_id})
-                result = cursor.fetchone()
-
-            return result
+            result = self.db.execute(text(sql), {'park_id': park_id}).fetchone()
+            if result:
+                return dict(result._mapping)
+            return None
 
         except Exception as e:
             logger.error(
@@ -285,7 +283,7 @@ class WeatherForecastRepository:
 
         # Backtick field names to prevent SQL keyword conflicts
         safe_fields = [f'`{field}`' for field in fields]
-        placeholders = [f'%({field})s' for field in fields]
+        placeholders = [f':{field}' for field in fields]  # SQLAlchemy uses :param syntax
         update_fields = [f'`{field}`=VALUES(`{field}`)' for field in fields
                         if field not in ('park_id', 'issued_at', 'forecast_time')]
 
@@ -298,8 +296,7 @@ class WeatherForecastRepository:
         """
 
         try:
-            with self.db.cursor() as cursor:
-                cursor.execute(sql, forecast)
+            self.db.execute(text(sql), forecast)
 
             logger.debug(
                 "Inserted weather forecast",
@@ -324,8 +321,7 @@ class WeatherForecastRepository:
     def batch_insert_forecasts(self, forecasts: List[Dict]) -> None:
         """Insert or update multiple forecasts in batch.
 
-        Uses executemany() for efficiency.
-        Up to 10x faster than individual inserts.
+        Uses SQLAlchemy execute for each record.
 
         Args:
             forecasts: List of forecast dictionaries
@@ -344,7 +340,7 @@ class WeatherForecastRepository:
 
         # Backtick field names to prevent SQL keyword conflicts
         safe_fields = [f'`{field}`' for field in fields]
-        placeholders = [f'%({field})s' for field in fields]
+        placeholders = [f':{field}' for field in fields]  # SQLAlchemy uses :param syntax
         update_fields = [f'`{field}`=VALUES(`{field}`)' for field in fields
                         if field not in ('park_id', 'issued_at', 'forecast_time')]
 
@@ -357,8 +353,9 @@ class WeatherForecastRepository:
         """
 
         try:
-            with self.db.cursor() as cursor:
-                cursor.executemany(sql, forecasts)
+            # Execute batch insert using SQLAlchemy (one forecast at a time for now)
+            for forecast in forecasts:
+                self.db.execute(text(sql), forecast)
 
             logger.info(
                 "Batch inserted weather forecasts",

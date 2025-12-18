@@ -94,12 +94,14 @@ else
     exit 1
 fi
 
-# Step 2: Export test database environment variables
+# Step 2: Use test database environment variables (with defaults)
 print_section "Step 2: Configuring test environment"
-export TEST_DB_HOST=localhost
-export TEST_DB_PORT=3306
-export TEST_DB_NAME=themepark_test
-export TEST_DB_USER=themepark_test
+# Use environment variables if set, otherwise use defaults
+# Users can set these in ~/.zshrc or ~/.bashrc for persistent configuration
+export TEST_DB_HOST="${TEST_DB_HOST:-localhost}"
+export TEST_DB_PORT="${TEST_DB_PORT:-3306}"
+export TEST_DB_NAME="${TEST_DB_NAME:-themepark_test}"
+export TEST_DB_USER="${TEST_DB_USER:-themepark_test}"
 export TEST_DB_PASSWORD="${TEST_DB_PASSWORD:-test_password}"
 
 # OpenAI API key for AI classification tests (use from environment or .env)
@@ -108,6 +110,7 @@ export OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 
 print_success "Environment variables configured"
 echo "  TEST_DB_HOST: $TEST_DB_HOST"
+echo "  TEST_DB_PORT: $TEST_DB_PORT"
 echo "  TEST_DB_NAME: $TEST_DB_NAME"
 echo "  TEST_DB_USER: $TEST_DB_USER"
 if [ -n "$OPENAI_API_KEY" ]; then

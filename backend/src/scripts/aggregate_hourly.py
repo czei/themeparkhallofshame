@@ -499,16 +499,21 @@ class HourlyAggregator:
                 :hour_start,
 
                 -- Average shame score across hour (already computed at collection time)
-                ROUND(AVG(CASE WHEN pas.park_appears_open = 1 THEN pas.shame_score END), 1) as shame_score,
+                -- FALLBACK HEURISTIC: Park is "effectively open" if EITHER:
+                -- 1. park_appears_open = TRUE (schedule-based detection), OR
+                -- 2. rides_open > 0 (rides are actually operating)
+                -- This handles parks like Six Flags where schedule data may be missing
+                -- but rides are clearly operating. Matches chart query logic.
+                ROUND(AVG(CASE WHEN (pas.park_appears_open = 1 OR pas.rides_open > 0) THEN pas.shame_score END), 1) as shame_score,
 
                 -- Average wait time across all operating rides
-                ROUND(AVG(CASE WHEN pas.park_appears_open = 1 THEN pas.avg_wait_time END), 2) as avg_wait_time_minutes,
+                ROUND(AVG(CASE WHEN (pas.park_appears_open = 1 OR pas.rides_open > 0) THEN pas.avg_wait_time END), 2) as avg_wait_time_minutes,
 
                 -- Average number of rides operating during hour
-                ROUND(AVG(CASE WHEN pas.park_appears_open = 1 THEN pas.rides_open END), 0) as rides_operating,
+                ROUND(AVG(CASE WHEN (pas.park_appears_open = 1 OR pas.rides_open > 0) THEN pas.rides_open END), 0) as rides_operating,
 
                 -- Average number of rides down during hour
-                ROUND(AVG(CASE WHEN pas.park_appears_open = 1 THEN pas.rides_closed END), 0) as rides_down,
+                ROUND(AVG(CASE WHEN (pas.park_appears_open = 1 OR pas.rides_open > 0) THEN pas.rides_closed END), 0) as rides_down,
 
                 -- Total downtime hours (unweighted, from ride_hourly_stats)
                 COALESCE((
@@ -552,7 +557,8 @@ class HourlyAggregator:
                 COUNT(*) as snapshot_count,
 
                 -- Was park open at all during hour?
-                MAX(pas.park_appears_open) as park_was_open,
+                -- Uses same fallback heuristic: TRUE if schedule says open OR rides operating
+                MAX(CASE WHEN pas.park_appears_open = 1 OR pas.rides_open > 0 THEN 1 ELSE 0 END) as park_was_open,
 
                 NOW()
 

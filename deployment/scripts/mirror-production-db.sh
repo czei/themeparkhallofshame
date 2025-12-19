@@ -33,9 +33,9 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 
-# Default options
+# Default options (mirror everything unless user opts into a window)
 DAYS=7
-FULL=false
+FULL=true
 SCHEMA_ONLY=false
 DRY_RUN=false
 SKIP_CONFIRM=false
@@ -48,9 +48,13 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --days=*)
             DAYS="${1#*=}"
+            FULL=false
             ;;
         --full)
             FULL=true
+            ;;
+        --partial)
+            FULL=false
             ;;
         --schema-only)
             SCHEMA_ONLY=true
@@ -82,9 +86,11 @@ FULL_TABLES=(
     "park_live_rankings_staging"
     "ride_live_rankings"
     "ride_live_rankings_staging"
+    "weather_observations"
+    "weather_forecasts"
 )
 
-# Tables that should be filtered by date (large snapshot data)
+# Tables that should be filtered by date when doing partial mirrors
 DATE_FILTERED_TABLES=(
     "ride_status_snapshots"
     "park_activity_snapshots"
@@ -98,6 +104,8 @@ DATE_FILTERED_TABLES=(
     "data_quality_issues"
     "ride_hourly_stats"
     "park_hourly_stats"
+    "weather_observations"
+    "weather_forecasts"
 )
 
 echo -e "${GREEN}======================================${NC}"
@@ -153,6 +161,15 @@ if ! command -v mysql &> /dev/null; then
     error "mysql command not found. Please install MySQL/MariaDB client."
 fi
 echo "  mysql client: OK"
+
+# Optional: pv for progress display
+PV_CMD="cat"
+if command -v pv &> /dev/null; then
+    PV_CMD="pv -N \"Importing\""
+    echo "  pv: OK"
+else
+    warn "pv not found; imports will run without progress display"
+fi
 
 # Check SSH key
 if [ ! -f "$SSH_KEY" ]; then
@@ -258,7 +275,7 @@ elif [ "$FULL" = true ]; then
               -e 's/current_timestamp()/CURRENT_TIMESTAMP/g' \
               -e 's/DEFAULT NULL ON UPDATE current_timestamp()/DEFAULT NULL/g' \
               -e "s/DEFAULT '0000-00-00 00:00:00'/DEFAULT CURRENT_TIMESTAMP/g" \
-        | pv -N "Importing" \
+        | ${PV_CMD} \
         | mysql --init-command="SET TIME_ZONE='+00:00';" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
     echo "  Full database imported"
 
@@ -294,7 +311,7 @@ FIXSQL
     log "  Exporting reference tables..."
     FULL_TABLES_STR="${FULL_TABLES[*]}"
     ssh -i "$SSH_KEY" "$REMOTE_HOST" \
-        "sudo mysqldump -u root --tz-utc --no-create-info --single-transaction $REMOTE_DB_NAME $FULL_TABLES_STR 2>/dev/null || true" \
+        "sudo mysqldump -u root --tz-utc --no-create-info --single-transaction $REMOTE_DB_NAME $FULL_TABLES_STR 2>/dev/null" \
         | mysql "${LOCAL_MYSQL_INIT[@]}" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
 
     # 3. Export filtered tables (last N days)
@@ -353,14 +370,28 @@ log "Verifying import..."
 
 # Show table counts
 echo ""
-echo "Table row counts:"
+echo "Table row counts (exact):"
 mysql -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME" -e "
-SELECT
-    table_name AS 'Table',
-    table_rows AS 'Rows'
-FROM information_schema.tables
-WHERE table_schema = '$LOCAL_DB_NAME'
-ORDER BY table_rows DESC;
+SELECT 'parks' table_name, COUNT(*) rows FROM parks
+UNION ALL SELECT 'rides', COUNT(*) FROM rides
+UNION ALL SELECT 'ride_classifications', COUNT(*) FROM ride_classifications
+UNION ALL SELECT 'park_schedules', COUNT(*) FROM park_schedules
+UNION ALL SELECT 'ride_status_snapshots', COUNT(*) FROM ride_status_snapshots
+UNION ALL SELECT 'park_activity_snapshots', COUNT(*) FROM park_activity_snapshots
+UNION ALL SELECT 'ride_status_changes', COUNT(*) FROM ride_status_changes
+UNION ALL SELECT 'ride_daily_stats', COUNT(*) FROM ride_daily_stats
+UNION ALL SELECT 'park_daily_stats', COUNT(*) FROM park_daily_stats
+UNION ALL SELECT 'ride_hourly_stats', COUNT(*) FROM ride_hourly_stats
+UNION ALL SELECT 'park_hourly_stats', COUNT(*) FROM park_hourly_stats
+UNION ALL SELECT 'ride_weekly_stats', COUNT(*) FROM ride_weekly_stats
+UNION ALL SELECT 'park_weekly_stats', COUNT(*) FROM park_weekly_stats
+UNION ALL SELECT 'ride_monthly_stats', COUNT(*) FROM ride_monthly_stats
+UNION ALL SELECT 'park_monthly_stats', COUNT(*) FROM park_monthly_stats
+UNION ALL SELECT 'ride_yearly_stats', COUNT(*) FROM ride_yearly_stats
+UNION ALL SELECT 'park_yearly_stats', COUNT(*) FROM park_yearly_stats
+UNION ALL SELECT 'weather_observations', COUNT(*) FROM weather_observations
+UNION ALL SELECT 'weather_forecasts', COUNT(*) FROM weather_forecasts
+ORDER BY table_name;
 " 2>/dev/null || true
 
 # ============================================
@@ -370,6 +401,14 @@ echo ""
 log "Running audit verification..."
 
 AUDIT_PASSED=true
+
+sync_single_table() {
+    local TABLE=$1
+    log "Re-syncing $TABLE..."
+    ssh -i "$SSH_KEY" "$REMOTE_HOST" \
+        "sudo mysqldump -u root --tz-utc --single-transaction --no-create-info $REMOTE_DB_NAME $TABLE" \
+        | mysql "${LOCAL_MYSQL_INIT[@]}" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} "$LOCAL_DB_NAME"
+}
 
 # Function to compare date ranges AND actual timestamp freshness
 compare_date_range() {
@@ -424,6 +463,23 @@ compare_row_count() {
     else
         echo -e "${YELLOW}⚠ DIFF${NC} (Prod: $PROD_COUNT, Local: $LOCAL_COUNT)"
         # This is OK for partial mirrors, just a warning
+        # If prod has rows but local is zero, try a targeted re-sync for critical tables
+        if [ "$PROD_COUNT" -gt 0 ] && [ "$LOCAL_COUNT" -eq 0 ]; then
+            case "$TABLE" in
+                weather_observations|weather_forecasts)
+                    sync_single_table "$TABLE"
+                    # Re-check
+                    LOCAL_COUNT=$(mysql "${LOCAL_MYSQL_INIT[@]}" -h"${LOCAL_DB_HOST}" -u"${LOCAL_DB_USER}" ${LOCAL_DB_PASS:+-p"$LOCAL_DB_PASS"} -N -e \
+                        "SELECT COUNT(*) FROM $TABLE" "$LOCAL_DB_NAME" 2>/dev/null || echo "0")
+                    if [ "$LOCAL_COUNT" = "$PROD_COUNT" ]; then
+                        echo -e "    ${GREEN}✓ Fixed by re-sync (${LOCAL_COUNT} rows)${NC}"
+                    else
+                        echo -e "    ${RED}✗ Still mismatched after re-sync (Prod: $PROD_COUNT, Local: $LOCAL_COUNT)${NC}"
+                        AUDIT_PASSED=false
+                    fi
+                    ;;
+            esac
+        fi
     fi
 }
 
@@ -434,8 +490,24 @@ echo "=== Data Integrity Audit ==="
 compare_row_count "parks" "parks"
 compare_row_count "rides" "rides"
 compare_row_count "ride_classifications" "ride_classifications"
+compare_row_count "weather_observations" "weather_observations"
+compare_row_count "weather_forecasts" "weather_forecasts"
 
-# Verify date-filtered tables have correct date ranges (CRITICAL)
+# Always verify critical snapshot/stat tables
+echo ""
+echo "=== Snapshot & Stats Verification (CRITICAL) ==="
+CRITICAL_TABLES=("ride_status_snapshots" "park_activity_snapshots" "ride_status_changes")
+STAT_TABLES=("ride_daily_stats" "park_daily_stats" "ride_hourly_stats" "park_hourly_stats" "ride_weekly_stats" "park_weekly_stats" "ride_monthly_stats" "park_monthly_stats" "ride_yearly_stats" "park_yearly_stats")
+
+for T in "${CRITICAL_TABLES[@]}"; do
+    compare_row_count "$T" "$T"
+done
+
+for T in "${STAT_TABLES[@]}"; do
+    compare_row_count "$T" "$T"
+done
+
+# For partial mirrors, also enforce date ranges on the main snapshot tables
 if [ "$FULL" = false ] && [ "$SCHEMA_ONLY" = false ]; then
     echo ""
     echo "=== Date Range Verification (CRITICAL) ==="

@@ -21,7 +21,7 @@ Cron example (every 10 minutes):
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 from sqlalchemy import text
 
@@ -356,15 +356,19 @@ class SnapshotCollector:
                 except (ValueError, TypeError) as e:
                     logger.debug(f"  Could not parse lastUpdated for {ride_data.name}: {e}")
 
+            # Retrieve previous snapshot BEFORE inserting the new one so change
+            # detection compares against the prior persisted state.
+            previous_snapshot = snapshot_repo.get_latest_by_ride(ride_id)
+
+            # Detect status change using rich status
+            self._detect_status_change_rich(
+                ride_id, status, snapshot_repo, status_change_repo, previous_snapshot=previous_snapshot
+            )
+
             # Store snapshot with rich status
             self._store_snapshot_with_status(
                 ride_id, wait_time, is_operating, is_operating, status,
                 ride_data.last_updated, snapshot_repo, snapshot_timestamp
-            )
-
-            # Detect status change using rich status
-            self._detect_status_change_rich(
-                ride_id, status, snapshot_repo, status_change_repo
             )
 
         except Exception as e:
@@ -411,7 +415,8 @@ class SnapshotCollector:
 
     def _detect_status_change_rich(self, ride_id: int, current_status: str,
                                     snapshot_repo: RideStatusSnapshotRepository,
-                                    status_change_repo: RideStatusChangeRepository):
+                                    status_change_repo: RideStatusChangeRepository,
+                                    previous_snapshot: Optional[Dict[str, Any]] = None):
         """
         Detect if ride status has changed using rich status enum.
 
@@ -420,6 +425,8 @@ class SnapshotCollector:
             current_status: Current status (OPERATING/DOWN/CLOSED/REFURBISHMENT)
             snapshot_repo: Ride status snapshot repository
             status_change_repo: Ride status change repository
+            previous_snapshot: Optional snapshot dict to use as prior state; if None,
+                falls back to repository lookup.
         """
         try:
             # Convert to boolean for backwards compat
@@ -427,7 +434,7 @@ class SnapshotCollector:
 
             # Get previous status from cache or database
             if ride_id not in self.previous_statuses:
-                last_snapshot = snapshot_repo.get_latest_by_ride(ride_id)
+                last_snapshot = previous_snapshot if previous_snapshot is not None else snapshot_repo.get_latest_by_ride(ride_id)
                 if last_snapshot:
                     prev_status = last_snapshot.get('status') or \
                                  ('OPERATING' if last_snapshot['computed_is_open'] else 'DOWN')
@@ -742,12 +749,20 @@ class SnapshotCollector:
             if computed_status:
                 self._update_last_operated_at(ride_id, ride_repo)
 
-            # Store snapshot
-            self._store_snapshot(ride_id, wait_time, is_open_api, computed_status, last_updated_api,
-                                snapshot_repo, snapshot_timestamp)
+            # Look up the previous snapshot BEFORE inserting the new one so
+            # change detection compares against the last persisted state.
+            previous_snapshot = snapshot_repo.get_latest_by_ride(ride_id)
 
-            # Detect status change
-            self._detect_status_change(ride_id, computed_status, snapshot_repo, status_change_repo)
+            # Detect status change using the previous snapshot
+            self._detect_status_change(
+                ride_id, computed_status, snapshot_repo, status_change_repo, previous_snapshot=previous_snapshot
+            )
+
+            # Store the current snapshot
+            self._store_snapshot(
+                ride_id, wait_time, is_open_api, computed_status, last_updated_api,
+                snapshot_repo, snapshot_timestamp
+            )
 
         except Exception as e:
             logger.error(f"Error processing ride: {e}")
@@ -794,7 +809,8 @@ class SnapshotCollector:
 
     def _detect_status_change(self, ride_id: int, current_status: bool,
                              snapshot_repo: RideStatusSnapshotRepository,
-                             status_change_repo: RideStatusChangeRepository):
+                             status_change_repo: RideStatusChangeRepository,
+                             previous_snapshot: Optional[Dict[str, Any]] = None):
         """
         Detect if ride status has changed since last snapshot.
 
@@ -803,11 +819,13 @@ class SnapshotCollector:
             current_status: Current computed open/closed status
             snapshot_repo: Ride status snapshot repository
             status_change_repo: Ride status change repository
+            previous_snapshot: Optional snapshot dict to use as prior state; if None,
+                falls back to repository lookup.
         """
         try:
             # Get previous status from cache or database
             if ride_id not in self.previous_statuses:
-                last_snapshot = snapshot_repo.get_latest_by_ride(ride_id)
+                last_snapshot = previous_snapshot if previous_snapshot is not None else snapshot_repo.get_latest_by_ride(ride_id)
                 if last_snapshot:
                     self.previous_statuses[ride_id] = {
                         'status': last_snapshot['computed_is_open'],

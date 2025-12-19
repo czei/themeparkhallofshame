@@ -32,13 +32,17 @@ from database.repositories.weather_repository import (
 
 @pytest.fixture
 def test_park(mysql_connection):
-    """Create a test park for weather repository tests."""
-    # Insert a park with a known id for FK constraints (include all required fields)
+    """Create a unique test park for weather repository tests to avoid PK collisions."""
+    from random import randint
+    park_id = randint(10000, 19999)
+    queue_times_id = randint(900000, 999999)
+
     mysql_connection.execute(text("""
         INSERT INTO parks (park_id, queue_times_id, name, city, state_province, country, timezone, is_disney, is_universal, is_active)
-        VALUES (1, 1, 'Test Weather Park', 'Orlando', 'FL', 'US', 'America/New_York', FALSE, FALSE, TRUE)
-    """))
-    return 1  # park_id
+        VALUES (:park_id, :queue_times_id, 'Test Weather Park', 'Orlando', 'FL', 'US', 'America/New_York', FALSE, FALSE, TRUE)
+    """), {'park_id': park_id, 'queue_times_id': queue_times_id})
+
+    return park_id  # unique per test run
 
 
 class TestWeatherObservationRepositoryIntegration:

@@ -56,22 +56,28 @@ class TestWeatherCollectionIntegration:
                 'visibility': [10000, 8000],
             }
         }
-        client.parse_observations.return_value = [
-            {
-                'park_id': 1,
-                'observation_time': datetime(2025, 12, 17, 0, 0, 0, tzinfo=timezone.utc),
-                'temperature_f': 75.2,
-                'temperature_c': 24.0,
-                'weather_code': 0,
-            },
-            {
-                'park_id': 1,
-                'observation_time': datetime(2025, 12, 17, 1, 0, 0, tzinfo=timezone.utc),
-                'temperature_f': 74.8,
-                'temperature_c': 23.8,
-                'weather_code': 61,
-            },
-        ]
+        def parse_observations_side_effect(weather_data, park_id):
+            """Return observations that match the park being processed to satisfy FK constraints."""
+            obs_time_0 = datetime(2025, 12, 17, 0, 0, 0)  # naive UTC to satisfy MySQL DATETIME
+            obs_time_1 = datetime(2025, 12, 17, 1, 0, 0)
+            return [
+                {
+                    'park_id': park_id,
+                    'observation_time': obs_time_0,
+                    'temperature_f': 75.2,
+                    'temperature_c': 24.0,
+                    'weather_code': 0,
+                },
+                {
+                    'park_id': park_id,
+                    'observation_time': obs_time_1,
+                    'temperature_f': 74.8,
+                    'temperature_c': 23.8,
+                    'weather_code': 61,
+                },
+            ]
+
+        client.parse_observations.side_effect = parse_observations_side_effect
         return client
 
     def test_concurrent_collection_with_multiple_parks(self, mysql_connection, mock_api_client):
@@ -144,6 +150,29 @@ class TestWeatherCollectionIntegration:
                 {'park_id': 2, 'latitude': 99.0, 'longitude': -81.0},          # Invalid
                 {'park_id': 3, 'latitude': 33.8121, 'longitude': -117.9190},   # Valid
             ]
+
+            # Ensure parks exist in DB to satisfy FK constraints on weather_observations
+            from sqlalchemy import text
+            park_ids = [p['park_id'] for p in parks]
+            mysql_connection.execute(text("DELETE FROM parks WHERE park_id IN :ids"), {'ids': tuple(park_ids)})
+            for p in parks:
+                mysql_connection.execute(text("""
+                    INSERT INTO parks (
+                        park_id, queue_times_id, name, city, state_province, country,
+                        latitude, longitude, timezone, operator, is_disney, is_universal, is_active
+                    )
+                    VALUES (
+                        :park_id, :queue_times_id, :name, 'TestCity', 'TS', 'US',
+                        :latitude, :longitude, 'America/New_York', 'TestOperator', 0, 0, 1
+                    )
+                    ON DUPLICATE KEY UPDATE name = VALUES(name)
+                """), {
+                    'park_id': p['park_id'],
+                    'queue_times_id': 900000 + p['park_id'],
+                    'name': f"Test Park {p['park_id']}",
+                    'latitude': p['latitude'],
+                    'longitude': p['longitude']
+                })
 
             # Mock _get_parks to return our test parks
             with patch.object(collector, '_get_parks', return_value=parks):
@@ -228,6 +257,29 @@ class TestWeatherCollectionIntegration:
                 {'park_id': i, 'latitude': 28.0 + i, 'longitude': -81.0}
                 for i in range(1, 11)
             ]
+
+            # Ensure parks exist in DB for FK constraints
+            from sqlalchemy import text
+            park_ids = [p['park_id'] for p in parks]
+            mysql_connection.execute(text("DELETE FROM parks WHERE park_id IN :ids"), {'ids': tuple(park_ids)})
+            for p in parks:
+                mysql_connection.execute(text("""
+                    INSERT INTO parks (
+                        park_id, queue_times_id, name, city, state_province, country,
+                        latitude, longitude, timezone, operator, is_disney, is_universal, is_active
+                    )
+                    VALUES (
+                        :park_id, :queue_times_id, :name, 'TestCity', 'TS', 'US',
+                        :latitude, :longitude, 'America/New_York', 'TestOperator', 0, 0, 1
+                    )
+                    ON DUPLICATE KEY UPDATE name = VALUES(name)
+                """), {
+                    'park_id': p['park_id'],
+                    'queue_times_id': 910000 + p['park_id'],
+                    'name': f"Test Park {p['park_id']}",
+                    'latitude': p['latitude'],
+                    'longitude': p['longitude']
+                })
 
             with patch.object(collector, '_get_parks', return_value=parks):
                 results = collector.run(mode='current', test_mode=True)

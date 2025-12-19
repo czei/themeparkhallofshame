@@ -10,9 +10,8 @@
   - Added park schedule data with time windows that include "now"
   - Added explicit commit between collector runs
 
-**❌ Still Failing (3 tests):**
-1. `test_collect_snapshots_integration.py::TestStatusChangeDetection::test_detects_ride_going_down` (1 test)
-2. `test_weather_collection.py` - 2 failures with RuntimeError about 100% park failures
+**🔄 In Progress:**
+- Implemented fixes for remaining integration tests (status change detection, weather collection mocks). Needs DB-backed rerun to confirm.
 
 ---
 
@@ -20,49 +19,23 @@
 
 ### Task 1: Fix `test_detects_ride_going_down`
 
-**Problem:** Status change is not being recorded when ride goes from OPEN → CLOSED
+**Status:** Updated collector to compare against the previous persisted snapshot BEFORE inserting the new one, so OPEN → CLOSED transitions are detected across runs.
 
-**Root Cause Analysis Needed:**
-1. Verify the collector is using Queue-Times code path (not ThemeParks.wiki)
-2. Check if snapshot from first collection is visible to second collection's database lookup
-3. Verify `_detect_status_change()` logic is comparing statuses correctly
-
-**Proposed Fix Steps:**
-1. Add debug logging to see if `_detect_status_change()` is being called
-2. Verify `last_snapshot` is found in database after first collection
-3. Check if status comparison logic (`previous_status != current_status`) is triggering
-4. Ensure `status_change_repo.insert()` is being called and committing
-
-**Alternative Approach (if above fails):**
-- The test might be fundamentally broken due to how mocks work
-- Consider mocking the status change detection logic itself
-- Or simplify the test to just verify snapshots are stored correctly
+**Next Step:** Re-run the test with a MySQL test DB to confirm `ride_status_changes` is written.
 
 ---
 
 ### Task 2: Fix `test_weather_collection.py` Failures
 
-**Problem:** Mock API client returns `park_id: 100516` which doesn't exist in parks table, causing FK constraint violations
+**Status:** Mock API client now returns observations with the current park_id (side effect) to satisfy FK constraints during inserts.
 
-**Files:**
-- `tests/integration/test_weather_collection.py`
-- Failing tests: `test_graceful_park_failure_handling`, `test_test_mode_limits_parks`
-
-**Proposed Fix Steps:**
-1. Read the `mock_api_client` fixture (around line 57)
-2. Update it to return `park_id` values that actually exist in the test database
-3. Ensure test fixtures create the necessary parks before the weather collection runs
-4. Verify `weather_observations` table has correct FK constraints to `parks` table
-
-**Expected Time:** 15-20 minutes
+**Next Step:** Re-run `tests/integration/test_weather_collection.py` against MySQL to verify no FK errors and failure-handling assertions still hold.
 
 ---
 
 ### Task 3: Update Todo List
 
-**Current todo shows:**
-- ~~"Fix weighted scoring tests"~~ - These are actually passing now
-- Update todo to reflect actual remaining work
+Refresh after DB reruns; if all green, collapse Tasks 1–2 and mark file as resolved.
 
 ---
 
@@ -82,7 +55,8 @@ Once all tests pass individually:
 **Files to commit:**
 1. `test_today_api_contract.py` - Flask client fixture fix
 2. `test_collect_snapshots_integration.py` - Multiple fixture fixes
-3. `test_weather_collection.py` - Mock data fixes (pending)
+3. `test_weather_collection.py` - Mock data fixes
+4. `scripts/collect_snapshots.py` - Status change detection ordering
 
 **Commit Message:**
 ```
@@ -95,6 +69,7 @@ test: fix integration test isolation and fixture issues
   - Add park schedule data for park open detection
   - Explicit commit between collector runs
 - Fix test_weather_collection.py: Use valid park IDs in mocks
+- Update snapshot collector to detect status changes before inserting new snapshot
 
 Resolves test isolation issues that caused failures when running
 full test suite. All fixtures now properly set up and clean up data.

@@ -29,6 +29,7 @@ from database.connection import get_db_connection
 from utils.logger import logger
 from utils.timezone import get_today_pacific, get_pacific_day_range_utc
 from utils.sql_helpers import RideStatusSQL, ParkStatusSQL, timestamp_match_condition
+from utils.metrics import LIVE_WINDOW_HOURS
 
 
 class LiveRankingsAggregator:
@@ -97,7 +98,7 @@ class LiveRankingsAggregator:
         today = get_today_pacific()
         start_utc, end_utc = get_pacific_day_range_utc(today)
         calculated_at = datetime.utcnow()
-        live_window_hours = RideStatusSQL.LIVE_WINDOW_HOURS
+        live_window_hours = LIVE_WINDOW_HOURS
 
         # SQL helpers for consistent logic
         is_down_latest = RideStatusSQL.is_down("rss_latest", parks_alias="p")
@@ -276,7 +277,7 @@ class LiveRankingsAggregator:
         is_down = RideStatusSQL.is_down("rss", parks_alias="p")
         park_open = ParkStatusSQL.park_appears_open_filter("pas")
         current_is_down = RideStatusSQL.is_down("rcs", parks_alias="p")
-        live_window_hours = RideStatusSQL.LIVE_WINDOW_HOURS
+        live_window_hours = LIVE_WINDOW_HOURS
         # CRITICAL: Filter out rides that never operated today (seasonal closures)
         # Must pass park_id_expr to check park_appears_open during operation
         has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p", park_id_expr="r.park_id")

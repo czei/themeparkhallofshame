@@ -128,10 +128,11 @@ class TestDisneyUniversalDownStatusLogic:
 
         content = filepath.read_text()
 
-        # The fix adds: OR (rss_day.status = 'DOWN' AND (p_day.is_disney = TRUE OR p_day.is_universal = TRUE))
-        assert "status = 'DOWN'" in content and "is_disney" in content, (
-            "aggregate_hourly.py must include Disney/Universal DOWN status in operated_today_ride_ids query. "
-            "Disney parks report DOWN for actual breakdowns - this IS a valid 'operated' signal."
+        # The fix includes DOWN status for ALL parks (not just Disney/Universal)
+        # Rationale: DOWN explicitly indicates a breakdown (vs CLOSED which could be seasonal)
+        assert "status = 'DOWN'" in content, (
+            "aggregate_hourly.py must include DOWN status in operated_today_ride_ids query. "
+            "DOWN status is a valid signal that a ride attempted to operate (distinguishes from seasonal closures)."
         )
 
         # Verify it's in the operated_today query context
@@ -143,8 +144,8 @@ class TestDisneyUniversalDownStatusLogic:
         )
 
         query_section = content[operated_query_start:operated_query_end]
-        assert "DOWN" in query_section and "is_disney" in query_section, (
-            "The operated_today query must check for Disney/Universal DOWN status"
+        assert "DOWN" in query_section, (
+            "The operated_today query must check for DOWN status"
         )
 
     def test_sql_helpers_documents_park_type_logic(self):
@@ -226,6 +227,124 @@ class TestParkOpenFallbackHeuristic:
                 "but aggregate_hourly.py does not. This causes different parks to appear\n"
                 "in charts vs rankings. SINGLE SOURCE OF TRUTH VIOLATION!"
             )
+
+
+class TestSixFlagsFiestaTexasBugFixes:
+    """
+    Tests for the Six Flags Fiesta Texas shame=2.4 but downtime=0 bug.
+
+    Bug Report (2025-12-19): Six Flags Fiesta Texas showed shame_score=2.4
+    but total_downtime_hours=0.0 on https://themeparkhallofshame.com/park-detail.html?park_id=169
+
+    Root Causes:
+    1. operated_today_ride_ids CTE didn't use fallback heuristic for parks with bad schedule data
+    2. Ride aggregation park_appears_open_filter() didn't use with_fallback=True
+    3. DOWN status only counted as "operated" for Disney/Universal, not all parks
+
+    Result: Rides with status='DOWN' had their downtime excluded from totals.
+    """
+
+    def test_operated_today_cte_uses_fallback_heuristic(self):
+        """operated_today_ride_ids CTE must use (park_appears_open OR rides_open > 0)."""
+        backend_root = Path(__file__).parent.parent.parent
+        filepath = backend_root / "src/scripts/aggregate_hourly.py"
+        content = filepath.read_text()
+
+        # Find the operated_today_ride_ids query section
+        query_start = content.find("operated_today_result = conn.execute")
+        query_end = content.find("operated_today_ride_ids = {", query_start)
+
+        assert query_start != -1 and query_end != -1, (
+            "Could not find operated_today_ride_ids query in aggregate_hourly.py"
+        )
+
+        query_section = content[query_start:query_end]
+
+        # Must use fallback heuristic for park open detection
+        assert "rides_open > 0" in query_section, (
+            "BUG: operated_today_ride_ids CTE must use fallback heuristic:\n"
+            "  AND (pas_day.park_appears_open = TRUE OR pas_day.rides_open > 0)\n\n"
+            "Without this, parks with bad schedule data (park_appears_open=FALSE but rides operating)\n"
+            "have NO rides marked as 'operated', so all downtime is excluded from totals.\n\n"
+            "Example: Six Flags Fiesta Texas had park_appears_open=0 but 47 rides operating.\n"
+            "Result: shame_score=2.4 (from collection) but total_downtime_hours=0.0 (aggregation)."
+        )
+
+    def test_ride_aggregation_uses_fallback_filter(self):
+        """Ride aggregation must call park_appears_open_filter() with with_fallback=True."""
+        backend_root = Path(__file__).parent.parent.parent
+        filepath = backend_root / "src/scripts/aggregate_hourly.py"
+        content = filepath.read_text()
+
+        # Find the _aggregate_ride method
+        method_start = content.find("def _aggregate_ride(")
+        method_end = content.find("def _aggregate_park(", method_start)
+
+        assert method_start != -1, "Could not find _aggregate_ride method"
+        method_section = content[method_start:method_end if method_end != -1 else len(content)]
+
+        # Must use with_fallback=True when calling park_appears_open_filter
+        assert "park_appears_open_filter" in method_section, (
+            "Ride aggregation must call park_appears_open_filter()"
+        )
+
+        assert "with_fallback=True" in method_section, (
+            "BUG: Ride aggregation must call park_appears_open_filter() with with_fallback=True.\n\n"
+            "Without this, downtime is only counted when park_appears_open=TRUE.\n"
+            "Parks with bad schedule data (park_appears_open=FALSE but rides operating) will have\n"
+            "down_snapshots=0 and downtime_hours=0 even when rides report status='DOWN'.\n\n"
+            "Example: Six Flags Fiesta Texas rides with DOWN status had:\n"
+            "  - Raw snapshots: status='DOWN' for all 6 snapshots\n"
+            "  - ride_hourly_stats: down_snapshots=0, downtime_hours=0.0\n"
+            "Result: Downtime not counted, total_downtime_hours=0.0 despite shame_score=2.4"
+        )
+
+    def test_down_status_counts_as_operated_for_all_parks(self):
+        """DOWN status must count as 'operated' for ALL parks, not just Disney/Universal."""
+        backend_root = Path(__file__).parent.parent.parent
+        filepath = backend_root / "src/scripts/aggregate_hourly.py"
+        content = filepath.read_text()
+
+        # Find the operated_today_ride_ids query section
+        query_start = content.find("operated_today_result = conn.execute")
+        query_end = content.find("operated_today_ride_ids = {", query_start)
+
+        assert query_start != -1 and query_end != -1, (
+            "Could not find operated_today_ride_ids query in aggregate_hourly.py"
+        )
+
+        query_section = content[query_start:query_end]
+
+        # Must include DOWN status without Disney/Universal restriction
+        assert "status = 'DOWN'" in query_section, (
+            "operated_today_ride_ids query must include rides with status='DOWN'"
+        )
+
+        # Find the DOWN status check
+        down_check_start = query_section.find("status = 'DOWN'")
+        # Look at context around DOWN check (200 chars before and after)
+        down_context = query_section[max(0, down_check_start - 200):down_check_start + 200]
+
+        # Should NOT have "is_disney" or "is_universal" restriction on same line as DOWN check
+        down_line_start = down_context.rfind('\n', 0, 200)
+        down_line_end = down_context.find('\n', 200)
+        down_line = down_context[down_line_start:down_line_end] if down_line_end != -1 else down_context[down_line_start:]
+
+        # The line with "status = 'DOWN'" should NOT contain park type checks
+        assert not ("is_disney" in down_line or "is_universal" in down_line), (
+            "BUG: DOWN status should count as 'operated' for ALL parks, not just Disney/Universal.\n\n"
+            "Rationale:\n"
+            "  - DOWN explicitly indicates a breakdown (not seasonal closure)\n"
+            "  - If a ride reports DOWN, it attempted to operate but failed\n"
+            "  - Collection time: DOWN rides contribute to shame_score for ALL parks\n"
+            "  - Aggregation time: DOWN rides must also count toward downtime for consistency\n\n"
+            "Without this fix:\n"
+            "  - Six Flags rides with status='DOWN' all day had ride_operated=0\n"
+            "  - Their downtime was excluded: SUM(downtime_hours WHERE ride_operated=1) = 0\n"
+            "  - Result: shame_score=2.4 (includes DOWN rides) but total_downtime_hours=0.0\n\n"
+            "Expected pattern:\n"
+            "  OR rss_day.status = 'DOWN'  -- No park type restriction"
+        )
 
 
 class TestHourlyAggregationDowntimeCalculation:

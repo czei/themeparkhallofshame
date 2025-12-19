@@ -390,6 +390,9 @@ class SnapshotCollector:
             snapshot_timestamp: Synchronized timestamp for this collection cycle
         """
         try:
+            # Use snapshot_timestamp as fallback for last_updated_api if API doesn't provide it
+            # (NOT NULL constraint in database requires a value)
+            effective_last_updated = last_updated_api if last_updated_api else snapshot_timestamp
             snapshot_record = {
                 'ride_id': ride_id,
                 'recorded_at': snapshot_timestamp,
@@ -397,7 +400,7 @@ class SnapshotCollector:
                 'is_open': is_open_api,
                 'computed_is_open': computed_status,
                 'status': status_enum,
-                'last_updated_api': last_updated_api
+                'last_updated_api': effective_last_updated
             }
 
             snapshot_repo.insert(snapshot_record)
@@ -770,6 +773,9 @@ class SnapshotCollector:
         try:
             # Use provided timestamp or fall back to now (for backwards compatibility)
             recorded_at = snapshot_timestamp if snapshot_timestamp else datetime.now()
+            # Use recorded_at as fallback for last_updated_api if API doesn't provide it
+            # (NOT NULL constraint in database requires a value)
+            effective_last_updated = last_updated_api if last_updated_api else recorded_at
             snapshot_record = {
                 'ride_id': ride_id,
                 'recorded_at': recorded_at,
@@ -777,7 +783,7 @@ class SnapshotCollector:
                 'is_open': is_open_api,
                 'computed_is_open': computed_status,
                 'status': None,  # Queue-Times doesn't provide rich status
-                'last_updated_api': last_updated_api
+                'last_updated_api': effective_last_updated
             }
 
             snapshot_repo.insert(snapshot_record)

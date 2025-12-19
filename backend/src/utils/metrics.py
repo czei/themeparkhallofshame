@@ -75,6 +75,10 @@ SHAME_SCORE_MULTIPLIER = 10
 # Default of 2 assumes unclassified rides are "major" attractions
 DEFAULT_TIER_WEIGHT = 2
 
+# Time window for "live" data - only consider snapshots from last 2 hours
+# Used by live rankings and real-time status queries
+LIVE_WINDOW_HOURS = 2
+
 # Feature flag for hourly aggregation tables
 # When True: Use pre-computed hourly tables (park_hourly_stats, ride_hourly_stats)
 # When False: Use original GROUP BY HOUR queries on raw snapshots (rollback path)

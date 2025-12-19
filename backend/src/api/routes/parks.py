@@ -27,6 +27,7 @@ from database.connection import get_db_connection
 from database.repositories.park_repository import ParkRepository
 from database.repositories.stats_repository import StatsRepository
 from utils.cache import get_query_cache, generate_cache_key
+from utils.timezone import PERIOD_ALIASES
 
 # New query imports - each file handles one specific data source
 from database.queries.rankings import ParkDowntimeRankingsQuery, ParkWaitTimeRankingsQuery
@@ -180,7 +181,7 @@ def get_park_downtime_rankings():
                         limit=limit,
                         sort_by=sort_by
                     )
-            aggregate_period = 'last_week' if period == '7days' else ('last_month' if period == '30days' else period)
+            aggregate_period = PERIOD_ALIASES.get(period, period)
             aggregate_stats = stats_repo.get_aggregate_park_stats(
                 period=aggregate_period,
                 filter_disney_universal=filter_disney_universal

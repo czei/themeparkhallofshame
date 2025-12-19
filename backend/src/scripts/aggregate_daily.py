@@ -27,6 +27,7 @@ sys.path.insert(0, str(backend_src.absolute()))
 
 from utils.logger import logger
 from utils.timezone import get_today_pacific, get_pacific_day_range_utc
+from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
 from database.repositories.park_repository import ParkRepository
 from database.repositories.ride_repository import RideRepository
 from database.repositories.aggregation_repository import AggregationLogRepository
@@ -218,7 +219,7 @@ class DailyAggregator:
         ride_id = ride.ride_id
         park_id = ride.park_id
 
-        result = conn.execute(text("""
+        result = conn.execute(text(f"""
             INSERT INTO ride_daily_stats (
                 ride_id,
                 stat_date,
@@ -239,7 +240,7 @@ class DailyAggregator:
                 :stat_date,
 
                 -- UPTIME: Minutes the ride was open during park operating hours
-                COALESCE(SUM(CASE WHEN pas.park_appears_open = 1 AND rss.computed_is_open THEN 10 ELSE 0 END), 0) as uptime_minutes,
+                COALESCE(SUM(CASE WHEN pas.park_appears_open = 1 AND rss.computed_is_open THEN {SNAPSHOT_INTERVAL_MINUTES} ELSE 0 END), 0) as uptime_minutes,
 
                 -- DOWNTIME: Only count if BOTH conditions are met:
                 --   1. Park was operating (park_appears_open = 1)
@@ -257,7 +258,7 @@ class DailyAggregator:
                             WHEN pas.park_appears_open = 1 AND (
                                 (rss.status IS NOT NULL AND rss.status = 'DOWN') OR
                                 (rss.status IS NULL AND NOT rss.computed_is_open)
-                            ) THEN 10
+                            ) THEN {SNAPSHOT_INTERVAL_MINUTES}
                             ELSE 0
                         END
                     ), 0)
@@ -267,15 +268,15 @@ class DailyAggregator:
                 -- UPTIME PERCENTAGE: Based on park operating hours only
                 -- Returns 0 if ride never operated (maintenance) or park was closed
                 CASE
-                    WHEN SUM(CASE WHEN pas.park_appears_open = 1 THEN 10 ELSE 0 END) > 0
+                    WHEN SUM(CASE WHEN pas.park_appears_open = 1 THEN {SNAPSHOT_INTERVAL_MINUTES} ELSE 0 END) > 0
                          AND SUM(CASE WHEN rss.computed_is_open THEN 1 ELSE 0 END) > 0
-                    THEN ROUND(100.0 * SUM(CASE WHEN pas.park_appears_open = 1 AND rss.computed_is_open THEN 10 ELSE 0 END)
-                              / SUM(CASE WHEN pas.park_appears_open = 1 THEN 10 ELSE 0 END), 2)
+                    THEN ROUND(100.0 * SUM(CASE WHEN pas.park_appears_open = 1 AND rss.computed_is_open THEN {SNAPSHOT_INTERVAL_MINUTES} ELSE 0 END)
+                              / SUM(CASE WHEN pas.park_appears_open = 1 THEN {SNAPSHOT_INTERVAL_MINUTES} ELSE 0 END), 2)
                     ELSE 0
                 END as uptime_percentage,
 
                 -- OPERATING HOURS: Time when park was open (regardless of ride status)
-                COALESCE(SUM(CASE WHEN pas.park_appears_open = 1 THEN 10 ELSE 0 END), 0) as operating_hours_minutes,
+                COALESCE(SUM(CASE WHEN pas.park_appears_open = 1 THEN {SNAPSHOT_INTERVAL_MINUTES} ELSE 0 END), 0) as operating_hours_minutes,
 
                 -- Wait time statistics (only when ride was actually open)
                 ROUND(AVG(CASE WHEN rss.wait_time IS NOT NULL AND rss.computed_is_open THEN rss.wait_time END), 2) as avg_wait_time,

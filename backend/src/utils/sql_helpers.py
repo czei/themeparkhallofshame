@@ -16,6 +16,7 @@ from utils.metrics import (
     SNAPSHOT_INTERVAL_MINUTES,
     SHAME_SCORE_MULTIPLIER,
     SHAME_SCORE_PRECISION,
+    LIVE_WINDOW_HOURS,
 )
 
 
@@ -58,8 +59,7 @@ class RideStatusSQL:
     # Core status expression - maps NULL status to OPERATING/DOWN based on computed_is_open
     STATUS_EXPR = "COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN'))"
 
-    # Time window for "live" data - only consider snapshots from last 2 hours
-    LIVE_WINDOW_HOURS = 2
+    # Note: LIVE_WINDOW_HOURS is now imported from utils.metrics (SSOT)
 
     @staticmethod
     def status_expression(table_alias: str = "rss") -> str:
@@ -467,7 +467,7 @@ class RideStatusSQL:
         """
         time_filter = ""
         if include_time_window:
-            time_filter = f"AND rss_inner.recorded_at >= DATE_SUB(NOW(), INTERVAL {RideStatusSQL.LIVE_WINDOW_HOURS} HOUR)"
+            time_filter = f"AND rss_inner.recorded_at >= DATE_SUB(NOW(), INTERVAL {LIVE_WINDOW_HOURS} HOUR)"
 
         # If park_id_expr is provided, wrap the status with park-open check
         if park_id_expr:
@@ -476,7 +476,7 @@ class RideStatusSQL:
                 SELECT pas_inner.park_appears_open
                 FROM park_activity_snapshots pas_inner
                 WHERE pas_inner.park_id = {park_id_expr}
-                    AND pas_inner.recorded_at >= DATE_SUB(NOW(), INTERVAL {RideStatusSQL.LIVE_WINDOW_HOURS} HOUR)
+                    AND pas_inner.recorded_at >= DATE_SUB(NOW(), INTERVAL {LIVE_WINDOW_HOURS} HOUR)
                 ORDER BY pas_inner.recorded_at DESC
                 LIMIT 1
             """
@@ -529,7 +529,7 @@ class RideStatusSQL:
         """
         time_filter = ""
         if include_time_window:
-            time_filter = f"AND rss_inner.recorded_at >= DATE_SUB(NOW(), INTERVAL {RideStatusSQL.LIVE_WINDOW_HOURS} HOUR)"
+            time_filter = f"AND rss_inner.recorded_at >= DATE_SUB(NOW(), INTERVAL {LIVE_WINDOW_HOURS} HOUR)"
 
         # If park_id_expr is provided, wrap the check with park-open check
         if park_id_expr:
@@ -538,7 +538,7 @@ class RideStatusSQL:
                 SELECT pas_inner.park_appears_open
                 FROM park_activity_snapshots pas_inner
                 WHERE pas_inner.park_id = {park_id_expr}
-                    AND pas_inner.recorded_at >= DATE_SUB(NOW(), INTERVAL {RideStatusSQL.LIVE_WINDOW_HOURS} HOUR)
+                    AND pas_inner.recorded_at >= DATE_SUB(NOW(), INTERVAL {LIVE_WINDOW_HOURS} HOUR)
                 ORDER BY pas_inner.recorded_at DESC
                 LIMIT 1
             """
@@ -620,7 +620,7 @@ class ParkStatusSQL:
                     SELECT CASE WHEN pas2.park_appears_open = TRUE THEN 1 ELSE 0 END
                     FROM park_activity_snapshots pas2
                     WHERE pas2.park_id = {park_id_expr}
-                        AND pas2.recorded_at >= DATE_SUB(NOW(), INTERVAL {RideStatusSQL.LIVE_WINDOW_HOURS} HOUR)
+                        AND pas2.recorded_at >= DATE_SUB(NOW(), INTERVAL {LIVE_WINDOW_HOURS} HOUR)
                     ORDER BY pas2.recorded_at DESC
                     LIMIT 1
                 )
@@ -981,7 +981,7 @@ class RideFilterSQL:
         Returns:
             SQL condition for live time window
         """
-        return f"{recorded_at_expr} >= DATE_SUB(NOW(), INTERVAL {RideStatusSQL.LIVE_WINDOW_HOURS} HOUR)"
+        return f"{recorded_at_expr} >= DATE_SUB(NOW(), INTERVAL {LIVE_WINDOW_HOURS} HOUR)"
 
 
 # Add the 7-day filter method to RideStatusSQL as well for consistency with legacy code

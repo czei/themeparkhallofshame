@@ -33,6 +33,8 @@ from database.repositories.status_change_repository import RideStatusChangeRepos
 @pytest.fixture
 def sample_api_response_open_park():
     """Queue-Times API response for park with multiple operating rides."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
     return {
         'id': 201,
         'name': 'Magic Kingdom',
@@ -42,28 +44,32 @@ def sample_api_response_open_park():
                 'name': 'Space Mountain',
                 'wait_time': 45,
                 'is_open': True,
-                'land': 'Tomorrowland'
+                'land': 'Tomorrowland',
+                'last_updated': now
             },
             {
                 'id': 2002,
                 'name': 'Haunted Mansion',
                 'wait_time': 30,
                 'is_open': True,
-                'land': 'Liberty Square'
+                'land': 'Liberty Square',
+                'last_updated': now
             },
             {
                 'id': 2003,
                 'name': 'Big Thunder Mountain',
                 'wait_time': 0,
                 'is_open': False,  # Closed for maintenance
-                'land': 'Frontierland'
+                'land': 'Frontierland',
+                'last_updated': now
             },
             {
                 'id': 2004,
                 'name': 'Pirates of the Caribbean',
                 'wait_time': 25,
                 'is_open': True,
-                'land': 'Adventureland'
+                'land': 'Adventureland',
+                'last_updated': now
             }
         ]
     }
@@ -72,6 +78,8 @@ def sample_api_response_open_park():
 @pytest.fixture
 def sample_api_response_closed_park():
     """Queue-Times API response for park that appears closed."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
     return {
         'id': 201,
         'name': 'Magic Kingdom',
@@ -81,14 +89,16 @@ def sample_api_response_closed_park():
                 'name': 'Space Mountain',
                 'wait_time': 0,
                 'is_open': False,
-                'land': 'Tomorrowland'
+                'land': 'Tomorrowland',
+                'last_updated': now
             },
             {
                 'id': 2002,
                 'name': 'Haunted Mansion',
                 'wait_time': 0,
                 'is_open': False,
-                'land': 'Liberty Square'
+                'land': 'Liberty Square',
+                'last_updated': now
             }
         ]
     }
@@ -123,6 +133,7 @@ def cleanup_before_each_collect_snapshots_test(mysql_engine):
         conn.execute(text("DELETE FROM park_weekly_stats"))
         conn.execute(text("DELETE FROM park_monthly_stats"))
         conn.execute(text("DELETE FROM ride_classifications"))
+        conn.execute(text("DELETE FROM park_schedules"))
         conn.execute(text("DELETE FROM rides"))
         conn.execute(text("DELETE FROM parks"))
         # Auto-commits on exit from begin() context
@@ -150,9 +161,26 @@ def setup_test_park(mysql_connection):
     }
 
     park = park_repo.create(park_data)
+    park_id = park.park_id if hasattr(park, 'park_id') else park['park_id']
+
+    # Add schedule data so park appears open during test
+    # Without schedule data, collector treats park as CLOSED
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import text
+    # Use naive datetime since schedule_repository.is_park_open_now uses datetime.utcnow() (naive)
+    now_utc_naive = datetime.utcnow()
+    today = now_utc_naive.date()
+    # Create opening/closing times that ALWAYS include "now"
+    # Opening: 1 hour ago, Closing: 24 hours from now
+    opening_time = now_utc_naive - timedelta(hours=1)
+    closing_time = now_utc_naive + timedelta(hours=24)
+    mysql_connection.execute(text("""
+        INSERT INTO park_schedules (park_id, schedule_date, opening_time, closing_time, schedule_type)
+        VALUES (:park_id, :schedule_date, :opening_time, :closing_time, 'OPERATING')
+    """), {'park_id': park_id, 'schedule_date': today, 'opening_time': opening_time, 'closing_time': closing_time})
+
     mysql_connection.commit()  # Commit so mocked collector can see the park
-    # park_repo.create() returns a Park object, extract park_id
-    return park.park_id if hasattr(park, 'park_id') else park['park_id']
+    return park_id
 
 
 @pytest.fixture
@@ -200,7 +228,17 @@ def setup_test_rides(mysql_connection, setup_test_park):
     for ride_data in rides_data:
         ride = ride_repo.create(ride_data)
         # ride_repo.create() returns a Ride object, extract ride_id
-        ride_ids.append(ride.ride_id if hasattr(ride, 'ride_id') else ride['ride_id'])
+        ride_id = ride.ride_id if hasattr(ride, 'ride_id') else ride['ride_id']
+        ride_ids.append(ride_id)
+
+        # Also create ride_classification entry (required by live rankings query)
+        tier = ride_data.get('tier', 2)
+        tier_weights = {1: 3, 2: 2, 3: 1}
+        from sqlalchemy import text
+        mysql_connection.execute(text("""
+            INSERT INTO ride_classifications (ride_id, tier, tier_weight, classification_method)
+            VALUES (:ride_id, :tier, :weight, 'manual_override')
+        """), {'ride_id': ride_id, 'tier': tier, 'weight': tier_weights.get(tier, 2)})
 
     mysql_connection.commit()  # Commit so mocked collector can see the rides
     return ride_ids
@@ -213,11 +251,12 @@ def setup_test_rides(mysql_connection, setup_test_park):
 class TestSnapshotCollectionBasicFlow:
     """Test basic snapshot collection workflow."""
 
+    @patch('scripts.collect_snapshots.SnapshotCollector._aggregate_live_rankings')  # Skip slow aggregation
     @patch('scripts.collect_snapshots.get_themeparks_wiki_client')
     @patch('scripts.collect_snapshots.get_db_connection')
     @patch('scripts.collect_snapshots.QueueTimesClient')
     def test_collect_snapshots_creates_snapshots_in_database(
-        self, mock_client_class, mock_get_db, mock_themeparks_wiki,
+        self, mock_client_class, mock_get_db, mock_themeparks_wiki, mock_aggregate,
         mysql_connection, setup_test_rides, sample_api_response_open_park
     ):
         """Snapshot collection should create ride snapshots in database."""
@@ -248,11 +287,12 @@ class TestSnapshotCollectionBasicFlow:
         assert snapshot['is_open'] == True
         assert snapshot['computed_is_open'] == True
 
+    @patch('scripts.collect_snapshots.SnapshotCollector._aggregate_live_rankings')  # Skip slow aggregation
     @patch('scripts.collect_snapshots.get_themeparks_wiki_client')
     @patch('scripts.collect_snapshots.get_db_connection')
     @patch('scripts.collect_snapshots.QueueTimesClient')
     def test_collect_snapshots_creates_park_activity_snapshot(
-        self, mock_client_class, mock_get_db, mock_themeparks_wiki,
+        self, mock_client_class, mock_get_db, mock_themeparks_wiki, mock_aggregate,
         mysql_connection, setup_test_rides, sample_api_response_open_park
     ):
         """Snapshot collection should create park activity snapshot."""
@@ -291,11 +331,12 @@ class TestSnapshotCollectionBasicFlow:
 class TestStatusChangeDetection:
     """Test ride status change detection."""
 
+    @patch('scripts.collect_snapshots.SnapshotCollector._aggregate_live_rankings')  # Skip slow aggregation
     @patch('scripts.collect_snapshots.get_themeparks_wiki_client')
     @patch('scripts.collect_snapshots.get_db_connection')
     @patch('scripts.collect_snapshots.QueueTimesClient')
     def test_detects_ride_going_down(
-        self, mock_client_class, mock_get_db, mock_themeparks_wiki,
+        self, mock_client_class, mock_get_db, mock_themeparks_wiki, mock_aggregate,
         mysql_connection, setup_test_rides
     ):
         """Should detect and record when ride goes from open to closed."""
@@ -318,6 +359,10 @@ class TestStatusChangeDetection:
 
         collector1 = SnapshotCollector()
         collector1.run()
+
+        # CRITICAL: Commit the first snapshot so the second collector can see it
+        # when looking up the previous status from the database
+        mysql_connection.commit()
 
         # Second collection - ride is closed
         mock_client.get_park_wait_times.return_value = {
@@ -418,11 +463,12 @@ class TestErrorHandling:
 class TestStatisticsTracking:
     """Test collection statistics tracking."""
 
+    @patch('scripts.collect_snapshots.SnapshotCollector._aggregate_live_rankings')  # Skip slow aggregation
     @patch('scripts.collect_snapshots.get_themeparks_wiki_client')
     @patch('scripts.collect_snapshots.get_db_connection')
     @patch('scripts.collect_snapshots.QueueTimesClient')
     def test_tracks_collection_statistics(
-        self, mock_client_class, mock_get_db, mock_themeparks_wiki,
+        self, mock_client_class, mock_get_db, mock_themeparks_wiki, mock_aggregate,
         mysql_connection, setup_test_rides, sample_api_response_open_park
     ):
         """Should track collection statistics correctly."""

@@ -257,12 +257,13 @@ class HourlyAggregator:
                         AND pas_day.recorded_at = rss_day.recorded_at
                     WHERE rss_day.recorded_at >= :day_start_utc
                         AND rss_day.recorded_at < :day_end_utc
-                        AND pas_day.park_appears_open = TRUE
+                        AND (pas_day.park_appears_open = TRUE OR pas_day.rides_open > 0)
                         AND (
                             -- Standard: ride showed OPERATING
                             rss_day.status = 'OPERATING' OR rss_day.computed_is_open = TRUE
-                            -- Disney/Universal: DOWN status is valid breakdown signal
-                            OR (rss_day.status = 'DOWN' AND (p_day.is_disney = TRUE OR p_day.is_universal = TRUE))
+                            -- DOWN status is valid signal that ride attempted to operate
+                            -- (distinguishes from seasonal closures which show CLOSED)
+                            OR rss_day.status = 'DOWN'
                         )
                 """), {
                     'day_start_utc': day_start_utc,
@@ -330,7 +331,7 @@ class HourlyAggregator:
 
         # Use centralized SQL helpers for consistent business logic (SINGLE SOURCE OF TRUTH)
         is_down_sql = RideStatusSQL.is_down("rss", parks_alias="p")
-        park_open_sql = ParkStatusSQL.park_appears_open_filter("pas")
+        park_open_sql = ParkStatusSQL.park_appears_open_filter("pas", with_fallback=True)
 
         # NEW: "Operated Today" subquery to fix multi-hour outage bug
         # MySQL doesn't support CTEs with INSERT ... ON DUPLICATE KEY UPDATE

@@ -149,11 +149,11 @@ In addition to tier, classify the attraction into ONE of these categories:
                     "OpenAI package not installed. Run: pip install openai"
                 )
 
-            # Get API key from environment
-            api_key = os.getenv('OPENAI_API_KEY')
+            # Get API key from environment (check both common names)
+            api_key = os.getenv('OPENAI_KEY') or os.getenv('OPENAI_API_KEY')
             if not api_key:
                 raise AIClassifierError(
-                    "OPENAI_API_KEY environment variable not set. "
+                    "OPENAI_KEY or OPENAI_API_KEY environment variable not set. "
                     "Please set it to your OpenAI API key."
                 )
 

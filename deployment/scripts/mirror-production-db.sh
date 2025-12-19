@@ -314,6 +314,9 @@ FIXSQL
             ride_weekly_stats|park_weekly_stats|ride_monthly_stats|park_monthly_stats)
                 DATE_COL="period_start"
                 ;;
+            ride_hourly_stats|park_hourly_stats)
+                DATE_COL="hour_start_utc"
+                ;;
             data_quality_issues)
                 DATE_COL="detected_at"
                 ;;

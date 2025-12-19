@@ -56,10 +56,13 @@ class Ride:
     @property
     def queue_times_url(self) -> Optional[str]:
         """
-        Get Queue-Times.com URL for this ride.
+        Get external URL for this ride (legacy queue-times.com link).
+
+        Note: Data is now sourced from ThemeParks.wiki, but queue-times.com
+        still provides useful public ride pages for users to browse.
 
         Returns:
-            URL to ride page on Queue-Times.com (FR-036), or None if park_queue_times_id unavailable
+            URL to ride page on queue-times.com, or None if park_queue_times_id unavailable
         """
         if self.park_queue_times_id:
             return f"https://queue-times.com/parks/{self.park_queue_times_id}/rides/{self.queue_times_id}"

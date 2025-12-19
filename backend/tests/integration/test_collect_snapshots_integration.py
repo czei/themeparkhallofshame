@@ -213,16 +213,18 @@ def setup_test_rides(mysql_connection, setup_test_park):
 class TestSnapshotCollectionBasicFlow:
     """Test basic snapshot collection workflow."""
 
+    @patch('scripts.collect_snapshots.get_themeparks_wiki_client')
     @patch('scripts.collect_snapshots.get_db_connection')
     @patch('scripts.collect_snapshots.QueueTimesClient')
     def test_collect_snapshots_creates_snapshots_in_database(
-        self, mock_client_class, mock_get_db, mysql_connection,
-        setup_test_rides, sample_api_response_open_park
+        self, mock_client_class, mock_get_db, mock_themeparks_wiki,
+        mysql_connection, setup_test_rides, sample_api_response_open_park
     ):
         """Snapshot collection should create ride snapshots in database."""
         # Setup mocks
         mock_get_db.return_value.__enter__.return_value = mysql_connection
         mock_get_db.return_value.__exit__.return_value = None
+        mock_themeparks_wiki.return_value = Mock()  # Mock the wiki client
 
         mock_client = Mock()
         mock_client_class.return_value = mock_client
@@ -246,16 +248,18 @@ class TestSnapshotCollectionBasicFlow:
         assert snapshot['is_open'] == True
         assert snapshot['computed_is_open'] == True
 
+    @patch('scripts.collect_snapshots.get_themeparks_wiki_client')
     @patch('scripts.collect_snapshots.get_db_connection')
     @patch('scripts.collect_snapshots.QueueTimesClient')
     def test_collect_snapshots_creates_park_activity_snapshot(
-        self, mock_client_class, mock_get_db, mysql_connection,
-        setup_test_rides, sample_api_response_open_park
+        self, mock_client_class, mock_get_db, mock_themeparks_wiki,
+        mysql_connection, setup_test_rides, sample_api_response_open_park
     ):
         """Snapshot collection should create park activity snapshot."""
         # Setup mocks
         mock_get_db.return_value.__enter__.return_value = mysql_connection
         mock_get_db.return_value.__exit__.return_value = None
+        mock_themeparks_wiki.return_value = Mock()  # Mock the wiki client
 
         mock_client = Mock()
         mock_client_class.return_value = mock_client
@@ -287,15 +291,18 @@ class TestSnapshotCollectionBasicFlow:
 class TestStatusChangeDetection:
     """Test ride status change detection."""
 
+    @patch('scripts.collect_snapshots.get_themeparks_wiki_client')
     @patch('scripts.collect_snapshots.get_db_connection')
     @patch('scripts.collect_snapshots.QueueTimesClient')
     def test_detects_ride_going_down(
-        self, mock_client_class, mock_get_db, mysql_connection, setup_test_rides
+        self, mock_client_class, mock_get_db, mock_themeparks_wiki,
+        mysql_connection, setup_test_rides
     ):
         """Should detect and record when ride goes from open to closed."""
         # Setup mocks
         mock_get_db.return_value.__enter__.return_value = mysql_connection
         mock_get_db.return_value.__exit__.return_value = None
+        mock_themeparks_wiki.return_value = Mock()  # Mock the wiki client
 
         mock_client = Mock()
         mock_client_class.return_value = mock_client
@@ -351,15 +358,18 @@ class TestStatusChangeDetection:
 class TestErrorHandling:
     """Test error handling in snapshot collection."""
 
+    @patch('scripts.collect_snapshots.get_themeparks_wiki_client')
     @patch('scripts.collect_snapshots.get_db_connection')
     @patch('scripts.collect_snapshots.QueueTimesClient')
     def test_handles_api_timeout(
-        self, mock_client_class, mock_get_db, mysql_connection, setup_test_park
+        self, mock_client_class, mock_get_db, mock_themeparks_wiki,
+        mysql_connection, setup_test_park
     ):
         """Should handle API timeout gracefully."""
         # Setup mocks
         mock_get_db.return_value.__enter__.return_value = mysql_connection
         mock_get_db.return_value.__exit__.return_value = None
+        mock_themeparks_wiki.return_value = Mock()  # Mock the wiki client
 
         mock_client = Mock()
         mock_client_class.return_value = mock_client
@@ -374,16 +384,18 @@ class TestErrorHandling:
         assert collector.stats['parks_processed'] == 1
         assert collector.stats['snapshots_created'] == 0
 
+    @patch('scripts.collect_snapshots.get_themeparks_wiki_client')
     @patch('scripts.collect_snapshots.get_db_connection')
     @patch('scripts.collect_snapshots.QueueTimesClient')
     def test_handles_empty_api_response(
-        self, mock_client_class, mock_get_db, mysql_connection,
-        setup_test_park, sample_api_response_empty
+        self, mock_client_class, mock_get_db, mock_themeparks_wiki,
+        mysql_connection, setup_test_park, sample_api_response_empty
     ):
         """Should handle empty API response (no rides)."""
         # Setup mocks
         mock_get_db.return_value.__enter__.return_value = mysql_connection
         mock_get_db.return_value.__exit__.return_value = None
+        mock_themeparks_wiki.return_value = Mock()  # Mock the wiki client
 
         mock_client = Mock()
         mock_client_class.return_value = mock_client
@@ -406,16 +418,18 @@ class TestErrorHandling:
 class TestStatisticsTracking:
     """Test collection statistics tracking."""
 
+    @patch('scripts.collect_snapshots.get_themeparks_wiki_client')
     @patch('scripts.collect_snapshots.get_db_connection')
     @patch('scripts.collect_snapshots.QueueTimesClient')
     def test_tracks_collection_statistics(
-        self, mock_client_class, mock_get_db, mysql_connection,
-        setup_test_rides, sample_api_response_open_park
+        self, mock_client_class, mock_get_db, mock_themeparks_wiki,
+        mysql_connection, setup_test_rides, sample_api_response_open_park
     ):
         """Should track collection statistics correctly."""
         # Setup mocks
         mock_get_db.return_value.__enter__.return_value = mysql_connection
         mock_get_db.return_value.__exit__.return_value = None
+        mock_themeparks_wiki.return_value = Mock()  # Mock the wiki client
 
         mock_client = Mock()
         mock_client_class.return_value = mock_client

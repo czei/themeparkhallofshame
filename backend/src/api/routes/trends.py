@@ -173,7 +173,7 @@ def get_trends():
                 "previous_period": period_info['previous_period_label']
             },
             "count": len(results),
-            "attribution": "Data powered by Queue-Times.com - https://queue-times.com",
+            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }
 
@@ -448,7 +448,7 @@ def get_chart_data():
             "chart_data": chart_data,
             "mock": is_mock,
             "granularity": granularity,
-            "attribution": "Data powered by Queue-Times.com - https://queue-times.com",
+            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }), 200
 
@@ -565,7 +565,7 @@ def get_longest_wait_times():
             "count": len(ranked_results),
             "data": ranked_results,
             "cached": True,
-            "attribution": "Data powered by Queue-Times.com - https://queue-times.com",
+            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }), 200
 
@@ -679,7 +679,7 @@ def get_least_reliable():
             "count": len(ranked_results),
             "data": ranked_results,
             "cached": True,
-            "attribution": "Data powered by Queue-Times.com - https://queue-times.com",
+            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }), 200
 

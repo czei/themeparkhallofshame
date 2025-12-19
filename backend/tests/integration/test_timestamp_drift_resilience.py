@@ -150,6 +150,56 @@ class TestTimestampDriftResilience:
                 'last_updated_api': rss_time
             })
 
+        # Create hourly stats that represent the aggregated data
+        # This is what get_park_today_shame_breakdown now reads from
+        hour_start = base_time.replace(minute=0, second=0, microsecond=0)
+        mysql_connection.execute(text("""
+            INSERT INTO park_hourly_stats (
+                park_id, hour_start_utc, shame_score, avg_wait_time_minutes,
+                rides_operating, rides_down, total_downtime_hours, weighted_downtime_hours,
+                effective_park_weight, snapshot_count, park_was_open
+            ) VALUES (
+                :park_id, :hour_start, :shame_score, :avg_wait,
+                :rides_operating, :rides_down, :total_downtime, :weighted_downtime,
+                :effective_weight, :snapshot_count, :park_was_open
+            )
+        """), {
+            'park_id': park_id,
+            'hour_start': hour_start,
+            'shame_score': 0.5,  # Some shame for 4 down snapshots
+            'avg_wait': 30.0,
+            'rides_operating': 1,
+            'rides_down': 1,
+            'total_downtime': 0.33,  # ~4 down snapshots × 5 min / 60
+            'weighted_downtime': 1.0,  # weighted by tier 1
+            'effective_weight': 3.0,  # tier 1 weight
+            'snapshot_count': 10,
+            'park_was_open': 1
+        })
+
+        mysql_connection.execute(text("""
+            INSERT INTO ride_hourly_stats (
+                ride_id, park_id, hour_start_utc, avg_wait_time_minutes,
+                operating_snapshots, down_snapshots, downtime_hours,
+                uptime_percentage, snapshot_count, ride_operated
+            ) VALUES (
+                :ride_id, :park_id, :hour_start, :avg_wait,
+                :operating, :down, :downtime,
+                :uptime, :snapshot_count, :operated
+            )
+        """), {
+            'ride_id': ride_id,
+            'park_id': park_id,
+            'hour_start': hour_start,
+            'avg_wait': 30.0,
+            'operating': 6,
+            'down': 4,
+            'downtime': 0.33,  # 4 down × 5 min / 60
+            'uptime': 60.0,  # 6/10
+            'snapshot_count': 10,
+            'operated': 1
+        })
+
         return {
             'park_id': park_id,
             'ride_id': ride_id,
@@ -391,6 +441,57 @@ class TestScheduleFallbackHeuristic:
                 'status': status,
                 'last_updated_api': snapshot_time
             })
+
+        # Create hourly stats that would be produced by the aggregation with fallback
+        # This simulates what aggregate_hourly.py would create when the fallback
+        # heuristic (park_appears_open = 1 OR rides_open > 0) is applied
+        hour_start = base_time.replace(minute=0, second=0, microsecond=0)
+        mysql_connection.execute(text("""
+            INSERT INTO park_hourly_stats (
+                park_id, hour_start_utc, shame_score, avg_wait_time_minutes,
+                rides_operating, rides_down, total_downtime_hours, weighted_downtime_hours,
+                effective_park_weight, snapshot_count, park_was_open
+            ) VALUES (
+                :park_id, :hour_start, :shame_score, :avg_wait,
+                :rides_operating, :rides_down, :total_downtime, :weighted_downtime,
+                :effective_weight, :snapshot_count, :park_was_open
+            )
+        """), {
+            'park_id': park_id,
+            'hour_start': hour_start,
+            'shame_score': 2.4,  # Match the raw snapshot shame score
+            'avg_wait': 25.0,
+            'rides_operating': 47,
+            'rides_down': 30,
+            'total_downtime': 0.67,  # 4 down snapshots × 10 min / 60
+            'weighted_downtime': 2.0,  # weighted by tier
+            'effective_weight': 3.0,
+            'snapshot_count': 10,
+            'park_was_open': 1  # Fallback: park_appears_open=0 but rides_open>0
+        })
+
+        mysql_connection.execute(text("""
+            INSERT INTO ride_hourly_stats (
+                ride_id, park_id, hour_start_utc, avg_wait_time_minutes,
+                operating_snapshots, down_snapshots, downtime_hours,
+                uptime_percentage, snapshot_count, ride_operated
+            ) VALUES (
+                :ride_id, :park_id, :hour_start, :avg_wait,
+                :operating, :down, :downtime,
+                :uptime, :snapshot_count, :operated
+            )
+        """), {
+            'ride_id': ride_id,
+            'park_id': park_id,
+            'hour_start': hour_start,
+            'avg_wait': 30.0,
+            'operating': 6,
+            'down': 4,
+            'downtime': 0.67,  # 4 down × 10 min / 60
+            'uptime': 60.0,  # 6 operating / 10 total
+            'snapshot_count': 10,
+            'operated': 1
+        })
 
         return {
             'park_id': park_id,

@@ -21,8 +21,8 @@ from classifier.ai_classifier import AIClassifier, AIClassificationResult, AICla
 
 # Skip tests that require real OpenAI API key
 requires_openai_key = pytest.mark.skipif(
-    not os.environ.get('OPENAI_API_KEY'),
-    reason="OPENAI_API_KEY not set - skipping live API test"
+    not (os.environ.get('OPENAI_KEY') or os.environ.get('OPENAI_API_KEY')),
+    reason="OPENAI_KEY or OPENAI_API_KEY not set - skipping live API test"
 )
 
 

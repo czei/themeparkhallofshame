@@ -186,7 +186,7 @@ def get_park_downtime_rankings():
                 filter_disney_universal=filter_disney_universal
             )
 
-            # Add Queue-Times.com URLs to rankings
+            # Add external URLs to rankings
             rankings_with_urls = []
             for rank_idx, park in enumerate(rankings, start=1):
                 park_dict = dict(park) if hasattr(park, '_mapping') else dict(park)
@@ -220,8 +220,8 @@ def get_park_downtime_rankings():
                 "aggregate_stats": aggregate_stats,
                 "data": rankings_with_urls,
                 "attribution": {
-                    "data_source": "Queue-Times.com",
-                    "url": "https://queue-times.com"
+                    "data_source": "ThemeParks.wiki",
+                    "url": "https://themeparks.wiki"
                 }
             }
 
@@ -342,7 +342,7 @@ def get_park_wait_times():
                         limit=limit
                     )
 
-            # Add Queue-Times.com URLs and rank to wait times
+            # Add external URLs and rank to wait times
             wait_times_with_urls = []
             for rank_idx, park in enumerate(wait_times, start=1):
                 park_dict = dict(park) if hasattr(park, '_mapping') else dict(park)

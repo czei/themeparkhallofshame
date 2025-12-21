@@ -1,26 +1,25 @@
 <!--
-Version: 1.0.0 → 1.1.0
-Modified Principles:
-  - VI. Test Coverage for Data Integrity → VI. Test-Driven Development (expanded to make TDD mandatory)
+Version: 1.1.0 → 1.2.0
+Modified Principles: None
 Added Sections:
-  - VII. DRY Principles & Single Source of Truth (new principle addressing code duplication root cause)
-  - VIII. Architecture Stability (new principle for long-term maintainability)
-  - IX. Production Integrity & Local-First Development (new principle prohibiting direct production modifications)
-  - X. Mandatory AI-Assisted Expert Review (new principle requiring Zen review and implementation of recommendations)
+  - XI. Cost Management & LLM Delegation (new principle addressing expensive Claude Code credits and delegation to cheaper Zen/PAL models)
 Removed Sections: None
 Templates Updated:
-  ✅ plan-template.md - Verified consistency with DRY and TDD principles
-  ✅ spec-template.md - Verified alignment with real-time data requirements
-  ✅ tasks-template.md - Verified task categories align with TDD workflow and observability principles
-Follow-up TODOs: None
+  ⏳ To be determined if delegation guidelines require template changes
+Follow-up TODOs:
+  - Review spec/plan/tasks templates to determine if Principle XI requires explicit delegation guidance
 Rationale:
+  - Claude Code credits are expensive and continually depleted
+  - Added explicit Cost Management principle to establish Claude as manager/orchestrator who delegates to cheaper specialized models
+  - Zen/PAL MCP tools (GPT-4o, Gemini, etc.) provide expert analysis at lower cost
+  - Preserves Claude credits for high-level coordination, user communication, and quality control
+  - Delegation to specialized models maintains quality while reducing costs
+Previous Version (1.0.0 → 1.1.0):
   - Elevated TDD from best practice to constitutional principle based on project requirement (882 tests in suite)
   - Added explicit DRY principle after Zen Consensus identified duplicated logic across 20+ files as root cause of "fix one, break another" regression cycles
   - Added Architecture Stability principle to prevent future architectural drift based on ORM migration decision
   - Added Production Integrity principle after repeated incidents of attempting bug fixes directly on production server without local testing
   - Added Mandatory AI Review principle to catch architectural problems, security vulnerabilities, and code smells early via systematic expert analysis
-  - Strengthened Deployment Process and Review Requirements sections with mandatory workflows and quality gates
-  - These changes codify lessons learned during two weeks of debugging shame-score-consistency issues
 -->
 
 # Theme Park Hall of Shame Constitution
@@ -98,6 +97,31 @@ After each significant design phase or coding phase, the design or implementatio
 - **Complex Bugs:** Use `debug` or `thinkdeep` to ensure root cause is properly identified
 
 **Enforcement:** Pull requests that skip Zen review or ignore recommendations without documented justification are grounds for rejection. The review report and implementation of recommendations MUST be included in PR description.
+
+### XI. Cost Management & LLM Delegation
+Claude Code usage is expensive and credits are continually depleted. Claude (Sonnet) MUST act as manager/orchestrator, delegating actual work to cheaper, specialized models via Zen/PAL MCP tools whenever possible. Claude's role is high-level coordination, planning, and quality control. Expert analysis, code generation, and detailed reviews should be delegated to cost-effective specialized models.
+
+**Rationale:** Claude Code credits are limited and expensive. Maximizing delegation to Zen/PAL tools (which use cheaper models like GPT-4o, Gemini, etc.) preserves credits while maintaining quality through specialized expert models.
+
+**When to Delegate:**
+- **Research/Analysis:** Use Zen `thinkdeep` or `analyze` for technical investigations
+- **Code Generation:** Use Zen `codegen` for implementation work
+- **Code Review:** Use Zen `codereview` for quality validation
+- **Security Audits:** Use Zen `secaudit` for security analysis
+- **Refactoring:** Use Zen `refactor` for code improvements
+- **Testing:** Use Zen `testgen` for test generation
+- **Debugging:** Use Zen `debug` for systematic debugging
+- **Complex Problem Solving:** Use PAL `consensus` for multi-model perspectives
+
+**When Claude Should Act Directly:**
+- High-level planning and coordination
+- User communication and clarification
+- Quality control and synthesis of delegated work
+- Final decision making when expert models disagree
+- Editing files based on expert recommendations
+- Simple, quick tasks that don't justify delegation overhead
+
+**Enforcement:** During planning and implementation phases, Claude MUST delegate technical work to Zen/PAL tools unless the task requires direct user interaction or synthesis of multiple expert outputs.
 
 ## Data Quality Standards
 
@@ -188,7 +212,8 @@ This constitution establishes the non-negotiable principles for the Theme Park H
 - API integration changes MUST verify attribution requirements
 - Code reviews MUST enforce TDD, DRY, and single source of truth principles
 - Deployment process MUST follow local-first development workflow (Principle IX)
-- Violations of Principles VI-VII-IX-X (TDD, DRY, Production Integrity, AI Review) are grounds for immediate PR rejection or deployment rollback
+- Claude MUST demonstrate delegation to Zen/PAL tools for technical work (Principle XI)
+- Violations of Principles VI-VII-IX-X-XI (TDD, DRY, Production Integrity, AI Review, Cost Management) are grounds for immediate PR rejection or deployment rollback
 - PRs missing Zen review report or ignoring recommendations without justification will be rejected
 
-**Version**: 1.1.0 | **Ratified**: 2025-11-22 | **Last Amended**: 2025-12-05
+**Version**: 1.2.0 | **Ratified**: 2025-11-22 | **Last Amended**: 2025-12-21

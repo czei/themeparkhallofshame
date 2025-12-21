@@ -242,11 +242,11 @@ class HourlyAggregator:
                 # Pre-calculate which rides operated today (fixes N+1 query problem)
                 # This runs ONCE instead of once per ride
                 #
-                # PARK-TYPE AWARE LOGIC (from CLAUDE.md Rule 3):
-                # - Disney/Universal: Trust DOWN status as valid breakdown signal
-                #   (they distinguish DOWN=breakdown vs CLOSED=scheduled)
-                # - Other parks: Require OPERATING status to filter out seasonal closures
-                #   (they only report CLOSED for all non-operating rides)
+                # PARK-TYPE AWARE LOGIC (from CLAUDE.md Rule 2):
+                # - Disney/Universal: DOWN status is valid signal (they distinguish DOWN vs CLOSED)
+                #   Fixes DINOSAUR bug where ride was DOWN before showing OPERATING
+                # - Other parks: Require OPERATING status only (they use CLOSED for everything)
+                #   Fixes Kennywood bug where rides showing only CLOSED were incorrectly counted
                 operated_today_result = conn.execute(text("""
                     SELECT DISTINCT rss_day.ride_id
                     FROM ride_status_snapshots rss_day
@@ -261,9 +261,13 @@ class HourlyAggregator:
                         AND (
                             -- Standard: ride showed OPERATING
                             rss_day.status = 'OPERATING' OR rss_day.computed_is_open = TRUE
-                            -- DOWN status is valid signal that ride attempted to operate
+                            -- Disney/Universal: DOWN is valid signal that ride attempted to operate
                             -- (distinguishes from seasonal closures which show CLOSED)
-                            OR rss_day.status = 'DOWN'
+                            -- Other parks: Don't use DOWN as signal (they only report CLOSED)
+                            OR (
+                                rss_day.status = 'DOWN'
+                                AND (p_day.is_disney = TRUE OR p_day.is_universal = TRUE)
+                            )
                         )
                 """), {
                     'day_start_utc': day_start_utc,

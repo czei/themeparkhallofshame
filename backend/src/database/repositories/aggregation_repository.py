@@ -4,7 +4,7 @@ Provides data access layer for aggregation job tracking and verification.
 """
 
 from typing import List, Optional, Dict, Any
-from datetime import date
+from datetime import date, datetime, timedelta
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
@@ -233,11 +233,12 @@ class AggregationLogRepository:
                    rides_processed, error_message
             FROM aggregation_log
             WHERE status = 'failed'
-                AND started_at >= DATE_SUB(NOW(), INTERVAL :days DAY)
+                AND started_at >= :start_date
             ORDER BY started_at DESC
         """)
 
-        result = self.conn.execute(query, {"days": days})
+        start_date = datetime.now() - timedelta(days=days)
+        result = self.conn.execute(query, {"start_date": start_date})
         return [dict(row._mapping) for row in result]
 
     def mark_complete(
@@ -260,7 +261,7 @@ class AggregationLogRepository:
         query = text("""
             UPDATE aggregation_log
             SET status = 'success',
-                completed_at = NOW(),
+                completed_at = CURRENT_TIMESTAMP,
                 parks_processed = :parks_processed,
                 rides_processed = :rides_processed
             WHERE log_id = :log_id
@@ -297,7 +298,7 @@ class AggregationLogRepository:
         query = text("""
             UPDATE aggregation_log
             SET status = 'failed',
-                completed_at = NOW(),
+                completed_at = CURRENT_TIMESTAMP,
                 error_message = :error_message
             WHERE log_id = :log_id
         """)

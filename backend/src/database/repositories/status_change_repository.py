@@ -4,6 +4,7 @@ Provides data access layer for ride status change events (up/down transitions).
 """
 
 from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
@@ -108,11 +109,12 @@ class RideStatusChangeRepository:
                    new_status, duration_in_previous_status, wait_time_at_change
             FROM ride_status_changes
             WHERE ride_id = :ride_id
-                AND changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+                AND changed_at >= :cutoff_time
             ORDER BY changed_at DESC
         """)
 
-        result = self.conn.execute(query, {"ride_id": ride_id, "hours": hours})
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        result = self.conn.execute(query, {"ride_id": ride_id, "cutoff_time": cutoff_time})
         return [dict(row._mapping) for row in result]
 
     def get_downtime_events(self, ride_id: int, hours: int = 24) -> List[Dict[str, Any]]:
@@ -132,11 +134,12 @@ class RideStatusChangeRepository:
             FROM ride_status_changes
             WHERE ride_id = :ride_id
                 AND new_status = FALSE
-                AND changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+                AND changed_at >= :cutoff_time
             ORDER BY changed_at DESC
         """)
 
-        result = self.conn.execute(query, {"ride_id": ride_id, "hours": hours})
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        result = self.conn.execute(query, {"ride_id": ride_id, "cutoff_time": cutoff_time})
         return [dict(row._mapping) for row in result]
 
     def get_uptime_events(self, ride_id: int, hours: int = 24) -> List[Dict[str, Any]]:
@@ -156,11 +159,12 @@ class RideStatusChangeRepository:
             FROM ride_status_changes
             WHERE ride_id = :ride_id
                 AND new_status = TRUE
-                AND changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+                AND changed_at >= :cutoff_time
             ORDER BY changed_at DESC
         """)
 
-        result = self.conn.execute(query, {"ride_id": ride_id, "hours": hours})
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        result = self.conn.execute(query, {"ride_id": ride_id, "cutoff_time": cutoff_time})
         return [dict(row._mapping) for row in result]
 
     def get_recent_changes_all_rides(
@@ -180,6 +184,7 @@ class RideStatusChangeRepository:
         Returns:
             List of dictionaries with change data
         """
+        cutoff_time = datetime.now() - timedelta(hours=hours)
         if park_id:
             query = text("""
                 SELECT rsc.change_id, rsc.ride_id, rsc.changed_at,
@@ -190,14 +195,14 @@ class RideStatusChangeRepository:
                 FROM ride_status_changes rsc
                 INNER JOIN rides r ON rsc.ride_id = r.ride_id
                 INNER JOIN parks p ON r.park_id = p.park_id
-                WHERE rsc.changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+                WHERE rsc.changed_at >= :cutoff_time
                     AND r.park_id = :park_id
                 ORDER BY rsc.changed_at DESC
                 LIMIT :limit
             """)
             result = self.conn.execute(query, {
                 "park_id": park_id,
-                "hours": hours,
+                "cutoff_time": cutoff_time,
                 "limit": limit
             })
         else:
@@ -210,11 +215,11 @@ class RideStatusChangeRepository:
                 FROM ride_status_changes rsc
                 INNER JOIN rides r ON rsc.ride_id = r.ride_id
                 INNER JOIN parks p ON r.park_id = p.park_id
-                WHERE rsc.changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+                WHERE rsc.changed_at >= :cutoff_time
                 ORDER BY rsc.changed_at DESC
                 LIMIT :limit
             """)
-            result = self.conn.execute(query, {"hours": hours, "limit": limit})
+            result = self.conn.execute(query, {"cutoff_time": cutoff_time, "limit": limit})
 
         return [dict(row._mapping) for row in result]
 
@@ -235,6 +240,7 @@ class RideStatusChangeRepository:
         Returns:
             List of dictionaries with longest downtime events
         """
+        cutoff_time = datetime.now() - timedelta(hours=hours)
         if park_id:
             query = text("""
                 SELECT rsc.change_id, rsc.ride_id, rsc.changed_at,
@@ -244,7 +250,7 @@ class RideStatusChangeRepository:
                 FROM ride_status_changes rsc
                 INNER JOIN rides r ON rsc.ride_id = r.ride_id
                 INNER JOIN parks p ON r.park_id = p.park_id
-                WHERE rsc.changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+                WHERE rsc.changed_at >= :cutoff_time
                     AND rsc.new_status = FALSE
                     AND rsc.duration_in_previous_status IS NOT NULL
                     AND r.park_id = :park_id
@@ -253,7 +259,7 @@ class RideStatusChangeRepository:
             """)
             result = self.conn.execute(query, {
                 "park_id": park_id,
-                "hours": hours,
+                "cutoff_time": cutoff_time,
                 "limit": limit
             })
         else:
@@ -265,13 +271,13 @@ class RideStatusChangeRepository:
                 FROM ride_status_changes rsc
                 INNER JOIN rides r ON rsc.ride_id = r.ride_id
                 INNER JOIN parks p ON r.park_id = p.park_id
-                WHERE rsc.changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+                WHERE rsc.changed_at >= :cutoff_time
                     AND rsc.new_status = FALSE
                     AND rsc.duration_in_previous_status IS NOT NULL
                 ORDER BY rsc.duration_in_previous_status DESC
                 LIMIT :limit
             """)
-            result = self.conn.execute(query, {"hours": hours, "limit": limit})
+            result = self.conn.execute(query, {"cutoff_time": cutoff_time, "limit": limit})
 
         return [dict(row._mapping) for row in result]
 
@@ -297,10 +303,11 @@ class RideStatusChangeRepository:
                 SUM(CASE WHEN new_status = FALSE THEN 1 ELSE 0 END) as to_closed
             FROM ride_status_changes
             WHERE ride_id = :ride_id
-                AND changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+                AND changed_at >= :cutoff_time
         """)
 
-        result = self.conn.execute(query, {"ride_id": ride_id, "hours": hours})
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        result = self.conn.execute(query, {"ride_id": ride_id, "cutoff_time": cutoff_time})
         row = result.fetchone()
 
         if row is None:

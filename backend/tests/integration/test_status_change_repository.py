@@ -76,7 +76,6 @@ class TestRideStatusChangeRepository:
 
         assert result is None
 
-    @pytest.mark.skip(reason="Requires MySQL-specific DATE_SUB() function")
     def test_count_changes_by_ride(self, mysql_connection, sample_park_data, sample_ride_data):
         """Count status changes for a ride."""
         from tests.conftest import insert_sample_park, insert_sample_ride
@@ -101,7 +100,6 @@ class TestRideStatusChangeRepository:
         assert counts['to_open'] == 2
         assert counts['to_closed'] == 1
 
-    @pytest.mark.skip(reason="Requires MySQL-specific DATE_SUB() function")
     def test_count_changes_no_changes(self, mysql_connection):
         """Count changes for ride with no status changes."""
         repo = RideStatusChangeRepository(mysql_connection)

@@ -369,18 +369,18 @@ class ParkRepository:
         """
         if period == "weekly":
             stats_table = "ride_weekly_stats"
+            stats_alias = "rws"
             date_condition = "rws.year = YEAR(COALESCE(:stat_date, CURDATE())) AND rws.week_number = WEEK(COALESCE(:stat_date, CURDATE()), 3)"
         elif period == "monthly":
             stats_table = "ride_monthly_stats"
+            stats_alias = "rms"
             date_condition = "rms.year = YEAR(COALESCE(:stat_date, CURDATE())) AND rms.month = MONTH(COALESCE(:stat_date, CURDATE()))"
         elif period == "yearly":
             stats_table = "ride_yearly_stats"
+            stats_alias = "rys"
             date_condition = "rys.year = YEAR(COALESCE(:stat_date, CURDATE()))"
         else:
             raise ValueError(f"Invalid period for weighted rankings: {period}")
-
-        # Adjust table alias in date condition
-        stats_alias = stats_table[0:3]  # rws, rms, or rys
 
         query = text(f"""
             WITH park_weights AS (

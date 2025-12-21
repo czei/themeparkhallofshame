@@ -100,7 +100,6 @@ class TestAggregationLogRepository:
         assert fetched_log['parks_processed'] == 5
         assert fetched_log['rides_processed'] == 25
 
-    @pytest.mark.skip(reason="Requires MySQL-specific NOW() function")
     def test_mark_complete(self, mysql_connection):
         """Mark an aggregation as successfully completed."""
         repo = AggregationLogRepository(mysql_connection)
@@ -126,7 +125,6 @@ class TestAggregationLogRepository:
         assert fetched_log['rides_processed'] == 50
         assert fetched_log['completed_at'] is not None
 
-    @pytest.mark.skip(reason="Requires MySQL-specific NOW() function")
     def test_mark_failed(self, mysql_connection):
         """Mark an aggregation as failed."""
         repo = AggregationLogRepository(mysql_connection)
@@ -151,7 +149,6 @@ class TestAggregationLogRepository:
         assert fetched_log['error_message'] == 'Test error'
         assert fetched_log['completed_at'] is not None
 
-    @pytest.mark.skip(reason="Requires MySQL-specific NOW() function (calls mark_complete)")
     def test_is_date_aggregated_success(self, mysql_connection):
         """Check if a date has been successfully aggregated."""
         repo = AggregationLogRepository(mysql_connection)
@@ -181,7 +178,6 @@ class TestAggregationLogRepository:
 
         assert is_aggregated is False
 
-    @pytest.mark.skip(reason="Requires MySQL-specific NOW() function (calls mark_failed)")
     def test_is_date_aggregated_failed_status(self, mysql_connection):
         """Check that failed aggregations don't count as aggregated."""
         repo = AggregationLogRepository(mysql_connection)

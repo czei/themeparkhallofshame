@@ -359,7 +359,6 @@ class TestParkRepositoryRowConversion:
 # Test Class: Rankings by Downtime (FR-010)
 # ============================================================================
 
-@pytest.mark.skip(reason="Ranking queries require MySQL-specific functions (CONCAT, CURDATE, etc.) and stats tables. Tested in integration tests.")
 class TestParkRankingsByDowntime:
     """
     Test get_rankings_by_downtime() for different periods.
@@ -431,7 +430,6 @@ class TestParkRankingsByDowntime:
 # Test Class: Rankings by Weighted Downtime (FR-024)
 # ============================================================================
 
-@pytest.mark.skip(reason="Weighted ranking queries require MySQL-specific functions and stats tables. Tested in integration tests.")
 class TestParkRankingsByWeightedDowntime:
     """
     Test get_rankings_by_weighted_downtime() with tier weighting.

@@ -503,13 +503,49 @@ class HourlyAggregator:
                 :park_id,
                 :hour_start,
 
-                -- Average shame score across hour (already computed at collection time)
-                -- FALLBACK HEURISTIC: Park is "effectively open" if EITHER:
-                -- 1. park_appears_open = TRUE (schedule-based detection), OR
-                -- 2. rides_open > 0 (rides are actually operating)
-                -- This handles parks like Six Flags where schedule data may be missing
-                -- but rides are clearly operating. Matches chart query logic.
-                ROUND(AVG(CASE WHEN (pas.park_appears_open = 1 OR pas.rides_open > 0) THEN pas.shame_score END), 1) as shame_score,
+                -- Shame score: (weighted_downtime / effective_park_weight) * 10
+                -- CRITICAL FIX (2025-12-21): Calculate from rides that operated TODAY for consistency
+                -- Previously used AVG(pas.shame_score) which used 7-day hybrid denominator,
+                -- causing mismatch: high shame_score but zero total_downtime_hours early in the day
+                -- NOW: Both shame_score and downtime use "operated TODAY" logic (ride_operated = 1)
+                ROUND(
+                    CASE
+                        -- Denominator: sum of tier weights for rides that operated TODAY
+                        WHEN COALESCE((
+                            SELECT SUM(COALESCE(rc.tier_weight, 2))
+                            FROM ride_hourly_stats rhs
+                            JOIN rides r ON rhs.ride_id = r.ride_id
+                            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                            WHERE rhs.park_id = :park_id
+                              AND rhs.hour_start_utc = :hour_start
+                              AND rhs.ride_operated = 1
+                        ), 0) > 0
+                        THEN
+                            -- Numerator: weighted downtime for rides that operated TODAY
+                            COALESCE((
+                                SELECT SUM(rhs.downtime_hours * COALESCE(rc.tier_weight, 2))
+                                FROM ride_hourly_stats rhs
+                                JOIN rides r ON rhs.ride_id = r.ride_id
+                                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                                WHERE rhs.park_id = :park_id
+                                  AND rhs.hour_start_utc = :hour_start
+                                  AND rhs.ride_operated = 1
+                            ), 0)
+                            /
+                            COALESCE((
+                                SELECT SUM(COALESCE(rc.tier_weight, 2))
+                                FROM ride_hourly_stats rhs
+                                JOIN rides r ON rhs.ride_id = r.ride_id
+                                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+                                WHERE rhs.park_id = :park_id
+                                  AND rhs.hour_start_utc = :hour_start
+                                  AND rhs.ride_operated = 1
+                            ), 0)
+                            * 10
+                        ELSE 0
+                    END,
+                    1
+                ) as shame_score,
 
                 -- Average wait time across all operating rides
                 ROUND(AVG(CASE WHEN (pas.park_appears_open = 1 OR pas.rides_open > 0) THEN pas.avg_wait_time END), 2) as avg_wait_time_minutes,
@@ -540,22 +576,18 @@ class HourlyAggregator:
                       AND rhs.ride_operated = 1
                 ), 0) as weighted_downtime_hours,
 
-                -- Effective park weight (park-type aware denominator)
-                -- Disney/Universal: 7-day window (have schedules, REFURBISHMENT status)
-                -- Other parks: 3-day (72-hour) window (CLOSED is only status, faster seasonal detection)
+                -- Effective park weight: sum of tier weights for rides that operated TODAY
+                -- CRITICAL FIX (2025-12-21): Changed from 7-day/3-day window to "operated TODAY"
+                -- This ensures consistency with shame_score and total_downtime_hours calculations
+                -- All three metrics now use the SAME set of rides (ride_operated = 1)
                 COALESCE((
                     SELECT SUM(COALESCE(rc.tier_weight, 2))
-                    FROM rides r
+                    FROM ride_hourly_stats rhs
+                    JOIN rides r ON rhs.ride_id = r.ride_id
                     LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                    JOIN parks p ON r.park_id = p.park_id
-                    WHERE r.park_id = :park_id
-                      AND r.is_active = TRUE
-                      AND r.category = 'ATTRACTION'
-                      AND r.last_operated_at >= CASE
-                        WHEN p.is_disney = TRUE OR p.is_universal = TRUE
-                        THEN DATE_SUB(:hour_start, INTERVAL 7 DAY)  -- 7 days for Disney/Universal
-                        ELSE DATE_SUB(:hour_start, INTERVAL 3 DAY)  -- 3 days (72 hours) for others
-                      END
+                    WHERE rhs.park_id = :park_id
+                      AND rhs.hour_start_utc = :hour_start
+                      AND rhs.ride_operated = 1
                 ), 0) as effective_park_weight,
 
                 -- Number of snapshots aggregated (expect ~12 for 5-min collection)

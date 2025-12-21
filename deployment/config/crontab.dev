@@ -1,0 +1,22 @@
+# Theme Park Hall of Shame - Development Cron Jobs
+# Install with: crontab /path/to/crontab.dev
+#
+# For local development/testing only. Production uses crontab.prod.
+
+SHELL=/bin/bash
+PATH=/Library/Frameworks/Python.framework/Versions/3.13/bin:/usr/local/bin:/usr/bin
+MAILTO=""
+
+# =============================================================================
+# DATA COLLECTION (Development)
+# =============================================================================
+
+# Weather collection every 10 minutes (synchronized with park data)
+# Test locally by running:
+#   PYTHONPATH=backend/src python3 backend/src/scripts/collect_weather.py --test
+#
+# For production deployment, this uses:
+#   */10 * * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.cron_wrapper collect_weather --timeout=300 >> /opt/themeparkhallofshame/logs/collect_weather.log 2>&1
+#
+# NOTE: Local cron is NOT recommended for development.
+# Instead, run scripts manually or use launchd on macOS.

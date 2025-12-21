@@ -16,6 +16,7 @@ from utils.metrics import (
     SNAPSHOT_INTERVAL_MINUTES,
     SHAME_SCORE_MULTIPLIER,
     SHAME_SCORE_PRECISION,
+    LIVE_WINDOW_HOURS,
 )
 
 
@@ -58,8 +59,7 @@ class RideStatusSQL:
     # Core status expression - maps NULL status to OPERATING/DOWN based on computed_is_open
     STATUS_EXPR = "COALESCE(status, IF(computed_is_open, 'OPERATING', 'DOWN'))"
 
-    # Time window for "live" data - only consider snapshots from last 2 hours
-    LIVE_WINDOW_HOURS = 2
+    # Note: LIVE_WINDOW_HOURS is now imported from utils.metrics (SSOT)
 
     @staticmethod
     def status_expression(table_alias: str = "rss") -> str:
@@ -293,7 +293,8 @@ class RideStatusSQL:
         parks_alias: str,
         start_param: str = ":start_utc",
         end_param: str = ":end_utc",
-        park_id_expr: str = None
+        park_id_expr: str = None,
+        with_fallback: bool = False
     ) -> str:
         """
         Get park-type-aware "has operated" check.
@@ -313,6 +314,10 @@ class RideStatusSQL:
             end_param: SQL parameter name for end time
             park_id_expr: Expression for park_id (e.g., "p.park_id"). If provided,
                          requires park_appears_open=TRUE for snapshots to count.
+            with_fallback: If True, also considers park "open" if rides_open > 0.
+                          This handles cases where schedule data is missing but
+                          rides are clearly operating. Default False for backwards
+                          compatibility.
 
         Returns:
             SQL condition that returns TRUE if ride has operated enough for its park type
@@ -326,7 +331,13 @@ class RideStatusSQL:
             park_join = f"""INNER JOIN park_activity_snapshots pas_op
                             ON pas_op.park_id = {park_id_expr}
                             AND {ts_match}"""
-            park_filter = "AND pas_op.park_appears_open = TRUE"
+            if with_fallback:
+                # FALLBACK HEURISTIC: Include snapshots where EITHER:
+                # 1. park_appears_open = TRUE (schedule-based detection), OR
+                # 2. rides_open > 0 (rides are actually operating)
+                park_filter = "AND (pas_op.park_appears_open = TRUE OR pas_op.rides_open > 0)"
+            else:
+                park_filter = "AND pas_op.park_appears_open = TRUE"
         else:
             park_join = ""
             park_filter = ""
@@ -456,7 +467,7 @@ class RideStatusSQL:
         """
         time_filter = ""
         if include_time_window:
-            time_filter = f"AND rss_inner.recorded_at >= DATE_SUB(NOW(), INTERVAL {RideStatusSQL.LIVE_WINDOW_HOURS} HOUR)"
+            time_filter = f"AND rss_inner.recorded_at >= DATE_SUB(NOW(), INTERVAL {LIVE_WINDOW_HOURS} HOUR)"
 
         # If park_id_expr is provided, wrap the status with park-open check
         if park_id_expr:
@@ -465,7 +476,7 @@ class RideStatusSQL:
                 SELECT pas_inner.park_appears_open
                 FROM park_activity_snapshots pas_inner
                 WHERE pas_inner.park_id = {park_id_expr}
-                    AND pas_inner.recorded_at >= DATE_SUB(NOW(), INTERVAL {RideStatusSQL.LIVE_WINDOW_HOURS} HOUR)
+                    AND pas_inner.recorded_at >= DATE_SUB(NOW(), INTERVAL {LIVE_WINDOW_HOURS} HOUR)
                 ORDER BY pas_inner.recorded_at DESC
                 LIMIT 1
             """
@@ -518,7 +529,7 @@ class RideStatusSQL:
         """
         time_filter = ""
         if include_time_window:
-            time_filter = f"AND rss_inner.recorded_at >= DATE_SUB(NOW(), INTERVAL {RideStatusSQL.LIVE_WINDOW_HOURS} HOUR)"
+            time_filter = f"AND rss_inner.recorded_at >= DATE_SUB(NOW(), INTERVAL {LIVE_WINDOW_HOURS} HOUR)"
 
         # If park_id_expr is provided, wrap the check with park-open check
         if park_id_expr:
@@ -527,7 +538,7 @@ class RideStatusSQL:
                 SELECT pas_inner.park_appears_open
                 FROM park_activity_snapshots pas_inner
                 WHERE pas_inner.park_id = {park_id_expr}
-                    AND pas_inner.recorded_at >= DATE_SUB(NOW(), INTERVAL {RideStatusSQL.LIVE_WINDOW_HOURS} HOUR)
+                    AND pas_inner.recorded_at >= DATE_SUB(NOW(), INTERVAL {LIVE_WINDOW_HOURS} HOUR)
                 ORDER BY pas_inner.recorded_at DESC
                 LIMIT 1
             """
@@ -609,7 +620,7 @@ class ParkStatusSQL:
                     SELECT CASE WHEN pas2.park_appears_open = TRUE THEN 1 ELSE 0 END
                     FROM park_activity_snapshots pas2
                     WHERE pas2.park_id = {park_id_expr}
-                        AND pas2.recorded_at >= DATE_SUB(NOW(), INTERVAL {RideStatusSQL.LIVE_WINDOW_HOURS} HOUR)
+                        AND pas2.recorded_at >= DATE_SUB(NOW(), INTERVAL {LIVE_WINDOW_HOURS} HOUR)
                     ORDER BY pas2.recorded_at DESC
                     LIMIT 1
                 )
@@ -617,7 +628,7 @@ class ParkStatusSQL:
         ) AS {alias}"""
 
     @staticmethod
-    def park_appears_open_filter(table_alias: str = "pas") -> str:
+    def park_appears_open_filter(table_alias: str = "pas", with_fallback: bool = False) -> str:
         """
         Get SQL condition for filtering to only open parks.
 
@@ -627,10 +638,20 @@ class ParkStatusSQL:
 
         Args:
             table_alias: The alias used for park_activity_snapshots table
+            with_fallback: If True, also considers park "open" if rides_open > 0.
+                          This handles cases where schedule data is missing but
+                          rides are clearly operating. Default False for backwards
+                          compatibility.
 
         Returns:
             SQL condition that is TRUE when park is open
         """
+        if with_fallback:
+            # FALLBACK HEURISTIC: Include snapshots where EITHER:
+            # 1. park_appears_open = TRUE (schedule-based detection), OR
+            # 2. rides_open > 0 (rides are actually operating)
+            # This makes queries robust against schedule data gaps.
+            return f"({table_alias}.park_appears_open = TRUE OR {table_alias}.rides_open > 0)"
         return f"{table_alias}.park_appears_open = TRUE"
 
     @staticmethod
@@ -960,7 +981,7 @@ class RideFilterSQL:
         Returns:
             SQL condition for live time window
         """
-        return f"{recorded_at_expr} >= DATE_SUB(NOW(), INTERVAL {RideStatusSQL.LIVE_WINDOW_HOURS} HOUR)"
+        return f"{recorded_at_expr} >= DATE_SUB(NOW(), INTERVAL {LIVE_WINDOW_HOURS} HOUR)"
 
 
 # Add the 7-day filter method to RideStatusSQL as well for consistency with legacy code

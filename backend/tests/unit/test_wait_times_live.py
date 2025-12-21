@@ -109,9 +109,9 @@ class TestParkLiveWaitTimesResponse:
 class TestWaitTimesRouteDispatch:
     """Test that routes correctly dispatch to live vs aggregated queries."""
 
-    def test_rides_waittimes_today_dispatches_to_live_method(self):
+    def test_rides_waittimes_today_dispatches_to_today_query(self):
         """
-        Verify that /api/rides/waittimes?period=today calls the live method,
+        Verify that /api/rides/waittimes?period=today calls TodayRideWaitTimesQuery,
         not the aggregated stats method.
 
         This is the CORE test that would have caught the bug.
@@ -121,16 +121,16 @@ class TestWaitTimesRouteDispatch:
         from api.routes.rides import get_ride_wait_times
         source = inspect.getsource(get_ride_wait_times)
 
-        # For period=today, should call live method from StatsRepository
+        # For mode=today, should call TodayRideWaitTimesQuery
         # NOT RideWaitTimeRankingsQuery.get_by_period('today')
-        assert "period == 'today'" in source, \
-            "Route must check for period=today"
-        assert "get_ride_live_wait_time_rankings" in source, \
-            "Route must call live method for period=today"
+        assert "mode == 'today'" in source, \
+            "Route must check for mode=today"
+        assert "TodayRideWaitTimesQuery" in source, \
+            "Route must call TodayRideWaitTimesQuery for mode=today"
 
-    def test_parks_waittimes_today_dispatches_to_live_method(self):
+    def test_parks_waittimes_today_dispatches_to_today_query(self):
         """
-        Verify that /api/parks/waittimes?period=today calls the live method.
+        Verify that /api/parks/waittimes?period=today calls TodayParkWaitTimesQuery.
         """
         import inspect
         from api.routes.parks import get_park_wait_times
@@ -138,8 +138,8 @@ class TestWaitTimesRouteDispatch:
 
         assert "period == 'today'" in source, \
             "Route must check for period=today"
-        assert "get_park_live_wait_time_rankings" in source, \
-            "Route must call live method for period=today"
+        assert "TodayParkWaitTimesQuery" in source, \
+            "Route must call TodayParkWaitTimesQuery for period=today"
 
 
 class TestLiveWaitTimesQueryStructure:

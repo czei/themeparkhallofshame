@@ -26,7 +26,8 @@ backend_src = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_src.absolute()))
 
 from utils.logger import logger
-from utils.timezone import get_today_pacific
+from utils.timezone import get_today_pacific, get_pacific_day_range_utc
+from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
 from database.repositories.park_repository import ParkRepository
 from database.repositories.ride_repository import RideRepository
 from database.repositories.aggregation_repository import AggregationLogRepository
@@ -48,6 +49,11 @@ class DailyAggregator:
         """
         # Use Pacific Time for US parks - aggregates "yesterday" in Pacific timezone
         self.target_date = target_date or (get_today_pacific() - timedelta(days=1))
+
+        # Calculate UTC range for the Pacific date
+        # Pacific day 2025-12-17 = UTC 2025-12-17 08:00 to 2025-12-18 08:00 (PST)
+        # This fixes the timezone bug where DATE(recorded_at) compared UTC to Pacific
+        self.day_start_utc, self.day_end_utc = get_pacific_day_range_utc(self.target_date)
 
         self.stats = {
             'parks_processed': 0,
@@ -213,7 +219,7 @@ class DailyAggregator:
         ride_id = ride.ride_id
         park_id = ride.park_id
 
-        result = conn.execute(text("""
+        result = conn.execute(text(f"""
             INSERT INTO ride_daily_stats (
                 ride_id,
                 stat_date,
@@ -234,7 +240,7 @@ class DailyAggregator:
                 :stat_date,
 
                 -- UPTIME: Minutes the ride was open during park operating hours
-                COALESCE(SUM(CASE WHEN pas.park_appears_open = 1 AND rss.computed_is_open THEN 10 ELSE 0 END), 0) as uptime_minutes,
+                COALESCE(SUM(CASE WHEN pas.park_appears_open = 1 AND rss.computed_is_open THEN {SNAPSHOT_INTERVAL_MINUTES} ELSE 0 END), 0) as uptime_minutes,
 
                 -- DOWNTIME: Only count if BOTH conditions are met:
                 --   1. Park was operating (park_appears_open = 1)
@@ -252,7 +258,7 @@ class DailyAggregator:
                             WHEN pas.park_appears_open = 1 AND (
                                 (rss.status IS NOT NULL AND rss.status = 'DOWN') OR
                                 (rss.status IS NULL AND NOT rss.computed_is_open)
-                            ) THEN 10
+                            ) THEN {SNAPSHOT_INTERVAL_MINUTES}
                             ELSE 0
                         END
                     ), 0)
@@ -262,15 +268,15 @@ class DailyAggregator:
                 -- UPTIME PERCENTAGE: Based on park operating hours only
                 -- Returns 0 if ride never operated (maintenance) or park was closed
                 CASE
-                    WHEN SUM(CASE WHEN pas.park_appears_open = 1 THEN 10 ELSE 0 END) > 0
+                    WHEN SUM(CASE WHEN pas.park_appears_open = 1 THEN {SNAPSHOT_INTERVAL_MINUTES} ELSE 0 END) > 0
                          AND SUM(CASE WHEN rss.computed_is_open THEN 1 ELSE 0 END) > 0
-                    THEN ROUND(100.0 * SUM(CASE WHEN pas.park_appears_open = 1 AND rss.computed_is_open THEN 10 ELSE 0 END)
-                              / SUM(CASE WHEN pas.park_appears_open = 1 THEN 10 ELSE 0 END), 2)
+                    THEN ROUND(100.0 * SUM(CASE WHEN pas.park_appears_open = 1 AND rss.computed_is_open THEN {SNAPSHOT_INTERVAL_MINUTES} ELSE 0 END)
+                              / SUM(CASE WHEN pas.park_appears_open = 1 THEN {SNAPSHOT_INTERVAL_MINUTES} ELSE 0 END), 2)
                     ELSE 0
                 END as uptime_percentage,
 
                 -- OPERATING HOURS: Time when park was open (regardless of ride status)
-                COALESCE(SUM(CASE WHEN pas.park_appears_open = 1 THEN 10 ELSE 0 END), 0) as operating_hours_minutes,
+                COALESCE(SUM(CASE WHEN pas.park_appears_open = 1 THEN {SNAPSHOT_INTERVAL_MINUTES} ELSE 0 END), 0) as operating_hours_minutes,
 
                 -- Wait time statistics (only when ride was actually open)
                 ROUND(AVG(CASE WHEN rss.wait_time IS NOT NULL AND rss.computed_is_open THEN rss.wait_time END), 2) as avg_wait_time,
@@ -279,15 +285,17 @@ class DailyAggregator:
                 MAX(CASE WHEN rss.wait_time IS NOT NULL THEN rss.wait_time END) as peak_wait_time,
 
                 -- Status changes from ride_status_changes table
-                (SELECT COUNT(*) FROM ride_status_changes WHERE ride_id = :ride_id AND DATE(changed_at) = :stat_date) as status_changes,
-                (SELECT MAX(duration_in_previous_status) FROM ride_status_changes WHERE ride_id = :ride_id AND DATE(changed_at) = :stat_date AND new_status = 1) as longest_downtime,
+                -- Uses UTC range for Pacific day instead of DATE() to fix timezone bug
+                (SELECT COUNT(*) FROM ride_status_changes WHERE ride_id = :ride_id AND changed_at >= :day_start_utc AND changed_at < :day_end_utc) as status_changes,
+                (SELECT MAX(duration_in_previous_status) FROM ride_status_changes WHERE ride_id = :ride_id AND changed_at >= :day_start_utc AND changed_at < :day_end_utc AND new_status = 1) as longest_downtime,
                 NOW()
             FROM ride_status_snapshots rss
             JOIN rides r ON rss.ride_id = r.ride_id
             JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
                 AND pas.recorded_at = rss.recorded_at
             WHERE rss.ride_id = :ride_id
-              AND DATE(rss.recorded_at) = :stat_date
+              AND rss.recorded_at >= :day_start_utc
+              AND rss.recorded_at < :day_end_utc
             ON DUPLICATE KEY UPDATE
                 uptime_minutes = VALUES(uptime_minutes),
                 downtime_minutes = VALUES(downtime_minutes),
@@ -301,7 +309,9 @@ class DailyAggregator:
                 longest_downtime_minutes = VALUES(longest_downtime_minutes)
         """), {
             'ride_id': ride_id,
-            'stat_date': self.target_date
+            'stat_date': self.target_date,
+            'day_start_utc': self.day_start_utc,
+            'day_end_utc': self.day_end_utc
         })
 
     def _aggregate_parks(self, park_repo: ParkRepository):

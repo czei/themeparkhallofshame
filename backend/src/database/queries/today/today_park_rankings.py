@@ -90,7 +90,8 @@ class TodayParkRankingsQuery:
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
 
-                -- Shame score: average across today's hourly stats
+                -- Shame score: average of hourly shame scores
+                -- (Hourly scores are corrected by aggregate_hourly.py to exclude non-operating rides)
                 ROUND(AVG(phs.shame_score), 1) AS shame_score,
 
                 -- Total downtime hours: sum across today

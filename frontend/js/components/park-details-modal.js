@@ -1256,7 +1256,7 @@ class ParkDetailsModal {
                         <span class="info-label">More Info:</span>
                         <span class="info-value">
                             <a href="${park.queue_times_url}" target="_blank" rel="noopener noreferrer" class="external-link">
-                                Queue-Times.com ↗
+                                Park Info ↗
                             </a>
                         </span>
                     </div>

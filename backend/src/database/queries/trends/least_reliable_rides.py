@@ -7,7 +7,7 @@ UI Location: Trends tab → Awards section
 
 Returns top 10 rides ranked by total downtime hours.
 
-Formula: COUNT(down_snapshots) * 5 / 60 = downtime hours
+Formula: COUNT(down_snapshots) * SNAPSHOT_INTERVAL_MINUTES / 60 = downtime hours
 Only counts downtime when park is open.
 
 CRITICAL: Only counts rides that have OPERATED during the period.
@@ -33,15 +33,13 @@ from sqlalchemy.engine import Connection
 
 from utils.timezone import get_today_range_to_now_utc, get_today_pacific, get_yesterday_range_utc
 from utils.sql_helpers import RideStatusSQL, ParkStatusSQL
+from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
 
 
 class LeastReliableRidesQuery:
     """
     Query for rides with highest downtime hours.
     """
-
-    # Snapshot interval in minutes
-    SNAPSHOT_INTERVAL_MINUTES = 5
 
     def __init__(self, connection: Connection):
         self.conn = connection
@@ -133,7 +131,7 @@ class LeastReliableRidesQuery:
                 ride_name,
                 park_id,
                 park_name,
-                ROUND(SUM(is_down_snapshot) * {self.SNAPSHOT_INTERVAL_MINUTES} / 60.0, 2) AS downtime_hours,
+                ROUND(SUM(is_down_snapshot) * {SNAPSHOT_INTERVAL_MINUTES} / 60.0, 2) AS downtime_hours,
                 SUM(is_down_snapshot) AS downtime_incidents,
                 ROUND(100.0 * SUM(is_operating_snapshot) / NULLIF(COUNT(*), 0), 1) AS uptime_percentage
             FROM downtime_snapshots
@@ -205,7 +203,7 @@ class LeastReliableRidesQuery:
                 ride_name,
                 park_id,
                 park_name,
-                ROUND(SUM(is_down_snapshot) * {self.SNAPSHOT_INTERVAL_MINUTES} / 60.0, 2) AS downtime_hours,
+                ROUND(SUM(is_down_snapshot) * {SNAPSHOT_INTERVAL_MINUTES} / 60.0, 2) AS downtime_hours,
                 SUM(is_down_snapshot) AS downtime_incidents,
                 ROUND(100.0 * SUM(is_operating_snapshot) / NULLIF(COUNT(*), 0), 1) AS uptime_percentage
             FROM downtime_snapshots

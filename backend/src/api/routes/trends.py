@@ -41,7 +41,7 @@ from database.queries.charts import (
 )
 
 from utils.logger import logger
-from utils.timezone import get_today_pacific, get_now_pacific, get_last_week_date_range, get_last_month_date_range
+from utils.timezone import get_today_pacific, get_now_pacific, get_last_week_date_range, get_last_month_date_range, PERIOD_ALIASES
 from utils.cache import get_query_cache, generate_cache_key
 from utils.heatmap_helpers import transform_chart_to_heatmap, validate_heatmap_period
 
@@ -117,8 +117,7 @@ def get_trends():
                 "error": "Limit must be between 1 and 100"
             }), 400
 
-        period_aliases = {'7days': 'last_week', '30days': 'last_month'}
-        normalized_period = period_aliases.get(period, period)
+        normalized_period = PERIOD_ALIASES.get(period, period)
 
         # Calculate period dates
         period_info = _calculate_period_dates(normalized_period)
@@ -173,7 +172,7 @@ def get_trends():
                 "previous_period": period_info['previous_period_label']
             },
             "count": len(results),
-            "attribution": "Data powered by Queue-Times.com - https://queue-times.com",
+            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }
 
@@ -448,7 +447,7 @@ def get_chart_data():
             "chart_data": chart_data,
             "mock": is_mock,
             "granularity": granularity,
-            "attribution": "Data powered by Queue-Times.com - https://queue-times.com",
+            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }), 200
 
@@ -565,7 +564,7 @@ def get_longest_wait_times():
             "count": len(ranked_results),
             "data": ranked_results,
             "cached": True,
-            "attribution": "Data powered by Queue-Times.com - https://queue-times.com",
+            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }), 200
 
@@ -679,7 +678,7 @@ def get_least_reliable():
             "count": len(ranked_results),
             "data": ranked_results,
             "cached": True,
-            "attribution": "Data powered by Queue-Times.com - https://queue-times.com",
+            "attribution": "Data powered by ThemeParks.wiki - https://themeparks.wiki",
             "timestamp": datetime.utcnow().isoformat() + 'Z'
         }), 200
 
@@ -1162,8 +1161,7 @@ def _calculate_period_dates(period: str) -> Dict[str, str]:
         Dict with current_period_label and previous_period_label
     """
     today = get_today_pacific()  # Pacific Time for US parks
-    alias_map = {'7days': 'last_week', '30days': 'last_month'}
-    normalized_period = alias_map.get(period, period)
+    normalized_period = PERIOD_ALIASES.get(period, period)
 
     if normalized_period == 'today':
         current_start = today

@@ -5,9 +5,7 @@
 This document specifies requirements for adding weather data collection to the Theme Park Hall of Shame project. The goal is to capture comprehensive weather data for all tracked theme parks to enable future correlation analysis between weather conditions and ride operational status.
 
 ### Existing System Overview
-- **Backend:** Java
 - **Database:** MariaDB
-- **Data Source:** Queue-Times.com API
 - **Current Scope:** ~150+ theme parks, 5,000-7,500 rides
 - **Collection Interval:** 10-minute snapshots for ride status
 - **Ride Data Retention:** 24-hour rolling window for raw data, then daily aggregation

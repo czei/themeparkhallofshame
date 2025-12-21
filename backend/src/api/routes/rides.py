@@ -264,12 +264,12 @@ Query Files Used:
                         sort_by=sort_by
                     )
 
-            # Add Queue-Times.com URLs and rank to rankings
+            # Add external URLs and rank to rankings
             rankings_with_urls = []
             for rank_idx, ride in enumerate(rankings, start=1):
                 ride_dict = dict(ride) if hasattr(ride, '_mapping') else dict(ride)
                 ride_dict['rank'] = rank_idx
-                # Generate correct Queue-Times URL: /parks/{park_qt_id}/rides/{ride_qt_id}
+                # Generate external URL (legacy queue-times format)
                 if 'queue_times_id' in ride_dict and 'park_queue_times_id' in ride_dict:
                     ride_dict['queue_times_url'] = f"https://queue-times.com/parks/{ride_dict['park_queue_times_id']}/rides/{ride_dict['queue_times_id']}"
                 else:
@@ -283,8 +283,8 @@ Query Files Used:
                 "filter": filter_type,
                 "data": rankings_with_urls,
                 "attribution": {
-                    "data_source": "Queue-Times.com",
-                    "url": "https://queue-times.com"
+                    "data_source": "ThemeParks.wiki",
+                    "url": "https://themeparks.wiki"
                 }
             }
 
@@ -428,12 +428,12 @@ def get_ride_wait_times():
                         limit=limit
                     )
 
-            # Add Queue-Times.com URLs and rank to wait times
+            # Add external URLs and rank to wait times
             wait_times_with_urls = []
             for rank_idx, ride in enumerate(wait_times, start=1):
                 ride_dict = dict(ride) if hasattr(ride, '_mapping') else dict(ride)
                 ride_dict['rank'] = rank_idx
-                # Generate correct Queue-Times URL: /parks/{park_qt_id}/rides/{ride_qt_id}
+                # Generate external URL (legacy queue-times format)
                 if 'queue_times_id' in ride_dict and 'park_queue_times_id' in ride_dict:
                     ride_dict['queue_times_url'] = f"https://queue-times.com/parks/{ride_dict['park_queue_times_id']}/rides/{ride_dict['queue_times_id']}"
                 else:
@@ -454,8 +454,8 @@ def get_ride_wait_times():
                 "filter": filter_type,
                 "data": wait_times_with_urls,
                 "attribution": {
-                    "data_source": "Queue-Times.com",
-                    "url": "https://queue-times.com"
+                    "data_source": "ThemeParks.wiki",
+                    "url": "https://themeparks.wiki"
                 }
             }
 

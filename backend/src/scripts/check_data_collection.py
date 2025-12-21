@@ -5,9 +5,9 @@ Data Collection Health Check Script
 
 Monitors that data collection is running and sends immediate alerts if it stops.
 
-This script checks if ride_status_snapshots and park_activity_snapshots have
-recent data (within the last 30 minutes). If no data is found, sends an alert
-email with diagnostic details.
+This script checks if ride_status_snapshots, park_activity_snapshots, and
+weather_observations have recent data (within the last 30 minutes). If no data
+is found, sends an alert email with diagnostic details.
 
 Run via cron every hour:
     0 * * * * cd /opt/themeparkhallofshame/backend && python -m src.scripts.check_data_collection
@@ -191,6 +191,68 @@ def check_recent_snapshots() -> Dict[str, Any]:
         }
 
 
+def check_recent_weather() -> Dict[str, Any]:
+    """
+    Check if we have recent weather observations.
+
+    Returns:
+        Dict with diagnostic information:
+        - has_recent_weather_data: bool
+        - most_recent_weather_observation: datetime or None
+        - parks_with_recent_weather: int
+        - weather_observation_count: int
+        - minutes_since_last_weather: int or None
+    """
+    with get_db_connection() as conn:
+        now = datetime.now()
+        cutoff = now - timedelta(minutes=MAX_DATA_AGE_MINUTES)
+
+        # Check weather observations
+        weather_result = conn.execute(text("""
+            SELECT
+                MAX(observation_time) as most_recent,
+                COUNT(DISTINCT park_id) as park_count,
+                COUNT(*) as observation_count
+            FROM weather_observations
+            WHERE observation_time >= :cutoff
+        """), {"cutoff": cutoff})
+        weather_row = weather_result.fetchone()
+
+        # Get overall most recent weather observation (even if older than cutoff)
+        overall_weather_result = conn.execute(text("""
+            SELECT MAX(observation_time) as most_recent
+            FROM weather_observations
+        """))
+        overall_weather_row = overall_weather_result.fetchone()
+
+        # Calculate results
+        most_recent_weather = weather_row[0] if weather_row else None
+        overall_most_recent_weather = overall_weather_row[0] if overall_weather_row else None
+
+        parks_with_recent_weather = weather_row[1] if weather_row else 0
+        weather_observation_count = weather_row[2] if weather_row else 0
+
+        # Calculate minutes since last observation
+        minutes_since_weather = None
+        if overall_most_recent_weather:
+            minutes_since_weather = int((now - overall_most_recent_weather).total_seconds() / 60)
+
+        has_recent_weather_data = (
+            most_recent_weather is not None and
+            parks_with_recent_weather >= MIN_PARKS_EXPECTED and
+            weather_observation_count > 0
+        )
+
+        return {
+            "has_recent_weather_data": has_recent_weather_data,
+            "most_recent_weather_observation": most_recent_weather,
+            "overall_most_recent_weather_observation": overall_most_recent_weather,
+            "parks_with_recent_weather": parks_with_recent_weather,
+            "weather_observation_count": weather_observation_count,
+            "minutes_since_last_weather": minutes_since_weather,
+        }
+
+
 def get_collection_process_status() -> Dict[str, Any]:
     """
     Check if the data collection process is running.
@@ -274,8 +336,12 @@ def format_alert_email(diagnostics: Dict[str, Any], process_status: Dict[str, An
     most_recent_ride = diagnostics.get("overall_most_recent_ride_snapshot")
     most_recent_park = diagnostics.get("overall_most_recent_park_snapshot")
 
+    weather = diagnostics.get("weather", {})
+    most_recent_weather = weather.get("overall_most_recent_weather_observation")
+
     minutes_since_ride = diagnostics.get("minutes_since_last_ride_snapshot")
     minutes_since_park = diagnostics.get("minutes_since_last_park_snapshot")
+    minutes_since_weather = weather.get("minutes_since_last_weather")
 
     # Get recent log content
     log_tail = get_cron_log_tail(lines=30)
@@ -352,6 +418,25 @@ def format_alert_email(diagnostics: Dict[str, Any], process_status: Dict[str, An
                 <td>Park Snapshots (last {MAX_DATA_AGE_MINUTES}m)</td>
                 <td>{diagnostics['park_snapshot_count']}</td>
                 <td class="{'ok' if diagnostics['park_snapshot_count'] > 0 else 'error'}"></td>
+            </tr>
+            <tr>
+                <td>Last Weather Observation</td>
+                <td>{format_timestamp(most_recent_weather)}</td>
+                <td class="{'ok' if weather.get('has_recent_weather_data') else 'error'}">
+                    {minutes_since_weather if minutes_since_weather is not None else 'N/A'} minutes ago
+                </td>
+            </tr>
+            <tr>
+                <td>Parks with Recent Weather (last {MAX_DATA_AGE_MINUTES}m)</td>
+                <td>{weather.get('parks_with_recent_weather', 0)}</td>
+                <td class="{'ok' if weather.get('parks_with_recent_weather', 0) >= MIN_PARKS_EXPECTED else 'error'}">
+                    Expected: ≥{MIN_PARKS_EXPECTED}
+                </td>
+            </tr>
+            <tr>
+                <td>Weather Observations (last {MAX_DATA_AGE_MINUTES}m)</td>
+                <td>{weather.get('weather_observation_count', 0)}</td>
+                <td class="{'ok' if weather.get('weather_observation_count', 0) > 0 else 'error'}"></td>
             </tr>
         </table>
 
@@ -462,13 +547,19 @@ def main():
     # Check hourly aggregates
     hourly = check_hourly_aggregates()
     diagnostics["hourly"] = hourly
+    # Check weather observations
+    weather = check_recent_weather()
+    diagnostics["weather"] = weather
 
     logger.info(f"Has recent ride data: {diagnostics['has_recent_ride_data']}")
     logger.info(f"Has recent park data: {diagnostics['has_recent_park_data']}")
+    logger.info(f"Has recent weather data: {weather['has_recent_weather_data']}")
     logger.info(f"Rides with recent data: {diagnostics['rides_with_recent_data']}")
     logger.info(f"Parks with recent data: {diagnostics['parks_with_recent_data']}")
+    logger.info(f"Parks with recent weather: {weather['parks_with_recent_weather']}")
     logger.info(f"Minutes since last ride snapshot: {diagnostics['minutes_since_last_ride_snapshot']}")
     logger.info(f"Minutes since last park snapshot: {diagnostics['minutes_since_last_park_snapshot']}")
+    logger.info(f"Minutes since last weather observation: {weather['minutes_since_last_weather']}")
     logger.info(f"Latest park_hourly_stats: {hourly['latest_park_hour']} ({hourly['minutes_since_park_hour']} min ago)")
     logger.info(f"Latest ride_hourly_stats: {hourly['latest_ride_hour']} ({hourly['minutes_since_ride_hour']} min ago)")
 
@@ -480,6 +571,7 @@ def main():
     should_alert = (
         not diagnostics["has_recent_ride_data"] or
         not diagnostics["has_recent_park_data"] or
+        not weather["has_recent_weather_data"] or
         not hourly["park_hourly_fresh"] or
         not hourly["ride_hourly_fresh"]
     )

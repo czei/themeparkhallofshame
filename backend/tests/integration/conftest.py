@@ -16,6 +16,61 @@ Safety Features:
 import pytest
 import os
 from sqlalchemy import create_engine, text
+import sys
+from pathlib import Path
+
+# Add src to path for imports
+backend_src = Path(__file__).parent.parent.parent / 'src'
+if str(backend_src.absolute()) not in sys.path:
+    sys.path.insert(0, str(backend_src.absolute()))
+
+
+# =============================================================================
+# Global Database Pool Reset Fixture
+# =============================================================================
+
+@pytest.fixture(autouse=True)
+def reset_flask_db_pool():
+    """
+    Reset the global Flask database connection pool and query cache before each test.
+
+    This is an autouse fixture that runs automatically before every integration test.
+    It ensures Flask apps get fresh database connections that see the latest
+    committed data from test fixtures, preventing test pollution when running
+    multiple test files together.
+
+    The pool and cache are reset before the test (so Flask creates fresh connections
+    after test fixtures commit data) and after the test (cleanup).
+    """
+    try:
+        from database.connection import db as global_db
+        # Dispose pool before test to clear any stale connections
+        global_db.close()
+    except ImportError:
+        pass  # database.connection not available yet
+
+    try:
+        from utils.cache import reset_query_cache
+        # Reset query cache to prevent cached results from polluting tests
+        reset_query_cache()
+    except ImportError:
+        pass  # utils.cache not available yet
+
+    yield
+
+    try:
+        from database.connection import db as global_db
+        # Dispose pool after test for cleanup
+        global_db.close()
+    except ImportError:
+        pass
+
+    try:
+        from utils.cache import reset_query_cache
+        # Reset query cache after test for cleanup
+        reset_query_cache()
+    except ImportError:
+        pass
 
 
 # =============================================================================

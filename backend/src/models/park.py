@@ -52,10 +52,13 @@ class Park:
     @property
     def queue_times_url(self) -> str:
         """
-        Get Queue-Times.com URL for this park.
+        Get external URL for this park (legacy queue-times.com link).
+
+        Note: Data is now sourced from ThemeParks.wiki, but queue-times.com
+        still provides useful public park pages for users to browse.
 
         Returns:
-            URL to park page on Queue-Times.com (FR-036)
+            URL to park page on queue-times.com
         """
         return f"https://queue-times.com/parks/{self.queue_times_id}"
 

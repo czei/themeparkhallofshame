@@ -5,6 +5,8 @@ Auto-generated from all feature plans. Last updated: 2025-12-08
 ## Active Technologies
 - Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ (Core only, no ORM models), mysqlclient 2.2+ (001-aggregation-tables)
 - MySQL/MariaDB with existing schema (park_activity_snapshots, ride_status_snapshots, park_daily_stats, etc.) (001-aggregation-tables)
+- Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ (Core only), mysqlclient 2.2+, tenacity, requests (002-weather-collection)
+- MySQL/MariaDB (existing database, new tables: weather_observations, weather_forecasts) (002-weather-collection)
 
 - Python 3.11+ (001-theme-park-tracker)
 
@@ -24,10 +26,10 @@ cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLO
 Python 3.11+: Follow standard conventions
 
 ## Recent Changes
+- 002-weather-collection: Added Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ (Core only), mysqlclient 2.2+, tenacity, requests
 - 001-aggregation-tables: Added Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ (Core only, no ORM models), mysqlclient 2.2+
 - 001-aggregation-tables: Added Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ (Core only, no ORM models), mysqlclient 2.2+
 
-- 001-theme-park-tracker: Added Python 3.11+
 
 <!-- MANUAL ADDITIONS START -->
 
@@ -453,6 +455,26 @@ def test_<unit>_<scenario>_<expected_result>():
 3. [ ] `ruff check .` passes
 4. [ ] No decrease in test coverage
 5. [ ] Integration tests pass against test database
+6. [ ] **Skipped test count is understood and acceptable** (see below)
+
+### Skipped Test Policy
+
+**CRITICAL: Understand WHY tests are being skipped before deploying.**
+
+Expected skipped tests:
+- **Integration tests (~250)**: Skip when `mysql_connection` fixture can't connect to test database
+- These are EXPECTED to skip in local development without test DB configured
+
+Unexpected skips that MUST be investigated:
+- Unit tests should NEVER be skipped
+- New skips that weren't there before
+- Skips due to missing files or imports
+
+**Before deployment:**
+1. Run `pytest -v 2>&1 | grep SKIPPED | head -20` to see what's being skipped
+2. If skipped count increased significantly, investigate why
+3. Integration tests skipping due to missing DB is acceptable
+4. Any other skips must be justified
 
 ### Test Failure Policy
 

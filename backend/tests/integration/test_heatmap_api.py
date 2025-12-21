@@ -13,8 +13,12 @@ ARCHITECTURE: These tests verify that the endpoint correctly:
 5. Returns proper data types (numbers, not strings)
 
 Test Database: themepark_test (via mysql_connection fixture)
+
+NOTE: Tests that require database access are skipped if TEST_DB_* environment
+variables are not properly configured. Run with proper test database config.
 """
 
+import os
 import pytest
 from datetime import date, datetime, timezone, timedelta
 from freezegun import freeze_time
@@ -25,6 +29,19 @@ from api.app import create_app
 MOCKED_NOW_UTC = datetime(2025, 12, 16, 20, 0, 0, tzinfo=timezone.utc)  # 12 PM PST Dec 16th
 TODAY_PST = date(2025, 12, 16)
 YESTERDAY_PST = date(2025, 12, 15)
+
+
+def _has_test_database_config():
+    """Check if test database environment variables are configured."""
+    required_vars = ['TEST_DB_HOST', 'TEST_DB_NAME', 'TEST_DB_USER', 'TEST_DB_PASSWORD']
+    return all(os.getenv(var) for var in required_vars)
+
+
+# Skip tests that require database access if not configured
+requires_test_db = pytest.mark.skipif(
+    not _has_test_database_config(),
+    reason="TEST_DB_* environment variables not configured. Set TEST_DB_HOST, TEST_DB_NAME, TEST_DB_USER, TEST_DB_PASSWORD."
+)
 
 
 class TestHeatmapAPIStructure:
@@ -87,6 +104,7 @@ class TestHeatmapAPIStructure:
         assert 'filter' in data['error'].lower()
 
 
+@requires_test_db
 @freeze_time(MOCKED_NOW_UTC)
 class TestHeatmapResponseStructure:
     """Test that heatmap responses have correct structure and data types."""
@@ -222,6 +240,7 @@ class TestHeatmapResponseStructure:
         assert 28 <= len(data['time_labels']) <= 31
 
 
+@requires_test_db
 @freeze_time(MOCKED_NOW_UTC)
 class TestHeatmapTypes:
     """Test all three heatmap types with different configurations."""
@@ -275,6 +294,7 @@ class TestHeatmapTypes:
         assert 'shame' in data['title'].lower()
 
 
+@requires_test_db
 @freeze_time(MOCKED_NOW_UTC)
 class TestHeatmapFiltersAndLimits:
     """Test filter and limit parameters."""
@@ -380,6 +400,7 @@ class TestHeatmapFiltersAndLimits:
             assert len(data['entities']) <= 20
 
 
+@requires_test_db
 @freeze_time(MOCKED_NOW_UTC)
 class TestHeatmapMatrixConsistency:
     """Test that matrix dimensions match entities and time labels."""

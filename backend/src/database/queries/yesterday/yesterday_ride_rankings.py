@@ -36,6 +36,7 @@ from utils.sql_helpers import (
     ParkStatusSQL,
     RideFilterSQL,
 )
+from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
 
 
 class YesterdayRideRankingsQuery:
@@ -44,10 +45,9 @@ class YesterdayRideRankingsQuery:
 
     Aggregates ALL downtime for the full previous Pacific day.
     Unlike TODAY, this data is immutable and highly cacheable.
-    """
 
-    # Snapshot interval in minutes (for converting snapshot counts to time)
-    SNAPSHOT_INTERVAL_MINUTES = 5
+    Uses SNAPSHOT_INTERVAL_MINUTES from utils.metrics (10 minutes).
+    """
 
     def __init__(self, connection: Connection):
         self.conn = connection
@@ -116,7 +116,7 @@ class YesterdayRideRankingsQuery:
                 ROUND(
                     SUM(CASE
                         WHEN {is_down} AND {park_open} AND rto.ride_id IS NOT NULL
-                        THEN {self.SNAPSHOT_INTERVAL_MINUTES} / 60.0
+                        THEN {SNAPSHOT_INTERVAL_MINUTES} / 60.0
                         ELSE 0
                     END),
                     2

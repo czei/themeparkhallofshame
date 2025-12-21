@@ -26,14 +26,14 @@ from sqlalchemy.sql import ColumnElement
 from sqlalchemy.sql.expression import BinaryExpression
 
 from database.schema import parks, rides
+from utils.metrics import LIVE_WINDOW_HOURS
 
 
 # =============================================================================
 # CONSTANTS
 # =============================================================================
 # Time window for "live" data - only consider snapshots from last 2 hours
-# This matches RideStatusSQL.LIVE_WINDOW_HOURS in sql_helpers.py
-LIVE_WINDOW_HOURS = 2
+# Imported from utils.sql_helpers (single source of truth)
 
 
 class Filters:

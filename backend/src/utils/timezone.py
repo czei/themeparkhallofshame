@@ -15,6 +15,13 @@ from zoneinfo import ZoneInfo
 PACIFIC_TZ = ZoneInfo('America/Los_Angeles')
 UTC_TZ = ZoneInfo('UTC')
 
+# Period aliases - maps user-friendly names to internal period names
+# Used by API routes for consistent period normalization
+PERIOD_ALIASES = {
+    '7days': 'last_week',
+    '30days': 'last_month',
+}
+
 
 def get_today_pacific() -> date:
     """

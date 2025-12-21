@@ -38,6 +38,7 @@ from database.schema import (
     ride_daily_stats,
 )
 from .filters import Filters
+from utils.metrics import DEFAULT_TIER_WEIGHT
 
 
 # =============================================================================
@@ -54,10 +55,8 @@ from .filters import Filters
 #   Tier 1 (flagship): weight = 3
 #   Tier 2 (standard): weight = 2
 #   Tier 3 (minor):    weight = 1
-#   Unclassified:      weight = 2 (default)
+#   Unclassified:      weight = 2 (default, from utils.metrics.DEFAULT_TIER_WEIGHT)
 # =============================================================================
-
-DEFAULT_TIER_WEIGHT = 2
 
 
 class ParkWeightsCTE:

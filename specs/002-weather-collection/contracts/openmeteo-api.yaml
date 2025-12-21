@@ -1,0 +1,448 @@
+openapi: 3.0.3
+info:
+  title: Open-Meteo Weather API
+  description: |
+    Contract specification for Open-Meteo Weather Forecast API.
+    This contract defines the request/response format used by the Theme Park Hall of Shame
+    weather collection system.
+
+    API Documentation: https://open-meteo.com/en/docs
+  version: 1.0.0
+  contact:
+    name: Open-Meteo
+    url: https://open-meteo.com
+
+servers:
+  - url: https://api.open-meteo.com/v1
+    description: Open-Meteo Production API
+
+paths:
+  /forecast:
+    get:
+      summary: Get weather forecast for coordinates
+      description: |
+        Fetch hourly weather forecast for the next 7-16 days for a specific latitude/longitude.
+        Includes current conditions plus hourly forecasts.
+      operationId: getWeatherForecast
+      parameters:
+        - name: latitude
+          in: query
+          required: true
+          schema:
+            type: number
+            format: float
+            minimum: -90
+            maximum: 90
+          description: Latitude in decimal degrees (WGS84)
+          example: 28.3772
+
+        - name: longitude
+          in: query
+          required: true
+          schema:
+            type: number
+            format: float
+            minimum: -180
+            maximum: 180
+          description: Longitude in decimal degrees (WGS84)
+          example: -81.5707
+
+        - name: hourly
+          in: query
+          required: true
+          schema:
+            type: string
+          description: |
+            Comma-separated list of hourly weather variables to fetch.
+            Variables we use:
+            - temperature_2m: Temperature at 2 meters above ground
+            - apparent_temperature: Perceived temperature (wind chill / heat index)
+            - precipitation: Total precipitation (rain + snow)
+            - rain: Liquid precipitation only
+            - snowfall: Snowfall amount (water equivalent)
+            - weather_code: WMO weather code (0-99)
+            - cloud_cover: Cloud coverage percentage
+            - wind_speed_10m: Wind speed at 10 meters
+            - wind_gusts_10m: Wind gust speed
+            - wind_direction_10m: Wind direction in degrees
+            - relative_humidity_2m: Relative humidity percentage
+            - surface_pressure: Barometric pressure at surface
+            - visibility: Visibility distance
+          example: "temperature_2m,apparent_temperature,precipitation,rain,snowfall,weather_code,cloud_cover,wind_speed_10m,wind_gusts_10m,wind_direction_10m,relative_humidity_2m,surface_pressure,visibility"
+
+        - name: temperature_unit
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [celsius, fahrenheit]
+            default: celsius
+          description: Temperature unit (we request both by making separate calls)
+          example: fahrenheit
+
+        - name: wind_speed_unit
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [kmh, mph, ms, kn]
+            default: kmh
+          description: Wind speed unit
+          example: mph
+
+        - name: precipitation_unit
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [mm, inch]
+            default: mm
+          description: Precipitation unit
+          example: inch
+
+        - name: timezone
+          in: query
+          required: false
+          schema:
+            type: string
+            default: GMT
+          description: Timezone for time values (we always use UTC)
+          example: UTC
+
+        - name: forecast_days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 16
+            default: 7
+          description: Number of forecast days (1-16, we use 7)
+          example: 7
+
+      responses:
+        '200':
+          description: Successful response with weather data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WeatherForecastResponse'
+              examples:
+                orlando_weather:
+                  summary: Example weather response for Orlando, FL
+                  value:
+                    latitude: 28.375
+                    longitude: -81.549805
+                    generationtime_ms: 0.123
+                    utc_offset_seconds: 0
+                    timezone: UTC
+                    timezone_abbreviation: UTC
+                    elevation: 34.0
+                    hourly_units:
+                      time: iso8601
+                      temperature_2m: "°F"
+                      apparent_temperature: "°F"
+                      precipitation: inch
+                      rain: inch
+                      snowfall: inch
+                      weather_code: wmo code
+                      cloud_cover: "%"
+                      wind_speed_10m: mph
+                      wind_gusts_10m: mph
+                      wind_direction_10m: "°"
+                      relative_humidity_2m: "%"
+                      surface_pressure: hPa
+                      visibility: m
+                    hourly:
+                      time:
+                        - "2025-12-17T00:00"
+                        - "2025-12-17T01:00"
+                        - "2025-12-17T02:00"
+                      temperature_2m: [72.5, 71.8, 70.9]
+                      apparent_temperature: [70.2, 69.5, 68.7]
+                      precipitation: [0.0, 0.05, 0.12]
+                      rain: [0.0, 0.05, 0.12]
+                      snowfall: [0.0, 0.0, 0.0]
+                      weather_code: [0, 61, 95]
+                      cloud_cover: [25, 75, 100]
+                      wind_speed_10m: [8.5, 10.2, 12.1]
+                      wind_gusts_10m: [15.3, 18.7, 22.4]
+                      wind_direction_10m: [180, 190, 200]
+                      relative_humidity_2m: [78, 82, 88]
+                      surface_pressure: [1013.2, 1012.8, 1011.5]
+                      visibility: [24140, 16000, 8000]
+
+        '400':
+          description: Bad request - invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_coordinates:
+                  summary: Invalid latitude/longitude
+                  value:
+                    error: true
+                    reason: "Latitude must be in range of -90 to 90°"
+
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    WeatherForecastResponse:
+      type: object
+      required:
+        - latitude
+        - longitude
+        - timezone
+        - hourly
+      properties:
+        latitude:
+          type: number
+          format: float
+          description: Actual latitude used (may differ slightly from requested)
+          example: 28.375
+
+        longitude:
+          type: number
+          format: float
+          description: Actual longitude used (may differ slightly from requested)
+          example: -81.549805
+
+        generationtime_ms:
+          type: number
+          format: float
+          description: Server-side generation time in milliseconds
+          example: 0.123
+
+        utc_offset_seconds:
+          type: integer
+          description: UTC offset in seconds (0 for UTC)
+          example: 0
+
+        timezone:
+          type: string
+          description: Timezone abbreviation
+          example: UTC
+
+        timezone_abbreviation:
+          type: string
+          description: Short timezone code
+          example: UTC
+
+        elevation:
+          type: number
+          format: float
+          description: Elevation in meters at coordinates
+          example: 34.0
+
+        hourly_units:
+          type: object
+          description: Units for each hourly variable
+          properties:
+            time:
+              type: string
+              example: iso8601
+            temperature_2m:
+              type: string
+              example: "°F"
+            apparent_temperature:
+              type: string
+              example: "°F"
+            precipitation:
+              type: string
+              example: inch
+            rain:
+              type: string
+              example: inch
+            snowfall:
+              type: string
+              example: inch
+            weather_code:
+              type: string
+              example: wmo code
+            cloud_cover:
+              type: string
+              example: "%"
+            wind_speed_10m:
+              type: string
+              example: mph
+            wind_gusts_10m:
+              type: string
+              example: mph
+            wind_direction_10m:
+              type: string
+              example: "°"
+            relative_humidity_2m:
+              type: string
+              example: "%"
+            surface_pressure:
+              type: string
+              example: hPa
+            visibility:
+              type: string
+              example: m
+
+        hourly:
+          type: object
+          description: Hourly weather data arrays (all arrays same length)
+          required:
+            - time
+          properties:
+            time:
+              type: array
+              description: ISO 8601 timestamps for each hour
+              items:
+                type: string
+                format: date-time
+              example: ["2025-12-17T00:00", "2025-12-17T01:00"]
+
+            temperature_2m:
+              type: array
+              description: Temperature at 2m above ground
+              items:
+                type: number
+                format: float
+                nullable: true
+              example: [72.5, 71.8, 70.9]
+
+            apparent_temperature:
+              type: array
+              description: Perceived temperature (wind chill / heat index)
+              items:
+                type: number
+                format: float
+                nullable: true
+              example: [70.2, 69.5, 68.7]
+
+            precipitation:
+              type: array
+              description: Total precipitation (rain + snow water equivalent)
+              items:
+                type: number
+                format: float
+                nullable: true
+              example: [0.0, 0.05, 0.12]
+
+            rain:
+              type: array
+              description: Liquid precipitation only
+              items:
+                type: number
+                format: float
+                nullable: true
+              example: [0.0, 0.05, 0.12]
+
+            snowfall:
+              type: array
+              description: Snowfall amount (water equivalent)
+              items:
+                type: number
+                format: float
+                nullable: true
+              example: [0.0, 0.0, 0.0]
+
+            weather_code:
+              type: array
+              description: WMO weather code (0-99, see WMO Code Table 4677)
+              items:
+                type: integer
+                minimum: 0
+                maximum: 99
+                nullable: true
+              example: [0, 61, 95]
+
+            cloud_cover:
+              type: array
+              description: Cloud coverage percentage (0-100%)
+              items:
+                type: integer
+                minimum: 0
+                maximum: 100
+                nullable: true
+              example: [25, 75, 100]
+
+            wind_speed_10m:
+              type: array
+              description: Wind speed at 10m above ground
+              items:
+                type: number
+                format: float
+                nullable: true
+              example: [8.5, 10.2, 12.1]
+
+            wind_gusts_10m:
+              type: array
+              description: Maximum wind gust speed
+              items:
+                type: number
+                format: float
+                nullable: true
+              example: [15.3, 18.7, 22.4]
+
+            wind_direction_10m:
+              type: array
+              description: Wind direction in degrees (0=N, 90=E, 180=S, 270=W)
+              items:
+                type: integer
+                minimum: 0
+                maximum: 360
+                nullable: true
+              example: [180, 190, 200]
+
+            relative_humidity_2m:
+              type: array
+              description: Relative humidity percentage (0-100%)
+              items:
+                type: integer
+                minimum: 0
+                maximum: 100
+                nullable: true
+              example: [78, 82, 88]
+
+            surface_pressure:
+              type: array
+              description: Barometric pressure at surface (hPa)
+              items:
+                type: number
+                format: float
+                nullable: true
+              example: [1013.2, 1012.8, 1011.5]
+
+            visibility:
+              type: array
+              description: Visibility distance in meters
+              items:
+                type: integer
+                minimum: 0
+                nullable: true
+              example: [24140, 16000, 8000]
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - reason
+      properties:
+        error:
+          type: boolean
+          description: Always true for error responses
+          example: true
+
+        reason:
+          type: string
+          description: Human-readable error message
+          example: "Latitude must be in range of -90 to 90°"
+
+  securitySchemes: {}
+
+security: []
+
+tags:
+  - name: forecast
+    description: Weather forecast operations

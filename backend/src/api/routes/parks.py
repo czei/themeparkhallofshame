@@ -27,6 +27,7 @@ from database.connection import get_db_connection
 from database.repositories.park_repository import ParkRepository
 from database.repositories.stats_repository import StatsRepository
 from utils.cache import get_query_cache, generate_cache_key
+from utils.timezone import PERIOD_ALIASES
 
 # New query imports - each file handles one specific data source
 from database.queries.rankings import ParkDowntimeRankingsQuery, ParkWaitTimeRankingsQuery
@@ -180,13 +181,13 @@ def get_park_downtime_rankings():
                         limit=limit,
                         sort_by=sort_by
                     )
-            aggregate_period = 'last_week' if period == '7days' else ('last_month' if period == '30days' else period)
+            aggregate_period = PERIOD_ALIASES.get(period, period)
             aggregate_stats = stats_repo.get_aggregate_park_stats(
                 period=aggregate_period,
                 filter_disney_universal=filter_disney_universal
             )
 
-            # Add Queue-Times.com URLs to rankings
+            # Add external URLs to rankings
             rankings_with_urls = []
             for rank_idx, park in enumerate(rankings, start=1):
                 park_dict = dict(park) if hasattr(park, '_mapping') else dict(park)
@@ -220,8 +221,8 @@ def get_park_downtime_rankings():
                 "aggregate_stats": aggregate_stats,
                 "data": rankings_with_urls,
                 "attribution": {
-                    "data_source": "Queue-Times.com",
-                    "url": "https://queue-times.com"
+                    "data_source": "ThemeParks.wiki",
+                    "url": "https://themeparks.wiki"
                 }
             }
 
@@ -342,7 +343,7 @@ def get_park_wait_times():
                         limit=limit
                     )
 
-            # Add Queue-Times.com URLs and rank to wait times
+            # Add external URLs and rank to wait times
             wait_times_with_urls = []
             for rank_idx, park in enumerate(wait_times, start=1):
                 park_dict = dict(park) if hasattr(park, '_mapping') else dict(park)

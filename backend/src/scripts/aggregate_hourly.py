@@ -33,6 +33,7 @@ sys.path.insert(0, str(backend_src.absolute()))
 
 from utils.logger import logger
 from utils.sql_helpers import RideStatusSQL, ParkStatusSQL
+from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
 from database.repositories.park_repository import ParkRepository
 from database.repositories.ride_repository import RideRepository
 from database.repositories.aggregation_repository import AggregationLogRepository
@@ -240,17 +241,34 @@ class HourlyAggregator:
 
                 # Pre-calculate which rides operated today (fixes N+1 query problem)
                 # This runs ONCE instead of once per ride
+                #
+                # PARK-TYPE AWARE LOGIC (from CLAUDE.md Rule 2):
+                # - Disney/Universal: DOWN status is valid signal (they distinguish DOWN vs CLOSED)
+                #   Fixes DINOSAUR bug where ride was DOWN before showing OPERATING
+                # - Other parks: Require OPERATING status only (they use CLOSED for everything)
+                #   Fixes Kennywood bug where rides showing only CLOSED were incorrectly counted
                 operated_today_result = conn.execute(text("""
                     SELECT DISTINCT rss_day.ride_id
                     FROM ride_status_snapshots rss_day
                     JOIN rides r_day ON rss_day.ride_id = r_day.ride_id
+                    JOIN parks p_day ON r_day.park_id = p_day.park_id
                     JOIN park_activity_snapshots pas_day
                         ON r_day.park_id = pas_day.park_id
                         AND pas_day.recorded_at = rss_day.recorded_at
                     WHERE rss_day.recorded_at >= :day_start_utc
                         AND rss_day.recorded_at < :day_end_utc
-                        AND pas_day.park_appears_open = TRUE
-                        AND (rss_day.status = 'OPERATING' OR rss_day.computed_is_open = TRUE)
+                        AND (pas_day.park_appears_open = TRUE OR pas_day.rides_open > 0)
+                        AND (
+                            -- Standard: ride showed OPERATING
+                            rss_day.status = 'OPERATING' OR rss_day.computed_is_open = TRUE
+                            -- Disney/Universal: DOWN is valid signal that ride attempted to operate
+                            -- (distinguishes from seasonal closures which show CLOSED)
+                            -- Other parks: Don't use DOWN as signal (they only report CLOSED)
+                            OR (
+                                rss_day.status = 'DOWN'
+                                AND (p_day.is_disney = TRUE OR p_day.is_universal = TRUE)
+                            )
+                        )
                 """), {
                     'day_start_utc': day_start_utc,
                     'day_end_utc': day_end_utc
@@ -317,7 +335,7 @@ class HourlyAggregator:
 
         # Use centralized SQL helpers for consistent business logic (SINGLE SOURCE OF TRUTH)
         is_down_sql = RideStatusSQL.is_down("rss", parks_alias="p")
-        park_open_sql = ParkStatusSQL.park_appears_open_filter("pas")
+        park_open_sql = ParkStatusSQL.park_appears_open_filter("pas", with_fallback=True)
 
         # NEW: "Operated Today" subquery to fix multi-hour outage bug
         # MySQL doesn't support CTEs with INSERT ... ON DUPLICATE KEY UPDATE
@@ -356,11 +374,11 @@ class HourlyAggregator:
                     ELSE 0
                 END) as down_snapshots,
 
-                -- Downtime hours: down_snapshots × 5 minutes / 60
+                -- Downtime hours: down_snapshots × SNAPSHOT_INTERVAL_MINUTES / 60
                 -- Uses RideStatusSQL.is_down() for consistency with canonical business rules
                 ROUND(SUM(CASE
                     WHEN {park_open_sql} AND ({is_down_sql})
-                    THEN 5.0 / 60.0
+                    THEN {SNAPSHOT_INTERVAL_MINUTES} / 60.0
                     ELSE 0
                 END), 2) as downtime_hours,
 
@@ -486,16 +504,21 @@ class HourlyAggregator:
                 :hour_start,
 
                 -- Average shame score across hour (already computed at collection time)
-                ROUND(AVG(CASE WHEN pas.park_appears_open = 1 THEN pas.shame_score END), 1) as shame_score,
+                -- FALLBACK HEURISTIC: Park is "effectively open" if EITHER:
+                -- 1. park_appears_open = TRUE (schedule-based detection), OR
+                -- 2. rides_open > 0 (rides are actually operating)
+                -- This handles parks like Six Flags where schedule data may be missing
+                -- but rides are clearly operating. Matches chart query logic.
+                ROUND(AVG(CASE WHEN (pas.park_appears_open = 1 OR pas.rides_open > 0) THEN pas.shame_score END), 1) as shame_score,
 
                 -- Average wait time across all operating rides
-                ROUND(AVG(CASE WHEN pas.park_appears_open = 1 THEN pas.avg_wait_time END), 2) as avg_wait_time_minutes,
+                ROUND(AVG(CASE WHEN (pas.park_appears_open = 1 OR pas.rides_open > 0) THEN pas.avg_wait_time END), 2) as avg_wait_time_minutes,
 
                 -- Average number of rides operating during hour
-                ROUND(AVG(CASE WHEN pas.park_appears_open = 1 THEN pas.rides_open END), 0) as rides_operating,
+                ROUND(AVG(CASE WHEN (pas.park_appears_open = 1 OR pas.rides_open > 0) THEN pas.rides_open END), 0) as rides_operating,
 
                 -- Average number of rides down during hour
-                ROUND(AVG(CASE WHEN pas.park_appears_open = 1 THEN pas.rides_closed END), 0) as rides_down,
+                ROUND(AVG(CASE WHEN (pas.park_appears_open = 1 OR pas.rides_open > 0) THEN pas.rides_closed END), 0) as rides_down,
 
                 -- Total downtime hours (unweighted, from ride_hourly_stats)
                 COALESCE((
@@ -539,7 +562,8 @@ class HourlyAggregator:
                 COUNT(*) as snapshot_count,
 
                 -- Was park open at all during hour?
-                MAX(pas.park_appears_open) as park_was_open,
+                -- Uses same fallback heuristic: TRUE if schedule says open OR rides operating
+                MAX(CASE WHEN pas.park_appears_open = 1 OR pas.rides_open > 0 THEN 1 ELSE 0 END) as park_was_open,
 
                 NOW()
 

@@ -2,6 +2,21 @@
 """
 Integration tests for TODAY hybrid query logic.
 
+NOTE: These tests are OBSOLETE as of 2025-12 refactoring.
+
+The TodayParkRankingsQuery was refactored to use ONLY pre-aggregated park_hourly_stats
+tables. The "hybrid" approach (combining hourly tables with raw snapshots) has been
+removed for performance reasons. The following features no longer exist:
+- USE_HOURLY_TABLES flag
+- get_today_range_to_now_utc() import
+- _query_hourly_tables() method
+- _query_raw_snapshots() method
+- _combine_hourly_and_raw() method
+- _build_rankings_from_combined_data() method
+
+These tests remain for historical reference but are all skipped.
+
+Original purpose:
 Tests TodayParkRankingsQuery's hybrid approach:
 - _query_hourly_tables(): Fetches complete hours from park_hourly_stats
 - _query_raw_snapshots(): Fetches current hour from park_activity_snapshots
@@ -16,9 +31,16 @@ Key Test Scenarios:
 5. Rides down bug: current hour rides_down ignored
 """
 
+import pytest
+
+# Mark entire module as obsolete
+pytestmark = pytest.mark.skip(
+    reason="OBSOLETE: TodayParkRankingsQuery hybrid approach was refactored out in 2025-12. "
+           "Query now uses ONLY pre-aggregated park_hourly_stats tables."
+)
+
 from datetime import datetime, timedelta, timezone
 
-import pytest
 from sqlalchemy import text
 
 from database.queries.today.today_park_rankings import TodayParkRankingsQuery

@@ -401,13 +401,13 @@ class ComputationTracer:
                 SUM(rds.downtime_minutes) AS downtime_minutes,
                 ROUND(SUM(rds.downtime_minutes) / 60.0, 2) AS downtime_hours,
                 rc.tier,
-                COALESCE(rc.weight, 2) AS tier_weight
+                COALESCE(rc.tier_weight, 2) AS tier_weight
             FROM ride_daily_stats rds
             JOIN rides r ON rds.ride_id = r.ride_id
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             WHERE r.park_id = :park_id
             AND rds.stat_date BETWEEN :start_date AND :end_date
-            GROUP BY rds.ride_id, r.name, rc.tier, rc.weight
+            GROUP BY rds.ride_id, r.name, rc.tier, rc.tier_weight
             ORDER BY downtime_hours DESC
         """)
         result = self.conn.execute(
@@ -421,8 +421,8 @@ class ComputationTracer:
         """Get weighted downtime calculation from pre-aggregated tables."""
         query = text("""
             SELECT
-                ROUND(SUM((rds.downtime_minutes / 60.0) * COALESCE(rc.weight, 2)), 2) AS weighted_downtime_hours,
-                SUM(COALESCE(rc.weight, 2)) AS total_park_weight,
+                ROUND(SUM((rds.downtime_minutes / 60.0) * COALESCE(rc.tier_weight, 2)), 2) AS weighted_downtime_hours,
+                SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight,
                 COUNT(DISTINCT rds.ride_id) AS total_rides
             FROM ride_daily_stats rds
             JOIN rides r ON rds.ride_id = r.ride_id
@@ -441,11 +441,11 @@ class ComputationTracer:
         """Calculate final shame score from pre-aggregated tables."""
         query = text("""
             SELECT
-                ROUND(SUM((rds.downtime_minutes / 60.0) * COALESCE(rc.weight, 2)), 2) AS weighted_downtime_hours,
-                SUM(COALESCE(rc.weight, 2)) AS total_park_weight,
+                ROUND(SUM((rds.downtime_minutes / 60.0) * COALESCE(rc.tier_weight, 2)), 2) AS weighted_downtime_hours,
+                SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight,
                 ROUND(
-                    SUM((rds.downtime_minutes / 60.0) * COALESCE(rc.weight, 2)) /
-                    NULLIF(SUM(COALESCE(rc.weight, 2)), 0),
+                    SUM((rds.downtime_minutes / 60.0) * COALESCE(rc.tier_weight, 2)) /
+                    NULLIF(SUM(COALESCE(rc.tier_weight, 2)), 0),
                     2
                 ) AS shame_score
             FROM ride_daily_stats rds

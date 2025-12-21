@@ -27,7 +27,7 @@ backend/
 ├── src/
 │   ├── api/           # Flask app, routes, middleware
 │   ├── database/      # SQLAlchemy connection, repositories, migrations
-│   ├── collector/     # Queue-Times API client
+│   ├── collector/     # ThemeParks.wiki & Queue-Times API clients
 │   ├── processor/     # Status change detection, aggregation
 │   ├── classifier/    # Ride tier classification
 │   └── scripts/       # Cron job entry points
@@ -82,4 +82,4 @@ See `.env.example` for all configuration options. Key variables:
 
 - `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` - Database connection
 - `ENVIRONMENT` - `development`, `server`, or `production`
-- `QUEUE_TIMES_API_BASE_URL` - API endpoint (default: https://queue-times.com)
+- `QUEUE_TIMES_API_BASE_URL` - Legacy API endpoint (default: https://queue-times.com)

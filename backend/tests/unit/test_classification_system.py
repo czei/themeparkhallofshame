@@ -21,8 +21,8 @@ import csv
 
 # Skip tests that require real OpenAI API key
 requires_openai_key = pytest.mark.skipif(
-    not os.environ.get('OPENAI_API_KEY'),
-    reason="OPENAI_API_KEY not set - skipping live API test"
+    not (os.environ.get('OPENAI_KEY') or os.environ.get('OPENAI_API_KEY')),
+    reason="OPENAI_KEY or OPENAI_API_KEY not set - skipping live API test"
 )
 
 backend_src = Path(__file__).parent.parent.parent / 'src'
@@ -188,7 +188,7 @@ class TestClassificationService:
             with open(exact_matches_path, 'w') as f:
                 json.dump({
                     "_meta": {
-                        "schema_version": "1.0",
+                        "schema_version": "2.0",
                         "last_updated": "2024-01-01T00:00:00Z"
                     },
                     "classifications": {
@@ -231,7 +231,7 @@ class TestClassificationService:
             with open(exact_matches_path, 'w') as f:
                 json.dump({
                     "_meta": {
-                        "schema_version": "1.0",
+                        "schema_version": "2.0",
                         "last_updated": "2024-01-01T00:00:00Z"
                     },
                     "classifications": {}
@@ -380,7 +380,7 @@ class TestMagicKingdomGroundTruth:
             with open(exact_matches_path, 'w') as f:
                 json.dump({
                     "_meta": {
-                        "schema_version": "1.0",
+                        "schema_version": "2.0",
                         "last_updated": "2024-01-01T00:00:00Z"
                     },
                     "classifications": {}

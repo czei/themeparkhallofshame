@@ -129,6 +129,33 @@ class ThemeParksWikiClient:
         wait=wait_exponential(multiplier=RETRY_BACKOFF_MULTIPLIER, min=4, max=60),
         retry=retry_if_exception_type((requests.Timeout, requests.ConnectionError))
     )
+    def get_entity(self, entity_id: str) -> Dict:
+        """
+        Fetch entity document for any entity (park, ride, restaurant, etc).
+
+        Args:
+            entity_id: ThemeParks.wiki entity UUID (or slug)
+
+        Returns:
+            Dictionary with entity metadata
+
+        Raises:
+            requests.HTTPError: If API returns error status
+            requests.Timeout: If request times out (after retries)
+        """
+        url = f"{self.base_url}/entity/{entity_id}"
+        logger.debug(f"Fetching entity document for {entity_id}")
+
+        response = self.session.get(url, timeout=15)
+        response.raise_for_status()
+
+        return response.json()
+
+    @retry(
+        stop=stop_after_attempt(MAX_RETRY_ATTEMPTS),
+        wait=wait_exponential(multiplier=RETRY_BACKOFF_MULTIPLIER, min=4, max=60),
+        retry=retry_if_exception_type((requests.Timeout, requests.ConnectionError))
+    )
     def get_entity_live(self, entity_id: str) -> Dict:
         """
         Fetch live data (wait times, status, operating hours) for an entity.

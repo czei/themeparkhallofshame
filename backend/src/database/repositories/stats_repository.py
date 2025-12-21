@@ -1295,10 +1295,15 @@ class StatsRepository:
         })
         park_row = park_stats_result.fetchone()
 
-        shame_score = float(park_row.shame_score) if park_row and park_row.shame_score else 0.0
+        # CRITICAL FIX: Calculate shame_score from corrected downtime data
+        # instead of using AVG(phs.shame_score) which includes non-operating rides
         total_downtime_hours = float(park_row.total_downtime_hours) if park_row and park_row.total_downtime_hours else 0.0
         weighted_downtime_hours = float(park_row.weighted_downtime_hours) if park_row and park_row.weighted_downtime_hours else 0.0
         total_park_weight = float(park_row.effective_park_weight) if park_row and park_row.effective_park_weight else 0.0
+
+        # Calculate shame_score from CORRECTED downtime data (SINGLE SOURCE OF TRUTH)
+        from utils.metrics import calculate_shame_score
+        shame_score = calculate_shame_score(weighted_downtime_hours, total_park_weight) or 0.0
 
         # Get ride-level breakdown from ride_hourly_stats - SAME source as park aggregates
         # Sum across hours to get total downtime per ride
@@ -1501,28 +1506,11 @@ class StatsRepository:
             total_downtime_hours += float(row.downtime_hours)
             total_weighted_downtime += float(row.weighted_downtime_hours)
 
-        # READ AVERAGE of stored shame_score from park_activity_snapshots
-        # THE SINGLE SOURCE OF TRUTH - calculated during data collection
-        # This matches the pattern used in Yesterday Park Rankings Query
-        # FALLBACK HEURISTIC: Include snapshots where EITHER:
-        # 1. park_appears_open = TRUE (schedule-based detection), OR
-        # 2. rides_open > 0 (rides are actually operating)
-        # This makes queries robust against schedule data gaps.
-        shame_score_query = text("""
-            SELECT ROUND(AVG(pas.shame_score), 1) AS avg_shame_score
-            FROM park_activity_snapshots pas
-            WHERE pas.park_id = :park_id
-                AND pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
-                AND (pas.park_appears_open = TRUE OR pas.rides_open > 0)
-                AND pas.shame_score IS NOT NULL
-        """)
-        shame_result = self.conn.execute(shame_score_query, {
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
-        shame_row = shame_result.fetchone()
-        shame_score = float(shame_row.avg_shame_score) if shame_row and shame_row.avg_shame_score else 0.0
+        # CRITICAL FIX: Calculate shame_score from corrected downtime data (SINGLE SOURCE OF TRUTH)
+        # Previously used AVG(pas.shame_score) which included non-operating rides
+        # Now calculate from weighted_downtime_hours which only includes rides that operated
+        from utils.metrics import calculate_shame_score
+        shame_score = calculate_shame_score(total_weighted_downtime, total_park_weight) or 0.0
 
         return {
             "rides_with_downtime": rides_with_downtime,

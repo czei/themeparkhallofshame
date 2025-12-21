@@ -1,12 +1,18 @@
 """
 Theme Park Downtime Tracker - Database Connection Management
-Provides SQLAlchemy Core connection pooling for MySQL with production optimizations.
+Provides SQLAlchemy Core connection pooling and ORM session management for MySQL.
+
+Migration Note:
+- get_db_connection() returns raw SQLAlchemy Core connections (for legacy code)
+- get_db_session() returns ORM sessions (for new ORM-based code)
+- Both use the same underlying engine for connection pooling
 """
 
 from contextlib import contextmanager
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import QueuePool
 from sqlalchemy.engine import Engine, Connection, URL
+from sqlalchemy.orm import Session
 from typing import Generator
 
 try:
@@ -177,3 +183,70 @@ def test_database_connection() -> bool:
         True if connection successful, False otherwise
     """
     return db.test_connection()
+
+
+# === ORM Session Management ===
+# The following functions provide ORM session management using the session factory from base.py.
+# This allows ORM-based repositories to coexist with raw SQL code during the migration.
+
+@contextmanager
+def get_db_session() -> Generator[Session, None, None]:
+    """
+    Context manager for ORM database sessions.
+
+    Creates a new Session from the scoped session factory, ensuring proper lifecycle management.
+    Sessions are automatically committed on success or rolled back on error.
+
+    Yields:
+        SQLAlchemy Session object
+
+    Example:
+        >>> from database.repositories.ride_repository_orm import RideRepository
+        >>> with get_db_session() as session:
+        ...     repo = RideRepository(session)
+        ...     ride = repo.get_by_id(1)
+        ...     print(ride.name)
+    """
+    from src.models.base import db_session
+
+    # Get a real Session from the scoped_session factory
+    session = db_session()
+
+    try:
+        yield session
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        log_database_error(e, "ORM transaction failed, rolled back")
+        raise
+    finally:
+        session.close()
+        db_session.remove()  # Remove scoped session to prevent connection leaks
+
+
+def create_db_session() -> Session:
+    """
+    Create a new ORM session (for scripts and cron jobs).
+
+    Unlike get_db_session(), this returns a session object that must be manually
+    managed (commit/rollback/close). Use this for long-running scripts or when
+    you need explicit session control.
+
+    Returns:
+        SQLAlchemy Session object (must be manually closed)
+
+    Example:
+        >>> from database.repositories.park_repository_orm import ParkRepository
+        >>> session = create_db_session()
+        >>> try:
+        ...     repo = ParkRepository(session)
+        ...     park = repo.get_by_id(1)
+        ...     session.commit()
+        ... except Exception as e:
+        ...     session.rollback()
+        ...     raise
+        ... finally:
+        ...     session.close()
+    """
+    from src.models.base import create_session
+    return create_session()

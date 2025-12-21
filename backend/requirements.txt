@@ -7,6 +7,7 @@ Flask-CORS>=4.0.0
 
 # Database
 SQLAlchemy>=2.0.0
+Alembic>=1.13.0
 mysqlclient>=2.2.0
 
 # API Client & Retry Logic

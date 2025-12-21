@@ -1,12 +1,12 @@
 """
 SQLAlchemy ORM Base Configuration
-Provides declarative base, engine, and session management for ORM models.
+Provides declarative base and session management for ORM models.
+
+IMPORTANT: Engine is imported from database.connection to ensure single source of truth.
 """
 
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, scoped_session, sessionmaker
-from sqlalchemy import create_engine
 from typing import Optional
-import os
 
 
 class Base(DeclarativeBase):
@@ -14,25 +14,20 @@ class Base(DeclarativeBase):
     pass
 
 
-# Database connection configuration
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    f"mysql+pymysql://{os.getenv('DB_USER', 'root')}:{os.getenv('DB_PASSWORD', '')}@"
-    f"{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '3306')}/"
-    f"{os.getenv('DB_NAME', 'themepark_tracker_dev')}"
-)
+def _get_engine():
+    """
+    Get the SQLAlchemy engine from database.connection.
 
-# Create engine with connection pooling and validation
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,  # Validate connections before using (catch stale connections)
-    pool_recycle=3600,   # Recycle connections after 1 hour (prevent MySQL timeout)
-    echo=os.getenv("SQL_ECHO", "false").lower() == "true",  # Log SQL queries if enabled
-)
+    Lazy import to avoid circular dependencies during module initialization.
+    """
+    from src.database.connection import db
+    return db.get_engine()
+
 
 # Session factory for manual session creation (cron jobs, scripts)
+# Uses engine from database.connection for consistency
 SessionLocal = sessionmaker(
-    bind=engine,
+    bind=_get_engine(),
     expire_on_commit=False,  # Allow access to objects after commit
     autoflush=True,
     autocommit=False

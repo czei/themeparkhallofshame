@@ -568,11 +568,14 @@ def get_park_details(park_id: int):
                     yesterday = today - timedelta(days=1)
                     chart_data = chart_query.get_single_park_hourly(park_id, yesterday, is_today=False)
 
-                # Override chart average with breakdown's shame_score for consistency
-                # The hourly chart query uses different filtering logic which can show 0
-                # when rides haven't "operated" yet, but the breakdown correctly counts downtime
+                # Add shame_score to chart data for badge display
+                # CRITICAL: chart_data['average'] = average of downtime hour bars
+                #          chart_data['shame_score'] = overall shame score (0-10 scale)
+                # These are DIFFERENT metrics with different semantics!
                 if chart_data and shame_breakdown:
-                    chart_data['average'] = shame_breakdown.get('shame_score', chart_data.get('average', 0))
+                    # Keep chart average as-is (average of downtime hours)
+                    # Add separate shame_score field for the shame score badge
+                    chart_data['shame_score'] = shame_breakdown.get('shame_score', 0)
             elif period in ('last_week', 'last_month'):
                 # WEEKLY/MONTHLY: Daily averages for the period
                 from utils.timezone import get_last_week_date_range, get_last_month_date_range
@@ -585,9 +588,11 @@ def get_park_details(park_id: int):
 
                 chart_data = chart_query.get_single_park_daily(park_id, start_date, end_date)
 
-                # Override chart average with breakdown's shame_score for consistency
+                # Add shame_score to chart data for badge display
+                # CRITICAL: For daily charts, chart_data['average'] already contains shame scores
+                #          (calculated per day), so we add the overall shame_score separately
                 if chart_data and shame_breakdown:
-                    chart_data['average'] = shame_breakdown.get('shame_score', chart_data.get('average', 0))
+                    chart_data['shame_score'] = shame_breakdown.get('shame_score', chart_data.get('average', 0))
 
             # Get excluded rides count for display in modal
             excluded_rides = stats_repo.get_excluded_rides(park_id)

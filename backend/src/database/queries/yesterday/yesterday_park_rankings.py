@@ -89,8 +89,13 @@ class YesterdayParkRankingsQuery:
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
 
-                -- Shame score: average across yesterday's hourly stats
-                ROUND(AVG(phs.shame_score), 1) AS shame_score,
+                -- Shame score: calculated from corrected downtime data (SINGLE SOURCE OF TRUTH)
+                -- Uses same formula as TODAY: (weighted_downtime / park_weight) × 10
+                -- This ensures rankings table EXACTLY matches detail popup
+                ROUND(
+                    (SUM(phs.weighted_downtime_hours) / NULLIF(AVG(phs.effective_park_weight), 0)) * 10,
+                    1
+                ) AS shame_score,
 
                 -- Total downtime hours: sum across yesterday
                 ROUND(SUM(phs.total_downtime_hours), 2) AS total_downtime_hours,
@@ -118,7 +123,7 @@ class YesterdayParkRankingsQuery:
               AND p.is_active = TRUE
               {filter_clause}
             GROUP BY p.park_id, p.queue_times_id, p.name, p.city, p.state_province
-            HAVING AVG(phs.shame_score) > 0
+            HAVING (SUM(phs.weighted_downtime_hours) / NULLIF(AVG(phs.effective_park_weight), 0)) * 10 > 0
             ORDER BY {sort_column} {sort_direction}
             LIMIT :limit
         """)

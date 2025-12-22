@@ -395,12 +395,27 @@ class ParkShameHistoryQuery:
     ) -> List[Dict[str, Any]]:
         """Get hourly shame scores from raw park_activity_snapshots.
 
+        DEPRECATED: This fallback path returns SHAME SCORES (0-10 scale),
+        while the fast path (_query_hourly_tables) returns DOWNTIME HOURS.
+        This creates inconsistent chart behavior!
+
+        CRITICAL: Set USE_HOURLY_TABLES=true in environment to use the fast path
+        which returns actual downtime hours and matches the Problem Rides table.
+
         Slow path: Uses GROUP BY HOUR on raw snapshots (rollback path).
         READs stored shame_score from park_activity_snapshots.
-        THE SINGLE SOURCE OF TRUTH - calculated during data collection.
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            "Using deprecated _query_raw_snapshots path for park %s. "
+            "Chart will show SHAME SCORES (0-10) instead of DOWNTIME HOURS. "
+            "Set USE_HOURLY_TABLES=true for consistent behavior.",
+            park_id
+        )
+
         # READ stored shame_score from park_activity_snapshots
-        # THE SINGLE SOURCE OF TRUTH - calculated during data collection
+        # WARNING: Returns shame_score (0-10 scale), NOT downtime hours!
         #
         # FALLBACK HEURISTIC: Include snapshots where EITHER:
         # 1. park_appears_open = TRUE (schedule-based detection), OR
@@ -444,11 +459,12 @@ class ParkShameHistoryQuery:
         Returns same format as _query_raw_snapshots for seamless switching.
         """
         # Query park_hourly_stats table for the time range
-        # Include rides_down and avg_wait_time_minutes for chart display
+        # CRITICAL: Return total_downtime_hours for chart display (not shame_score)
+        # The chart shows actual downtime hours per hour, not shame intensity
         query = text("""
             SELECT
                 HOUR(DATE_SUB(phs.hour_start_utc, INTERVAL 8 HOUR)) AS hour,
-                phs.shame_score,
+                ROUND(phs.total_downtime_hours, 1) AS shame_score,  -- USING DOWNTIME HOURS for chart data
                 phs.rides_down,
                 phs.avg_wait_time_minutes
             FROM park_hourly_stats phs
@@ -456,7 +472,7 @@ class ParkShameHistoryQuery:
                 AND phs.hour_start_utc >= :start_utc
                 AND phs.hour_start_utc < :end_utc
                 AND phs.park_was_open = TRUE
-                AND phs.shame_score IS NOT NULL
+                AND phs.total_downtime_hours IS NOT NULL
             ORDER BY phs.hour_start_utc
         """)
 

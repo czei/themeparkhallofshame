@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
 """
 Theme Park Downtime Tracker - Hourly Aggregation Script
-Pre-computes hourly statistics from raw snapshots for fast chart queries.
 
-This script should be run at :05 past each hour to aggregate the previous completed hour.
+**DEPRECATED as of Phase 4 (ORM Refactoring)**
 
-Usage:
+This script is no longer used. Hourly metrics are now computed on-the-fly via ORM queries
+from ride_status_snapshots and park_activity_snapshots (see utils/query_helpers.py).
+
+Benefits of ORM approach:
+- Real-time data freshness (no aggregation lag)
+- Eliminates ride_hourly_stats table and maintenance overhead
+- Reduces complexity and storage requirements
+
+Historical usage (pre-Phase 4):
     python -m scripts.aggregate_hourly [--hour YYYY-MM-DD-HH]
 
-Options:
-    --hour    Specific hour to aggregate (default: previous completed hour in UTC)
-
-Cron example (every hour at :05):
-    5 * * * * cd /path/to/backend && python -m scripts.aggregate_hourly
-
-Performance:
-    - Aggregates ~12 snapshots per park per hour (5-min collection)
-    - Stores to park_hourly_stats and ride_hourly_stats
-    - Target: <10 seconds for 80 parks × 4200 rides
+Cron job removed from deployment/config/crontab.prod in Phase 4.
+This file is retained for reference only.
 """
 
 import sys
@@ -281,7 +280,7 @@ class HourlyAggregator:
 
                 for ride in rides:
                     try:
-                        self._aggregate_ride(conn, ride, operated_today_ride_ids)
+                        self._aggregate_ride(conn, ride, operated_today_ride_ids, day_start_utc, day_end_utc)
                         self.stats['rides_processed'] += 1
                     except Exception as e:
                         logger.error(f"Error aggregating ride {ride.name}: {e}")
@@ -293,7 +292,7 @@ class HourlyAggregator:
             logger.error(f"Failed to aggregate rides: {e}")
             raise
 
-    def _aggregate_ride(self, conn, ride, operated_today_ride_ids: set):
+    def _aggregate_ride(self, conn, ride, operated_today_ride_ids: set, day_start_utc, day_end_utc):
         """
         Aggregate statistics for a single ride for the target hour.
 
@@ -301,6 +300,8 @@ class HourlyAggregator:
             conn: Database connection
             ride: Ride model object
             operated_today_ride_ids: Set of ride IDs that operated anywhere during the Pacific calendar day
+            day_start_utc: Start of Pacific calendar day in UTC
+            day_end_utc: End of Pacific calendar day in UTC
 
         Business Logic (from CLAUDE.md Rule 2 - HOURLY):
         ==================================================
@@ -312,6 +313,9 @@ class HourlyAggregator:
 
         Only rides that operated count toward downtime calculations.
         This prevents scheduled maintenance rides from showing false downtime.
+
+        CRITICAL FIX (2025-12-21): Downtime only counts AFTER ride first operated.
+        Prevents counting early morning hours when ride was still closed/warming up.
         """
         ride_id = ride.ride_id
         park_id = ride.park_id
@@ -335,7 +339,11 @@ class HourlyAggregator:
 
         # Use centralized SQL helpers for consistent business logic (SINGLE SOURCE OF TRUTH)
         is_down_sql = RideStatusSQL.is_down("rss", parks_alias="p")
-        park_open_sql = ParkStatusSQL.park_appears_open_filter("pas", with_fallback=True)
+        # CRITICAL FIX (2025-12-21): Remove fallback heuristic to enforce Canonical Business Rule #1
+        # "If park is closed, ignore ALL ride statuses" - NO EXCEPTIONS
+        # Previously: with_fallback=True counted downtime if rides_open > 0, even when park was officially closed
+        # Bug: Kumba showed 1.0 hours downtime at 3-4am EST when park_appears_open=0 but rides_open=1
+        park_open_sql = ParkStatusSQL.park_appears_open_filter("pas", with_fallback=False)
 
         # NEW: "Operated Today" subquery to fix multi-hour outage bug
         # MySQL doesn't support CTEs with INSERT ... ON DUPLICATE KEY UPDATE
@@ -368,16 +376,22 @@ class HourlyAggregator:
 
                 -- Count snapshots where ride was down (Rule 3: park-type aware)
                 -- Uses RideStatusSQL.is_down() for consistency with canonical business rules
+                -- CRITICAL FIX (2025-12-21): Only count after ride first operated (Canonical Business Rule #2)
                 SUM(CASE
-                    WHEN {park_open_sql} AND ({is_down_sql})
+                    WHEN {park_open_sql}
+                      AND ({is_down_sql})
+                      AND (first_op.first_operating_time IS NOT NULL AND rss.recorded_at >= first_op.first_operating_time)
                     THEN 1
                     ELSE 0
                 END) as down_snapshots,
 
                 -- Downtime hours: down_snapshots × SNAPSHOT_INTERVAL_MINUTES / 60
                 -- Uses RideStatusSQL.is_down() for consistency with canonical business rules
+                -- CRITICAL FIX (2025-12-21): Only count after ride first operated (Canonical Business Rule #2)
                 ROUND(SUM(CASE
-                    WHEN {park_open_sql} AND ({is_down_sql})
+                    WHEN {park_open_sql}
+                      AND ({is_down_sql})
+                      AND (first_op.first_operating_time IS NOT NULL AND rss.recorded_at >= first_op.first_operating_time)
                     THEN {SNAPSHOT_INTERVAL_MINUTES} / 60.0
                     ELSE 0
                 END), 2) as downtime_hours,
@@ -403,6 +417,20 @@ class HourlyAggregator:
             JOIN parks p ON r.park_id = p.park_id
             JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
                 AND pas.recorded_at = rss.recorded_at
+            -- CRITICAL FIX (2025-12-21): Find when ride FIRST operated during Pacific day
+            -- This ensures downtime only counts AFTER ride started operating (Canonical Business Rule #2)
+            -- Fixes Kumba bug: showed 7.2 hours downtime including hours before it first operated at 5:20am
+            CROSS JOIN (
+                SELECT MIN(rss_first.recorded_at) as first_operating_time
+                FROM ride_status_snapshots rss_first
+                JOIN park_activity_snapshots pas_first ON rss_first.park_id = pas_first.park_id
+                    AND pas_first.recorded_at = rss_first.recorded_at
+                WHERE rss_first.ride_id = :ride_id
+                  AND rss_first.recorded_at >= :day_start_utc
+                  AND rss_first.recorded_at < :day_end_utc
+                  AND (pas_first.park_appears_open = TRUE)
+                  AND (rss_first.status = 'OPERATING' OR rss_first.computed_is_open = TRUE)
+            ) first_op
             WHERE rss.ride_id = :ride_id
               AND rss.recorded_at >= :hour_start
               AND rss.recorded_at < :hour_end
@@ -420,6 +448,8 @@ class HourlyAggregator:
             'park_id': park_id,
             'hour_start': self.target_hour,
             'hour_end': self.hour_end,
+            'day_start_utc': day_start_utc,
+            'day_end_utc': day_end_utc,
             'ride_operated': 1 if ride_id in operated_today_ride_ids else 0
         })
 

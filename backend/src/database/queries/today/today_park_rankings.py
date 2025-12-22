@@ -9,10 +9,10 @@ Returns parks ranked by AVERAGE shame score from midnight Pacific to now.
 
 SHAME SCORE CALCULATION:
 - LIVE: Instantaneous shame = (sum of weights of down rides) / total_park_weight × 10
-- TODAY: Average of instantaneous shame scores across today's hourly stats
+- TODAY: (SUM(weighted_downtime_hours) / AVG(effective_park_weight)) × 10
 
-This makes TODAY comparable to LIVE - both on the same 0-100 scale representing
-"percentage of weighted capacity that was down".
+SINGLE SOURCE OF TRUTH: Uses same formula as detail popup (stats_repository.py).
+This ensures shame score in rankings table EXACTLY matches detail popup.
 
 Performance Optimization (2025-12):
 ====================================
@@ -90,9 +90,13 @@ class TodayParkRankingsQuery:
                 p.name AS park_name,
                 CONCAT(p.city, ', ', p.state_province) AS location,
 
-                -- Shame score: average of hourly shame scores
-                -- (Hourly scores are corrected by aggregate_hourly.py to exclude non-operating rides)
-                ROUND(AVG(phs.shame_score), 1) AS shame_score,
+                -- Shame score: calculated from corrected downtime data (SINGLE SOURCE OF TRUTH)
+                -- Uses same formula as detail popup: (weighted_downtime / park_weight) × 10
+                -- This ensures rankings table EXACTLY matches detail popup
+                ROUND(
+                    (SUM(phs.weighted_downtime_hours) / NULLIF(AVG(phs.effective_park_weight), 0)) * 10,
+                    1
+                ) AS shame_score,
 
                 -- Total downtime hours: sum across today
                 ROUND(SUM(phs.total_downtime_hours), 2) AS total_downtime_hours,
@@ -125,7 +129,7 @@ class TodayParkRankingsQuery:
               AND p.is_active = TRUE
               {filter_clause}
             GROUP BY p.park_id, p.queue_times_id, p.name, p.city, p.state_province
-            HAVING AVG(phs.shame_score) > 0
+            HAVING (SUM(phs.weighted_downtime_hours) / NULLIF(AVG(phs.effective_park_weight), 0)) * 10 > 0
             ORDER BY {sort_column} DESC
             LIMIT :limit
         """)

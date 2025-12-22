@@ -1277,12 +1277,16 @@ class StatsRepository:
 
         # Get park-level stats from park_hourly_stats - SAME source as rankings
         # This ensures shame_score EXACTLY matches the rankings table
+        # CRITICAL: Use UNROUNDED values for calculation, rounded values for display
         park_stats_query = text("""
             SELECT
-                ROUND(AVG(phs.shame_score), 1) AS shame_score,
+                -- For display (rounded)
                 ROUND(SUM(phs.total_downtime_hours), 2) AS total_downtime_hours,
-                ROUND(SUM(phs.weighted_downtime_hours), 2) AS weighted_downtime_hours,
-                ROUND(AVG(phs.effective_park_weight), 1) AS effective_park_weight
+                ROUND(SUM(phs.weighted_downtime_hours), 2) AS weighted_downtime_hours_display,
+                ROUND(AVG(phs.effective_park_weight), 1) AS effective_park_weight_display,
+                -- For calculation (unrounded - SINGLE SOURCE OF TRUTH)
+                SUM(phs.weighted_downtime_hours) AS weighted_downtime_hours_raw,
+                AVG(phs.effective_park_weight) AS effective_park_weight_raw
             FROM park_hourly_stats phs
             WHERE phs.park_id = :park_id
               AND phs.hour_start_utc >= :start_utc
@@ -1295,15 +1299,19 @@ class StatsRepository:
         })
         park_row = park_stats_result.fetchone()
 
-        # CRITICAL FIX: Calculate shame_score from corrected downtime data
-        # instead of using AVG(phs.shame_score) which includes non-operating rides
+        # CRITICAL FIX: Calculate shame_score from UNROUNDED data (SINGLE SOURCE OF TRUTH)
+        # Use raw values for calculation to match rankings table exactly
         total_downtime_hours = float(park_row.total_downtime_hours) if park_row and park_row.total_downtime_hours else 0.0
-        weighted_downtime_hours = float(park_row.weighted_downtime_hours) if park_row and park_row.weighted_downtime_hours else 0.0
-        total_park_weight = float(park_row.effective_park_weight) if park_row and park_row.effective_park_weight else 0.0
+        weighted_downtime_hours_raw = float(park_row.weighted_downtime_hours_raw) if park_row and park_row.weighted_downtime_hours_raw else 0.0
+        total_park_weight_raw = float(park_row.effective_park_weight_raw) if park_row and park_row.effective_park_weight_raw else 0.0
 
-        # Calculate shame_score from CORRECTED downtime data (SINGLE SOURCE OF TRUTH)
+        # Use rounded values for display
+        weighted_downtime_hours_display = float(park_row.weighted_downtime_hours_display) if park_row and park_row.weighted_downtime_hours_display else 0.0
+        total_park_weight_display = float(park_row.effective_park_weight_display) if park_row and park_row.effective_park_weight_display else 0.0
+
+        # Calculate shame_score from UNROUNDED data (matches rankings table calculation)
         from utils.metrics import calculate_shame_score
-        shame_score = calculate_shame_score(weighted_downtime_hours, total_park_weight) or 0.0
+        shame_score = calculate_shame_score(weighted_downtime_hours_raw, total_park_weight_raw) or 0.0
 
         # Get ride-level breakdown from ride_hourly_stats - SAME source as park aggregates
         # Sum across hours to get total downtime per ride
@@ -1367,9 +1375,9 @@ class StatsRepository:
         return {
             "rides_with_downtime": rides_with_downtime,
             "rides_affected_count": len(rides_with_downtime),
-            "total_park_weight": total_park_weight,
+            "total_park_weight": total_park_weight_display,
             "total_downtime_hours": total_downtime_hours,
-            "weighted_downtime_hours": weighted_downtime_hours,
+            "weighted_downtime_hours": weighted_downtime_hours_display,
             "shame_score": shame_score,
             "park_is_open": park_is_open,
             "breakdown_type": "today",

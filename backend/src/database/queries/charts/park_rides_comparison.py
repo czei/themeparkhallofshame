@@ -213,7 +213,7 @@ class ParkRidesComparisonQuery:
         Get hourly downtime for all rides in a park.
 
         Used for: today, yesterday periods.
-        Uses live snapshot data.
+        Uses ride_hourly_stats (SINGLE SOURCE OF TRUTH - same as Problem Rides table).
         """
         # Generate hourly labels (6am to 11pm = 18 hours)
         labels = [f"{h}:00" for h in range(6, 24)]
@@ -221,7 +221,7 @@ class ParkRidesComparisonQuery:
         # Get UTC time range for the target date in Pacific timezone
         start_utc, end_utc = get_pacific_day_range_utc(target_date)
 
-        # Get all rides that operated during this period
+        # Get all rides that operated during this period (from ride_hourly_stats)
         rides_query = text("""
             SELECT DISTINCT
                 r.ride_id,
@@ -229,16 +229,13 @@ class ParkRidesComparisonQuery:
                 COALESCE(rc.tier, 2) AS tier
             FROM rides r
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
+            INNER JOIN ride_hourly_stats rhs ON r.ride_id = rhs.ride_id
             WHERE r.park_id = :park_id
                 AND r.is_active = TRUE
                 AND r.category = 'ATTRACTION'
-                AND rss.recorded_at >= :start_utc
-                AND rss.recorded_at < :end_utc
-                AND pas.park_appears_open = TRUE
-                AND (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = 1))
+                AND rhs.hour_start_utc >= :start_utc
+                AND rhs.hour_start_utc < :end_utc
+                AND rhs.ride_operated = 1
             ORDER BY tier ASC, r.name ASC
         """)
 
@@ -265,7 +262,8 @@ class ParkRidesComparisonQuery:
             )
 
             # Align data to labels (6am to 11pm)
-            data_by_hour = {row["hour"]: row["downtime_hours"] for row in hourly_data}
+            # Convert Decimal to float for JSON serialization
+            data_by_hour = {row["hour"]: float(row["downtime_hours"]) if row["downtime_hours"] is not None else None for row in hourly_data}
             aligned_data = [data_by_hour.get(h) for h in range(6, 24)]
 
             datasets.append({
@@ -422,59 +420,28 @@ class ParkRidesComparisonQuery:
         end_utc,
     ) -> List[Dict[str, Any]]:
         """
-        Get hourly downtime for a specific ride from live snapshots.
+        Get hourly downtime for a specific ride from ride_hourly_stats.
 
-        Logic:
-        1. Only count hours where park_appears_open = TRUE
-        2. Only count downtime AFTER the ride first operated today
+        SINGLE SOURCE OF TRUTH: Uses ride_hourly_stats (same as Problem Rides table).
+        This ensures the chart total matches the table total exactly.
+
+        Only includes hours where ride_operated = 1 (ride actually ran that hour or earlier in the day).
         """
         query = text("""
-            WITH ride_first_operating AS (
-                SELECT MIN(rss_inner.recorded_at) as first_op_time
-                FROM ride_status_snapshots rss_inner
-                WHERE rss_inner.ride_id = :ride_id
-                    AND rss_inner.recorded_at >= :start_utc
-                    AND rss_inner.recorded_at < :end_utc
-                    AND (rss_inner.status = 'OPERATING'
-                         OR (rss_inner.status IS NULL AND rss_inner.computed_is_open = 1))
-            ),
-            park_hourly_open AS (
-                SELECT
-                    HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR)) as hour,
-                    MAX(pas.park_appears_open) as park_open
-                FROM park_activity_snapshots pas
-                WHERE pas.park_id = :park_id
-                    AND pas.recorded_at >= :start_utc
-                    AND pas.recorded_at < :end_utc
-                GROUP BY HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR))
-            )
             SELECT
-                HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) AS hour,
-                ROUND(
-                    SUM(CASE
-                        WHEN pho.park_open = 1
-                            AND rfo.first_op_time IS NOT NULL
-                            AND rss.recorded_at >= rfo.first_op_time
-                            AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0))
-                        THEN 5
-                        ELSE 0
-                    END) / 60.0,
-                    2
-                ) AS downtime_hours
-            FROM ride_status_snapshots rss
-            CROSS JOIN ride_first_operating rfo
-            LEFT JOIN park_hourly_open pho
-                ON HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) = pho.hour
-            WHERE rss.ride_id = :ride_id
-                AND rss.recorded_at >= :start_utc
-                AND rss.recorded_at < :end_utc
-            GROUP BY HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR))
+                HOUR(DATE_SUB(rhs.hour_start_utc, INTERVAL 8 HOUR)) AS hour,
+                rhs.downtime_hours
+            FROM ride_hourly_stats rhs
+            WHERE rhs.ride_id = :ride_id
+                AND rhs.hour_start_utc >= :start_utc
+                AND rhs.hour_start_utc < :end_utc
+                AND rhs.ride_operated = 1
             ORDER BY hour
         """)
 
         result = self.conn.execute(query, {
             "ride_id": ride_id,
-            "park_id": park_id,
+            "park_id": park_id,  # Not used in query but kept for API compatibility
             "start_utc": start_utc,
             "end_utc": end_utc
         })

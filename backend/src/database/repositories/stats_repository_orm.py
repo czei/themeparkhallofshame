@@ -32,16 +32,10 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, text, distinct
 
-try:
-    from ...models.orm_park import Park
-    from ...models.orm_ride import Ride
-    from ...models.orm_stats import ParkDailyStats
-    from ...models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
-except ImportError:
-    from models.orm_park import Park
-    from models.orm_ride import Ride
-    from models.orm_stats import ParkDailyStats
-    from models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
+from src.models.orm_park import Park
+from src.models.orm_ride import Ride
+from src.models.orm_stats import ParkDailyStats
+from src.models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
 
 
 class StatsRepository:

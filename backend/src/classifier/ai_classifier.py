@@ -13,10 +13,7 @@ try:
 except ImportError:
     OpenAI = None
 
-try:
-    from ..utils.logger import logger
-except ImportError:
-    from utils.logger import logger
+from src.utils.logger import logger
 
 
 VALID_CATEGORIES = ['ATTRACTION', 'MEET_AND_GREET', 'SHOW', 'EXPERIENCE']

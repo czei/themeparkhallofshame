@@ -6,12 +6,8 @@ Validates X-API-Key header for protected endpoints.
 from functools import wraps
 from flask import request, jsonify
 
-try:
-    from ...utils.config import config
-    from ...utils.logger import logger
-except ImportError:
-    from utils.config import config
-    from utils.logger import logger
+from src.utils.config import config
+from src.utils.logger import logger
 
 
 class APIKeyAuth:

@@ -12,6 +12,7 @@ from typing import List, Optional
 
 class Park(Base):
     __tablename__ = "parks"
+    __table_args__ = {'extend_existing': True}
 
     # Primary Key
     park_id: Mapped[int] = mapped_column(primary_key=True)

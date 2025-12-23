@@ -7,12 +7,8 @@ import requests
 from typing import Dict, List, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-try:
-    from ..utils.config import QUEUE_TIMES_API_BASE_URL, MAX_RETRY_ATTEMPTS, RETRY_BACKOFF_MULTIPLIER
-    from ..utils.logger import logger
-except ImportError:
-    from utils.config import QUEUE_TIMES_API_BASE_URL, MAX_RETRY_ATTEMPTS, RETRY_BACKOFF_MULTIPLIER
-    from utils.logger import logger
+from src.utils.config import QUEUE_TIMES_API_BASE_URL, MAX_RETRY_ATTEMPTS, RETRY_BACKOFF_MULTIPLIER
+from src.utils.logger import logger
 
 
 class QueueTimesClient:

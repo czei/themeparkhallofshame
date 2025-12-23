@@ -12,6 +12,7 @@ from typing import List, Optional
 
 class Ride(Base):
     __tablename__ = "rides"
+    __table_args__ = {'extend_existing': True}
 
     # Primary Key
     ride_id: Mapped[int] = mapped_column(primary_key=True)

@@ -8,10 +8,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-try:
-    from ...utils.logger import logger, log_database_error
-except ImportError:
-    from utils.logger import logger, log_database_error
+from src.utils.logger import logger, log_database_error
 
 
 class DataQualityRepository:

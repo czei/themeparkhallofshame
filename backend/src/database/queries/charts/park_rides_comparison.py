@@ -422,63 +422,51 @@ class ParkRidesComparisonQuery:
         end_utc,
     ) -> List[Dict[str, Any]]:
         """
-        Get hourly downtime for a specific ride from live snapshots.
+        Get hourly downtime for a specific ride using ORM queries.
 
-        Logic:
-        1. Only count hours where park_appears_open = TRUE
-        2. Only count downtime AFTER the ride first operated today
+        SINGLE SOURCE OF TRUTH: Uses HourlyAggregationQuery (same as all other hourly metrics).
+
+        Logic (enforced in ORM):
+        1. Only count hours where park_appears_open = TRUE (no fallback heuristic)
+        2. Only count downtime AFTER the ride operated anywhere during Pacific day
         """
-        query = text("""
-            WITH ride_first_operating AS (
-                SELECT MIN(rss_inner.recorded_at) as first_op_time
-                FROM ride_status_snapshots rss_inner
-                WHERE rss_inner.ride_id = :ride_id
-                    AND rss_inner.recorded_at >= :start_utc
-                    AND rss_inner.recorded_at < :end_utc
-                    AND (rss_inner.status = 'OPERATING'
-                         OR (rss_inner.status IS NULL AND rss_inner.computed_is_open = 1))
-            ),
-            park_hourly_open AS (
-                SELECT
-                    HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR)) as hour,
-                    MAX(pas.park_appears_open) as park_open
-                FROM park_activity_snapshots pas
-                WHERE pas.park_id = :park_id
-                    AND pas.recorded_at >= :start_utc
-                    AND pas.recorded_at < :end_utc
-                GROUP BY HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR))
-            )
-            SELECT
-                HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) AS hour,
-                ROUND(
-                    SUM(CASE
-                        WHEN pho.park_open = 1
-                            AND rfo.first_op_time IS NOT NULL
-                            AND rss.recorded_at >= rfo.first_op_time
-                            AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0))
-                        THEN 5
-                        ELSE 0
-                    END) / 60.0,
-                    2
-                ) AS downtime_hours
-            FROM ride_status_snapshots rss
-            CROSS JOIN ride_first_operating rfo
-            LEFT JOIN park_hourly_open pho
-                ON HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) = pho.hour
-            WHERE rss.ride_id = :ride_id
-                AND rss.recorded_at >= :start_utc
-                AND rss.recorded_at < :end_utc
-            GROUP BY HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR))
-            ORDER BY hour
-        """)
+        from src.models.base import db_session
+        from src.utils.query_helpers import HourlyAggregationQuery
+        from src.utils.timezone import PACIFIC_TZ, UTC_TZ
 
-        result = self.conn.execute(query, {
-            "ride_id": ride_id,
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
-        return [dict(row._mapping) for row in result]
+        # Debug logging
+        import logging
+        logger = logging.getLogger('themepark_tracker')
+        logger.info(f"ORM chart query: ride_id={ride_id}, period={start_utc} to {end_utc}")
+
+        # Get hourly metrics using ORM
+        metrics = HourlyAggregationQuery.ride_hour_range_metrics(
+            session=db_session,
+            ride_id=ride_id,
+            start_utc=start_utc,
+            end_utc=end_utc,
+        )
+
+        logger.info(f"ORM returned {len(metrics)} hourly metrics")
+
+        # Convert to chart format (Pacific hour 0-23, downtime_hours)
+        result = []
+        total_downtime = 0
+        for m in metrics:
+            # Convert UTC hour_start to Pacific hour (0-23)
+            # hour_start_utc is naive, so we treat it as UTC, then convert to Pacific
+            utc_dt = m.hour_start_utc.replace(tzinfo=UTC_TZ)
+            pacific_dt = utc_dt.astimezone(PACIFIC_TZ)
+            pacific_hour = pacific_dt.hour
+
+            result.append({
+                "hour": pacific_hour,
+                "downtime_hours": float(m.downtime_hours)  # Ensure float for JSON
+            })
+            total_downtime += m.downtime_hours
+
+        logger.info(f"Ride {ride_id} total downtime: {total_downtime}h, ride_operated={metrics[0].ride_operated if metrics else 'N/A'}")
+        return result
 
     def _get_ride_hourly_wait_times(
         self,

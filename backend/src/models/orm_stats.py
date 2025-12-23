@@ -112,6 +112,7 @@ class RideDailyStats(Base):
         Index('idx_ride_daily_stats_date', 'stat_date'),
         Index('idx_ride_daily_ranking', 'stat_date', 'downtime_minutes'),
         Index('idx_ride_daily_stats_version', 'metrics_version'),
+        {'extend_existing': True}
     )
 
     # Relationships
@@ -215,6 +216,7 @@ class ParkDailyStats(Base):
         Index('idx_park_daily_stats_date', 'stat_date'),
         Index('idx_park_daily_ranking', 'stat_date', 'total_downtime_hours'),
         Index('idx_park_daily_stats_version', 'metrics_version'),
+        {'extend_existing': True}
     )
 
     # Relationships

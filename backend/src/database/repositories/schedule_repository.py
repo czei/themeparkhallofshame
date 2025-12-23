@@ -17,12 +17,8 @@ import pytz
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-try:
-    from ...collector.themeparks_wiki_client import get_themeparks_wiki_client
-    from ...utils.logger import logger, log_database_error
-except ImportError:
-    from collector.themeparks_wiki_client import get_themeparks_wiki_client
-    from utils.logger import logger, log_database_error
+from src.collector.themeparks_wiki_client import get_themeparks_wiki_client
+from src.utils.logger import logger, log_database_error
 
 
 class ScheduleRepository:

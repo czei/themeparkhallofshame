@@ -129,6 +129,7 @@ class WeatherObservation(Base):
     # Composite Indexes for Performance
     __table_args__ = (
         Index('idx_weather_obs_park_time', 'park_id', 'observation_time'),
+        {'extend_existing': True}
     )
 
     # Relationships
@@ -256,6 +257,7 @@ class WeatherForecast(Base):
     # Composite Indexes for Performance
     __table_args__ = (
         Index('idx_weather_forecast_park_issued', 'park_id', 'issued_at'),
+        {'extend_existing': True}
     )
 
     # Relationships

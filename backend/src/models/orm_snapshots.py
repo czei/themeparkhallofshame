@@ -75,6 +75,7 @@ class RideStatusSnapshot(Base):
         Index('idx_ride_recorded', 'ride_id', 'recorded_at'),
         Index('idx_ride_status_snapshots_recorded_at', 'recorded_at'),
         Index('idx_computed_status', 'computed_is_open', 'recorded_at'),
+        {'extend_existing': True}
     )
 
     # Relationships
@@ -192,6 +193,7 @@ class ParkActivitySnapshot(Base):
         Index('idx_park_recorded', 'park_id', 'recorded_at'),
         Index('idx_park_activity_snapshots_recorded_at', 'recorded_at'),
         Index('idx_park_open', 'park_id', 'park_appears_open', 'recorded_at'),
+        {'extend_existing': True}
     )
 
     # Relationships

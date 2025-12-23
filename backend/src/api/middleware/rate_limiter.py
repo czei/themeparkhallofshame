@@ -8,10 +8,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from flask import request, jsonify
 
-try:
-    from ...utils.logger import logger
-except ImportError:
-    from utils.logger import logger
+from src.utils.logger import logger
 
 
 class RateLimiter:
@@ -139,10 +136,7 @@ class RateLimiter:
 
 
 # Global instance
-try:
-    from ...utils.config import API_RATE_LIMIT_PER_HOUR, API_RATE_LIMIT_PER_DAY
-except ImportError:
-    from utils.config import API_RATE_LIMIT_PER_HOUR, API_RATE_LIMIT_PER_DAY
+from src.utils.config import API_RATE_LIMIT_PER_HOUR, API_RATE_LIMIT_PER_DAY
 
 rate_limiter = RateLimiter(
     hourly_limit=API_RATE_LIMIT_PER_HOUR,

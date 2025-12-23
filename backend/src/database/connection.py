@@ -15,20 +15,12 @@ from sqlalchemy.engine import Engine, Connection, URL
 from sqlalchemy.orm import Session
 from typing import Generator
 
-try:
-    from ..utils.config import (
-        DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD,
-        DB_POOL_SIZE, DB_POOL_MAX_OVERFLOW, DB_POOL_RECYCLE, DB_POOL_PRE_PING,
-        config
-    )
-    from ..utils.logger import logger, log_database_error
-except ImportError:
-    from utils.config import (
-        DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD,
-        DB_POOL_SIZE, DB_POOL_MAX_OVERFLOW, DB_POOL_RECYCLE, DB_POOL_PRE_PING,
-        config
-    )
-    from utils.logger import logger, log_database_error
+from src.utils.config import (
+    DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD,
+    DB_POOL_SIZE, DB_POOL_MAX_OVERFLOW, DB_POOL_RECYCLE, DB_POOL_PRE_PING,
+    config
+)
+from src.utils.logger import logger, log_database_error
 
 
 class DatabaseConnection:

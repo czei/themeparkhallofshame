@@ -215,6 +215,36 @@ def mysql_with_schema(mysql_connection):
     yield mysql_connection
 
 
+@pytest.fixture
+def mysql_session(mysql_engine):
+    """
+    Provide SQLAlchemy ORM Session for integration tests.
+
+    Each test gets a fresh session with a transaction that's
+    rolled back after the test completes. This fixture is for
+    ORM-based repository tests that use Session instead of Connection.
+
+    Args:
+        mysql_engine: MySQL engine fixture
+
+    Yields:
+        SQLAlchemy Session within a transaction
+    """
+    from sqlalchemy.orm import Session
+
+    # Create session bound to engine
+    session = Session(bind=mysql_engine)
+
+    # Begin a transaction that we'll rollback at the end
+    session.begin()
+
+    try:
+        yield session
+    finally:
+        session.rollback()
+        session.close()
+
+
 # Sample data fixtures (similar to unit test fixtures)
 
 @pytest.fixture

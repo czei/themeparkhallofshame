@@ -380,6 +380,8 @@ class HourlyAggregationQuery:
         - downtime_hours: Fractional hours of downtime (1.0 = full hour down)
         - ride_operated: Whether ride operated at any point in the Pacific day
 
+        Performance: Uses a single grouped query instead of N queries per hour.
+
         Args:
             session: SQLAlchemy session
             ride_id: Ride ID
@@ -396,14 +398,16 @@ class HourlyAggregationQuery:
             >>> for m in metrics:
             ...     print(f"Hour {m.hour_start_utc}: {m.uptime_percentage}% uptime")
         """
+        from sqlalchemy import literal_column, case
+        from sqlalchemy.sql.expression import cast
+        from sqlalchemy.types import Integer
+
         # First, determine if ride operated at all in the date range (Pacific day)
-        # For simplicity, we check if the ride operated in the entire UTC range
         ride_operated_subquery = (
             select(func.count(RideStatusSnapshot.snapshot_id))
             .where(RideStatusSnapshot.ride_id == ride_id)
             .where(RideStatusSnapshot.recorded_at >= start_utc)
             .where(RideStatusSnapshot.recorded_at < end_utc)
-            .where(RideStatusSnapshot.park_appears_open == True)
             .where(
                 or_(
                     RideStatusSnapshot.status == 'OPERATING',
@@ -414,60 +418,62 @@ class HourlyAggregationQuery:
         ride_operated_count = session.execute(ride_operated_subquery).scalar() or 0
         ride_operated = ride_operated_count > 0
 
-        # Generate hourly buckets
-        results = []
-        current_hour = start_utc.replace(minute=0, second=0, microsecond=0)
+        # Single query with GROUP BY hour - uses MySQL DATE_FORMAT to truncate to hour
+        # DATE_FORMAT(recorded_at, '%Y-%m-%d %H:00:00') gives hour start
+        hour_start_expr = func.date_format(
+            RideStatusSnapshot.recorded_at,
+            literal_column("'%Y-%m-%d %H:00:00'")
+        ).label('hour_start')
 
-        while current_hour < end_utc:
-            next_hour = current_hour + timedelta(hours=1)
+        # Use CASE expression for counting operating snapshots
+        is_operating = case(
+            (or_(
+                RideStatusSnapshot.status == 'OPERATING',
+                RideStatusSnapshot.computed_is_open == True
+            ), 1),
+            else_=0
+        )
 
-            # Query snapshots for this hour
-            hour_snapshots = (
-                select(
-                    func.count(RideStatusSnapshot.snapshot_id).label('total_count'),
-                    func.avg(RideStatusSnapshot.wait_time).label('avg_wait'),
-                    func.sum(
-                        func.cast(
-                            or_(
-                                RideStatusSnapshot.status == 'OPERATING',
-                                RideStatusSnapshot.computed_is_open == True
-                            ),
-                            type_=Decimal
-                        )
-                    ).label('operating_count')
-                )
-                .where(RideStatusSnapshot.ride_id == ride_id)
-                .where(RideStatusSnapshot.recorded_at >= current_hour)
-                .where(RideStatusSnapshot.recorded_at < next_hour)
-                .where(RideStatusSnapshot.park_appears_open == True)
+        hourly_query = (
+            select(
+                hour_start_expr,
+                func.count(RideStatusSnapshot.snapshot_id).label('total_count'),
+                func.avg(RideStatusSnapshot.wait_time).label('avg_wait'),
+                func.sum(is_operating).label('operating_count')
             )
+            .where(RideStatusSnapshot.ride_id == ride_id)
+            .where(RideStatusSnapshot.recorded_at >= start_utc)
+            .where(RideStatusSnapshot.recorded_at < end_utc)
+            .group_by(hour_start_expr)
+            .order_by(hour_start_expr)
+        )
 
-            row = session.execute(hour_snapshots).first()
+        rows = session.execute(hourly_query).all()
 
-            total_count = int(row.total_count or 0) if row else 0
-
+        results = []
+        for row in rows:
+            total_count = int(row.total_count or 0)
             if total_count > 0:
-                operating_count = int(row.operating_count or 0) if row else 0
-                avg_wait = float(row.avg_wait) if row and row.avg_wait is not None else None
+                operating_count = int(row.operating_count or 0)
+                avg_wait = float(row.avg_wait) if row.avg_wait is not None else None
 
                 # Calculate uptime percentage
-                uptime_pct = (operating_count / total_count) * 100.0 if total_count > 0 else 0.0
+                uptime_pct = (operating_count / total_count) * 100.0
 
                 # Calculate downtime hours (fraction of hour)
-                # Assume 6 snapshots per hour (10-minute intervals)
-                # Downtime = (1 - operating_count/total_count) hours
                 down_count = total_count - operating_count
-                downtime_hours = (down_count / total_count) if total_count > 0 else 0.0
+                downtime_hours = (down_count / total_count)
+
+                # Parse hour_start string back to datetime
+                hour_start_dt = datetime.strptime(row.hour_start, '%Y-%m-%d %H:%M:%S')
 
                 results.append(RideHourlyMetrics(
-                    hour_start_utc=current_hour,
+                    hour_start_utc=hour_start_dt,
                     avg_wait_time_minutes=avg_wait,
                     uptime_percentage=uptime_pct,
                     snapshot_count=total_count,
                     downtime_hours=downtime_hours,
                     ride_operated=ride_operated
                 ))
-
-            current_hour = next_hour
 
         return results

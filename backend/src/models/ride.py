@@ -26,6 +26,7 @@ class Ride:
     created_at: datetime
     updated_at: datetime
     park_queue_times_id: Optional[int] = None  # From parks table, needed for queue_times_url
+    park_name: Optional[str] = None  # From parks table, for display purposes
 
     @property
     def tier_weight(self) -> int:

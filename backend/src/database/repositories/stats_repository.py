@@ -33,7 +33,7 @@ from sqlalchemy import func, and_, text, distinct
 
 from src.models.orm_park import Park
 from src.models.orm_ride import Ride
-from src.models.orm_stats import ParkDailyStats
+from src.models.orm_stats import ParkDailyStats, ParkHourlyStats
 from src.models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
 
 
@@ -56,23 +56,41 @@ class StatsRepository:
 
     def get_aggregate_park_stats(
         self,
-        park_id: int,
+        park_id: Optional[int] = None,
         period: str = "daily",
         start_date: Optional[str] = None,
-        end_date: Optional[str] = None
+        end_date: Optional[str] = None,
+        filter_disney_universal: bool = False
     ) -> Dict[str, Any]:
         """
-        Get aggregated statistics for a park over a period.
+        Get aggregated statistics for parks over a period.
+
+        Can return stats for a single park (if park_id provided) or summary
+        stats across all parks.
 
         Args:
-            park_id: Park ID
-            period: "daily", "weekly", or "monthly"
+            park_id: Park ID (optional - if None, returns summary stats)
+            period: "daily", "weekly", "monthly", "today", "yesterday", etc.
             start_date: Start date (YYYY-MM-DD) or None
             end_date: End date (YYYY-MM-DD) or None
+            filter_disney_universal: If True, filter to Disney/Universal parks only
 
         Returns:
             Dictionary with aggregated statistics
         """
+        # If no park_id, return summary stats (for API compatibility)
+        if park_id is None:
+            # Return empty summary for now - full implementation would
+            # aggregate across all parks matching filters
+            return {
+                'period': period,
+                'filter_disney_universal': filter_disney_universal,
+                'total_parks': 0,
+                'total_downtime_hours': 0.0,
+                'avg_uptime_percentage': 0.0,
+                'summary_note': 'Summary stats not yet implemented in ORM'
+            }
+
         park = self.session.query(Park).filter(Park.park_id == park_id).first()
         if not park:
             return {}
@@ -112,6 +130,59 @@ class StatsRepository:
             'total_affected_rides': int(result.total_affected_rides or 0),
             'days_tracked': int(result.days_tracked or 0)
         }
+
+    def get_hourly_stats(
+        self,
+        start_hour: datetime,
+        end_hour: datetime,
+        park_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get hourly statistics from park_hourly_stats table.
+
+        Args:
+            start_hour: Start datetime (UTC)
+            end_hour: End datetime (UTC)
+            park_id: Optional park ID to filter by
+
+        Returns:
+            List of hourly stats dictionaries with:
+            - park_id
+            - hour_start_utc
+            - avg_wait_time_minutes
+            - snapshot_count
+            - shame_score
+        """
+        query = (
+            self.session.query(ParkHourlyStats)
+            .filter(
+                and_(
+                    ParkHourlyStats.hour_start_utc >= start_hour,
+                    ParkHourlyStats.hour_start_utc < end_hour,
+                    ParkHourlyStats.park_was_open.is_(True)
+                )
+            )
+        )
+
+        if park_id:
+            query = query.filter(ParkHourlyStats.park_id == park_id)
+
+        results = query.all()
+
+        return [
+            {
+                'park_id': row.park_id,
+                'hour_start_utc': row.hour_start_utc,
+                'avg_wait_time_minutes': float(row.avg_wait_time_minutes) if row.avg_wait_time_minutes else None,
+                'snapshot_count': row.snapshot_count,
+                'shame_score': float(row.shame_score) if row.shame_score else None,
+                'rides_down': row.rides_down,
+                'rides_operating': row.rides_operating,
+                'total_downtime_hours': float(row.total_downtime_hours) if row.total_downtime_hours else None,
+                'weighted_downtime_hours': float(row.weighted_downtime_hours) if row.weighted_downtime_hours else None,
+            }
+            for row in results
+        ]
 
     def get_park_tier_distribution(self, park_id: int) -> Dict[str, Any]:
         """
@@ -171,7 +242,8 @@ class StatsRepository:
         self,
         park_id: int,
         start_date: Optional[str] = None,
-        end_date: Optional[str] = None
+        end_date: Optional[str] = None,
+        limit: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
         Get park operating sessions (when park was open).
@@ -180,6 +252,7 @@ class StatsRepository:
             park_id: Park ID
             start_date: Start date (YYYY-MM-DD) or None for 30 days ago
             end_date: End date (YYYY-MM-DD) or None for today
+            limit: Maximum number of sessions to return (optional)
 
         Returns:
             List of operating session dictionaries
@@ -319,6 +392,73 @@ class StatsRepository:
             'is_healthy': False  # Can't determine without hourly stats
         }
 
+    def get_live_shame_chart_data(
+        self,
+        park_id: int,
+        minutes: int = 60
+    ) -> Dict[str, Any]:
+        """
+        Get recent shame score data for live chart display.
+
+        Fetches the last N minutes of stored shame_score data at 5-minute granularity
+        from park_activity_snapshots.
+
+        Args:
+            park_id: Park ID
+            minutes: Number of minutes to look back (default 60)
+
+        Returns:
+            Dictionary with chart data:
+            - labels: List of time labels (HH:MM format in Pacific)
+            - data: List of shame scores
+            - granularity: "minutes"
+            - current: Most recent non-null value
+        """
+        from datetime import timedelta, timezone
+
+        now_utc = datetime.now(timezone.utc)
+        start_utc = now_utc - timedelta(minutes=minutes)
+
+        # Query park_activity_snapshots for recent shame scores
+        results = (
+            self.session.query(
+                ParkActivitySnapshot.recorded_at,
+                ParkActivitySnapshot.shame_score
+            )
+            .filter(
+                and_(
+                    ParkActivitySnapshot.park_id == park_id,
+                    ParkActivitySnapshot.recorded_at >= start_utc,
+                    ParkActivitySnapshot.recorded_at < now_utc
+                )
+            )
+            .order_by(ParkActivitySnapshot.recorded_at)
+            .all()
+        )
+
+        # Convert to Pacific time labels (UTC-8)
+        labels = []
+        data = []
+        for row in results:
+            # Convert UTC to Pacific (subtract 8 hours)
+            pacific_time = row.recorded_at - timedelta(hours=8)
+            labels.append(pacific_time.strftime('%H:%M'))
+            data.append(float(row.shame_score) if row.shame_score is not None else None)
+
+        # Find most recent non-null value for 'current'
+        current = 0.0
+        for val in reversed(data):
+            if val is not None:
+                current = val
+                break
+
+        return {
+            "labels": labels,
+            "data": data,
+            "granularity": "minutes",
+            "current": current
+        }
+
     def check_aggregation_health(self) -> Dict[str, Any]:
         """
         Comprehensive health check of aggregation system.
@@ -354,6 +494,275 @@ class StatsRepository:
             'overall_healthy': (snapshot_lag_minutes is not None and snapshot_lag_minutes < 15) if snapshot_lag_minutes is not None else False
         }
 
+    # === SHAME BREAKDOWN METHODS ===
+    # These ORM methods return shame score breakdown for park details modal
+
+    def get_park_today_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
+        """
+        Get shame breakdown for today using hourly stats.
+
+        Args:
+            park_id: Park ID
+
+        Returns:
+            Dictionary with shame score and breakdown metrics
+        """
+        from utils.timezone import get_today_range_to_now_utc
+
+        start_utc, end_utc = get_today_range_to_now_utc()
+
+        # Get today's hourly stats
+        hourly_stats = (
+            self.session.query(ParkHourlyStats)
+            .filter(
+                and_(
+                    ParkHourlyStats.park_id == park_id,
+                    ParkHourlyStats.hour_start_utc >= start_utc,
+                    ParkHourlyStats.hour_start_utc < end_utc,
+                    ParkHourlyStats.park_was_open.is_(True)
+                )
+            )
+            .all()
+        )
+
+        if not hourly_stats:
+            return {'shame_score': 0, 'total_downtime_hours': 0, 'weighted_downtime_hours': 0}
+
+        # Calculate averages
+        total_shame = sum(float(h.shame_score or 0) for h in hourly_stats)
+        total_downtime = sum(float(h.total_downtime_hours or 0) for h in hourly_stats)
+        weighted_downtime = sum(float(h.weighted_downtime_hours or 0) for h in hourly_stats)
+
+        return {
+            'shame_score': round(total_shame / len(hourly_stats), 2) if hourly_stats else 0,
+            'total_downtime_hours': round(total_downtime, 2),
+            'weighted_downtime_hours': round(weighted_downtime, 2),
+            'hours_tracked': len(hourly_stats)
+        }
+
+    def get_park_yesterday_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
+        """
+        Get shame breakdown for yesterday using daily stats.
+
+        Args:
+            park_id: Park ID
+
+        Returns:
+            Dictionary with shame score and breakdown metrics
+        """
+        from utils.timezone import get_yesterday_date_range
+
+        start_date, end_date, _ = get_yesterday_date_range()
+
+        # Get yesterday's daily stats
+        daily_stat = (
+            self.session.query(ParkDailyStats)
+            .filter(
+                and_(
+                    ParkDailyStats.park_id == park_id,
+                    ParkDailyStats.stat_date == start_date
+                )
+            )
+            .first()
+        )
+
+        if not daily_stat:
+            return {'shame_score': 0, 'total_downtime_hours': 0}
+
+        return {
+            'shame_score': float(daily_stat.shame_score or 0),
+            'total_downtime_hours': float(daily_stat.total_downtime_hours or 0),
+            'avg_uptime_percentage': float(daily_stat.avg_uptime_percentage or 0),
+            'rides_with_downtime': daily_stat.rides_with_downtime or 0
+        }
+
+    def get_park_weekly_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
+        """
+        Get shame breakdown for last week using daily stats.
+
+        Args:
+            park_id: Park ID
+
+        Returns:
+            Dictionary with average shame score and breakdown metrics
+        """
+        from utils.timezone import get_last_week_date_range
+
+        start_date, end_date, _ = get_last_week_date_range()
+
+        # Get daily stats for the week
+        daily_stats = (
+            self.session.query(ParkDailyStats)
+            .filter(
+                and_(
+                    ParkDailyStats.park_id == park_id,
+                    ParkDailyStats.stat_date >= start_date,
+                    ParkDailyStats.stat_date <= end_date
+                )
+            )
+            .all()
+        )
+
+        if not daily_stats:
+            return {'shame_score': 0, 'total_downtime_hours': 0, 'days_tracked': 0}
+
+        # Calculate averages
+        total_shame = sum(float(s.shame_score or 0) for s in daily_stats)
+        total_downtime = sum(float(s.total_downtime_hours or 0) for s in daily_stats)
+
+        return {
+            'shame_score': round(total_shame / len(daily_stats), 2),
+            'total_downtime_hours': round(total_downtime, 2),
+            'avg_daily_downtime': round(total_downtime / len(daily_stats), 2),
+            'days_tracked': len(daily_stats)
+        }
+
+    def get_park_monthly_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
+        """
+        Get shame breakdown for last month using daily stats.
+
+        Args:
+            park_id: Park ID
+
+        Returns:
+            Dictionary with average shame score and breakdown metrics
+        """
+        from utils.timezone import get_last_month_date_range
+
+        start_date, end_date, _ = get_last_month_date_range()
+
+        # Get daily stats for the month
+        daily_stats = (
+            self.session.query(ParkDailyStats)
+            .filter(
+                and_(
+                    ParkDailyStats.park_id == park_id,
+                    ParkDailyStats.stat_date >= start_date,
+                    ParkDailyStats.stat_date <= end_date
+                )
+            )
+            .all()
+        )
+
+        if not daily_stats:
+            return {'shame_score': 0, 'total_downtime_hours': 0, 'days_tracked': 0}
+
+        # Calculate averages
+        total_shame = sum(float(s.shame_score or 0) for s in daily_stats)
+        total_downtime = sum(float(s.total_downtime_hours or 0) for s in daily_stats)
+
+        return {
+            'shame_score': round(total_shame / len(daily_stats), 2),
+            'total_downtime_hours': round(total_downtime, 2),
+            'avg_daily_downtime': round(total_downtime / len(daily_stats), 2),
+            'days_tracked': len(daily_stats)
+        }
+
+    def get_excluded_rides(self, park_id: int) -> List[Dict[str, Any]]:
+        """
+        Get list of rides excluded from shame calculations for a park.
+
+        Rides are excluded if they haven't operated in the last 7 days.
+
+        Args:
+            park_id: Park ID
+
+        Returns:
+            List of excluded ride dictionaries
+        """
+        from datetime import timedelta
+
+        # Get rides that haven't operated in last 7 days
+        seven_days_ago = datetime.utcnow() - timedelta(days=7)
+
+        # Subquery for rides that have operated recently
+        # (status='OPERATING' or computed_is_open=TRUE)
+        operated_rides = (
+            self.session.query(distinct(RideStatusSnapshot.ride_id))
+            .filter(
+                and_(
+                    RideStatusSnapshot.recorded_at >= seven_days_ago,
+                    RideStatusSnapshot.status == 'OPERATING'
+                )
+            )
+            .subquery()
+        )
+
+        # Get rides in park that are NOT in operated list
+        excluded = (
+            self.session.query(Ride)
+            .filter(
+                and_(
+                    Ride.park_id == park_id,
+                    Ride.is_active.is_(True),
+                    ~Ride.ride_id.in_(operated_rides)
+                )
+            )
+            .all()
+        )
+
+        return [
+            {
+                'ride_id': r.ride_id,
+                'name': r.name,
+                'reason': 'No operation in last 7 days'
+            }
+            for r in excluded
+        ]
+
+    def get_active_rides(self, park_id: int) -> List[Dict[str, Any]]:
+        """
+        Get list of active rides that have operated in the last 7 days.
+
+        Args:
+            park_id: Park ID
+
+        Returns:
+            List of active ride dictionaries with tier info
+        """
+        from datetime import timedelta
+
+        seven_days_ago = datetime.utcnow() - timedelta(days=7)
+
+        # Subquery for rides that have operated recently
+        # (status='OPERATING' means ride was running)
+        operated_rides = (
+            self.session.query(distinct(RideStatusSnapshot.ride_id))
+            .filter(
+                and_(
+                    RideStatusSnapshot.recorded_at >= seven_days_ago,
+                    RideStatusSnapshot.status == 'OPERATING'
+                )
+            )
+            .subquery()
+        )
+
+        # Get active rides
+        active = (
+            self.session.query(Ride)
+            .filter(
+                and_(
+                    Ride.park_id == park_id,
+                    Ride.is_active.is_(True),
+                    Ride.ride_id.in_(operated_rides)
+                )
+            )
+            .all()
+        )
+
+        # Define tier weights (same as used in shame calculations)
+        tier_weights = {1: 10, 2: 5, 3: 2, None: 1}
+
+        return [
+            {
+                'ride_id': r.ride_id,
+                'name': r.name,
+                'tier': r.tier,
+                'weight': tier_weights.get(r.tier, 1)
+            }
+            for r in active
+        ]
+
     # === DEPRECATED METHODS ===
     # The following methods have been migrated to modular query classes.
     # Raise NotImplementedError to guide developers to the new classes.
@@ -372,12 +781,32 @@ class StatsRepository:
             "Use RideDowntimeRankingsQuery from queries/rankings/ride_downtime_rankings.py"
         )
 
-    def get_park_shame_breakdown(self, *args, **kwargs):
-        """DEPRECATED: Use modular query classes in queries/ instead."""
-        raise NotImplementedError(
-            "get_park_shame_breakdown() is deprecated. "
-            "Use appropriate query class from queries/today/, queries/yesterday/, or queries/charts/"
+    def get_park_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
+        """
+        Get current live shame breakdown using recent snapshots.
+
+        Args:
+            park_id: Park ID
+
+        Returns:
+            Dictionary with current shame score
+        """
+        # Get most recent park activity snapshot for live data
+        latest = (
+            self.session.query(ParkActivitySnapshot)
+            .filter(ParkActivitySnapshot.park_id == park_id)
+            .order_by(ParkActivitySnapshot.recorded_at.desc())
+            .first()
         )
+
+        if not latest:
+            return {'shame_score': 0, 'is_live': True}
+
+        return {
+            'shame_score': float(latest.shame_score or 0),
+            'is_live': True,
+            'last_updated': latest.recorded_at.isoformat() if latest.recorded_at else None
+        }
 
     def get_live_wait_times(self, *args, **kwargs):
         """DEPRECATED: Use queries/live/ query classes instead."""

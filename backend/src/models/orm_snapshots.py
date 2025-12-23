@@ -63,12 +63,6 @@ class RideStatusSnapshot(Base):
         default=False,
         comment="TRUE if ride is operating (status='OPERATING' OR wait_time > 0)"
     )
-    park_appears_open: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-        comment="TRUE if park appears to be operating at snapshot time"
-    )
 
     # Composite Indexes for Performance (already exist in database)
     __table_args__ = (

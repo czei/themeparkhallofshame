@@ -58,7 +58,7 @@ class TestParkRepositoryCRUD:
     Priority: P0 - Foundation for all other operations
     """
 
-    def test_create_park(self, mysql_connection, sample_park_data):
+    def test_create_park(self, mysql_session, sample_park_data):
         """
         Create a new park record.
 
@@ -66,7 +66,7 @@ class TestParkRepositoryCRUD:
         When: create() is called
         Then: Return Park object with assigned park_id
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
 
         park = repo.create(sample_park_data)
 
@@ -76,7 +76,7 @@ class TestParkRepositoryCRUD:
         assert park.queue_times_id == sample_park_data['queue_times_id']
         assert park.is_disney == sample_park_data['is_disney']
 
-    def test_get_by_id_existing_park(self, mysql_connection, sample_park_data):
+    def test_get_by_id_existing_park(self, mysql_session, sample_park_data):
         """
         Fetch park by ID.
 
@@ -84,7 +84,7 @@ class TestParkRepositoryCRUD:
         When: get_by_id() is called
         Then: Return Park object
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
         created_park = repo.create(sample_park_data)
 
         fetched_park = repo.get_by_id(created_park.park_id)
@@ -93,7 +93,7 @@ class TestParkRepositoryCRUD:
         assert fetched_park.park_id == created_park.park_id
         assert fetched_park.name == created_park.name
 
-    def test_get_by_id_nonexistent_park(self, mysql_connection):
+    def test_get_by_id_nonexistent_park(self, mysql_session):
         """
         Fetch park by ID when park doesn't exist.
 
@@ -101,13 +101,13 @@ class TestParkRepositoryCRUD:
         When: get_by_id(999) is called
         Then: Return None
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
 
         park = repo.get_by_id(999)
 
         assert park is None
 
-    def test_get_by_queue_times_id(self, mysql_connection, sample_park_data):
+    def test_get_by_queue_times_id(self, mysql_session, sample_park_data):
         """
         Fetch park by Queue-Times.com external ID.
 
@@ -115,7 +115,7 @@ class TestParkRepositoryCRUD:
         When: get_by_queue_times_id(601) is called
         Then: Return Park object
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
         created_park = repo.create(sample_park_data)
 
         fetched_park = repo.get_by_queue_times_id(sample_park_data['queue_times_id'])
@@ -124,7 +124,7 @@ class TestParkRepositoryCRUD:
         assert fetched_park.queue_times_id == sample_park_data['queue_times_id']
         assert fetched_park.park_id == created_park.park_id
 
-    def test_update_park(self, mysql_connection, sample_park_data):
+    def test_update_park(self, mysql_session, sample_park_data):
         """
         Update existing park record.
 
@@ -132,7 +132,7 @@ class TestParkRepositoryCRUD:
         When: update() is called with new data
         Then: Return updated Park object
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
         created_park = repo.create(sample_park_data)
 
         update_data = {'name': 'Updated Magic Kingdom', 'city': 'Lake Buena Vista'}
@@ -144,7 +144,7 @@ class TestParkRepositoryCRUD:
         # Other fields unchanged
         assert updated_park.state_province == sample_park_data['state_province']
 
-    def test_update_nonexistent_park(self, mysql_connection):
+    def test_update_nonexistent_park(self, mysql_session):
         """
         Update park that doesn't exist.
 
@@ -152,13 +152,13 @@ class TestParkRepositoryCRUD:
         When: update(999, {...}) is called
         Then: Return None
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
 
         result = repo.update(999, {'name': 'Ghost Park'})
 
         assert result is None
 
-    def test_update_with_no_fields(self, mysql_connection, sample_park_data):
+    def test_update_with_no_fields(self, mysql_session, sample_park_data):
         """
         Update park with empty data dictionary.
 
@@ -166,7 +166,7 @@ class TestParkRepositoryCRUD:
         When: update() is called with empty dict
         Then: Return unchanged Park object
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
         created_park = repo.create(sample_park_data)
 
         result = repo.update(created_park.park_id, {})
@@ -186,7 +186,7 @@ class TestParkRepositoryQueries:
     Priority: P1 - Used for park listings
     """
 
-    def test_get_all_active_returns_only_active_parks(self, mysql_connection):
+    def test_get_all_active_returns_only_active_parks(self, mysql_session):
         """
         get_all_active() should return only active parks.
 
@@ -196,7 +196,8 @@ class TestParkRepositoryQueries:
         """
         from tests.conftest import insert_sample_park
 
-        repo = ParkRepository(mysql_connection)
+        conn = mysql_session.connection()
+        repo = ParkRepository(mysql_session)
 
         # Create 2 active parks
         park1_data = {
@@ -211,15 +212,15 @@ class TestParkRepositoryQueries:
             'longitude': -81.549, 'timezone': 'America/New_York',
             'operator': 'Disney', 'is_disney': 1, 'is_universal': 0, 'is_active': 1
         }
-        insert_sample_park(mysql_connection, park1_data)
-        insert_sample_park(mysql_connection, park2_data)
+        insert_sample_park(conn, park1_data)
+        insert_sample_park(conn, park2_data)
 
         # Create 1 inactive park
         park3_data = park1_data.copy()
         park3_data['queue_times_id'] = 103
         park3_data['name'] = 'Closed Park'
         park3_data['is_active'] = 0
-        insert_sample_park(mysql_connection, park3_data)
+        insert_sample_park(conn, park3_data)
 
         parks = repo.get_all_active()
 
@@ -230,7 +231,7 @@ class TestParkRepositoryQueries:
         assert 'Magic Kingdom' in park_names
         assert 'Closed Park' not in park_names
 
-    def test_get_all_active_ordered_by_name(self, mysql_connection):
+    def test_get_all_active_ordered_by_name(self, mysql_session):
         """
         get_all_active() should return parks ordered by name.
 
@@ -240,7 +241,8 @@ class TestParkRepositoryQueries:
         """
         from tests.conftest import insert_sample_park
 
-        repo = ParkRepository(mysql_connection)
+        conn = mysql_session.connection()
+        repo = ParkRepository(mysql_session)
 
         for idx, name in enumerate(['Zion Park', 'Atlantis Park', 'Midway Park'], start=101):
             park_data = {
@@ -249,14 +251,14 @@ class TestParkRepositoryQueries:
                 'longitude': -95.0, 'timezone': 'America/Chicago',
                 'operator': 'Independent', 'is_disney': 0, 'is_universal': 0, 'is_active': 1
             }
-            insert_sample_park(mysql_connection, park_data)
+            insert_sample_park(conn, park_data)
 
         parks = repo.get_all_active()
 
         park_names = [p.name for p in parks]
         assert park_names == ['Atlantis Park', 'Midway Park', 'Zion Park']
 
-    def test_get_disney_universal_parks(self, mysql_connection):
+    def test_get_disney_universal_parks(self, mysql_session):
         """
         get_disney_universal_parks() should return only Disney/Universal parks.
 
@@ -266,7 +268,8 @@ class TestParkRepositoryQueries:
         """
         from tests.conftest import insert_sample_park
 
-        repo = ParkRepository(mysql_connection)
+        conn = mysql_session.connection()
+        repo = ParkRepository(mysql_session)
 
         # Disney parks
         disney1 = {
@@ -298,10 +301,10 @@ class TestParkRepositoryQueries:
             'operator': 'Six Flags', 'is_disney': 0, 'is_universal': 0, 'is_active': 1
         }
 
-        insert_sample_park(mysql_connection, disney1)
-        insert_sample_park(mysql_connection, disney2)
-        insert_sample_park(mysql_connection, universal1)
-        insert_sample_park(mysql_connection, independent)
+        insert_sample_park(conn, disney1)
+        insert_sample_park(conn, disney2)
+        insert_sample_park(conn, universal1)
+        insert_sample_park(conn, independent)
 
         parks = repo.get_disney_universal_parks()
 
@@ -324,7 +327,7 @@ class TestParkRepositoryRowConversion:
     Priority: P2 - Internal method but critical for data integrity
     """
 
-    def test_row_to_park_conversion(self, mysql_connection, sample_park_data):
+    def test_row_to_park_conversion(self, mysql_session, sample_park_data):
         """
         _row_to_park() should correctly convert database row to Park object.
 
@@ -332,11 +335,12 @@ class TestParkRepositoryRowConversion:
         When: Fetched and converted
         Then: Park object has all correct fields
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
         created_park = repo.create(sample_park_data)
 
         # Verify all fields converted correctly
-        assert isinstance(created_park, Park)
+        # Note: Use class name check instead of isinstance due to module path differences
+        assert type(created_park).__name__ == 'Park'
         assert created_park.park_id is not None
         assert created_park.queue_times_id == sample_park_data['queue_times_id']
         assert created_park.name == sample_park_data['name']
@@ -363,67 +367,66 @@ class TestParkRankingsByDowntime:
     """
     Test get_rankings_by_downtime() for different periods.
 
-    Priority: P1 - CRITICAL (Core feature FR-010)
-
-    Note: These tests require MySQL-specific SQL functions and stats tables.
-    Full integration tests with MySQL database are in tests/integration/.
+    NOTE: These methods are DEPRECATED in favor of modular query classes.
+    Tests verify that deprecated methods raise NotImplementedError with correct message.
+    Use ParkDowntimeRankingsQuery from queries/rankings/park_downtime_rankings.py instead.
     """
 
-    def test_get_rankings_daily_period(self, mysql_connection):
+    def test_get_rankings_daily_period_deprecated(self, mysql_session):
         """
-        get_rankings_by_downtime('daily') should call _get_daily_rankings.
-
-        Given: Valid database connection
-        When: get_rankings_by_downtime('daily') is called
-        Then: Execute without error (integration tests verify full data flow)
+        get_rankings_by_downtime() should raise NotImplementedError (deprecated).
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
 
-        # Should not raise ValueError
-        result = repo.get_rankings_by_downtime(period='daily', limit=10)
-        assert isinstance(result, list)
+        with pytest.raises(NotImplementedError) as exc_info:
+            repo.get_rankings_by_downtime(period='daily', limit=10)
 
-    def test_get_rankings_weekly_period(self, mysql_connection):
+        assert 'deprecated' in str(exc_info.value).lower()
+        assert 'ParkDowntimeRankingsQuery' in str(exc_info.value)
+
+    def test_get_rankings_weekly_period_deprecated(self, mysql_session):
         """
-        get_rankings_by_downtime('weekly') should call _get_weekly_rankings.
+        get_rankings_by_downtime() should raise NotImplementedError (deprecated).
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
 
-        result = repo.get_rankings_by_downtime(period='weekly', limit=10)
-        assert isinstance(result, list)
+        with pytest.raises(NotImplementedError) as exc_info:
+            repo.get_rankings_by_downtime(period='weekly', limit=10)
 
-    def test_get_rankings_monthly_period(self, mysql_connection):
+        assert 'deprecated' in str(exc_info.value).lower()
+
+    def test_get_rankings_monthly_period_deprecated(self, mysql_session):
         """
-        get_rankings_by_downtime('monthly') should call _get_monthly_rankings.
+        get_rankings_by_downtime() should raise NotImplementedError (deprecated).
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
 
-        result = repo.get_rankings_by_downtime(period='monthly', limit=10)
-        assert isinstance(result, list)
+        with pytest.raises(NotImplementedError) as exc_info:
+            repo.get_rankings_by_downtime(period='monthly', limit=10)
 
-    def test_get_rankings_yearly_period(self, mysql_connection):
+        assert 'deprecated' in str(exc_info.value).lower()
+
+    def test_get_rankings_yearly_period_deprecated(self, mysql_session):
         """
-        get_rankings_by_downtime('yearly') should call _get_yearly_rankings.
+        get_rankings_by_downtime() should raise NotImplementedError (deprecated).
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
 
-        result = repo.get_rankings_by_downtime(period='yearly', limit=10)
-        assert isinstance(result, list)
+        with pytest.raises(NotImplementedError) as exc_info:
+            repo.get_rankings_by_downtime(period='yearly', limit=10)
 
-    def test_get_rankings_invalid_period_raises_error(self, mysql_connection):
+        assert 'deprecated' in str(exc_info.value).lower()
+
+    def test_get_rankings_invalid_period_deprecated(self, mysql_session):
         """
-        get_rankings_by_downtime() should raise ValueError for invalid period.
-
-        Given: Invalid period 'invalid'
-        When: get_rankings_by_downtime('invalid') is called
-        Then: Raise ValueError
+        get_rankings_by_downtime() should raise NotImplementedError even for invalid period.
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(NotImplementedError) as exc_info:
             repo.get_rankings_by_downtime(period='invalid')
 
-        assert 'Invalid period' in str(exc_info.value)
+        assert 'deprecated' in str(exc_info.value).lower()
 
 
 # ============================================================================
@@ -434,58 +437,54 @@ class TestParkRankingsByWeightedDowntime:
     """
     Test get_rankings_by_weighted_downtime() with tier weighting.
 
-    Priority: P1 - CRITICAL (Core feature FR-024)
-
-    Note: These tests require MySQL-specific SQL functions and stats tables.
-    Full integration tests with MySQL database are in tests/integration/.
-
-    Weighted scoring:
-    - Tier 1 rides: 3x weight
-    - Tier 2 rides: 2x weight
-    - Tier 3 rides: 1x weight
+    NOTE: These methods are DEPRECATED in favor of modular query classes.
+    Tests verify that deprecated methods raise NotImplementedError with correct message.
+    Use ParkDowntimeRankingsQuery from queries/rankings/park_downtime_rankings.py instead.
     """
 
-    def test_get_weighted_rankings_weekly_period(self, mysql_connection):
+    def test_get_weighted_rankings_weekly_period_deprecated(self, mysql_session):
         """
-        get_rankings_by_weighted_downtime('weekly') should execute successfully.
+        get_rankings_by_weighted_downtime() should raise NotImplementedError (deprecated).
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
 
-        result = repo.get_rankings_by_weighted_downtime(period='weekly', limit=10)
-        assert isinstance(result, list)
+        with pytest.raises(NotImplementedError) as exc_info:
+            repo.get_rankings_by_weighted_downtime(period='weekly', limit=10)
 
-    def test_get_weighted_rankings_monthly_period(self, mysql_connection):
+        assert 'deprecated' in str(exc_info.value).lower()
+
+    def test_get_weighted_rankings_monthly_period_deprecated(self, mysql_session):
         """
-        get_rankings_by_weighted_downtime('monthly') should execute successfully.
+        get_rankings_by_weighted_downtime() should raise NotImplementedError (deprecated).
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
 
-        result = repo.get_rankings_by_weighted_downtime(period='monthly', limit=10)
-        assert isinstance(result, list)
+        with pytest.raises(NotImplementedError) as exc_info:
+            repo.get_rankings_by_weighted_downtime(period='monthly', limit=10)
 
-    def test_get_weighted_rankings_yearly_period(self, mysql_connection):
+        assert 'deprecated' in str(exc_info.value).lower()
+
+    def test_get_weighted_rankings_yearly_period_deprecated(self, mysql_session):
         """
-        get_rankings_by_weighted_downtime('yearly') should execute successfully.
+        get_rankings_by_weighted_downtime() should raise NotImplementedError (deprecated).
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
 
-        result = repo.get_rankings_by_weighted_downtime(period='yearly', limit=10)
-        assert isinstance(result, list)
+        with pytest.raises(NotImplementedError) as exc_info:
+            repo.get_rankings_by_weighted_downtime(period='yearly', limit=10)
 
-    def test_get_weighted_rankings_invalid_period_raises_error(self, mysql_connection):
+        assert 'deprecated' in str(exc_info.value).lower()
+
+    def test_get_weighted_rankings_invalid_period_deprecated(self, mysql_session):
         """
-        get_rankings_by_weighted_downtime() should raise ValueError for invalid period.
-
-        Given: Invalid period 'daily' (not meaningful for weighted scores)
-        When: get_rankings_by_weighted_downtime('daily') is called
-        Then: Raise ValueError
+        get_rankings_by_weighted_downtime() should raise NotImplementedError even for invalid period.
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(NotImplementedError) as exc_info:
             repo.get_rankings_by_weighted_downtime(period='daily')
 
-        assert 'Invalid period for weighted rankings' in str(exc_info.value)
+        assert 'deprecated' in str(exc_info.value).lower()
 
 
 # ============================================================================
@@ -499,7 +498,7 @@ class TestParkRepositoryEdgeCases:
     Priority: P2 - Robustness
     """
 
-    def test_create_park_with_minimal_data(self, mysql_connection):
+    def test_create_park_with_minimal_data(self, mysql_session):
         """
         Create park with only required fields.
 
@@ -507,7 +506,7 @@ class TestParkRepositoryEdgeCases:
         When: create() is called
         Then: Park created successfully with defaults
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
 
         minimal_data = {
             'queue_times_id': 999,
@@ -529,7 +528,7 @@ class TestParkRepositoryEdgeCases:
         assert park.name == 'Minimal Park'
         assert park.operator is None
 
-    def test_update_only_one_field(self, mysql_connection, sample_park_data):
+    def test_update_only_one_field(self, mysql_session, sample_park_data):
         """
         Update park with single field change.
 
@@ -537,7 +536,7 @@ class TestParkRepositoryEdgeCases:
         When: update() with only 'city' field
         Then: Only city should change
         """
-        repo = ParkRepository(mysql_connection)
+        repo = ParkRepository(mysql_session)
         created_park = repo.create(sample_park_data)
         original_name = created_park.name
 

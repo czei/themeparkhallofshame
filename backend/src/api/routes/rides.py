@@ -34,7 +34,7 @@ from utils.timezone import get_today_pacific
 from database.queries.live import StatusSummaryQuery
 from database.queries.rankings import RideDowntimeRankingsQuery, RideWaitTimeRankingsQuery
 from database.queries.today import TodayRideWaitTimesQuery, TodayRideRankingsQuery
-from database.queries.yesterday import YesterdayRideWaitTimesQuery
+from database.queries.yesterday import YesterdayRideWaitTimesQuery, YesterdayRideRankingsQuery
 
 # ORM hourly aggregation
 from utils.query_helpers import HourlyAggregationQuery, RideHourlyMetrics
@@ -347,8 +347,8 @@ Query Files Used:
                 )
             elif period == 'yesterday':
                 # YESTERDAY: Full previous Pacific day (immutable, highly cacheable)
-                rankings = stats_repo.get_ride_daily_rankings(
-                    stat_date=today_pacific - timedelta(days=1),
+                query = YesterdayRideRankingsQuery(conn)
+                rankings = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
@@ -697,17 +697,9 @@ def get_ride_details(ride_id: int):
                 ride_id, start_date, end_date, period
             )
 
-            # Get park name
-            park_query = text("SELECT name FROM parks WHERE park_id = :park_id")
-            park_result = conn.execute(park_query, {"park_id": ride.park_id})
-            park_row = park_result.fetchone()
-            park_name = park_row[0] if park_row else None
-
-            # Get tier from ride_classifications (tier data is stored there, not in rides table)
-            tier_query = text("SELECT tier FROM ride_classifications WHERE ride_id = :ride_id")
-            tier_result = conn.execute(tier_query, {"ride_id": ride_id})
-            tier_row = tier_result.fetchone()
-            tier = tier_row[0] if tier_row else None
+            # Get park name and tier from ride dataclass (populated via ORM join)
+            park_name = ride.park_name
+            tier = ride.tier
 
             # Build response
             response = {

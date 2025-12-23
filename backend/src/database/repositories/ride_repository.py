@@ -50,7 +50,11 @@ class RideRepository:
             Ride dataclass object or None if not found
         """
         query = (
-            select(RideORM, ParkORM.queue_times_id.label('park_queue_times_id'))
+            select(
+                RideORM,
+                ParkORM.queue_times_id.label('park_queue_times_id'),
+                ParkORM.name.label('park_name')
+            )
             .join(ParkORM, RideORM.park_id == ParkORM.park_id)
             .where(RideORM.ride_id == ride_id)
         )
@@ -60,8 +64,8 @@ class RideRepository:
         if result is None:
             return None
 
-        ride_orm, park_qtid = result
-        return self._orm_to_dataclass(ride_orm, park_qtid)
+        ride_orm, park_qtid, park_name = result
+        return self._orm_to_dataclass(ride_orm, park_qtid, park_name)
 
     def get_by_queue_times_id(self, queue_times_id: int) -> Optional[RideDataclass]:
         """
@@ -74,7 +78,11 @@ class RideRepository:
             Ride dataclass object or None if not found
         """
         query = (
-            select(RideORM, ParkORM.queue_times_id.label('park_queue_times_id'))
+            select(
+                RideORM,
+                ParkORM.queue_times_id.label('park_queue_times_id'),
+                ParkORM.name.label('park_name')
+            )
             .join(ParkORM, RideORM.park_id == ParkORM.park_id)
             .where(RideORM.queue_times_id == queue_times_id)
         )
@@ -84,8 +92,8 @@ class RideRepository:
         if result is None:
             return None
 
-        ride_orm, park_qtid = result
-        return self._orm_to_dataclass(ride_orm, park_qtid)
+        ride_orm, park_qtid, park_name = result
+        return self._orm_to_dataclass(ride_orm, park_qtid, park_name)
 
     def get_by_themeparks_wiki_id(self, wiki_id: str) -> Optional[RideDataclass]:
         """
@@ -98,7 +106,11 @@ class RideRepository:
             Ride dataclass object or None if not found
         """
         query = (
-            select(RideORM, ParkORM.queue_times_id.label('park_queue_times_id'))
+            select(
+                RideORM,
+                ParkORM.queue_times_id.label('park_queue_times_id'),
+                ParkORM.name.label('park_name')
+            )
             .join(ParkORM, RideORM.park_id == ParkORM.park_id)
             .where(RideORM.themeparks_wiki_id == wiki_id)
         )
@@ -108,8 +120,8 @@ class RideRepository:
         if result is None:
             return None
 
-        ride_orm, park_qtid = result
-        return self._orm_to_dataclass(ride_orm, park_qtid)
+        ride_orm, park_qtid, park_name = result
+        return self._orm_to_dataclass(ride_orm, park_qtid, park_name)
 
     def get_by_park_id(self, park_id: int, active_only: bool = True) -> List[RideDataclass]:
         """
@@ -123,7 +135,11 @@ class RideRepository:
             List of Ride dataclass objects
         """
         query = (
-            select(RideORM, ParkORM.queue_times_id.label('park_queue_times_id'))
+            select(
+                RideORM,
+                ParkORM.queue_times_id.label('park_queue_times_id'),
+                ParkORM.name.label('park_name')
+            )
             .join(ParkORM, RideORM.park_id == ParkORM.park_id)
             .where(RideORM.park_id == park_id)
         )
@@ -134,7 +150,7 @@ class RideRepository:
         query = query.order_by(RideORM.name)
 
         results = self.session.execute(query).all()
-        return [self._orm_to_dataclass(ride_orm, park_qtid) for ride_orm, park_qtid in results]
+        return [self._orm_to_dataclass(ride_orm, park_qtid, park_name) for ride_orm, park_qtid, park_name in results]
 
     def get_all_active(self) -> List[RideDataclass]:
         """
@@ -144,14 +160,18 @@ class RideRepository:
             List of Ride dataclass objects
         """
         query = (
-            select(RideORM, ParkORM.queue_times_id.label('park_queue_times_id'))
+            select(
+                RideORM,
+                ParkORM.queue_times_id.label('park_queue_times_id'),
+                ParkORM.name.label('park_name')
+            )
             .join(ParkORM, RideORM.park_id == ParkORM.park_id)
             .where(RideORM.is_active.is_(True))
             .order_by(RideORM.park_id, RideORM.name)
         )
 
         results = self.session.execute(query).all()
-        return [self._orm_to_dataclass(ride_orm, park_qtid) for ride_orm, park_qtid in results]
+        return [self._orm_to_dataclass(ride_orm, park_qtid, park_name) for ride_orm, park_qtid, park_name in results]
 
     def get_unclassified_rides(self) -> List[RideDataclass]:
         """
@@ -165,7 +185,11 @@ class RideRepository:
         """
         # For now, return rides with tier=NULL as proxy for unclassified
         query = (
-            select(RideORM, ParkORM.queue_times_id.label('park_queue_times_id'))
+            select(
+                RideORM,
+                ParkORM.queue_times_id.label('park_queue_times_id'),
+                ParkORM.name.label('park_name')
+            )
             .join(ParkORM, RideORM.park_id == ParkORM.park_id)
             .where(
                 and_(
@@ -177,7 +201,7 @@ class RideRepository:
         )
 
         results = self.session.execute(query).all()
-        return [self._orm_to_dataclass(ride_orm, park_qtid) for ride_orm, park_qtid in results]
+        return [self._orm_to_dataclass(ride_orm, park_qtid, park_name) for ride_orm, park_qtid, park_name in results]
 
     def create(self, ride_data: Dict[str, Any]) -> RideDataclass:
         """
@@ -436,13 +460,19 @@ class RideRepository:
         logger.warning("get_downtime_changes not yet implemented in ORM migration")
         return []
 
-    def _orm_to_dataclass(self, ride_orm: RideORM, park_queue_times_id: Optional[int] = None) -> RideDataclass:
+    def _orm_to_dataclass(
+        self,
+        ride_orm: RideORM,
+        park_queue_times_id: Optional[int] = None,
+        park_name: Optional[str] = None
+    ) -> RideDataclass:
         """
         Convert ORM Ride object to dataclass Ride object.
 
         Args:
             ride_orm: ORM Ride instance
             park_queue_times_id: Park's queue_times_id (from join)
+            park_name: Park's name (from join)
 
         Returns:
             Dataclass Ride instance
@@ -458,5 +488,6 @@ class RideRepository:
             is_active=ride_orm.is_active,
             created_at=ride_orm.created_at,
             updated_at=ride_orm.updated_at,
-            park_queue_times_id=park_queue_times_id
+            park_queue_times_id=park_queue_times_id,
+            park_name=park_name
         )

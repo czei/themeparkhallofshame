@@ -195,14 +195,6 @@ class ParkDailyStats(Base):
         comment="Total minutes park was open"
     )
 
-    # Calculation Metadata
-    metrics_version: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=1,
-        comment="Calculation version for side-by-side comparison during bug fixes"
-    )
-
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -215,7 +207,6 @@ class ParkDailyStats(Base):
         Index('idx_park_daily_stats_park', 'park_id'),
         Index('idx_park_daily_stats_date', 'stat_date'),
         Index('idx_park_daily_ranking', 'stat_date', 'total_downtime_hours'),
-        Index('idx_park_daily_stats_version', 'metrics_version'),
         {'extend_existing': True}
     )
 
@@ -227,3 +218,94 @@ class ParkDailyStats(Base):
 
     def __repr__(self) -> str:
         return f"<ParkDailyStats(stat_id={self.stat_id}, park_id={self.park_id}, date={self.stat_date}, shame_score={self.shame_score})>"
+
+
+class ParkHourlyStats(Base):
+    """
+    Hourly aggregated statistics for park performance.
+    Used for fast time-series queries and "today" cumulative data.
+    """
+    __tablename__ = "park_hourly_stats"
+
+    # Primary Key
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # Foreign Keys
+    park_id: Mapped[int] = mapped_column(
+        ForeignKey("parks.park_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    # Hour (UTC)
+    hour_start_utc: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        index=True,
+        comment="Start of the hour in UTC"
+    )
+
+    # Aggregated Metrics
+    shame_score: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(3, 1),
+        comment="Shame score for this hour (0-10 scale)"
+    )
+    avg_wait_time_minutes: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(6, 2),
+        comment="Average wait time in minutes"
+    )
+    rides_operating: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        comment="Number of rides operating"
+    )
+    rides_down: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        comment="Number of rides down"
+    )
+    total_downtime_hours: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(8, 2),
+        comment="Total downtime hours across all rides"
+    )
+    weighted_downtime_hours: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(8, 2),
+        comment="Tier-weighted downtime hours"
+    )
+    effective_park_weight: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(10, 2),
+        comment="Sum of tier weights for active rides"
+    )
+    snapshot_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Number of snapshots aggregated"
+    )
+    park_was_open: Mapped[bool] = mapped_column(
+        nullable=False,
+        comment="Whether park was open during this hour"
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
+    # Composite Indexes for Performance
+    __table_args__ = (
+        Index('idx_park_hourly_stats_park_hour', 'park_id', 'hour_start_utc'),
+        Index('idx_park_hourly_stats_hour', 'hour_start_utc'),
+        {'extend_existing': True}
+    )
+
+    # Relationships
+    park: Mapped["Park"] = relationship("Park")
+
+    def __repr__(self) -> str:
+        return f"<ParkHourlyStats(id={self.id}, park_id={self.park_id}, hour={self.hour_start_utc}, shame={self.shame_score})>"

@@ -23,7 +23,7 @@ from flask import Blueprint, request, jsonify
 from datetime import timedelta
 from decimal import Decimal
 
-from database.connection import get_db_connection
+from database.connection import get_db_connection, get_db_session
 from database.repositories.park_repository import ParkRepository
 from database.repositories.stats_repository import StatsRepository
 from utils.cache import get_query_cache, generate_cache_key
@@ -470,9 +470,9 @@ def get_park_details(park_id: int):
         period = 'live'
 
     try:
-        with get_db_connection() as conn:
-            park_repo = ParkRepository(conn)
-            stats_repo = StatsRepository(conn)
+        with get_db_session() as session:
+            park_repo = ParkRepository(session)
+            stats_repo = StatsRepository(session)
 
             # Get park basic info
             park = park_repo.get_by_id(park_id)
@@ -514,52 +514,10 @@ def get_park_details(park_id: int):
             chart_data = None
             if period == 'live':
                 # LIVE: Get recent 60 minutes of stored shame_score data at 5-minute granularity
-                # Use the pre-calculated shame_score from park_activity_snapshots (calculated with 7-day hybrid logic)
-                from datetime import datetime, timedelta, timezone
-                from sqlalchemy import text
-
-                now_utc = datetime.now(timezone.utc)
-                start_utc = now_utc - timedelta(minutes=60)
-
-                query = text("""
-                    SELECT
-                        DATE_FORMAT(DATE_SUB(recorded_at, INTERVAL 8 HOUR), '%H:%i') AS time_label,
-                        shame_score
-                    FROM park_activity_snapshots
-                    WHERE park_id = :park_id
-                        AND recorded_at >= :start_utc
-                        AND recorded_at < :end_utc
-                    ORDER BY recorded_at
-                """)
-
-                result = conn.execute(query, {
-                    "park_id": park_id,
-                    "start_utc": start_utc,
-                    "end_utc": now_utc
-                })
-
-                rows = [dict(row._mapping) for row in result]
-
-                # Build chart data
-                labels = [row['time_label'] for row in rows]
-                data = [float(row['shame_score']) if row['shame_score'] is not None else None for row in rows]
-
-                chart_data = {
-                    "labels": labels,
-                    "data": data,
-                    "granularity": "minutes"
-                }
-
-                # For LIVE, set 'current' to the last non-null value from the chart data
-                # This ensures the badge matches the rightmost point on the chart
-                last_value = None
-                for val in reversed(data):
-                    if val is not None:
-                        last_value = val
-                        break
-                chart_data['current'] = float(last_value) if last_value is not None else 0.0
+                # Uses ORM via StatsRepository.get_live_shame_chart_data()
+                chart_data = stats_repo.get_live_shame_chart_data(park_id, minutes=60)
             elif period in ('today', 'yesterday'):
-                chart_query = ParkShameHistoryQuery(conn)
+                chart_query = ParkShameHistoryQuery(session.connection())
                 today = get_today_pacific()
                 if period == 'today':
                     chart_data = chart_query.get_single_park_hourly(park_id, today, is_today=True)
@@ -579,7 +537,7 @@ def get_park_details(park_id: int):
             elif period in ('last_week', 'last_month'):
                 # WEEKLY/MONTHLY: Daily averages for the period
                 from utils.timezone import get_last_week_date_range, get_last_month_date_range
-                chart_query = ParkShameHistoryQuery(conn)
+                chart_query = ParkShameHistoryQuery(session.connection())
 
                 if period == 'last_week':
                     start_date, end_date, _ = get_last_week_date_range()

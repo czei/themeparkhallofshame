@@ -74,3 +74,10 @@ htmlcov/
 *.sql~
 *.sql.bak
 .playwright-mcp/
+
+# Tool-generated files
+pal_generated.code
+**/pal_generated.code
+
+# Duplicate/temp directories
+backend/backend/

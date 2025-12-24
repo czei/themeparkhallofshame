@@ -11,11 +11,10 @@ CALENDAR-BASED PERIODS:
 - last_week: Previous complete week (Sunday-Saturday, Pacific Time)
 - last_month: Previous complete calendar month (Pacific Time)
 
-Database Tables:
-- rides (ride metadata)
-- parks (park metadata)
-- ride_daily_stats (aggregated wait time data)
-- ride_classifications (tier data)
+Database Tables (ORM Models):
+- Ride (ride metadata)
+- Park (park metadata)
+- RideDailyStats (aggregated wait time data)
 
 Example Response:
 {
@@ -34,21 +33,20 @@ Example Response:
 from datetime import date
 from typing import List, Dict, Any
 
-from sqlalchemy import select, func, and_, literal
-from sqlalchemy.engine import Connection
+from sqlalchemy import select, func, and_, or_, case
+from sqlalchemy.orm import Session
 
-from database.schema import parks, rides, ride_daily_stats, ride_classifications
-from database.queries.builders import Filters
+from src.models.orm_ride import Ride
+from src.models.orm_park import Park
+from src.models.orm_stats import RideDailyStats
+from src.utils.query_helpers import QueryClassBase
 from utils.timezone import get_last_week_date_range, get_last_month_date_range
 
 
-class RideWaitTimeRankingsQuery:
+class RideWaitTimeRankingsQuery(QueryClassBase):
     """
     Query handler for ride wait time rankings.
     """
-
-    def __init__(self, connection: Connection):
-        self.conn = connection
 
     def get_by_period(
         self,
@@ -88,59 +86,83 @@ class RideWaitTimeRankingsQuery:
         filter_disney_universal: bool = False,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
-        conditions = [
-            rides.c.is_active == True,
-            rides.c.category == "ATTRACTION",
-            parks.c.is_active == True,
-            ride_daily_stats.c.stat_date >= start_date,
-            ride_daily_stats.c.stat_date <= end_date,
-            ride_daily_stats.c.avg_wait_time.isnot(None),
-        ]
+        """
+        Get ride wait time rankings for a date range.
 
-        if filter_disney_universal:
-            conditions.append(Filters.disney_universal(parks))
+        Args:
+            start_date: Start of period (inclusive)
+            end_date: End of period (inclusive)
+            period_label: Human-readable period label
+            filter_disney_universal: If True, only include Disney/Universal parks
+            limit: Maximum number of results
 
+        Returns:
+            List of ride wait time ranking dicts
+        """
         # Build location string: "city, state_province" or just "city" if no state
-        location_expr = func.concat(
-            parks.c.city,
-            func.if_(parks.c.state_province.isnot(None), func.concat(", ", parks.c.state_province), "")
-        )
+        location_expr = case(
+            (Park.state_province.isnot(None), func.concat(Park.city, ", ", Park.state_province)),
+            else_=Park.city
+        ).label("location")
 
+        # Build base query
         stmt = (
             select(
-                rides.c.ride_id,
-                rides.c.name.label("ride_name"),
-                rides.c.queue_times_id,
-                parks.c.name.label("park_name"),
-                parks.c.park_id,
-                parks.c.queue_times_id.label("park_queue_times_id"),
-                location_expr.label("location"),
+                Ride.ride_id,
+                Ride.name.label("ride_name"),
+                Ride.queue_times_id,
+                Park.name.label("park_name"),
+                Park.park_id,
+                Park.queue_times_id.label("park_queue_times_id"),
+                location_expr,
                 # Use consistent field names with LIVE endpoint
-                func.round(func.avg(ride_daily_stats.c.avg_wait_time), 1).label(
-                    "avg_wait_minutes"
-                ),
-                func.max(ride_daily_stats.c.peak_wait_time).label("peak_wait_minutes"),
-                # Include tier from ride_classifications (default to 3 if unclassified)
-                func.coalesce(ride_classifications.c.tier, literal(3)).label("tier"),
+                func.round(func.avg(RideDailyStats.avg_wait_time), 1).label("avg_wait_minutes"),
+                func.max(RideDailyStats.peak_wait_time).label("peak_wait_minutes"),
+                # Include tier from rides table (default to 3 if NULL)
+                func.coalesce(Ride.tier, 3).label("tier"),
             )
-            .select_from(
-                rides
-                .join(parks, rides.c.park_id == parks.c.park_id)
-                .join(ride_daily_stats, rides.c.ride_id == ride_daily_stats.c.ride_id)
-                .outerjoin(ride_classifications, rides.c.ride_id == ride_classifications.c.ride_id)
+            .select_from(Ride)
+            .join(Park, Ride.park_id == Park.park_id)
+            .join(RideDailyStats, Ride.ride_id == RideDailyStats.ride_id)
+            .where(
+                and_(
+                    Ride.is_active == True,
+                    Ride.category == "ATTRACTION",
+                    Park.is_active == True,
+                    RideDailyStats.stat_date >= start_date,
+                    RideDailyStats.stat_date <= end_date,
+                    RideDailyStats.avg_wait_time.isnot(None),
+                )
             )
-            .where(and_(*conditions))
+        )
+
+        # Apply Disney/Universal filter if requested
+        if filter_disney_universal:
+            stmt = stmt.where(
+                or_(Park.is_disney == True, Park.is_universal == True)
+            )
+
+        # Group by and order
+        stmt = (
+            stmt
             .group_by(
-                rides.c.ride_id, rides.c.name, rides.c.queue_times_id,
-                parks.c.name, parks.c.park_id, parks.c.queue_times_id,
-                parks.c.city, parks.c.state_province,
-                ride_classifications.c.tier
+                Ride.ride_id,
+                Ride.name,
+                Ride.queue_times_id,
+                Ride.tier,
+                Park.name,
+                Park.park_id,
+                Park.queue_times_id,
+                Park.city,
+                Park.state_province,
             )
-            .order_by(func.avg(ride_daily_stats.c.avg_wait_time).desc())
+            .order_by(func.avg(RideDailyStats.avg_wait_time).desc())
             .limit(limit)
         )
 
-        result = self.conn.execute(stmt)
+        # Execute query
+        result = self.session.execute(stmt)
+
         # Add period_label to each result
         rankings = []
         for row in result:
@@ -148,4 +170,5 @@ class RideWaitTimeRankingsQuery:
             if period_label:
                 row_dict['period_label'] = period_label
             rankings.append(row_dict)
+
         return rankings

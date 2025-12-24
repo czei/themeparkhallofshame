@@ -37,19 +37,18 @@ from datetime import date
 from typing import List, Dict, Any
 
 from sqlalchemy import select, func, and_
-from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session
 
-from database.schema import (
-    parks,
-    rides,
-    ride_classifications,
-    ride_daily_stats,
-)
-from database.queries.builders import Filters
-from utils.timezone import get_last_week_date_range, get_last_month_date_range
+from src.models.orm_park import Park
+from src.models.orm_ride import Ride
+from src.models.orm_stats import RideDailyStats
+from src.database.schema import ride_classifications
+from src.database.queries.builders import Filters
+from src.utils.timezone import get_last_week_date_range, get_last_month_date_range
+from src.utils.query_helpers import QueryClassBase
 
 
-class RideDowntimeRankingsQuery:
+class RideDowntimeRankingsQuery(QueryClassBase):
     """
     Query handler for ride downtime rankings.
 
@@ -59,9 +58,6 @@ class RideDowntimeRankingsQuery:
 
     For live (today) rankings, use live/live_ride_rankings.py instead.
     """
-
-    def __init__(self, connection: Connection):
-        self.conn = connection
 
     def get_weekly(
         self,
@@ -131,8 +127,8 @@ class RideDowntimeRankingsQuery:
         """
         # Map sort options to SQLAlchemy expressions
         # Note: current_is_open not available for historical data, falls back to downtime
-        downtime_expr = func.sum(ride_daily_stats.c.downtime_minutes)
-        uptime_expr = func.avg(ride_daily_stats.c.uptime_percentage)
+        downtime_expr = func.sum(RideDailyStats.downtime_minutes)
+        uptime_expr = func.avg(RideDailyStats.uptime_percentage)
 
         sort_mapping = {
             "downtime_hours": downtime_expr.desc(),
@@ -163,60 +159,59 @@ class RideDowntimeRankingsQuery:
             sort_by: Column to sort by
         """
         conditions = [
-            rides.c.is_active == True,
-            rides.c.category == "ATTRACTION",
-            parks.c.is_active == True,
-            ride_daily_stats.c.stat_date >= start_date,
-            ride_daily_stats.c.stat_date <= end_date,
+            Ride.is_active == True,
+            Ride.category == "ATTRACTION",
+            Park.is_active == True,
+            RideDailyStats.stat_date >= start_date,
+            RideDailyStats.stat_date <= end_date,
         ]
 
         if filter_disney_universal:
-            conditions.append(Filters.disney_universal(parks))
+            conditions.append(Filters.disney_universal())
 
         stmt = (
             select(
-                rides.c.ride_id,
-                rides.c.name.label("ride_name"),
-                parks.c.name.label("park_name"),
-                parks.c.park_id,
+                Ride.ride_id,
+                Ride.name.label("ride_name"),
+                Park.name.label("park_name"),
+                Park.park_id,
                 ride_classifications.c.tier,
                 func.round(
-                    func.sum(ride_daily_stats.c.downtime_minutes) / 60.0, 2
+                    func.sum(RideDailyStats.downtime_minutes) / 60.0, 2
                 ).label("total_downtime_hours"),
-                func.round(func.avg(ride_daily_stats.c.uptime_percentage), 2).label(
+                func.round(func.avg(RideDailyStats.uptime_percentage), 2).label(
                     "uptime_percentage"
                 ),
-                func.sum(ride_daily_stats.c.status_changes).label("status_changes"),
+                func.sum(RideDailyStats.status_changes).label("status_changes"),
                 # Trend not available for aggregated queries
-                func.cast(None, rides.c.ride_id.type).label("trend_percentage"),
+                func.cast(None, Ride.ride_id.type).label("trend_percentage"),
             )
             .select_from(
-                rides.join(parks, rides.c.park_id == parks.c.park_id)
-                .join(ride_daily_stats, rides.c.ride_id == ride_daily_stats.c.ride_id)
+                Ride.__table__.join(Park, Ride.park_id == Park.park_id)
+                .join(RideDailyStats, Ride.ride_id == RideDailyStats.ride_id)
                 .outerjoin(
                     ride_classifications,
-                    rides.c.ride_id == ride_classifications.c.ride_id,
+                    Ride.ride_id == ride_classifications.c.ride_id,
                 )
             )
             .where(and_(*conditions))
             .group_by(
-                rides.c.ride_id,
-                rides.c.name,
-                parks.c.name,
-                parks.c.park_id,
+                Ride.ride_id,
+                Ride.name,
+                Park.name,
+                Park.park_id,
                 ride_classifications.c.tier,
             )
-            .having(func.sum(ride_daily_stats.c.downtime_minutes) > 0)
+            .having(func.sum(RideDailyStats.downtime_minutes) > 0)
             .order_by(self._get_order_by_clause(sort_by))
             .limit(limit)
         )
 
-        result = self.conn.execute(stmt)
+        rankings = self.execute_and_fetchall(stmt)
+
         # Add period_label to each result
-        rankings = []
-        for row in result:
-            row_dict = dict(row._mapping)
-            if period_label:
+        if period_label:
+            for row_dict in rankings:
                 row_dict['period_label'] = period_label
-            rankings.append(row_dict)
+
         return rankings

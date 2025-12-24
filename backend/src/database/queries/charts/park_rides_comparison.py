@@ -30,10 +30,13 @@ Output Format (Chart.js compatible):
 from datetime import date, timedelta
 from typing import Dict, Any, List
 
-from sqlalchemy import text
+from sqlalchemy import select, func, and_, or_, literal_column
 from sqlalchemy.engine import Connection
 
 from utils.timezone import get_pacific_day_range_utc
+
+# ORM models for query conversion
+from src.models import Ride, Park, ParkActivitySnapshot, RideStatusSnapshot, RideClassification, RideDailyStats
 
 
 class ParkRidesComparisonQuery:
@@ -65,28 +68,30 @@ class ParkRidesComparisonQuery:
             current += timedelta(days=1)
 
         # Get all rides that operated in this park during the period
-        rides_query = text("""
-            SELECT DISTINCT
-                r.ride_id,
-                r.name AS ride_name,
-                COALESCE(rc.tier, 2) AS tier
-            FROM rides r
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            INNER JOIN ride_daily_stats rds ON r.ride_id = rds.ride_id
-            WHERE r.park_id = :park_id
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND rds.stat_date >= :start_date
-                AND rds.stat_date <= :end_date
-                AND (rds.uptime_minutes > 0 OR rds.downtime_minutes > 0)
-            ORDER BY tier ASC, r.name ASC
-        """)
+        rides_stmt = (
+            select(
+                Ride.ride_id,
+                Ride.name.label("ride_name"),
+                func.coalesce(RideClassification.tier, 2).label("tier")
+            )
+            .select_from(Ride)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .join(RideDailyStats, Ride.ride_id == RideDailyStats.ride_id)
+            .where(
+                and_(
+                    Ride.park_id == park_id,
+                    Ride.is_active == True,
+                    Ride.category == 'ATTRACTION',
+                    RideDailyStats.stat_date >= start_date,
+                    RideDailyStats.stat_date <= end_date,
+                    or_(RideDailyStats.uptime_minutes > 0, RideDailyStats.downtime_minutes > 0)
+                )
+            )
+            .distinct()
+            .order_by(func.coalesce(RideClassification.tier, 2), Ride.name)
+        )
 
-        result = self.conn.execute(rides_query, {
-            "park_id": park_id,
-            "start_date": start_date,
-            "end_date": end_date
-        })
+        result = self.conn.execute(rides_stmt)
         rides = [dict(row._mapping) for row in result]
 
         if not rides:
@@ -144,28 +149,30 @@ class ParkRidesComparisonQuery:
             current += timedelta(days=1)
 
         # Get all rides that operated in this park during the period
-        rides_query = text("""
-            SELECT DISTINCT
-                r.ride_id,
-                r.name AS ride_name,
-                COALESCE(rc.tier, 2) AS tier
-            FROM rides r
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            INNER JOIN ride_daily_stats rds ON r.ride_id = rds.ride_id
-            WHERE r.park_id = :park_id
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND rds.stat_date >= :start_date
-                AND rds.stat_date <= :end_date
-                AND rds.avg_wait_time IS NOT NULL
-            ORDER BY tier ASC, r.name ASC
-        """)
+        rides_stmt = (
+            select(
+                Ride.ride_id,
+                Ride.name.label("ride_name"),
+                func.coalesce(RideClassification.tier, 2).label("tier")
+            )
+            .select_from(Ride)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .join(RideDailyStats, Ride.ride_id == RideDailyStats.ride_id)
+            .where(
+                and_(
+                    Ride.park_id == park_id,
+                    Ride.is_active == True,
+                    Ride.category == 'ATTRACTION',
+                    RideDailyStats.stat_date >= start_date,
+                    RideDailyStats.stat_date <= end_date,
+                    RideDailyStats.avg_wait_time.isnot(None)
+                )
+            )
+            .distinct()
+            .order_by(func.coalesce(RideClassification.tier, 2), Ride.name)
+        )
 
-        result = self.conn.execute(rides_query, {
-            "park_id": park_id,
-            "start_date": start_date,
-            "end_date": end_date
-        })
+        result = self.conn.execute(rides_stmt)
         rides = [dict(row._mapping) for row in result]
 
         if not rides:
@@ -222,31 +229,41 @@ class ParkRidesComparisonQuery:
         start_utc, end_utc = get_pacific_day_range_utc(target_date)
 
         # Get all rides that operated during this period
-        rides_query = text("""
-            SELECT DISTINCT
-                r.ride_id,
-                r.name AS ride_name,
-                COALESCE(rc.tier, 2) AS tier
-            FROM rides r
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
-            WHERE r.park_id = :park_id
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND rss.recorded_at >= :start_utc
-                AND rss.recorded_at < :end_utc
-                AND pas.park_appears_open = TRUE
-                AND (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = 1))
-            ORDER BY tier ASC, r.name ASC
-        """)
+        rides_stmt = (
+            select(
+                Ride.ride_id,
+                Ride.name.label("ride_name"),
+                func.coalesce(RideClassification.tier, 2).label("tier")
+            )
+            .select_from(Ride)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .join(RideStatusSnapshot, Ride.ride_id == RideStatusSnapshot.ride_id)
+            .join(ParkActivitySnapshot, and_(
+                Ride.park_id == ParkActivitySnapshot.park_id,
+                ParkActivitySnapshot.recorded_at == RideStatusSnapshot.recorded_at
+            ))
+            .where(
+                and_(
+                    Ride.park_id == park_id,
+                    Ride.is_active == True,
+                    Ride.category == 'ATTRACTION',
+                    RideStatusSnapshot.recorded_at >= start_utc,
+                    RideStatusSnapshot.recorded_at < end_utc,
+                    ParkActivitySnapshot.park_appears_open == True,
+                    or_(
+                        RideStatusSnapshot.status == 'OPERATING',
+                        and_(
+                            RideStatusSnapshot.status.is_(None),
+                            RideStatusSnapshot.computed_is_open == 1
+                        )
+                    )
+                )
+            )
+            .distinct()
+            .order_by(func.coalesce(RideClassification.tier, 2), Ride.name)
+        )
 
-        result = self.conn.execute(rides_query, {
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
+        result = self.conn.execute(rides_stmt)
         rides = [dict(row._mapping) for row in result]
 
         if not rides:
@@ -300,31 +317,35 @@ class ParkRidesComparisonQuery:
         start_utc, end_utc = get_pacific_day_range_utc(target_date)
 
         # Get all rides that had wait time data during this period
-        rides_query = text("""
-            SELECT DISTINCT
-                r.ride_id,
-                r.name AS ride_name,
-                COALESCE(rc.tier, 2) AS tier
-            FROM rides r
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
-            WHERE r.park_id = :park_id
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND rss.recorded_at >= :start_utc
-                AND rss.recorded_at < :end_utc
-                AND pas.park_appears_open = TRUE
-                AND rss.wait_time IS NOT NULL
-            ORDER BY tier ASC, r.name ASC
-        """)
+        rides_stmt = (
+            select(
+                Ride.ride_id,
+                Ride.name.label("ride_name"),
+                func.coalesce(RideClassification.tier, 2).label("tier")
+            )
+            .select_from(Ride)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .join(RideStatusSnapshot, Ride.ride_id == RideStatusSnapshot.ride_id)
+            .join(ParkActivitySnapshot, and_(
+                Ride.park_id == ParkActivitySnapshot.park_id,
+                ParkActivitySnapshot.recorded_at == RideStatusSnapshot.recorded_at
+            ))
+            .where(
+                and_(
+                    Ride.park_id == park_id,
+                    Ride.is_active == True,
+                    Ride.category == 'ATTRACTION',
+                    RideStatusSnapshot.recorded_at >= start_utc,
+                    RideStatusSnapshot.recorded_at < end_utc,
+                    ParkActivitySnapshot.park_appears_open == True,
+                    RideStatusSnapshot.wait_time.isnot(None)
+                )
+            )
+            .distinct()
+            .order_by(func.coalesce(RideClassification.tier, 2), Ride.name)
+        )
 
-        result = self.conn.execute(rides_query, {
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
+        result = self.conn.execute(rides_stmt)
         rides = [dict(row._mapping) for row in result]
 
         if not rides:
@@ -371,22 +392,22 @@ class ParkRidesComparisonQuery:
         end_date: date,
     ) -> List[Dict[str, Any]]:
         """Get daily downtime hours for a specific ride."""
-        query = text("""
-            SELECT
-                stat_date,
-                ROUND(downtime_minutes / 60.0, 2) AS downtime_hours
-            FROM ride_daily_stats
-            WHERE ride_id = :ride_id
-                AND stat_date >= :start_date
-                AND stat_date <= :end_date
-            ORDER BY stat_date
-        """)
+        stmt = (
+            select(
+                RideDailyStats.stat_date,
+                func.round(RideDailyStats.downtime_minutes / 60.0, 2).label("downtime_hours")
+            )
+            .where(
+                and_(
+                    RideDailyStats.ride_id == ride_id,
+                    RideDailyStats.stat_date >= start_date,
+                    RideDailyStats.stat_date <= end_date
+                )
+            )
+            .order_by(RideDailyStats.stat_date)
+        )
 
-        result = self.conn.execute(query, {
-            "ride_id": ride_id,
-            "start_date": start_date,
-            "end_date": end_date
-        })
+        result = self.conn.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def _get_ride_daily_wait_times(
@@ -396,22 +417,22 @@ class ParkRidesComparisonQuery:
         end_date: date,
     ) -> List[Dict[str, Any]]:
         """Get daily average wait times for a specific ride."""
-        query = text("""
-            SELECT
-                stat_date,
-                avg_wait_time
-            FROM ride_daily_stats
-            WHERE ride_id = :ride_id
-                AND stat_date >= :start_date
-                AND stat_date <= :end_date
-            ORDER BY stat_date
-        """)
+        stmt = (
+            select(
+                RideDailyStats.stat_date,
+                RideDailyStats.avg_wait_time
+            )
+            .where(
+                and_(
+                    RideDailyStats.ride_id == ride_id,
+                    RideDailyStats.stat_date >= start_date,
+                    RideDailyStats.stat_date <= end_date
+                )
+            )
+            .order_by(RideDailyStats.stat_date)
+        )
 
-        result = self.conn.execute(query, {
-            "ride_id": ride_id,
-            "start_date": start_date,
-            "end_date": end_date
-        })
+        result = self.conn.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def _get_ride_hourly_downtime(
@@ -476,26 +497,35 @@ class ParkRidesComparisonQuery:
         end_utc,
     ) -> List[Dict[str, Any]]:
         """Get hourly average wait times for a specific ride from live snapshots."""
-        query = text("""
-            SELECT
-                HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) AS hour,
-                ROUND(AVG(rss.wait_time), 0) AS avg_wait_time
-            FROM ride_status_snapshots rss
-            INNER JOIN park_activity_snapshots pas ON rss.recorded_at = pas.recorded_at
-                AND pas.park_id = :park_id
-            WHERE rss.ride_id = :ride_id
-                AND rss.recorded_at >= :start_utc
-                AND rss.recorded_at < :end_utc
-                AND pas.park_appears_open = TRUE
-                AND rss.wait_time IS NOT NULL
-            GROUP BY HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR))
-            ORDER BY hour
-        """)
+        # Calculate Pacific hour: UTC - 8 hours
+        pacific_time = func.date_sub(
+            RideStatusSnapshot.recorded_at,
+            literal_column("INTERVAL 8 HOUR")
+        )
+        hour_expr = func.hour(pacific_time)
 
-        result = self.conn.execute(query, {
-            "ride_id": ride_id,
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
+        stmt = (
+            select(
+                hour_expr.label("hour"),
+                func.round(func.avg(RideStatusSnapshot.wait_time), 0).label("avg_wait_time")
+            )
+            .select_from(RideStatusSnapshot)
+            .join(ParkActivitySnapshot, and_(
+                RideStatusSnapshot.recorded_at == ParkActivitySnapshot.recorded_at,
+                ParkActivitySnapshot.park_id == park_id
+            ))
+            .where(
+                and_(
+                    RideStatusSnapshot.ride_id == ride_id,
+                    RideStatusSnapshot.recorded_at >= start_utc,
+                    RideStatusSnapshot.recorded_at < end_utc,
+                    ParkActivitySnapshot.park_appears_open == True,
+                    RideStatusSnapshot.wait_time.isnot(None)
+                )
+            )
+            .group_by(hour_expr)
+            .order_by(literal_column("hour"))
+        )
+
+        result = self.conn.execute(stmt)
         return [dict(row._mapping) for row in result]

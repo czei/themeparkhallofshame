@@ -5,7 +5,7 @@ Integration Tests: Weather Collection
 Tests WeatherCollector with real database and API mocks.
 
 Test Strategy:
-- Use mysql_connection fixture (isolated transaction)
+- Use mysql_session fixture (isolated transaction)
 - Mock API client to avoid real API calls
 - Test concurrent collection with ThreadPoolExecutor
 - Test rate limiting behavior
@@ -80,14 +80,14 @@ class TestWeatherCollectionIntegration:
         client.parse_observations.side_effect = parse_observations_side_effect
         return client
 
-    def test_concurrent_collection_with_multiple_parks(self, mysql_connection, mock_api_client):
+    def test_concurrent_collection_with_multiple_parks(self, mysql_session, mock_api_client):
         """Should collect weather for multiple parks concurrently."""
         with patch('scripts.collect_weather.get_openmeteo_client', return_value=mock_api_client):
-            collector = WeatherCollector(mysql_connection)
+            collector = WeatherCollector(mysql_session)
 
             # Query test parks using SQLAlchemy
             from sqlalchemy import text
-            result = mysql_connection.execute(text("SELECT park_id, latitude, longitude FROM parks LIMIT 3"))
+            result = mysql_session.execute(text("SELECT park_id, latitude, longitude FROM parks LIMIT 3"))
             parks = [dict(row._mapping) for row in result]
 
             if len(parks) < 3:
@@ -111,10 +111,10 @@ class TestWeatherCollectionIntegration:
             successful = [r for r in results if r['success']]
             assert len(successful) >= 2
 
-    def test_rate_limiting_enforced(self, mysql_connection, mock_api_client):
+    def test_rate_limiting_enforced(self, mysql_session, mock_api_client):
         """Should enforce 1 req/sec rate limit."""
         with patch('scripts.collect_weather.get_openmeteo_client', return_value=mock_api_client):
-            collector = WeatherCollector(mysql_connection)
+            collector = WeatherCollector(mysql_session)
 
             # Create 5 test parks
             parks = [
@@ -132,7 +132,7 @@ class TestWeatherCollectionIntegration:
             assert elapsed >= 4.0, \
                 f"Rate limiting not enforced: 5 requests took {elapsed}s, expected >= 4s"
 
-    def test_graceful_park_failure_handling(self, mysql_connection, mock_api_client):
+    def test_graceful_park_failure_handling(self, mysql_session, mock_api_client):
         """Should handle individual park failures gracefully."""
         # Make API fail for specific park
         def side_effect_fetch(latitude, longitude, **kwargs):
@@ -143,7 +143,7 @@ class TestWeatherCollectionIntegration:
         mock_api_client.fetch_weather.side_effect = side_effect_fetch
 
         with patch('scripts.collect_weather.get_openmeteo_client', return_value=mock_api_client):
-            collector = WeatherCollector(mysql_connection)
+            collector = WeatherCollector(mysql_session)
 
             parks = [
                 {'park_id': 1, 'latitude': 28.41777, 'longitude': -81.58116},  # Valid
@@ -154,9 +154,9 @@ class TestWeatherCollectionIntegration:
             # Ensure parks exist in DB to satisfy FK constraints on weather_observations
             from sqlalchemy import text
             park_ids = [p['park_id'] for p in parks]
-            mysql_connection.execute(text("DELETE FROM parks WHERE park_id IN :ids"), {'ids': tuple(park_ids)})
+            mysql_session.execute(text("DELETE FROM parks WHERE park_id IN :ids"), {'ids': tuple(park_ids)})
             for p in parks:
-                mysql_connection.execute(text("""
+                mysql_session.execute(text("""
                     INSERT INTO parks (
                         park_id, queue_times_id, name, city, state_province, country,
                         latitude, longitude, timezone, operator, is_disney, is_universal, is_active
@@ -189,14 +189,14 @@ class TestWeatherCollectionIntegration:
             assert len(failed) == 1
             assert failed[0]['park_id'] == 2
 
-    def test_batch_insert_observations(self, mysql_connection, mock_api_client):
+    def test_batch_insert_observations(self, mysql_session, mock_api_client):
         """Should batch insert observations to database."""
         with patch('scripts.collect_weather.get_openmeteo_client', return_value=mock_api_client):
-            collector = WeatherCollector(mysql_connection)
+            collector = WeatherCollector(mysql_session)
 
             # Get a real park from the database
             from sqlalchemy import text
-            result = mysql_connection.execute(text("SELECT park_id, latitude, longitude FROM parks LIMIT 1"))
+            result = mysql_session.execute(text("SELECT park_id, latitude, longitude FROM parks LIMIT 1"))
             park_row = result.first()
 
             if not park_row:
@@ -209,7 +209,7 @@ class TestWeatherCollectionIntegration:
             assert result['success'] is True
 
             # Verify observations were inserted using SQLAlchemy
-            count_result = mysql_connection.execute(text("""
+            count_result = mysql_session.execute(text("""
                 SELECT COUNT(*) as count
                 FROM weather_observations
                 WHERE park_id = :park_id
@@ -220,13 +220,13 @@ class TestWeatherCollectionIntegration:
             # Should have inserted at least 1 observation (test mode)
             assert row[0] >= 1
 
-    def test_failure_threshold_aborts_on_systemic_failure(self, mysql_connection, mock_api_client):
+    def test_failure_threshold_aborts_on_systemic_failure(self, mysql_session, mock_api_client):
         """Should abort when >50% of parks fail."""
         # Make API fail for most parks
         mock_api_client.fetch_weather.side_effect = Exception("API down")
 
         with patch('scripts.collect_weather.get_openmeteo_client', return_value=mock_api_client):
-            collector = WeatherCollector(mysql_connection)
+            collector = WeatherCollector(mysql_session)
 
             parks = [
                 {'park_id': i, 'latitude': 28.0 + i, 'longitude': -81.0}
@@ -238,19 +238,19 @@ class TestWeatherCollectionIntegration:
                 with pytest.raises(RuntimeError, match="Collection failed for"):
                     collector.run(mode='current', test_mode=True)
 
-    def test_concurrent_execution_uses_thread_pool(self, mysql_connection, mock_api_client):
+    def test_concurrent_execution_uses_thread_pool(self, mysql_session, mock_api_client):
         """Should use ThreadPoolExecutor for concurrent collection."""
         with patch('scripts.collect_weather.get_openmeteo_client', return_value=mock_api_client):
-            collector = WeatherCollector(mysql_connection)
+            collector = WeatherCollector(mysql_session)
 
             # Verify collector has ThreadPoolExecutor
             assert hasattr(collector, 'max_workers')
             assert collector.max_workers == 10
 
-    def test_test_mode_limits_parks(self, mysql_connection, mock_api_client):
+    def test_test_mode_limits_parks(self, mysql_session, mock_api_client):
         """test_mode should limit collection to 5 parks."""
         with patch('scripts.collect_weather.get_openmeteo_client', return_value=mock_api_client):
-            collector = WeatherCollector(mysql_connection)
+            collector = WeatherCollector(mysql_session)
 
             # Create 10 test parks
             parks = [
@@ -261,9 +261,9 @@ class TestWeatherCollectionIntegration:
             # Ensure parks exist in DB for FK constraints
             from sqlalchemy import text
             park_ids = [p['park_id'] for p in parks]
-            mysql_connection.execute(text("DELETE FROM parks WHERE park_id IN :ids"), {'ids': tuple(park_ids)})
+            mysql_session.execute(text("DELETE FROM parks WHERE park_id IN :ids"), {'ids': tuple(park_ids)})
             for p in parks:
-                mysql_connection.execute(text("""
+                mysql_session.execute(text("""
                     INSERT INTO parks (
                         park_id, queue_times_id, name, city, state_province, country,
                         latitude, longitude, timezone, operator, is_disney, is_universal, is_active

@@ -36,9 +36,12 @@ Updated: 2024-11 (Rewritten to use pre-aggregated tables)
 from datetime import date, timedelta
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy import func, and_, case
+from sqlalchemy.orm import Session
 
+from src.models.orm_park import Park
+from src.models.orm_ride import Ride
+from src.models.orm_stats import ParkDailyStats, RideDailyStats
 from utils.logger import logger
 
 
@@ -77,15 +80,15 @@ class AnomalyDetector:
         "baseline_days": 30,  # Days for baseline calculation
     }
 
-    def __init__(self, conn: Connection, thresholds: Optional[Dict[str, float]] = None):
+    def __init__(self, session: Session, thresholds: Optional[Dict[str, float]] = None):
         """
-        Initialize with database connection.
+        Initialize with database session.
 
         Args:
-            conn: SQLAlchemy connection
+            session: SQLAlchemy ORM session
             thresholds: Optional custom thresholds (defaults to DEFAULT_THRESHOLDS)
         """
-        self.conn = conn
+        self.session = session
         self.thresholds = {**self.DEFAULT_THRESHOLDS, **(thresholds or {})}
 
     def detect_anomalies(self, target_date: date) -> List[Anomaly]:
@@ -137,55 +140,61 @@ class AnomalyDetector:
         Uses: park_daily_stats (pre-aggregated)
         """
         baseline_start = target_date - timedelta(days=self.thresholds["baseline_days"])
-
-        query = text("""
-            WITH park_baseline AS (
-                SELECT
-                    pds.park_id,
-                    AVG(pds.shame_score) AS mean_score,
-                    STDDEV(pds.shame_score) AS std_score
-                FROM park_daily_stats pds
-                WHERE pds.stat_date BETWEEN :start_date AND :end_date
-                AND pds.shame_score IS NOT NULL
-                GROUP BY pds.park_id
-                HAVING COUNT(*) >= 7  -- Need at least a week of data
-            )
-            SELECT
-                pds.park_id,
-                p.name AS park_name,
-                pds.stat_date,
-                pds.shame_score AS current_value,
-                pb.mean_score,
-                pb.std_score,
-                CASE
-                    WHEN pb.std_score > 0 THEN
-                        (pds.shame_score - pb.mean_score) / pb.std_score
-                    ELSE 0
-                END AS zscore
-            FROM park_daily_stats pds
-            JOIN parks p ON pds.park_id = p.park_id
-            JOIN park_baseline pb ON pds.park_id = pb.park_id
-            WHERE pds.stat_date = :target_date
-            AND pb.std_score > 0
-            AND ABS((pds.shame_score - pb.mean_score) / pb.std_score) > :threshold
-        """)
+        baseline_end = target_date - timedelta(days=1)
 
         try:
-            result = self.conn.execute(
-                query,
-                {
-                    "start_date": baseline_start,
-                    "end_date": target_date - timedelta(days=1),
-                    "target_date": target_date,
-                    "threshold": self.thresholds["zscore"],
-                },
+            # Build baseline statistics subquery
+            baseline = (
+                self.session.query(
+                    ParkDailyStats.park_id,
+                    func.avg(ParkDailyStats.shame_score).label('mean_score'),
+                    func.stddev(ParkDailyStats.shame_score).label('std_score'),
+                    func.count().label('count')
+                )
+                .filter(
+                    and_(
+                        ParkDailyStats.stat_date >= baseline_start,
+                        ParkDailyStats.stat_date <= baseline_end,
+                        ParkDailyStats.shame_score.isnot(None)
+                    )
+                )
+                .group_by(ParkDailyStats.park_id)
+                .having(func.count() >= 7)  # Need at least a week of data
+                .subquery()
             )
-            rows = result.fetchall()
+
+            # Calculate z-scores for target date
+            zscore_expr = case(
+                (baseline.c.std_score > 0,
+                 (ParkDailyStats.shame_score - baseline.c.mean_score) / baseline.c.std_score),
+                else_=0
+            )
+
+            results = (
+                self.session.query(
+                    ParkDailyStats.park_id,
+                    Park.name.label('park_name'),
+                    ParkDailyStats.stat_date,
+                    ParkDailyStats.shame_score.label('current_value'),
+                    baseline.c.mean_score,
+                    baseline.c.std_score,
+                    zscore_expr.label('zscore')
+                )
+                .join(Park, ParkDailyStats.park_id == Park.park_id)
+                .join(baseline, ParkDailyStats.park_id == baseline.c.park_id)
+                .filter(
+                    and_(
+                        ParkDailyStats.stat_date == target_date,
+                        baseline.c.std_score > 0,
+                        func.abs(zscore_expr) > self.thresholds["zscore"]
+                    )
+                )
+                .all()
+            )
 
             anomalies = []
-            for row in rows:
-                row_dict = dict(row._mapping)
-                zscore = row_dict["zscore"]
+            for row in results:
+                zscore = float(row.zscore)
                 severity = "CRITICAL" if abs(zscore) > 4.0 else "WARNING"
 
                 anomalies.append(
@@ -193,16 +202,16 @@ class AnomalyDetector:
                         anomaly_type="zscore",
                         severity=severity,
                         entity_type="park",
-                        entity_id=row_dict["park_id"],
-                        entity_name=row_dict["park_name"],
-                        stat_date=row_dict["stat_date"],
+                        entity_id=row.park_id,
+                        entity_name=row.park_name,
+                        stat_date=row.stat_date,
                         metric="shame_score",
-                        current_value=float(row_dict["current_value"]),
-                        expected_value=float(row_dict["mean_score"]),
-                        threshold=float(zscore),
+                        current_value=float(row.current_value),
+                        expected_value=float(row.mean_score),
+                        threshold=zscore,
                         message=(
-                            f"Shame score {row_dict['current_value']:.2f} is {abs(zscore):.1f} "
-                            f"standard deviations from 30-day mean ({row_dict['mean_score']:.2f})"
+                            f"Shame score {row.current_value:.2f} is {abs(zscore):.1f} "
+                            f"standard deviations from 30-day mean ({row.mean_score:.2f})"
                         ),
                     )
                 )
@@ -221,60 +230,75 @@ class AnomalyDetector:
         Note: downtime_minutes is converted to hours for display
         """
         baseline_start = target_date - timedelta(days=self.thresholds["baseline_days"])
-
-        query = text("""
-            WITH ride_baseline AS (
-                SELECT
-                    rds.ride_id,
-                    AVG(rds.downtime_minutes / 60.0) AS mean_downtime,
-                    STDDEV(rds.downtime_minutes / 60.0) AS std_downtime
-                FROM ride_daily_stats rds
-                WHERE rds.stat_date BETWEEN :start_date AND :end_date
-                GROUP BY rds.ride_id
-                HAVING COUNT(*) >= 7 AND STDDEV(rds.downtime_minutes / 60.0) > 0.1
-            )
-            SELECT
-                rds.ride_id,
-                r.name AS ride_name,
-                p.name AS park_name,
-                rds.stat_date,
-                ROUND(rds.downtime_minutes / 60.0, 2) AS current_value,
-                rb.mean_downtime,
-                rb.std_downtime,
-                CASE
-                    WHEN rb.std_downtime > 0 THEN
-                        ((rds.downtime_minutes / 60.0) - rb.mean_downtime) / rb.std_downtime
-                    ELSE 0
-                END AS zscore
-            FROM ride_daily_stats rds
-            JOIN rides r ON rds.ride_id = r.ride_id
-            JOIN parks p ON r.park_id = p.park_id
-            JOIN ride_baseline rb ON rds.ride_id = rb.ride_id
-            WHERE rds.stat_date = :target_date
-            AND rds.downtime_minutes > 0
-            AND ((rds.downtime_minutes / 60.0) - rb.mean_downtime) / rb.std_downtime > :threshold
-        """)
+        baseline_end = target_date - timedelta(days=1)
 
         try:
-            result = self.conn.execute(
-                query,
-                {
-                    "start_date": baseline_start,
-                    "end_date": target_date - timedelta(days=1),
-                    "target_date": target_date,
-                    "threshold": self.thresholds["zscore"],
-                },
+            # Build baseline statistics subquery (downtime in hours)
+            baseline = (
+                self.session.query(
+                    RideDailyStats.ride_id,
+                    func.avg(RideDailyStats.downtime_minutes / 60.0).label('mean_downtime'),
+                    func.stddev(RideDailyStats.downtime_minutes / 60.0).label('std_downtime'),
+                    func.count().label('count')
+                )
+                .filter(
+                    and_(
+                        RideDailyStats.stat_date >= baseline_start,
+                        RideDailyStats.stat_date <= baseline_end
+                    )
+                )
+                .group_by(RideDailyStats.ride_id)
+                .having(
+                    and_(
+                        func.count() >= 7,
+                        func.stddev(RideDailyStats.downtime_minutes / 60.0) > 0.1
+                    )
+                )
+                .subquery()
             )
-            rows = result.fetchall()
+
+            # Calculate current downtime in hours
+            current_downtime_hours = RideDailyStats.downtime_minutes / 60.0
+
+            # Calculate z-scores for target date
+            zscore_expr = case(
+                (baseline.c.std_downtime > 0,
+                 (current_downtime_hours - baseline.c.mean_downtime) / baseline.c.std_downtime),
+                else_=0
+            )
+
+            results = (
+                self.session.query(
+                    RideDailyStats.ride_id,
+                    Ride.name.label('ride_name'),
+                    Park.name.label('park_name'),
+                    RideDailyStats.stat_date,
+                    func.round(current_downtime_hours, 2).label('current_value'),
+                    baseline.c.mean_downtime,
+                    baseline.c.std_downtime,
+                    zscore_expr.label('zscore')
+                )
+                .join(Ride, RideDailyStats.ride_id == Ride.ride_id)
+                .join(Park, Ride.park_id == Park.park_id)
+                .join(baseline, RideDailyStats.ride_id == baseline.c.ride_id)
+                .filter(
+                    and_(
+                        RideDailyStats.stat_date == target_date,
+                        RideDailyStats.downtime_minutes > 0,
+                        zscore_expr > self.thresholds["zscore"]
+                    )
+                )
+                .all()
+            )
 
             anomalies = []
-            for row in rows:
-                row_dict = dict(row._mapping)
-                zscore = row_dict["zscore"]
+            for row in results:
+                zscore = float(row.zscore)
+                current_value = float(row.current_value)
                 # Only flag as critical if >4σ and >2 hours downtime
                 severity = (
                     "CRITICAL"
-                    if abs(zscore) > 4.0 and row_dict["current_value"] > 2
+                    if abs(zscore) > 4.0 and current_value > 2
                     else "WARNING"
                 )
 
@@ -283,16 +307,16 @@ class AnomalyDetector:
                         anomaly_type="zscore",
                         severity=severity,
                         entity_type="ride",
-                        entity_id=row_dict["ride_id"],
-                        entity_name=f"{row_dict['ride_name']} ({row_dict['park_name']})",
-                        stat_date=row_dict["stat_date"],
+                        entity_id=row.ride_id,
+                        entity_name=f"{row.ride_name} ({row.park_name})",
+                        stat_date=row.stat_date,
                         metric="downtime_hours",
-                        current_value=float(row_dict["current_value"]),
-                        expected_value=float(row_dict["mean_downtime"]),
-                        threshold=float(zscore),
+                        current_value=current_value,
+                        expected_value=float(row.mean_downtime),
+                        threshold=zscore,
                         message=(
-                            f"Downtime {row_dict['current_value']:.2f}h is {abs(zscore):.1f}σ "
-                            f"from 30-day mean ({row_dict['mean_downtime']:.2f}h)"
+                            f"Downtime {current_value:.2f}h is {abs(zscore):.1f}σ "
+                            f"from 30-day mean ({row.mean_downtime:.2f}h)"
                         ),
                     )
                 )
@@ -315,44 +339,50 @@ class AnomalyDetector:
         """
         previous_date = target_date - timedelta(days=1)
 
-        query = text("""
-            SELECT
-                curr.park_id,
-                p.name AS park_name,
-                curr.stat_date,
-                curr.shame_score AS current_value,
-                prev.shame_score AS previous_value,
-                CASE
-                    WHEN prev.shame_score > 0 THEN
-                        ((curr.shame_score - prev.shame_score) / prev.shame_score) * 100
-                    ELSE NULL
-                END AS pct_change
-            FROM park_daily_stats curr
-            JOIN parks p ON curr.park_id = p.park_id
-            JOIN park_daily_stats prev
-                ON curr.park_id = prev.park_id
-                AND prev.stat_date = :previous_date
-            WHERE curr.stat_date = :target_date
-            AND prev.shame_score > 0.1  -- Avoid division by tiny numbers
-            AND curr.shame_score > 0.1
-            AND ABS((curr.shame_score - prev.shame_score) / prev.shame_score) * 100 > :threshold
-        """)
-
         try:
-            result = self.conn.execute(
-                query,
-                {
-                    "target_date": target_date,
-                    "previous_date": previous_date,
-                    "threshold": self.thresholds["sudden_change_pct"],
-                },
+            # Alias for current and previous stats
+            from sqlalchemy.orm import aliased
+            curr = aliased(ParkDailyStats)
+            prev = aliased(ParkDailyStats)
+
+            # Calculate percentage change
+            pct_change_expr = case(
+                (prev.shame_score > 0,
+                 ((curr.shame_score - prev.shame_score) / prev.shame_score) * 100),
+                else_=None
             )
-            rows = result.fetchall()
+
+            results = (
+                self.session.query(
+                    curr.park_id,
+                    Park.name.label('park_name'),
+                    curr.stat_date,
+                    curr.shame_score.label('current_value'),
+                    prev.shame_score.label('previous_value'),
+                    pct_change_expr.label('pct_change')
+                )
+                .join(Park, curr.park_id == Park.park_id)
+                .join(
+                    prev,
+                    and_(
+                        curr.park_id == prev.park_id,
+                        prev.stat_date == previous_date
+                    )
+                )
+                .filter(
+                    and_(
+                        curr.stat_date == target_date,
+                        prev.shame_score > 0.1,  # Avoid division by tiny numbers
+                        curr.shame_score > 0.1,
+                        func.abs(pct_change_expr) > self.thresholds["sudden_change_pct"]
+                    )
+                )
+                .all()
+            )
 
             anomalies = []
-            for row in rows:
-                row_dict = dict(row._mapping)
-                pct_change = row_dict["pct_change"]
+            for row in results:
+                pct_change = float(row.pct_change)
                 direction = "increased" if pct_change > 0 else "decreased"
                 severity = "WARNING"  # Sudden changes flagged, not critical
 
@@ -361,16 +391,16 @@ class AnomalyDetector:
                         anomaly_type="sudden_change",
                         severity=severity,
                         entity_type="park",
-                        entity_id=row_dict["park_id"],
-                        entity_name=row_dict["park_name"],
-                        stat_date=row_dict["stat_date"],
+                        entity_id=row.park_id,
+                        entity_name=row.park_name,
+                        stat_date=row.stat_date,
                         metric="shame_score",
-                        current_value=float(row_dict["current_value"]),
-                        expected_value=float(row_dict["previous_value"]),
-                        threshold=float(pct_change),
+                        current_value=float(row.current_value),
+                        expected_value=float(row.previous_value),
+                        threshold=pct_change,
                         message=(
                             f"Shame score {direction} {abs(pct_change):.0f}% "
-                            f"({row_dict['previous_value']:.2f} → {row_dict['current_value']:.2f})"
+                            f"({row.previous_value:.2f} → {row.current_value:.2f})"
                         ),
                     )
                 )
@@ -394,31 +424,38 @@ class AnomalyDetector:
         anomalies = []
 
         # Check 1: Active parks with no daily stats
-        missing_query = text("""
-            SELECT p.park_id, p.name AS park_name, :target_date AS stat_date
-            FROM parks p
-            WHERE p.is_active = 1
-            AND NOT EXISTS (
-                SELECT 1 FROM park_daily_stats pds
-                WHERE pds.park_id = p.park_id
-                AND pds.stat_date = :target_date
-            )
-        """)
-
         try:
-            result = self.conn.execute(missing_query, {"target_date": target_date})
-            rows = result.fetchall()
+            # Subquery for parks with stats on target date
+            parks_with_stats = (
+                self.session.query(ParkDailyStats.park_id)
+                .filter(ParkDailyStats.stat_date == target_date)
+                .subquery()
+            )
 
-            for row in rows:
-                row_dict = dict(row._mapping)
+            # Find active parks WITHOUT stats
+            missing_parks = (
+                self.session.query(
+                    Park.park_id,
+                    Park.name.label('park_name')
+                )
+                .filter(
+                    and_(
+                        Park.is_active.is_(True),
+                        ~Park.park_id.in_(parks_with_stats)
+                    )
+                )
+                .all()
+            )
+
+            for row in missing_parks:
                 anomalies.append(
                     Anomaly(
                         anomaly_type="data_quality",
                         severity="WARNING",
                         entity_type="park",
-                        entity_id=row_dict["park_id"],
-                        entity_name=row_dict["park_name"],
-                        stat_date=row_dict["stat_date"],
+                        entity_id=row.park_id,
+                        entity_name=row.park_name,
+                        stat_date=target_date,
                         metric="missing_daily_stats",
                         current_value=0,
                         expected_value=1.0,  # Expected to have stats
@@ -431,43 +468,55 @@ class AnomalyDetector:
             logger.error(f"Missing data detection failed: {e}")
 
         # Check 2: Parks with abnormally low ride counts
-        low_rides_query = text("""
-            WITH park_avg_rides AS (
-                SELECT pds.park_id, AVG(pds.total_rides_tracked) AS avg_rides
-                FROM park_daily_stats pds
-                WHERE pds.stat_date BETWEEN :start_date AND :end_date
-                GROUP BY pds.park_id
-                HAVING AVG(pds.total_rides_tracked) > 5
-            )
-            SELECT
-                pds.park_id,
-                p.name AS park_name,
-                pds.stat_date,
-                pds.total_rides_tracked AS current_rides,
-                par.avg_rides,
-                ROUND(100.0 * pds.total_rides_tracked / par.avg_rides, 1) AS pct_of_normal
-            FROM park_daily_stats pds
-            JOIN parks p ON pds.park_id = p.park_id
-            JOIN park_avg_rides par ON pds.park_id = par.park_id
-            WHERE pds.stat_date = :target_date
-            AND pds.total_rides_tracked < par.avg_rides * 0.5
-        """)
-
         try:
             start_date = target_date - timedelta(days=14)
-            result = self.conn.execute(
-                low_rides_query,
-                {
-                    "target_date": target_date,
-                    "start_date": start_date,
-                    "end_date": target_date - timedelta(days=1),
-                },
-            )
-            rows = result.fetchall()
+            end_date = target_date - timedelta(days=1)
 
-            for row in rows:
-                row_dict = dict(row._mapping)
-                pct = row_dict["pct_of_normal"] or 0
+            # Build average rides subquery
+            park_avg_rides = (
+                self.session.query(
+                    ParkDailyStats.park_id,
+                    func.avg(ParkDailyStats.total_rides_tracked).label('avg_rides')
+                )
+                .filter(
+                    and_(
+                        ParkDailyStats.stat_date >= start_date,
+                        ParkDailyStats.stat_date <= end_date
+                    )
+                )
+                .group_by(ParkDailyStats.park_id)
+                .having(func.avg(ParkDailyStats.total_rides_tracked) > 5)
+                .subquery()
+            )
+
+            # Calculate percentage of normal
+            pct_of_normal = func.round(
+                100.0 * ParkDailyStats.total_rides_tracked / park_avg_rides.c.avg_rides,
+                1
+            )
+
+            results = (
+                self.session.query(
+                    ParkDailyStats.park_id,
+                    Park.name.label('park_name'),
+                    ParkDailyStats.stat_date,
+                    ParkDailyStats.total_rides_tracked.label('current_rides'),
+                    park_avg_rides.c.avg_rides,
+                    pct_of_normal.label('pct_of_normal')
+                )
+                .join(Park, ParkDailyStats.park_id == Park.park_id)
+                .join(park_avg_rides, ParkDailyStats.park_id == park_avg_rides.c.park_id)
+                .filter(
+                    and_(
+                        ParkDailyStats.stat_date == target_date,
+                        ParkDailyStats.total_rides_tracked < park_avg_rides.c.avg_rides * 0.5
+                    )
+                )
+                .all()
+            )
+
+            for row in results:
+                pct = float(row.pct_of_normal) if row.pct_of_normal else 0
 
                 severity = "CRITICAL" if pct < 25 else "WARNING"
 
@@ -476,16 +525,16 @@ class AnomalyDetector:
                         anomaly_type="data_quality",
                         severity=severity,
                         entity_type="park",
-                        entity_id=row_dict["park_id"],
-                        entity_name=row_dict["park_name"],
-                        stat_date=row_dict["stat_date"],
+                        entity_id=row.park_id,
+                        entity_name=row.park_name,
+                        stat_date=row.stat_date,
                         metric="rides_tracked",
-                        current_value=float(row_dict["current_rides"]),
-                        expected_value=float(row_dict["avg_rides"]),
+                        current_value=float(row.current_rides),
+                        expected_value=float(row.avg_rides),
                         threshold=50.0,  # <50% of normal
                         message=(
-                            f"Only {row_dict['current_rides']} rides tracked "
-                            f"({pct:.0f}% of normal {row_dict['avg_rides']:.0f})"
+                            f"Only {row.current_rides} rides tracked "
+                            f"({pct:.0f}% of normal {row.avg_rides:.0f})"
                         ),
                     )
                 )

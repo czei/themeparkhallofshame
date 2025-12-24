@@ -7,8 +7,9 @@ Phase 4 (T023) - Hourly aggregation ORM queries
 """
 
 from __future__ import annotations
-from datetime import datetime, timedelta
-from typing import Optional, List, NamedTuple
+from datetime import datetime, date, timedelta
+from typing import Optional, List, Dict, Any, NamedTuple
+from abc import ABC, abstractmethod
 from decimal import Decimal
 
 from sqlalchemy import select, func, and_, or_, extract
@@ -477,3 +478,167 @@ class HourlyAggregationQuery:
                 ))
 
         return results
+
+
+class TimeIntervalHelper:
+    """
+    Helper methods for timedelta-based date math.
+
+    Use these instead of raw SQL INTERVAL syntax (e.g., text('INTERVAL 30 DAY'))
+    for database-agnostic time calculations.
+
+    Phase 9 (T045) - Replace all MySQL-specific INTERVAL patterns.
+    """
+
+    @staticmethod
+    def days_ago(n: int) -> datetime:
+        """
+        Return datetime N days in the past from now (UTC).
+
+        Args:
+            n: Number of days ago
+
+        Returns:
+            datetime N days before current UTC time
+
+        Example:
+            >>> TimeIntervalHelper.days_ago(30)  # 30 days ago
+        """
+        return datetime.utcnow() - timedelta(days=n)
+
+    @staticmethod
+    def hours_ago(n: int) -> datetime:
+        """
+        Return datetime N hours in the past from now (UTC).
+
+        Args:
+            n: Number of hours ago
+
+        Returns:
+            datetime N hours before current UTC time
+
+        Example:
+            >>> TimeIntervalHelper.hours_ago(1)  # 1 hour ago
+        """
+        return datetime.utcnow() - timedelta(hours=n)
+
+    @staticmethod
+    def date_n_days_ago(n: int) -> date:
+        """
+        Return date N days in the past from today.
+
+        Args:
+            n: Number of days ago
+
+        Returns:
+            date N days before today
+
+        Example:
+            >>> TimeIntervalHelper.date_n_days_ago(30)  # 30 days ago as date
+        """
+        return (datetime.utcnow() - timedelta(days=n)).date()
+
+    @staticmethod
+    def minutes_ago(n: int) -> datetime:
+        """
+        Return datetime N minutes in the past from now (UTC).
+
+        Args:
+            n: Number of minutes ago
+
+        Returns:
+            datetime N minutes before current UTC time
+        """
+        return datetime.utcnow() - timedelta(minutes=n)
+
+
+class QueryClassBase(ABC):
+    """
+    Base class for all ORM query handler classes.
+
+    Provides common functionality for Session-based query classes:
+    - Consistent session management
+    - Result row to dict conversion
+    - Standard execute/fetch patterns
+
+    Phase 10 (T046) - Foundation for migrating query classes from Connection to Session.
+
+    Usage:
+        class MyQueryClass(QueryClassBase):
+            def get_stuff(self) -> List[Dict[str, Any]]:
+                stmt = select(...)
+                return self.execute_and_fetchall(stmt)
+    """
+
+    def __init__(self, session: Session):
+        """
+        Initialize with SQLAlchemy Session.
+
+        Args:
+            session: Active SQLAlchemy session
+        """
+        self.session = session
+
+    def execute_and_fetchall(self, stmt) -> List[Dict[str, Any]]:
+        """
+        Execute a SELECT statement and return all rows as dicts.
+
+        Args:
+            stmt: SQLAlchemy Select statement
+
+        Returns:
+            List of dicts, one per row
+        """
+        result = self.session.execute(stmt)
+        return [self._row_to_dict(row) for row in result]
+
+    def execute_and_fetchone(self, stmt) -> Optional[Dict[str, Any]]:
+        """
+        Execute a SELECT statement and return first row as dict.
+
+        Args:
+            stmt: SQLAlchemy Select statement
+
+        Returns:
+            Dict for first row, or None if no results
+        """
+        result = self.session.execute(stmt)
+        row = result.first()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def execute_scalar(self, stmt) -> Any:
+        """
+        Execute a SELECT statement and return single scalar value.
+
+        Args:
+            stmt: SQLAlchemy Select statement
+
+        Returns:
+            Scalar value from first column of first row
+        """
+        return self.session.execute(stmt).scalar()
+
+    def _row_to_dict(self, row) -> Dict[str, Any]:
+        """
+        Convert a SQLAlchemy Row to a dictionary.
+
+        Args:
+            row: SQLAlchemy Row (from execute().all() or similar)
+
+        Returns:
+            Dict with column names as keys
+        """
+        if hasattr(row, '_mapping'):
+            # SQLAlchemy 2.0 Row objects have _mapping
+            return dict(row._mapping)
+        elif hasattr(row, '_asdict'):
+            # Named tuple style
+            return row._asdict()
+        elif hasattr(row, '__table__'):
+            # ORM model object
+            return {c.name: getattr(row, c.name) for c in row.__table__.columns}
+        else:
+            # Fallback: try direct dict conversion
+            return dict(row)

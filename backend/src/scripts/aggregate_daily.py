@@ -13,6 +13,8 @@ Options:
 
 Cron example (daily at 5 AM UTC = 1 AM Pacific, after PT day ends):
     0 5 * * * cd /path/to/backend && python -m scripts.aggregate_daily
+
+Converted to SQLAlchemy 2.0 ORM (Phase 5).
 """
 
 import sys
@@ -31,8 +33,14 @@ from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
 from database.repositories.park_repository import ParkRepository
 from database.repositories.ride_repository import RideRepository
 from database.repositories.aggregation_repository import AggregationLogRepository
-from database.connection import get_db_connection
-from sqlalchemy import text
+from database.connection import get_db_session
+from sqlalchemy import select, func, case, and_
+from sqlalchemy.dialects.mysql import insert as mysql_insert
+
+from src.models import (
+    Ride, RideStatusSnapshot, ParkActivitySnapshot,
+    RideDailyStats, ParkDailyStats, RideStatusChange
+)
 
 
 class DailyAggregator:
@@ -68,10 +76,10 @@ class DailyAggregator:
         logger.info("=" * 60)
 
         try:
-            with get_db_connection() as conn:
-                aggregation_repo = AggregationLogRepository(conn)
-                park_repo = ParkRepository(conn)
-                ride_repo = RideRepository(conn)
+            with get_db_session() as session:
+                aggregation_repo = AggregationLogRepository(session)
+                park_repo = ParkRepository(session)
+                ride_repo = RideRepository(session)
 
                 # Check if aggregation already completed for this date
                 if self._check_already_aggregated(aggregation_repo):
@@ -84,11 +92,11 @@ class DailyAggregator:
 
                 # Step 1: Aggregate ride statistics
                 logger.info("Step 1: Aggregating ride statistics...")
-                self._aggregate_rides(ride_repo)
+                self._aggregate_rides(ride_repo, session)
 
                 # Step 2: Aggregate park statistics
                 logger.info("Step 2: Aggregating park statistics...")
-                self._aggregate_parks(park_repo)
+                self._aggregate_parks(park_repo, session)
 
                 # Step 3: Mark aggregation as complete
                 self._complete_aggregation_log(log_id, aggregation_repo)
@@ -102,8 +110,8 @@ class DailyAggregator:
 
         except Exception as e:
             logger.error(f"Fatal error during aggregation: {e}", exc_info=True)
-            with get_db_connection() as conn:
-                aggregation_repo = AggregationLogRepository(conn)
+            with get_db_session() as session:
+                aggregation_repo = AggregationLogRepository(session)
                 self._fail_aggregation_log(log_id, str(e), aggregation_repo)
             sys.exit(1)
 
@@ -149,38 +157,38 @@ class DailyAggregator:
             logger.error(f"Failed to create aggregation log: {e}")
             raise
 
-    def _aggregate_rides(self, ride_repo: RideRepository):
+    def _aggregate_rides(self, ride_repo: RideRepository, session):
         """
         Aggregate statistics for all rides.
 
         Args:
             ride_repo: Ride repository
+            session: Database session
         """
         try:
-            with get_db_connection() as conn:
-                # Get all active rides
-                rides = ride_repo.get_all_active()
+            # Get all active rides
+            rides = ride_repo.get_all_active()
 
-                for ride in rides:
-                    try:
-                        self._aggregate_ride(conn, ride)
-                        self.stats['rides_processed'] += 1
-                    except Exception as e:
-                        logger.error(f"Error aggregating ride {ride.name}: {e}")
-                        self.stats['errors'] += 1
+            for ride in rides:
+                try:
+                    self._aggregate_ride(session, ride)
+                    self.stats['rides_processed'] += 1
+                except Exception as e:
+                    logger.error(f"Error aggregating ride {ride.name}: {e}")
+                    self.stats['errors'] += 1
 
-                logger.info(f"  ✓ Aggregated {self.stats['rides_processed']} rides")
+            logger.info(f"  ✓ Aggregated {self.stats['rides_processed']} rides")
 
         except Exception as e:
             logger.error(f"Failed to aggregate rides: {e}")
             raise
 
-    def _aggregate_ride(self, conn, ride):
+    def _aggregate_ride(self, session, ride):
         """
         Aggregate statistics for a single ride.
 
         Args:
-            conn: Database connection
+            session: Database session
             ride: Ride model object
 
         Downtime Calculation Logic:
@@ -219,191 +227,351 @@ class DailyAggregator:
         ride_id = ride.ride_id
         park_id = ride.park_id
 
-        result = conn.execute(text(f"""
-            INSERT INTO ride_daily_stats (
-                ride_id,
-                stat_date,
-                uptime_minutes,
-                downtime_minutes,
-                uptime_percentage,
-                operating_hours_minutes,
-                avg_wait_time,
-                min_wait_time,
-                max_wait_time,
-                peak_wait_time,
-                status_changes,
-                longest_downtime_minutes,
-                created_at
+        # Build the aggregation query
+        rss = RideStatusSnapshot.__table__.alias('rss')
+        r = Ride.__table__.alias('r')
+        pas = ParkActivitySnapshot.__table__.alias('pas')
+
+        # Calculate if ride operated (for downtime filter)
+        ride_operated = func.sum(
+            case(
+                (rss.c.computed_is_open == True, 1),
+                else_=0
             )
-            SELECT
-                :ride_id,
-                :stat_date,
+        ) > 0
 
-                -- UPTIME: Minutes the ride was open during park operating hours
-                COALESCE(SUM(CASE WHEN pas.park_appears_open = 1 AND rss.computed_is_open THEN {SNAPSHOT_INTERVAL_MINUTES} ELSE 0 END), 0) as uptime_minutes,
+        # UPTIME: Minutes the ride was open during park operating hours
+        uptime_minutes = func.coalesce(
+            func.sum(
+                case(
+                    (and_(pas.c.park_appears_open == True, rss.c.computed_is_open == True), SNAPSHOT_INTERVAL_MINUTES),
+                    else_=0
+                )
+            ),
+            0
+        )
 
-                -- DOWNTIME: Only count if BOTH conditions are met:
-                --   1. Park was operating (park_appears_open = 1)
-                --   2. Ride operated at least once today (filters out scheduled maintenance)
-                -- This prevents "never opened" rides from counting as downtime.
-                --
-                -- For ThemeParks.wiki parks (status is NOT NULL):
-                --   Only status='DOWN' counts as downtime (not CLOSED/REFURBISHMENT)
-                -- For Queue-Times parks (status IS NULL):
-                --   Falls back to NOT computed_is_open
-                CASE
-                    WHEN SUM(CASE WHEN rss.computed_is_open THEN 1 ELSE 0 END) > 0
-                    THEN COALESCE(SUM(
-                        CASE
-                            WHEN pas.park_appears_open = 1 AND (
-                                (rss.status IS NOT NULL AND rss.status = 'DOWN') OR
-                                (rss.status IS NULL AND NOT rss.computed_is_open)
-                            ) THEN {SNAPSHOT_INTERVAL_MINUTES}
-                            ELSE 0
-                        END
-                    ), 0)
-                    ELSE 0  -- Ride never opened = scheduled maintenance, not downtime
-                END as downtime_minutes,
+        # DOWNTIME: Only count if BOTH conditions are met:
+        #   1. Park was operating (park_appears_open = 1)
+        #   2. Ride operated at least once today (filters out scheduled maintenance)
+        # This prevents "never opened" rides from counting as downtime.
+        #
+        # For ThemeParks.wiki parks (status is NOT NULL):
+        #   Only status='DOWN' counts as downtime (not CLOSED/REFURBISHMENT)
+        # For Queue-Times parks (status IS NULL):
+        #   Falls back to NOT computed_is_open
+        downtime_minutes = case(
+            (
+                ride_operated,
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                and_(
+                                    pas.c.park_appears_open == True,
+                                    (
+                                        (and_(rss.c.status != None, rss.c.status == 'DOWN')) |
+                                        (and_(rss.c.status == None, rss.c.computed_is_open == False))
+                                    )
+                                ),
+                                SNAPSHOT_INTERVAL_MINUTES
+                            ),
+                            else_=0
+                        )
+                    ),
+                    0
+                )
+            ),
+            else_=0  # Ride never opened = scheduled maintenance, not downtime
+        )
 
-                -- UPTIME PERCENTAGE: Based on park operating hours only
-                -- Returns 0 if ride never operated (maintenance) or park was closed
-                CASE
-                    WHEN SUM(CASE WHEN pas.park_appears_open = 1 THEN {SNAPSHOT_INTERVAL_MINUTES} ELSE 0 END) > 0
-                         AND SUM(CASE WHEN rss.computed_is_open THEN 1 ELSE 0 END) > 0
-                    THEN ROUND(100.0 * SUM(CASE WHEN pas.park_appears_open = 1 AND rss.computed_is_open THEN {SNAPSHOT_INTERVAL_MINUTES} ELSE 0 END)
-                              / SUM(CASE WHEN pas.park_appears_open = 1 THEN {SNAPSHOT_INTERVAL_MINUTES} ELSE 0 END), 2)
-                    ELSE 0
-                END as uptime_percentage,
+        # UPTIME PERCENTAGE: Based on park operating hours only
+        # Returns 0 if ride never operated (maintenance) or park was closed
+        operating_hours_sum = func.sum(
+            case(
+                (pas.c.park_appears_open == True, SNAPSHOT_INTERVAL_MINUTES),
+                else_=0
+            )
+        )
 
-                -- OPERATING HOURS: Time when park was open (regardless of ride status)
-                COALESCE(SUM(CASE WHEN pas.park_appears_open = 1 THEN {SNAPSHOT_INTERVAL_MINUTES} ELSE 0 END), 0) as operating_hours_minutes,
+        uptime_percentage = case(
+            (
+                and_(
+                    operating_hours_sum > 0,
+                    ride_operated
+                ),
+                func.round(
+                    100.0 * func.sum(
+                        case(
+                            (and_(pas.c.park_appears_open == True, rss.c.computed_is_open == True), SNAPSHOT_INTERVAL_MINUTES),
+                            else_=0
+                        )
+                    ) / operating_hours_sum,
+                    2
+                )
+            ),
+            else_=0
+        )
 
-                -- Wait time statistics (only when ride was actually open)
-                ROUND(AVG(CASE WHEN rss.wait_time IS NOT NULL AND rss.computed_is_open THEN rss.wait_time END), 2) as avg_wait_time,
-                MIN(CASE WHEN rss.wait_time IS NOT NULL AND rss.computed_is_open THEN rss.wait_time END) as min_wait_time,
-                MAX(CASE WHEN rss.wait_time IS NOT NULL AND rss.computed_is_open THEN rss.wait_time END) as max_wait_time,
-                MAX(CASE WHEN rss.wait_time IS NOT NULL THEN rss.wait_time END) as peak_wait_time,
+        # OPERATING HOURS: Time when park was open (regardless of ride status)
+        operating_hours_minutes = func.coalesce(
+            func.sum(
+                case(
+                    (pas.c.park_appears_open == True, SNAPSHOT_INTERVAL_MINUTES),
+                    else_=0
+                )
+            ),
+            0
+        )
 
-                -- Status changes from ride_status_changes table
-                -- Uses UTC range for Pacific day instead of DATE() to fix timezone bug
-                (SELECT COUNT(*) FROM ride_status_changes WHERE ride_id = :ride_id AND changed_at >= :day_start_utc AND changed_at < :day_end_utc) as status_changes,
-                (SELECT MAX(duration_in_previous_status) FROM ride_status_changes WHERE ride_id = :ride_id AND changed_at >= :day_start_utc AND changed_at < :day_end_utc AND new_status = 1) as longest_downtime,
-                NOW()
-            FROM ride_status_snapshots rss
-            JOIN rides r ON rss.ride_id = r.ride_id
-            JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
-            WHERE rss.ride_id = :ride_id
-              AND rss.recorded_at >= :day_start_utc
-              AND rss.recorded_at < :day_end_utc
-            ON DUPLICATE KEY UPDATE
-                uptime_minutes = VALUES(uptime_minutes),
-                downtime_minutes = VALUES(downtime_minutes),
-                uptime_percentage = VALUES(uptime_percentage),
-                operating_hours_minutes = VALUES(operating_hours_minutes),
-                avg_wait_time = VALUES(avg_wait_time),
-                min_wait_time = VALUES(min_wait_time),
-                max_wait_time = VALUES(max_wait_time),
-                peak_wait_time = VALUES(peak_wait_time),
-                status_changes = VALUES(status_changes),
-                longest_downtime_minutes = VALUES(longest_downtime_minutes)
-        """), {
-            'ride_id': ride_id,
-            'stat_date': self.target_date,
-            'day_start_utc': self.day_start_utc,
-            'day_end_utc': self.day_end_utc
-        })
+        # Wait time statistics (only when ride was actually open)
+        avg_wait_time = func.round(
+            func.avg(
+                case(
+                    (and_(rss.c.wait_time != None, rss.c.computed_is_open == True), rss.c.wait_time),
+                    else_=None
+                )
+            ),
+            2
+        )
 
-    def _aggregate_parks(self, park_repo: ParkRepository):
+        min_wait_time = func.min(
+            case(
+                (and_(rss.c.wait_time != None, rss.c.computed_is_open == True), rss.c.wait_time),
+                else_=None
+            )
+        )
+
+        max_wait_time = func.max(
+            case(
+                (and_(rss.c.wait_time != None, rss.c.computed_is_open == True), rss.c.wait_time),
+                else_=None
+            )
+        )
+
+        peak_wait_time = func.max(
+            case(
+                (rss.c.wait_time != None, rss.c.wait_time),
+                else_=None
+            )
+        )
+
+        # Status changes from ride_status_changes table
+        # Uses UTC range for Pacific day instead of DATE() to fix timezone bug
+        status_changes_subq = (
+            select(func.count())
+            .select_from(RideStatusChange.__table__)
+            .where(
+                and_(
+                    RideStatusChange.ride_id == ride_id,
+                    RideStatusChange.changed_at >= self.day_start_utc,
+                    RideStatusChange.changed_at < self.day_end_utc
+                )
+            )
+            .scalar_subquery()
+        )
+
+        longest_downtime_subq = (
+            select(func.max(RideStatusChange.duration_in_previous_status))
+            .select_from(RideStatusChange.__table__)
+            .where(
+                and_(
+                    RideStatusChange.ride_id == ride_id,
+                    RideStatusChange.changed_at >= self.day_start_utc,
+                    RideStatusChange.changed_at < self.day_end_utc,
+                    RideStatusChange.new_status == True
+                )
+            )
+            .scalar_subquery()
+        )
+
+        # Main aggregation query
+        agg_query = (
+            select(
+                uptime_minutes.label('uptime_minutes'),
+                downtime_minutes.label('downtime_minutes'),
+                uptime_percentage.label('uptime_percentage'),
+                operating_hours_minutes.label('operating_hours_minutes'),
+                avg_wait_time.label('avg_wait_time'),
+                min_wait_time.label('min_wait_time'),
+                max_wait_time.label('max_wait_time'),
+                peak_wait_time.label('peak_wait_time'),
+                status_changes_subq.label('status_changes'),
+                longest_downtime_subq.label('longest_downtime')
+            )
+            .select_from(rss)
+            .join(r, rss.c.ride_id == r.c.ride_id)
+            .join(
+                pas,
+                and_(
+                    r.c.park_id == pas.c.park_id,
+                    pas.c.recorded_at == rss.c.recorded_at
+                )
+            )
+            .where(
+                and_(
+                    rss.c.ride_id == ride_id,
+                    rss.c.recorded_at >= self.day_start_utc,
+                    rss.c.recorded_at < self.day_end_utc
+                )
+            )
+        )
+
+        result = session.execute(agg_query).first()
+
+        if result is None:
+            # No snapshots for this ride on this date
+            return
+
+        # Insert or update using MySQL INSERT ... ON DUPLICATE KEY UPDATE
+        stmt = mysql_insert(RideDailyStats).values(
+            ride_id=ride_id,
+            stat_date=self.target_date,
+            uptime_minutes=int(result.uptime_minutes or 0),
+            downtime_minutes=int(result.downtime_minutes or 0),
+            uptime_percentage=float(result.uptime_percentage or 0),
+            operating_hours_minutes=int(result.operating_hours_minutes or 0),
+            avg_wait_time=float(result.avg_wait_time) if result.avg_wait_time is not None else None,
+            min_wait_time=result.min_wait_time,
+            max_wait_time=result.max_wait_time,
+            peak_wait_time=result.peak_wait_time,
+            status_changes=int(result.status_changes or 0),
+            longest_downtime_minutes=result.longest_downtime,
+            created_at=datetime.now()
+        )
+
+        stmt = stmt.on_duplicate_key_update(
+            uptime_minutes=stmt.inserted.uptime_minutes,
+            downtime_minutes=stmt.inserted.downtime_minutes,
+            uptime_percentage=stmt.inserted.uptime_percentage,
+            operating_hours_minutes=stmt.inserted.operating_hours_minutes,
+            avg_wait_time=stmt.inserted.avg_wait_time,
+            min_wait_time=stmt.inserted.min_wait_time,
+            max_wait_time=stmt.inserted.max_wait_time,
+            peak_wait_time=stmt.inserted.peak_wait_time,
+            status_changes=stmt.inserted.status_changes,
+            longest_downtime_minutes=stmt.inserted.longest_downtime_minutes
+        )
+
+        session.execute(stmt)
+
+    def _aggregate_parks(self, park_repo: ParkRepository, session):
         """
         Aggregate statistics for all parks.
 
         Args:
             park_repo: Park repository
+            session: Database session
         """
         try:
-            with get_db_connection() as conn:
-                # Get all active parks
-                parks = park_repo.get_all_active()
+            # Get all active parks
+            parks = park_repo.get_all_active()
 
-                for park in parks:
-                    try:
-                        self._aggregate_park(conn, park)
-                        self.stats['parks_processed'] += 1
-                    except Exception as e:
-                        logger.error(f"Error aggregating park {park.name}: {e}")
-                        self.stats['errors'] += 1
+            for park in parks:
+                try:
+                    self._aggregate_park(session, park)
+                    self.stats['parks_processed'] += 1
+                except Exception as e:
+                    logger.error(f"Error aggregating park {park.name}: {e}")
+                    self.stats['errors'] += 1
 
-                logger.info(f"  ✓ Aggregated {self.stats['parks_processed']} parks")
+            logger.info(f"  ✓ Aggregated {self.stats['parks_processed']} parks")
 
         except Exception as e:
             logger.error(f"Failed to aggregate parks: {e}")
             raise
 
-    def _aggregate_park(self, conn, park):
+    def _aggregate_park(self, session, park):
         """
         Aggregate statistics for a single park.
 
         Args:
-            conn: Database connection
+            session: Database session
             park: Park model object
         """
         park_id = park.park_id
 
         # Calculate park-wide statistics by rolling up ride statistics
         # First check if park has any ride stats for this date
-        check_result = conn.execute(text("""
-            SELECT COUNT(*) as ride_count
-            FROM ride_daily_stats rds
-            JOIN rides r ON rds.ride_id = r.ride_id
-            WHERE r.park_id = :park_id AND rds.stat_date = :stat_date
-        """), {'park_id': park_id, 'stat_date': self.target_date})
+        rds = RideDailyStats.__table__.alias('rds')
+        r = Ride.__table__.alias('r')
 
-        row = check_result.fetchone()
-        if row is None or row[0] == 0:
+        check_query = (
+            select(func.count())
+            .select_from(rds)
+            .join(r, rds.c.ride_id == r.c.ride_id)
+            .where(
+                and_(
+                    r.c.park_id == park_id,
+                    rds.c.stat_date == self.target_date
+                )
+            )
+        )
+
+        ride_count = session.execute(check_query).scalar()
+        if ride_count is None or ride_count == 0:
             # No ride data for this park on this date, skip aggregation
             return
 
-        result = conn.execute(text("""
-            INSERT INTO park_daily_stats (
-                park_id,
-                stat_date,
-                total_rides_tracked,
-                avg_uptime_percentage,
-                total_downtime_hours,
-                rides_with_downtime,
-                avg_wait_time,
-                peak_wait_time,
-                operating_hours_minutes,
-                created_at
+        # Aggregation query
+        agg_query = (
+            select(
+                func.count().label('total_rides'),
+                func.coalesce(func.round(func.avg(rds.c.uptime_percentage), 2), 0).label('avg_uptime'),
+                func.coalesce(func.round(func.sum(rds.c.downtime_minutes) / 60.0, 2), 0).label('total_downtime_hours'),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (rds.c.downtime_minutes > 0, 1),
+                            else_=0
+                        )
+                    ),
+                    0
+                ).label('rides_with_downtime'),
+                func.coalesce(func.round(func.avg(rds.c.avg_wait_time), 2), 0).label('avg_wait_time'),
+                func.coalesce(func.max(rds.c.peak_wait_time), 0).label('peak_wait_time'),
+                func.coalesce(func.avg(rds.c.operating_hours_minutes), 0).label('operating_hours_minutes')
             )
-            SELECT
-                :park_id,
-                :stat_date,
-                COUNT(*) as total_rides,
-                COALESCE(ROUND(AVG(uptime_percentage), 2), 0) as avg_uptime,
-                COALESCE(ROUND(SUM(downtime_minutes) / 60.0, 2), 0) as total_downtime_hours,
-                COALESCE(SUM(CASE WHEN downtime_minutes > 0 THEN 1 ELSE 0 END), 0) as rides_with_downtime,
-                COALESCE(ROUND(AVG(avg_wait_time), 2), 0) as avg_wait_time,
-                COALESCE(MAX(peak_wait_time), 0) as peak_wait_time,
-                COALESCE(AVG(operating_hours_minutes), 0) as operating_hours_minutes,
-                NOW()
-            FROM ride_daily_stats rds
-            JOIN rides r ON rds.ride_id = r.ride_id
-            WHERE r.park_id = :park_id
-              AND rds.stat_date = :stat_date
-            ON DUPLICATE KEY UPDATE
-                total_rides_tracked = VALUES(total_rides_tracked),
-                avg_uptime_percentage = VALUES(avg_uptime_percentage),
-                total_downtime_hours = VALUES(total_downtime_hours),
-                rides_with_downtime = VALUES(rides_with_downtime),
-                avg_wait_time = VALUES(avg_wait_time),
-                peak_wait_time = VALUES(peak_wait_time),
-                operating_hours_minutes = VALUES(operating_hours_minutes)
-        """), {
-            'park_id': park_id,
-            'stat_date': self.target_date
-        })
+            .select_from(rds)
+            .join(r, rds.c.ride_id == r.c.ride_id)
+            .where(
+                and_(
+                    r.c.park_id == park_id,
+                    rds.c.stat_date == self.target_date
+                )
+            )
+        )
+
+        result = session.execute(agg_query).first()
+
+        if result is None:
+            return
+
+        # Insert or update using MySQL INSERT ... ON DUPLICATE KEY UPDATE
+        stmt = mysql_insert(ParkDailyStats).values(
+            park_id=park_id,
+            stat_date=self.target_date,
+            total_rides_tracked=int(result.total_rides),
+            avg_uptime_percentage=float(result.avg_uptime),
+            total_downtime_hours=float(result.total_downtime_hours),
+            rides_with_downtime=int(result.rides_with_downtime),
+            avg_wait_time=float(result.avg_wait_time),
+            peak_wait_time=int(result.peak_wait_time),
+            operating_hours_minutes=int(result.operating_hours_minutes),
+            created_at=datetime.now()
+        )
+
+        stmt = stmt.on_duplicate_key_update(
+            total_rides_tracked=stmt.inserted.total_rides_tracked,
+            avg_uptime_percentage=stmt.inserted.avg_uptime_percentage,
+            total_downtime_hours=stmt.inserted.total_downtime_hours,
+            rides_with_downtime=stmt.inserted.rides_with_downtime,
+            avg_wait_time=stmt.inserted.avg_wait_time,
+            peak_wait_time=stmt.inserted.peak_wait_time,
+            operating_hours_minutes=stmt.inserted.operating_hours_minutes
+        )
+
+        session.execute(stmt)
 
     def _complete_aggregation_log(self, log_id: int, aggregation_repo: AggregationLogRepository):
         """

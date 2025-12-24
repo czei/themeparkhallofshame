@@ -1,19 +1,20 @@
 """
 Theme Park Downtime Tracker - Snapshot Repositories
-Provides data access layer for ride status and park activity snapshots.
+Provides data access layer for ride status and park activity snapshots using SQLAlchemy ORM.
 """
 
 from typing import List, Optional, Dict, Any
-from datetime import datetime
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from datetime import datetime, timedelta
+from sqlalchemy.orm import Session
+from sqlalchemy import select, and_, func
 
+from src.models import RideStatusSnapshot, ParkActivitySnapshot, Ride, Park
 from src.utils.logger import logger, log_database_error
 
 
 class RideStatusSnapshotRepository:
     """
-    Repository for ride status snapshot operations.
+    Repository for ride status snapshot operations using SQLAlchemy ORM.
 
     Implements:
     - CRUD operations for ride_status_snapshots table
@@ -21,14 +22,14 @@ class RideStatusSnapshotRepository:
     - Historical snapshot queries
     """
 
-    def __init__(self, connection: Connection):
+    def __init__(self, session: Session):
         """
-        Initialize repository with database connection.
+        Initialize repository with SQLAlchemy session.
 
         Args:
-            connection: SQLAlchemy connection object
+            session: SQLAlchemy session object
         """
-        self.conn = connection
+        self.session = session
 
     def insert(self, snapshot_data: Dict[str, Any]) -> int:
         """
@@ -43,27 +44,27 @@ class RideStatusSnapshotRepository:
         Raises:
             DatabaseError: If insertion fails
         """
-        query = text("""
-            INSERT INTO ride_status_snapshots (
-                ride_id, recorded_at, wait_time, is_open, computed_is_open, status, last_updated_api
-            )
-            VALUES (
-                :ride_id, :recorded_at, :wait_time, :is_open, :computed_is_open, :status, :last_updated_api
-            )
-        """)
-
         try:
             # Parse ISO 8601 timestamp if provided as string (e.g., '2024-03-19T03:04:01Z')
-            if 'last_updated_api' in snapshot_data and isinstance(snapshot_data['last_updated_api'], str):
-                ts = snapshot_data['last_updated_api']
-                if ts:
-                    # Remove 'Z' suffix and parse ISO format
-                    ts = ts.replace('Z', '+00:00')
-                    snapshot_data['last_updated_api'] = datetime.fromisoformat(ts).replace(tzinfo=None)
+            last_updated_api = snapshot_data.get('last_updated_api')
+            if last_updated_api and isinstance(last_updated_api, str):
+                # Remove 'Z' suffix and parse ISO format
+                ts = last_updated_api.replace('Z', '+00:00')
+                last_updated_api = datetime.fromisoformat(ts).replace(tzinfo=None)
 
-            result = self.conn.execute(query, snapshot_data)
-            snapshot_id = result.lastrowid
-            return snapshot_id
+            snapshot = RideStatusSnapshot(
+                ride_id=snapshot_data['ride_id'],
+                recorded_at=snapshot_data['recorded_at'],
+                wait_time=snapshot_data.get('wait_time'),
+                is_open=snapshot_data.get('is_open'),
+                computed_is_open=snapshot_data.get('computed_is_open', False),
+                status=snapshot_data.get('status'),
+                last_updated_api=last_updated_api or datetime.utcnow()
+            )
+
+            self.session.add(snapshot)
+            self.session.flush()  # Get snapshot_id without committing
+            return snapshot.snapshot_id
 
         except Exception as e:
             log_database_error(e, "Failed to insert ride status snapshot")
@@ -79,22 +80,28 @@ class RideStatusSnapshotRepository:
         Returns:
             Dictionary with snapshot data or None if not found
         """
-        query = text("""
-            SELECT snapshot_id, ride_id, recorded_at, wait_time,
-                   is_open, computed_is_open, status, last_updated_api
-            FROM ride_status_snapshots
-            WHERE ride_id = :ride_id
-            ORDER BY recorded_at DESC
-            LIMIT 1
-        """)
+        stmt = (
+            select(RideStatusSnapshot)
+            .where(RideStatusSnapshot.ride_id == ride_id)
+            .order_by(RideStatusSnapshot.recorded_at.desc())
+            .limit(1)
+        )
 
-        result = self.conn.execute(query, {"ride_id": ride_id})
-        row = result.fetchone()
+        result = self.session.execute(stmt).scalar_one_or_none()
 
-        if row is None:
+        if result is None:
             return None
 
-        return dict(row._mapping)
+        return {
+            'snapshot_id': result.snapshot_id,
+            'ride_id': result.ride_id,
+            'recorded_at': result.recorded_at,
+            'wait_time': result.wait_time,
+            'is_open': result.is_open,
+            'computed_is_open': result.computed_is_open,
+            'status': result.status,
+            'last_updated_api': result.last_updated_api
+        }
 
     def get_latest_all_rides(self, park_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """
@@ -106,41 +113,39 @@ class RideStatusSnapshotRepository:
         Returns:
             List of dictionaries with snapshot data
         """
-        if park_id:
-            query = text("""
-                SELECT rss.snapshot_id, rss.ride_id, rss.recorded_at,
-                       rss.wait_time, rss.is_open, rss.computed_is_open,
-                       r.name as ride_name, r.park_id
-                FROM ride_status_snapshots rss
-                INNER JOIN rides r ON rss.ride_id = r.ride_id
-                WHERE rss.snapshot_id IN (
-                    SELECT MAX(snapshot_id)
-                    FROM ride_status_snapshots
-                    WHERE recorded_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
-                    GROUP BY ride_id
-                )
-                AND r.park_id = :park_id
-                ORDER BY rss.wait_time DESC
-            """)
-            result = self.conn.execute(query, {"park_id": park_id})
-        else:
-            query = text("""
-                SELECT rss.snapshot_id, rss.ride_id, rss.recorded_at,
-                       rss.wait_time, rss.is_open, rss.computed_is_open,
-                       r.name as ride_name, r.park_id
-                FROM ride_status_snapshots rss
-                INNER JOIN rides r ON rss.ride_id = r.ride_id
-                WHERE rss.snapshot_id IN (
-                    SELECT MAX(snapshot_id)
-                    FROM ride_status_snapshots
-                    WHERE recorded_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
-                    GROUP BY ride_id
-                )
-                ORDER BY rss.wait_time DESC
-            """)
-            result = self.conn.execute(query)
+        # Subquery to get latest snapshot_id per ride from the last hour
+        cutoff_time = datetime.utcnow() - timedelta(hours=1)
 
-        return [dict(row._mapping) for row in result]
+        latest_snapshot_subquery = (
+            select(func.max(RideStatusSnapshot.snapshot_id).label('max_snapshot_id'))
+            .where(RideStatusSnapshot.recorded_at >= cutoff_time)
+            .group_by(RideStatusSnapshot.ride_id)
+            .subquery()
+        )
+
+        # Main query
+        stmt = (
+            select(
+                RideStatusSnapshot.snapshot_id,
+                RideStatusSnapshot.ride_id,
+                RideStatusSnapshot.recorded_at,
+                RideStatusSnapshot.wait_time,
+                RideStatusSnapshot.is_open,
+                RideStatusSnapshot.computed_is_open,
+                Ride.name.label('ride_name'),
+                Ride.park_id
+            )
+            .join(Ride, RideStatusSnapshot.ride_id == Ride.ride_id)
+            .where(RideStatusSnapshot.snapshot_id.in_(select(latest_snapshot_subquery.c.max_snapshot_id)))
+        )
+
+        if park_id:
+            stmt = stmt.where(Ride.park_id == park_id)
+
+        stmt = stmt.order_by(RideStatusSnapshot.wait_time.desc())
+
+        results = self.session.execute(stmt).all()
+        return [dict(row._mapping) for row in results]
 
     def get_history(self, ride_id: int, hours: int = 24) -> List[Dict[str, Any]]:
         """
@@ -153,36 +158,48 @@ class RideStatusSnapshotRepository:
         Returns:
             List of dictionaries with snapshot data
         """
-        query = text("""
-            SELECT snapshot_id, ride_id, recorded_at, wait_time,
-                   is_open, computed_is_open, last_updated_api
-            FROM ride_status_snapshots
-            WHERE ride_id = :ride_id
-                AND recorded_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-            ORDER BY recorded_at DESC
-        """)
+        cutoff_time = datetime.utcnow() - timedelta(hours=hours)
 
-        result = self.conn.execute(query, {"ride_id": ride_id, "hours": hours})
-        return [dict(row._mapping) for row in result]
+        stmt = (
+            select(
+                RideStatusSnapshot.snapshot_id,
+                RideStatusSnapshot.ride_id,
+                RideStatusSnapshot.recorded_at,
+                RideStatusSnapshot.wait_time,
+                RideStatusSnapshot.is_open,
+                RideStatusSnapshot.computed_is_open,
+                RideStatusSnapshot.last_updated_api
+            )
+            .where(
+                and_(
+                    RideStatusSnapshot.ride_id == ride_id,
+                    RideStatusSnapshot.recorded_at >= cutoff_time
+                )
+            )
+            .order_by(RideStatusSnapshot.recorded_at.desc())
+        )
+
+        results = self.session.execute(stmt).all()
+        return [dict(row._mapping) for row in results]
 
 
 class ParkActivitySnapshotRepository:
     """
-    Repository for park activity snapshot operations.
+    Repository for park activity snapshot operations using SQLAlchemy ORM.
 
     Implements:
     - CRUD operations for park_activity_snapshots table
     - Park operating status queries
     """
 
-    def __init__(self, connection: Connection):
+    def __init__(self, session: Session):
         """
-        Initialize repository with database connection.
+        Initialize repository with SQLAlchemy session.
 
         Args:
-            connection: SQLAlchemy connection object
+            session: SQLAlchemy session object
         """
-        self.conn = connection
+        self.session = session
 
     def insert(self, activity_data: Dict[str, Any]) -> int:
         """
@@ -197,23 +214,22 @@ class ParkActivitySnapshotRepository:
         Raises:
             DatabaseError: If insertion fails
         """
-        query = text("""
-            INSERT INTO park_activity_snapshots (
-                park_id, recorded_at, total_rides_tracked,
-                rides_open, rides_closed, avg_wait_time, max_wait_time,
-                park_appears_open, shame_score
-            )
-            VALUES (
-                :park_id, :recorded_at, :total_rides_tracked,
-                :rides_open, :rides_closed, :avg_wait_time, :max_wait_time,
-                :park_appears_open, :shame_score
-            )
-        """)
-
         try:
-            result = self.conn.execute(query, activity_data)
-            activity_id = result.lastrowid
-            return activity_id
+            snapshot = ParkActivitySnapshot(
+                park_id=activity_data['park_id'],
+                recorded_at=activity_data['recorded_at'],
+                total_rides_tracked=activity_data.get('total_rides_tracked', 0),
+                rides_open=activity_data.get('rides_open', 0),
+                rides_closed=activity_data.get('rides_closed', 0),
+                avg_wait_time=activity_data.get('avg_wait_time'),
+                max_wait_time=activity_data.get('max_wait_time'),
+                park_appears_open=activity_data.get('park_appears_open', False),
+                shame_score=activity_data.get('shame_score')
+            )
+
+            self.session.add(snapshot)
+            self.session.flush()  # Get snapshot_id without committing
+            return snapshot.snapshot_id
 
         except Exception as e:
             log_database_error(e, "Failed to insert park activity snapshot")
@@ -229,23 +245,29 @@ class ParkActivitySnapshotRepository:
         Returns:
             Dictionary with activity data or None if not found
         """
-        query = text("""
-            SELECT snapshot_id, park_id, recorded_at, total_rides_tracked,
-                   rides_open, rides_closed, avg_wait_time, max_wait_time,
-                   park_appears_open
-            FROM park_activity_snapshots
-            WHERE park_id = :park_id
-            ORDER BY recorded_at DESC
-            LIMIT 1
-        """)
+        stmt = (
+            select(ParkActivitySnapshot)
+            .where(ParkActivitySnapshot.park_id == park_id)
+            .order_by(ParkActivitySnapshot.recorded_at.desc())
+            .limit(1)
+        )
 
-        result = self.conn.execute(query, {"park_id": park_id})
-        row = result.fetchone()
+        result = self.session.execute(stmt).scalar_one_or_none()
 
-        if row is None:
+        if result is None:
             return None
 
-        return dict(row._mapping)
+        return {
+            'snapshot_id': result.snapshot_id,
+            'park_id': result.park_id,
+            'recorded_at': result.recorded_at,
+            'total_rides_tracked': result.total_rides_tracked,
+            'rides_open': result.rides_open,
+            'rides_closed': result.rides_closed,
+            'avg_wait_time': result.avg_wait_time,
+            'max_wait_time': result.max_wait_time,
+            'park_appears_open': result.park_appears_open
+        }
 
     def get_history(self, park_id: int, hours: int = 24) -> List[Dict[str, Any]]:
         """
@@ -258,18 +280,31 @@ class ParkActivitySnapshotRepository:
         Returns:
             List of dictionaries with activity data
         """
-        query = text("""
-            SELECT snapshot_id, park_id, recorded_at, total_rides_tracked,
-                   rides_open, rides_closed, avg_wait_time, max_wait_time,
-                   park_appears_open
-            FROM park_activity_snapshots
-            WHERE park_id = :park_id
-                AND recorded_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-            ORDER BY recorded_at DESC
-        """)
+        cutoff_time = datetime.utcnow() - timedelta(hours=hours)
 
-        result = self.conn.execute(query, {"park_id": park_id, "hours": hours})
-        return [dict(row._mapping) for row in result]
+        stmt = (
+            select(
+                ParkActivitySnapshot.snapshot_id,
+                ParkActivitySnapshot.park_id,
+                ParkActivitySnapshot.recorded_at,
+                ParkActivitySnapshot.total_rides_tracked,
+                ParkActivitySnapshot.rides_open,
+                ParkActivitySnapshot.rides_closed,
+                ParkActivitySnapshot.avg_wait_time,
+                ParkActivitySnapshot.max_wait_time,
+                ParkActivitySnapshot.park_appears_open
+            )
+            .where(
+                and_(
+                    ParkActivitySnapshot.park_id == park_id,
+                    ParkActivitySnapshot.recorded_at >= cutoff_time
+                )
+            )
+            .order_by(ParkActivitySnapshot.recorded_at.desc())
+        )
+
+        results = self.session.execute(stmt).all()
+        return [dict(row._mapping) for row in results]
 
     def get_all_latest(self) -> List[Dict[str, Any]]:
         """
@@ -278,21 +313,34 @@ class ParkActivitySnapshotRepository:
         Returns:
             List of dictionaries with activity data
         """
-        query = text("""
-            SELECT pas.snapshot_id, pas.park_id, pas.recorded_at,
-                   pas.total_rides_tracked, pas.rides_open, pas.rides_closed,
-                   pas.avg_wait_time, pas.max_wait_time, pas.park_appears_open,
-                   p.name as park_name
-            FROM park_activity_snapshots pas
-            INNER JOIN parks p ON pas.park_id = p.park_id
-            WHERE pas.snapshot_id IN (
-                SELECT MAX(snapshot_id)
-                FROM park_activity_snapshots
-                WHERE recorded_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
-                GROUP BY park_id
-            )
-            ORDER BY p.name
-        """)
+        # Subquery to get latest snapshot_id per park from the last hour
+        cutoff_time = datetime.utcnow() - timedelta(hours=1)
 
-        result = self.conn.execute(query)
-        return [dict(row._mapping) for row in result]
+        latest_snapshot_subquery = (
+            select(func.max(ParkActivitySnapshot.snapshot_id).label('max_snapshot_id'))
+            .where(ParkActivitySnapshot.recorded_at >= cutoff_time)
+            .group_by(ParkActivitySnapshot.park_id)
+            .subquery()
+        )
+
+        # Main query
+        stmt = (
+            select(
+                ParkActivitySnapshot.snapshot_id,
+                ParkActivitySnapshot.park_id,
+                ParkActivitySnapshot.recorded_at,
+                ParkActivitySnapshot.total_rides_tracked,
+                ParkActivitySnapshot.rides_open,
+                ParkActivitySnapshot.rides_closed,
+                ParkActivitySnapshot.avg_wait_time,
+                ParkActivitySnapshot.max_wait_time,
+                ParkActivitySnapshot.park_appears_open,
+                Park.name.label('park_name')
+            )
+            .join(Park, ParkActivitySnapshot.park_id == Park.park_id)
+            .where(ParkActivitySnapshot.snapshot_id.in_(select(latest_snapshot_subquery.c.max_snapshot_id)))
+            .order_by(Park.name)
+        )
+
+        results = self.session.execute(stmt).all()
+        return [dict(row._mapping) for row in results]

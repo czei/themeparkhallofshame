@@ -5,6 +5,6 @@ This package contains calculator classes that provide a single source of truth
 for business calculations that need to be consistent across multiple queries.
 """
 
-from database.calculators.shame_score import ShameScoreCalculator
+from src.database.calculators.shame_score import ShameScoreCalculator
 
 __all__ = ["ShameScoreCalculator"]

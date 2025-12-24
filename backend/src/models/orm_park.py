@@ -86,6 +86,11 @@ class Park(Base):
         lazy="select",  # Default: lazy load, use joinedload() for hot paths
         cascade="all, delete-orphan"
     )
+    schedules: Mapped[List["ParkSchedule"]] = relationship(
+        "ParkSchedule",
+        back_populates="park",
+        lazy="select"
+    )
     park_snapshots: Mapped[List["ParkActivitySnapshot"]] = relationship(
         "ParkActivitySnapshot",
         back_populates="park",
@@ -93,6 +98,16 @@ class Park(Base):
     )
     daily_stats: Mapped[List["ParkDailyStats"]] = relationship(
         "ParkDailyStats",
+        back_populates="park",
+        lazy="select"
+    )
+    weekly_stats: Mapped[List["ParkWeeklyStats"]] = relationship(
+        "ParkWeeklyStats",
+        back_populates="park",
+        lazy="select"
+    )
+    operating_sessions: Mapped[List["ParkOperatingSession"]] = relationship(
+        "ParkOperatingSession",
         back_populates="park",
         lazy="select"
     )

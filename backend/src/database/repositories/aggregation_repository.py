@@ -5,9 +5,10 @@ Provides data access layer for aggregation job tracking and verification.
 
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime, timedelta
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session
+from sqlalchemy import select, func
 
+from src.models import AggregationLog, AggregationType, AggregationStatus
 from src.utils.logger import logger, log_database_error
 
 
@@ -21,14 +22,14 @@ class AggregationLogRepository:
     - Completion verification for safe cleanup
     """
 
-    def __init__(self, connection: Connection):
+    def __init__(self, session: Session):
         """
-        Initialize repository with database connection.
+        Initialize repository with database session.
 
         Args:
-            connection: SQLAlchemy connection object
+            session: SQLAlchemy session object
         """
-        self.conn = connection
+        self.session = session
 
     def insert(self, log_data: Dict[str, Any]) -> int:
         """
@@ -43,20 +44,29 @@ class AggregationLogRepository:
         Raises:
             DatabaseError: If insertion fails
         """
-        query = text("""
-            INSERT INTO aggregation_log (
-                aggregation_date, aggregation_type, started_at,
-                status, parks_processed, rides_processed
-            )
-            VALUES (
-                :aggregation_date, :aggregation_type, :started_at,
-                :status, :parks_processed, :rides_processed
-            )
-        """)
-
         try:
-            result = self.conn.execute(query, log_data)
-            log_id = result.lastrowid
+            # Convert string type to enum if needed
+            aggregation_type = log_data.get('aggregation_type')
+            if isinstance(aggregation_type, str):
+                aggregation_type = AggregationType(aggregation_type)
+
+            status = log_data.get('status', 'running')
+            if isinstance(status, str):
+                status = AggregationStatus(status)
+
+            log_entry = AggregationLog(
+                aggregation_date=log_data['aggregation_date'],
+                aggregation_type=aggregation_type,
+                started_at=log_data['started_at'],
+                status=status,
+                parks_processed=log_data.get('parks_processed', 0),
+                rides_processed=log_data.get('rides_processed', 0)
+            )
+
+            self.session.add(log_entry)
+            self.session.flush()
+
+            log_id = log_entry.log_id
             logger.info(f"Created aggregation log entry: {log_id}")
             return log_id
 
@@ -80,27 +90,25 @@ class AggregationLogRepository:
         if 'log_id' not in log_data:
             raise ValueError("log_id is required for update")
 
-        # Build dynamic SET clause from provided fields
-        set_clauses = []
-        params = {"log_id": log_data['log_id']}
-
-        for field, value in log_data.items():
-            if field != 'log_id':
-                set_clauses.append(f"{field} = :{field}")
-                params[field] = value
-
-        if not set_clauses:
-            return True  # Nothing to update
-
-        query = text(f"""
-            UPDATE aggregation_log
-            SET {', '.join(set_clauses)}
-            WHERE log_id = :log_id
-        """)
-
         try:
-            result = self.conn.execute(query, params)
-            return result.rowcount > 0
+            log_entry = self.session.get(AggregationLog, log_data['log_id'])
+
+            if log_entry is None:
+                return False
+
+            # Update fields dynamically
+            for field, value in log_data.items():
+                if field != 'log_id' and hasattr(log_entry, field):
+                    # Convert string enums to enum types
+                    if field == 'aggregation_type' and isinstance(value, str):
+                        value = AggregationType(value)
+                    elif field == 'status' and isinstance(value, str):
+                        value = AggregationStatus(value)
+
+                    setattr(log_entry, field, value)
+
+            self.session.flush()
+            return True
 
         except Exception as e:
             log_database_error(e, f"Failed to update aggregation log {log_data['log_id']}")
@@ -116,21 +124,22 @@ class AggregationLogRepository:
         Returns:
             Dictionary with log data or None if not found
         """
-        query = text("""
-            SELECT log_id, aggregation_date, aggregation_type,
-                   started_at, completed_at, status, parks_processed,
-                   rides_processed, error_message
-            FROM aggregation_log
-            WHERE log_id = :log_id
-        """)
+        log_entry = self.session.get(AggregationLog, log_id)
 
-        result = self.conn.execute(query, {"log_id": log_id})
-        row = result.fetchone()
-
-        if row is None:
+        if log_entry is None:
             return None
 
-        return dict(row._mapping)
+        return {
+            'log_id': log_entry.log_id,
+            'aggregation_date': log_entry.aggregation_date,
+            'aggregation_type': log_entry.aggregation_type.value,
+            'started_at': log_entry.started_at,
+            'completed_at': log_entry.completed_at,
+            'status': log_entry.status.value,
+            'parks_processed': log_entry.parks_processed,
+            'rides_processed': log_entry.rides_processed,
+            'error_message': log_entry.error_message
+        }
 
     def get_by_date_and_type(
         self,
@@ -147,27 +156,35 @@ class AggregationLogRepository:
         Returns:
             Dictionary with log data or None if not found
         """
-        query = text("""
-            SELECT log_id, aggregation_date, aggregation_type,
-                   started_at, completed_at, status, parks_processed,
-                   rides_processed, error_message
-            FROM aggregation_log
-            WHERE aggregation_date = :aggregation_date
-                AND aggregation_type = :aggregation_type
-            ORDER BY started_at DESC
-            LIMIT 1
-        """)
+        # Convert string to enum
+        agg_type = AggregationType(aggregation_type)
 
-        result = self.conn.execute(query, {
-            "aggregation_date": aggregation_date,
-            "aggregation_type": aggregation_type
-        })
-        row = result.fetchone()
+        stmt = (
+            select(AggregationLog)
+            .where(
+                AggregationLog.aggregation_date == aggregation_date,
+                AggregationLog.aggregation_type == agg_type
+            )
+            .order_by(AggregationLog.started_at.desc())
+            .limit(1)
+        )
 
-        if row is None:
+        log_entry = self.session.execute(stmt).scalar_one_or_none()
+
+        if log_entry is None:
             return None
 
-        return dict(row._mapping)
+        return {
+            'log_id': log_entry.log_id,
+            'aggregation_date': log_entry.aggregation_date,
+            'aggregation_type': log_entry.aggregation_type.value,
+            'started_at': log_entry.started_at,
+            'completed_at': log_entry.completed_at,
+            'status': log_entry.status.value,
+            'parks_processed': log_entry.parks_processed,
+            'rides_processed': log_entry.rides_processed,
+            'error_message': log_entry.error_message
+        }
 
     def get_recent_logs(
         self,
@@ -184,32 +201,30 @@ class AggregationLogRepository:
         Returns:
             List of dictionaries with log data
         """
-        if aggregation_type:
-            query = text("""
-                SELECT log_id, aggregation_date, aggregation_type,
-                       started_at, completed_at, status, parks_processed,
-                       rides_processed, error_message
-                FROM aggregation_log
-                WHERE aggregation_type = :aggregation_type
-                ORDER BY started_at DESC
-                LIMIT :limit
-            """)
-            result = self.conn.execute(query, {
-                "aggregation_type": aggregation_type,
-                "limit": limit
-            })
-        else:
-            query = text("""
-                SELECT log_id, aggregation_date, aggregation_type,
-                       started_at, completed_at, status, parks_processed,
-                       rides_processed, error_message
-                FROM aggregation_log
-                ORDER BY started_at DESC
-                LIMIT :limit
-            """)
-            result = self.conn.execute(query, {"limit": limit})
+        stmt = select(AggregationLog)
 
-        return [dict(row._mapping) for row in result]
+        if aggregation_type:
+            agg_type = AggregationType(aggregation_type)
+            stmt = stmt.where(AggregationLog.aggregation_type == agg_type)
+
+        stmt = stmt.order_by(AggregationLog.started_at.desc()).limit(limit)
+
+        results = self.session.execute(stmt).scalars().all()
+
+        return [
+            {
+                'log_id': log.log_id,
+                'aggregation_date': log.aggregation_date,
+                'aggregation_type': log.aggregation_type.value,
+                'started_at': log.started_at,
+                'completed_at': log.completed_at,
+                'status': log.status.value,
+                'parks_processed': log.parks_processed,
+                'rides_processed': log.rides_processed,
+                'error_message': log.error_message
+            }
+            for log in results
+        ]
 
     def get_failed_aggregations(
         self,
@@ -224,19 +239,33 @@ class AggregationLogRepository:
         Returns:
             List of dictionaries with failed log data
         """
-        query = text("""
-            SELECT log_id, aggregation_date, aggregation_type,
-                   started_at, completed_at, status, parks_processed,
-                   rides_processed, error_message
-            FROM aggregation_log
-            WHERE status = 'failed'
-                AND started_at >= :start_date
-            ORDER BY started_at DESC
-        """)
-
         start_date = datetime.now() - timedelta(days=days)
-        result = self.conn.execute(query, {"start_date": start_date})
-        return [dict(row._mapping) for row in result]
+
+        stmt = (
+            select(AggregationLog)
+            .where(
+                AggregationLog.status == AggregationStatus.FAILED,
+                AggregationLog.started_at >= start_date
+            )
+            .order_by(AggregationLog.started_at.desc())
+        )
+
+        results = self.session.execute(stmt).scalars().all()
+
+        return [
+            {
+                'log_id': log.log_id,
+                'aggregation_date': log.aggregation_date,
+                'aggregation_type': log.aggregation_type.value,
+                'started_at': log.started_at,
+                'completed_at': log.completed_at,
+                'status': log.status.value,
+                'parks_processed': log.parks_processed,
+                'rides_processed': log.rides_processed,
+                'error_message': log.error_message
+            }
+            for log in results
+        ]
 
     def mark_complete(
         self,
@@ -255,23 +284,20 @@ class AggregationLogRepository:
         Returns:
             True if update succeeded
         """
-        query = text("""
-            UPDATE aggregation_log
-            SET status = 'success',
-                completed_at = CURRENT_TIMESTAMP,
-                parks_processed = :parks_processed,
-                rides_processed = :rides_processed
-            WHERE log_id = :log_id
-        """)
-
         try:
-            result = self.conn.execute(query, {
-                "log_id": log_id,
-                "parks_processed": parks_processed,
-                "rides_processed": rides_processed
-            })
+            log_entry = self.session.get(AggregationLog, log_id)
+
+            if log_entry is None:
+                return False
+
+            log_entry.status = AggregationStatus.SUCCESS
+            log_entry.completed_at = datetime.now()
+            log_entry.parks_processed = parks_processed
+            log_entry.rides_processed = rides_processed
+
+            self.session.flush()
             logger.info(f"Marked aggregation {log_id} as complete")
-            return result.rowcount > 0
+            return True
 
         except Exception as e:
             log_database_error(e, f"Failed to mark aggregation {log_id} as complete")
@@ -292,21 +318,19 @@ class AggregationLogRepository:
         Returns:
             True if update succeeded
         """
-        query = text("""
-            UPDATE aggregation_log
-            SET status = 'failed',
-                completed_at = CURRENT_TIMESTAMP,
-                error_message = :error_message
-            WHERE log_id = :log_id
-        """)
-
         try:
-            result = self.conn.execute(query, {
-                "log_id": log_id,
-                "error_message": error_message
-            })
+            log_entry = self.session.get(AggregationLog, log_id)
+
+            if log_entry is None:
+                return False
+
+            log_entry.status = AggregationStatus.FAILED
+            log_entry.completed_at = datetime.now()
+            log_entry.error_message = error_message
+
+            self.session.flush()
             logger.error(f"Marked aggregation {log_id} as failed: {error_message}")
-            return result.rowcount > 0
+            return True
 
         except Exception as e:
             log_database_error(e, f"Failed to mark aggregation {log_id} as failed")
@@ -329,21 +353,19 @@ class AggregationLogRepository:
         Returns:
             True if date has successful aggregation
         """
-        query = text("""
-            SELECT COUNT(*) as count
-            FROM aggregation_log
-            WHERE aggregation_date = :aggregation_date
-                AND aggregation_type = :aggregation_type
-                AND status = 'success'
-        """)
+        agg_type = AggregationType(aggregation_type)
 
-        result = self.conn.execute(query, {
-            "aggregation_date": aggregation_date,
-            "aggregation_type": aggregation_type
-        })
-        row = result.fetchone()
+        stmt = (
+            select(func.count(AggregationLog.log_id))
+            .where(
+                AggregationLog.aggregation_date == aggregation_date,
+                AggregationLog.aggregation_type == agg_type,
+                AggregationLog.status == AggregationStatus.SUCCESS
+            )
+        )
 
-        return row.count > 0 if row else False
+        count = self.session.execute(stmt).scalar()
+        return count > 0 if count else False
 
     def get_aggregation_status(
         self,
@@ -376,21 +398,31 @@ class AggregationLogRepository:
         Returns:
             Dictionary with log data or None if not found
         """
-        query = text("""
-            SELECT log_id, aggregation_date, aggregation_type,
-                   started_at, completed_at, status, parks_processed,
-                   rides_processed, error_message
-            FROM aggregation_log
-            WHERE aggregation_type = :aggregation_type
-                AND status = 'success'
-            ORDER BY aggregation_date DESC
-            LIMIT 1
-        """)
+        agg_type = AggregationType(aggregation_type)
 
-        result = self.conn.execute(query, {"aggregation_type": aggregation_type})
-        row = result.fetchone()
+        stmt = (
+            select(AggregationLog)
+            .where(
+                AggregationLog.aggregation_type == agg_type,
+                AggregationLog.status == AggregationStatus.SUCCESS
+            )
+            .order_by(AggregationLog.aggregation_date.desc())
+            .limit(1)
+        )
 
-        if row is None:
+        log_entry = self.session.execute(stmt).scalar_one_or_none()
+
+        if log_entry is None:
             return None
 
-        return dict(row._mapping)
+        return {
+            'log_id': log_entry.log_id,
+            'aggregation_date': log_entry.aggregation_date,
+            'aggregation_type': log_entry.aggregation_type.value,
+            'started_at': log_entry.started_at,
+            'completed_at': log_entry.completed_at,
+            'status': log_entry.status.value,
+            'parks_processed': log_entry.parks_processed,
+            'rides_processed': log_entry.rides_processed,
+            'error_message': log_entry.error_message
+        }

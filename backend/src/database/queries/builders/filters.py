@@ -18,7 +18,7 @@ How to Add a Filter:
 3. Accept table references as parameters for flexibility
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import and_, or_
@@ -140,10 +140,10 @@ class Filters:
         Returns:
             Expression: recorded_at >= NOW() - 2 hours
         """
-        from sqlalchemy import func, text
+        from sqlalchemy import func
 
-        # Use text() for MySQL INTERVAL syntax - timedelta doesn't work with date_sub
-        return recorded_at_column >= func.now() - text(f"INTERVAL {LIVE_WINDOW_HOURS} HOUR")
+        # Use timedelta for database-agnostic date math
+        return recorded_at_column >= (func.now() - timedelta(hours=LIVE_WINDOW_HOURS))
 
     @staticmethod
     def within_date_range(

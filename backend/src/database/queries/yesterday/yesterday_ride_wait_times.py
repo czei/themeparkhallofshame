@@ -19,28 +19,29 @@ Database Tables:
 
 Single Source of Truth:
 - Formulas: utils/metrics.py
-- SQL Helpers: utils/sql_helpers.py
+- ORM Helpers: utils/query_helpers.py
 """
 
 from typing import List, Dict, Any
 
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy import select, func, case, and_, or_, literal_column
+from sqlalchemy.orm import Session, aliased
 
-from utils.timezone import get_yesterday_range_utc
-from utils.sql_helpers import ParkStatusSQL, RideFilterSQL
+from src.models.orm_ride import Ride
+from src.models.orm_park import Park
+from src.models.orm_classification import RideClassification
+from src.models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
+from src.utils.timezone import get_yesterday_range_utc
+from src.utils.query_helpers import QueryClassBase
 
 
-class YesterdayRideWaitTimesQuery:
+class YesterdayRideWaitTimesQuery(QueryClassBase):
     """
     Query handler for yesterday's ride wait time rankings.
 
     Uses snapshot data from yesterday's full Pacific day
     (midnight to midnight Pacific, converted to UTC).
     """
-
-    def __init__(self, connection: Connection):
-        self.conn = connection
 
     def get_rankings(
         self,
@@ -60,61 +61,95 @@ class YesterdayRideWaitTimesQuery:
         # Get yesterday's full day range in UTC
         start_utc, end_utc, _ = get_yesterday_range_utc()
 
-        # Use centralized SQL helpers for consistent logic
-        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
-        park_open = ParkStatusSQL.park_appears_open_filter("pas")
+        # Aliases for clarity
+        RSS = aliased(RideStatusSnapshot)
+        PAS = aliased(ParkActivitySnapshot)
 
-        query = text(f"""
-            SELECT
-                r.ride_id,
-                r.queue_times_id,
-                p.queue_times_id AS park_queue_times_id,
-                r.name AS ride_name,
-                p.name AS park_name,
-                p.park_id,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-                rc.tier,
+        # Park open filter condition
+        park_open_filter = PAS.park_appears_open == True
 
-                -- Average wait time (only when park is open and wait > 0)
-                -- IMPORTANT: Use avg_wait_minutes (not avg_wait_time) for frontend compatibility
-                ROUND(
-                    AVG(CASE
-                        WHEN {park_open} AND rss.wait_time > 0
-                        THEN rss.wait_time
-                    END),
+        # Main query
+        query = (
+            select(
+                Ride.ride_id,
+                Ride.queue_times_id,
+                Park.queue_times_id.label('park_queue_times_id'),
+                Ride.name.label('ride_name'),
+                Park.name.label('park_name'),
+                Park.park_id,
+                (Park.city + ', ' + Park.state_province).label('location'),
+                RideClassification.tier,
+
+                # Average wait time (only when park is open and wait > 0)
+                # IMPORTANT: Use avg_wait_minutes (not avg_wait_time) for frontend compatibility
+                func.round(
+                    func.avg(
+                        case(
+                            (and_(park_open_filter, RSS.wait_time > 0), RSS.wait_time),
+                            else_=None
+                        )
+                    ),
                     1
-                ) AS avg_wait_minutes,
+                ).label('avg_wait_minutes'),
 
-                -- Peak wait time yesterday
-                -- IMPORTANT: Use peak_wait_minutes (not peak_wait_time) for frontend compatibility
-                MAX(CASE
-                    WHEN {park_open}
-                    THEN rss.wait_time
-                END) AS peak_wait_minutes,
+                # Peak wait time yesterday
+                # IMPORTANT: Use peak_wait_minutes (not peak_wait_time) for frontend compatibility
+                func.max(
+                    case(
+                        (park_open_filter, RSS.wait_time),
+                        else_=None
+                    )
+                ).label('peak_wait_minutes'),
 
-                -- Count of snapshots with wait time data
-                COUNT(CASE WHEN rss.wait_time > 0 THEN 1 END) AS snapshots_with_waits
+                # Count of snapshots with wait time data
+                func.count(
+                    case(
+                        (RSS.wait_time > 0, 1),
+                        else_=None
+                    )
+                ).label('snapshots_with_waits')
+            )
+            .select_from(Ride)
+            .join(Park, Ride.park_id == Park.park_id)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .join(RSS, Ride.ride_id == RSS.ride_id)
+            .join(
+                PAS,
+                and_(
+                    Park.park_id == PAS.park_id,
+                    # Minute-level timestamp matching (1-2 second drift between tables)
+                    func.date_format(PAS.recorded_at, '%Y-%m-%d %H:%i') ==
+                    func.date_format(RSS.recorded_at, '%Y-%m-%d %H:%i')
+                )
+            )
+            .where(RSS.recorded_at >= start_utc)
+            .where(RSS.recorded_at < end_utc)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+            .where(Park.is_active == True)
+        )
 
-            FROM rides r
-            INNER JOIN parks p ON r.park_id = p.park_id
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
-            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND p.is_active = TRUE
-                {filter_clause}
-            GROUP BY r.ride_id, r.name, p.name, p.park_id, p.city, p.state_province, rc.tier
-            HAVING avg_wait_minutes IS NOT NULL
-            ORDER BY avg_wait_minutes DESC
-            LIMIT :limit
-        """)
+        # Apply Disney/Universal filter if requested
+        if filter_disney_universal:
+            query = query.where(
+                or_(Park.is_disney == True, Park.is_universal == True)
+            )
 
-        result = self.conn.execute(query, {
-            "start_utc": start_utc,
-            "end_utc": end_utc,
-            "limit": limit
-        })
-        return [dict(row._mapping) for row in result]
+        # Group and filter
+        query = (
+            query
+            .group_by(
+                Ride.ride_id,
+                Ride.name,
+                Park.name,
+                Park.park_id,
+                Park.city,
+                Park.state_province,
+                RideClassification.tier
+            )
+            .having(literal_column('avg_wait_minutes').isnot(None))
+            .order_by(literal_column('avg_wait_minutes').desc())
+            .limit(limit)
+        )
+
+        return self.execute_and_fetchall(query)

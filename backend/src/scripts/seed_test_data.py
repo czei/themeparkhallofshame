@@ -19,13 +19,19 @@ import random
 from pathlib import Path
 from datetime import datetime, timedelta, date
 from typing import List, Dict, Tuple
+from decimal import Decimal
 
 # Add src to path
 backend_src = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_src.absolute()))
 
-from sqlalchemy import text
-from database.connection import get_db_connection
+from sqlalchemy import text, delete
+from database.connection import get_db_session
+from src.models import (
+    Park, Ride, RideStatusSnapshot,
+    RideDailyStats, ParkDailyStats,
+    RideWeeklyStats, ParkWeeklyStats
+)
 
 # ============================================================================
 # PARK DATA - Real theme parks with locations
@@ -211,77 +217,100 @@ class TestDataSeeder:
         print("TEST DATA SEEDING - Starting")
         print("=" * 60)
 
-        with get_db_connection() as conn:
-            self._clear_existing_data(conn)
-            self._seed_parks(conn)
-            self._seed_rides(conn)
+        with get_db_session() as session:
+            self._clear_existing_data(session)
+            self._seed_parks(session)
+            self._seed_rides(session)
             self._assign_edge_cases()
-            self._seed_ride_snapshots(conn)
-            self._seed_daily_stats(conn)
-            self._seed_weekly_stats(conn)
-            self._seed_monthly_stats(conn)
+            self._seed_ride_snapshots(session)
+            self._seed_daily_stats(session)
+            self._seed_weekly_stats(session)
+            self._seed_monthly_stats(session)
 
         self._print_summary()
         print("=" * 60)
         print("TEST DATA SEEDING - Complete")
         print("=" * 60)
 
-    def _clear_existing_data(self, conn):
+    def _clear_existing_data(self, session):
         """Clear all existing data from relevant tables."""
         print("\nClearing existing data...")
-        tables = [
-            "ride_status_snapshots",
+
+        # ORM models - use delete()
+        orm_models = [
+            RideStatusSnapshot,
+            RideDailyStats,
+            RideWeeklyStats,
+            ParkDailyStats,
+            ParkWeeklyStats,
+            Ride,
+            Park,
+        ]
+
+        for model in orm_models:
+            try:
+                session.execute(delete(model))
+            except Exception as e:
+                print(f"  Warning: Could not clear {model.__tablename__}: {e}")
+
+        # Tables without ORM models - keep text()
+        text_tables = [
             "ride_status_changes",
             "park_activity_snapshots",
-            "ride_daily_stats",
-            "ride_weekly_stats",
             "ride_monthly_stats",
             "ride_yearly_stats",
-            "park_daily_stats",
-            "park_weekly_stats",
             "park_monthly_stats",
             "park_yearly_stats",
             "park_operating_sessions",
             "aggregation_log",
             "ride_classifications",
-            "rides",
-            "parks",
         ]
-        for table in tables:
+
+        for table in text_tables:
             try:
-                conn.execute(text(f"DELETE FROM {table}"))
+                session.execute(text(f"DELETE FROM {table}"))  # Keep text() - no ORM model exists yet
             except Exception as e:
                 print(f"  Warning: Could not clear {table}: {e}")
+
         print("  Done clearing tables")
 
-    def _seed_parks(self, conn):
+    def _seed_parks(self, session):
         """Insert all parks."""
         print("\nSeeding parks...")
+        parks_to_add = []
+
         for i, park in enumerate(PARKS_DATA):
             queue_times_id = 9000 + i  # Start high to avoid conflicts
-            result = conn.execute(text("""
-                INSERT INTO parks (queue_times_id, name, city, state_province, country, timezone, operator, is_disney, is_universal, is_active)
-                VALUES (:qt_id, :name, :city, :state, :country, :tz, :operator, :is_disney, :is_universal, TRUE)
-            """), {
-                "qt_id": queue_times_id,
-                "name": park["name"],
-                "city": park["city"],
-                "state": park["state"],
-                "country": park["country"],
-                "tz": park["tz"],
-                "operator": park["operator"],
-                "is_disney": park["is_disney"],
-                "is_universal": park["is_universal"],
-            })
-            park_id = result.lastrowid
-            self.park_ids[park["name"]] = park_id
+            park_obj = Park(
+                queue_times_id=queue_times_id,
+                name=park["name"],
+                city=park["city"],
+                state_province=park["state"],  # Note: "state" → state_province
+                country=park["country"],
+                timezone=park["tz"],
+                operator=park["operator"],
+                is_disney=park["is_disney"],
+                is_universal=park["is_universal"],
+                is_active=True
+            )
+            parks_to_add.append(park_obj)
+
+        # Bulk add for performance
+        session.add_all(parks_to_add)
+        session.flush()  # Flush to get park_ids
+
+        # Store park_ids for later use
+        for park_obj in parks_to_add:
+            self.park_ids[park_obj.name] = park_obj.park_id
             self.stats['parks_inserted'] += 1
+
         print(f"  Inserted {self.stats['parks_inserted']} parks")
 
-    def _seed_rides(self, conn):
+    def _seed_rides(self, session):
         """Insert rides for all parks."""
         print("\nSeeding rides...")
         ride_counter = 90000  # Start high for queue_times_id
+        rides_to_add = []
 
         for park_name, park_id in self.park_ids.items():
             # Get specific rides if available, otherwise generate generic ones
@@ -292,18 +321,23 @@ class TestDataSeeder:
 
             for ride_name, tier in rides:
                 ride_counter += 1
-                result = conn.execute(text("""
-                    INSERT INTO rides (queue_times_id, park_id, name, tier, is_active)
-                    VALUES (:qt_id, :park_id, :name, :tier, TRUE)
-                """), {
-                    "qt_id": ride_counter,
-                    "park_id": park_id,
-                    "name": ride_name,
-                    "tier": tier,
-                })
-                ride_id = result.lastrowid
-                self.ride_ids[(park_id, ride_name)] = ride_id
-                self.stats['rides_inserted'] += 1
+                ride_obj = Ride(
+                    queue_times_id=ride_counter,
+                    park_id=park_id,
+                    name=ride_name,
+                    tier=tier,
+                    is_active=True
+                )
+                rides_to_add.append(ride_obj)
+
+        # Bulk add for performance
+        session.add_all(rides_to_add)
+        session.flush()  # Flush to get ride_ids
+
+        # Store ride_ids for later use
+        for ride_obj in rides_to_add:
+            self.ride_ids[(ride_obj.park_id, ride_obj.name)] = ride_obj.ride_id
+            self.stats['rides_inserted'] += 1
 
         print(f"  Inserted {self.stats['rides_inserted']} rides")
 
@@ -365,10 +399,11 @@ class TestDataSeeder:
         for i in range(8, min(18, len(ride_items))):
             self.edge_case_rides[ride_items[i][1]] = "currently_down"
 
-    def _seed_ride_snapshots(self, conn):
+    def _seed_ride_snapshots(self, session):
         """Insert current ride status snapshots."""
         print("\nSeeding ride snapshots...")
         now = datetime.utcnow()
+        snapshots_to_add = []
 
         for (park_id, ride_name), ride_id in self.ride_ids.items():
             edge_case = self.edge_case_rides.get(ride_id)
@@ -383,17 +418,19 @@ class TestDataSeeder:
                 is_open = random.random() > 0.05  # 95% open
                 wait_time = random.randint(5, 60) if is_open else 0
 
-            conn.execute(text("""
-                INSERT INTO ride_status_snapshots (ride_id, recorded_at, is_open, wait_time, computed_is_open)
-                VALUES (:ride_id, :recorded_at, :is_open, :wait_time, :computed_is_open)
-            """), {
-                "ride_id": ride_id,
-                "recorded_at": now,
-                "is_open": is_open,
-                "wait_time": wait_time,
-                "computed_is_open": is_open and wait_time >= 0,
-            })
-            self.stats['snapshots_inserted'] += 1
+            snapshot_obj = RideStatusSnapshot(
+                ride_id=ride_id,
+                recorded_at=now,
+                is_open=is_open,
+                wait_time=wait_time,
+                computed_is_open=is_open and wait_time >= 0,
+                last_updated_api=now
+            )
+            snapshots_to_add.append(snapshot_obj)
+
+        # Bulk add for performance
+        session.add_all(snapshots_to_add)
+        self.stats['snapshots_inserted'] = len(snapshots_to_add)
 
         print(f"  Inserted {self.stats['snapshots_inserted']} snapshots")
 
@@ -447,20 +484,23 @@ class TestDataSeeder:
         return {
             "uptime_minutes": uptime_minutes,
             "downtime_minutes": downtime_minutes,
-            "uptime_percentage": round(uptime_pct, 2),
+            "uptime_percentage": Decimal(str(round(uptime_pct, 2))),
             "operating_hours_minutes": operating_minutes,
-            "avg_wait_time": round(avg_wait, 2),
+            "avg_wait_time": Decimal(str(round(avg_wait, 2))),
             "peak_wait_time": peak_wait,
             "status_changes": random.randint(0, 8),
         }
 
-    def _seed_daily_stats(self, conn):
+    def _seed_daily_stats(self, session):
         """Insert daily statistics for the past 35 days."""
         print("\nSeeding daily stats...")
         today = date.today()
 
         # Create a mapping of park_id -> park_name
         park_id_to_name = {v: k for k, v in self.park_ids.items()}
+
+        ride_stats_to_add = []
+        park_stats_to_add = []
 
         for day_offset in range(35):
             stat_date = today - timedelta(days=day_offset)
@@ -470,18 +510,18 @@ class TestDataSeeder:
                 park_name = park_id_to_name.get(park_id, "")
                 stats = self._get_stats_for_ride(ride_id, park_name, day_offset)
 
-                conn.execute(text("""
-                    INSERT INTO ride_daily_stats
-                    (ride_id, stat_date, uptime_minutes, downtime_minutes, uptime_percentage,
-                     operating_hours_minutes, avg_wait_time, peak_wait_time, status_changes)
-                    VALUES (:ride_id, :stat_date, :uptime_minutes, :downtime_minutes, :uptime_percentage,
-                            :operating_hours_minutes, :avg_wait_time, :peak_wait_time, :status_changes)
-                """), {
-                    "ride_id": ride_id,
-                    "stat_date": stat_date,
-                    **stats
-                })
-                self.stats['daily_stats_inserted'] += 1
+                ride_stat_obj = RideDailyStats(
+                    ride_id=ride_id,
+                    stat_date=stat_date,
+                    uptime_minutes=stats["uptime_minutes"],
+                    downtime_minutes=stats["downtime_minutes"],
+                    uptime_percentage=stats["uptime_percentage"],
+                    operating_hours_minutes=stats["operating_hours_minutes"],
+                    avg_wait_time=stats["avg_wait_time"],
+                    peak_wait_time=stats["peak_wait_time"],
+                    status_changes=stats["status_changes"]
+                )
+                ride_stats_to_add.append(ride_stat_obj)
 
             # Park daily stats (aggregate from rides)
             for park_name, park_id in self.park_ids.items():
@@ -498,40 +538,43 @@ class TestDataSeeder:
                 for _, _, ride_id in park_rides:
                     stats = self._get_stats_for_ride(ride_id, park_name, day_offset)
                     total_downtime_hours += stats["downtime_minutes"] / 60
-                    uptimes.append(stats["uptime_percentage"])
-                    avg_waits.append(stats["avg_wait_time"])
+                    uptimes.append(float(stats["uptime_percentage"]))
+                    avg_waits.append(float(stats["avg_wait_time"]))
                     peak_waits.append(stats["peak_wait_time"])
 
                 avg_uptime = sum(uptimes) / len(uptimes) if uptimes else 0
                 rides_with_downtime = sum(1 for u in uptimes if u < 100)
 
-                conn.execute(text("""
-                    INSERT INTO park_daily_stats
-                    (park_id, stat_date, total_rides_tracked, avg_uptime_percentage, total_downtime_hours,
-                     rides_with_downtime, avg_wait_time, peak_wait_time, operating_hours_minutes)
-                    VALUES (:park_id, :stat_date, :total_rides, :avg_uptime, :downtime_hours,
-                            :rides_with_downtime, :avg_wait, :peak_wait, :op_minutes)
-                """), {
-                    "park_id": park_id,
-                    "stat_date": stat_date,
-                    "total_rides": len(park_rides),
-                    "avg_uptime": round(avg_uptime, 2),
-                    "downtime_hours": round(total_downtime_hours, 2),
-                    "rides_with_downtime": rides_with_downtime,
-                    "avg_wait": round(sum(avg_waits) / len(avg_waits), 2) if avg_waits else 0,
-                    "peak_wait": max(peak_waits) if peak_waits else 0,
-                    "op_minutes": 720,
-                })
+                park_stat_obj = ParkDailyStats(
+                    park_id=park_id,
+                    stat_date=stat_date,
+                    total_rides_tracked=len(park_rides),
+                    avg_uptime_percentage=Decimal(str(round(avg_uptime, 2))),
+                    total_downtime_hours=Decimal(str(round(total_downtime_hours, 2))),
+                    rides_with_downtime=rides_with_downtime,
+                    avg_wait_time=Decimal(str(round(sum(avg_waits) / len(avg_waits), 2))) if avg_waits else Decimal('0.00'),
+                    peak_wait_time=max(peak_waits) if peak_waits else 0,
+                    operating_hours_minutes=720
+                )
+                park_stats_to_add.append(park_stat_obj)
+
+        # Bulk add for performance
+        session.add_all(ride_stats_to_add)
+        session.add_all(park_stats_to_add)
+        self.stats['daily_stats_inserted'] = len(ride_stats_to_add)
 
         print(f"  Inserted {self.stats['daily_stats_inserted']} ride daily stats")
 
-    def _seed_weekly_stats(self, conn):
+    def _seed_weekly_stats(self, session):
         """Insert weekly statistics for the past 8 weeks."""
         print("\nSeeding weekly stats...")
         today = date.today()
 
         # Create a mapping of park_id -> park_name
         park_id_to_name = {v: k for k, v in self.park_ids.items()}
+
+        ride_stats_to_add = []
+        park_stats_to_add = []
 
         for week_offset in range(8):
             # Calculate ISO week info
@@ -554,30 +597,23 @@ class TestDataSeeder:
                 if week_offset > 0:
                     prev_stats = self._get_stats_for_ride(ride_id, park_name, (week_offset + 1) * 7)
                     if prev_stats["uptime_percentage"] > 0:
-                        trend = round(stats["uptime_percentage"] - prev_stats["uptime_percentage"], 2)
+                        trend = Decimal(str(round(float(stats["uptime_percentage"] - prev_stats["uptime_percentage"]), 2)))
 
-                conn.execute(text("""
-                    INSERT INTO ride_weekly_stats
-                    (ride_id, year, week_number, week_start_date, uptime_minutes, downtime_minutes,
-                     uptime_percentage, operating_hours_minutes, avg_wait_time, peak_wait_time,
-                     status_changes, trend_vs_previous_week)
-                    VALUES (:ride_id, :year, :week_num, :week_start, :uptime, :downtime,
-                            :uptime_pct, :op_minutes, :avg_wait, :peak_wait, :status_changes, :trend)
-                """), {
-                    "ride_id": ride_id,
-                    "year": year,
-                    "week_num": week_num,
-                    "week_start": week_start,
-                    "uptime": uptime_weekly,
-                    "downtime": downtime_weekly,
-                    "uptime_pct": stats["uptime_percentage"],
-                    "op_minutes": op_minutes_weekly,
-                    "avg_wait": stats["avg_wait_time"],
-                    "peak_wait": stats["peak_wait_time"],
-                    "status_changes": stats["status_changes"] * 7,
-                    "trend": trend,
-                })
-                self.stats['weekly_stats_inserted'] += 1
+                ride_stat_obj = RideWeeklyStats(
+                    ride_id=ride_id,
+                    year=year,
+                    week_number=week_num,
+                    week_start_date=week_start,
+                    uptime_minutes=uptime_weekly,
+                    downtime_minutes=downtime_weekly,
+                    uptime_percentage=stats["uptime_percentage"],
+                    operating_hours_minutes=op_minutes_weekly,
+                    avg_wait_time=stats["avg_wait_time"],
+                    peak_wait_time=stats["peak_wait_time"],
+                    status_changes=stats["status_changes"] * 7,
+                    trend_vs_previous_week=trend
+                )
+                ride_stats_to_add.append(ride_stat_obj)
 
             # Park weekly stats
             for park_name, park_id in self.park_ids.items():
@@ -591,7 +627,7 @@ class TestDataSeeder:
                 for _, _, ride_id in park_rides:
                     stats = self._get_stats_for_ride(ride_id, park_name, week_offset * 7)
                     total_downtime_hours += (stats["downtime_minutes"] * 7) / 60
-                    uptimes.append(stats["uptime_percentage"])
+                    uptimes.append(float(stats["uptime_percentage"]))
 
                 avg_uptime = sum(uptimes) / len(uptimes) if uptimes else 0
                 rides_with_downtime = sum(1 for u in uptimes if u < 100)
@@ -602,32 +638,32 @@ class TestDataSeeder:
                     prev_uptimes = []
                     for _, _, ride_id in park_rides:
                         prev_stats = self._get_stats_for_ride(ride_id, park_name, (week_offset + 1) * 7)
-                        prev_uptimes.append(prev_stats["uptime_percentage"])
+                        prev_uptimes.append(float(prev_stats["uptime_percentage"]))
                     if prev_uptimes:
                         prev_avg = sum(prev_uptimes) / len(prev_uptimes)
-                        trend = round(avg_uptime - prev_avg, 2)
+                        trend = Decimal(str(round(avg_uptime - prev_avg, 2)))
 
-                conn.execute(text("""
-                    INSERT INTO park_weekly_stats
-                    (park_id, year, week_number, week_start_date, total_rides_tracked,
-                     avg_uptime_percentage, total_downtime_hours, rides_with_downtime, trend_vs_previous_week)
-                    VALUES (:park_id, :year, :week_num, :week_start, :total_rides,
-                            :avg_uptime, :downtime_hours, :rides_with_downtime, :trend)
-                """), {
-                    "park_id": park_id,
-                    "year": year,
-                    "week_num": week_num,
-                    "week_start": week_start,
-                    "total_rides": len(park_rides),
-                    "avg_uptime": round(avg_uptime, 2),
-                    "downtime_hours": round(total_downtime_hours, 2),
-                    "rides_with_downtime": rides_with_downtime,
-                    "trend": trend,
-                })
+                park_stat_obj = ParkWeeklyStats(
+                    park_id=park_id,
+                    year=year,
+                    week_number=week_num,
+                    week_start_date=week_start,
+                    total_rides_tracked=len(park_rides),
+                    avg_uptime_percentage=Decimal(str(round(avg_uptime, 2))),
+                    total_downtime_hours=Decimal(str(round(total_downtime_hours, 2))),
+                    rides_with_downtime=rides_with_downtime,
+                    trend_vs_previous_week=trend
+                )
+                park_stats_to_add.append(park_stat_obj)
+
+        # Bulk add for performance
+        session.add_all(ride_stats_to_add)
+        session.add_all(park_stats_to_add)
+        self.stats['weekly_stats_inserted'] = len(ride_stats_to_add)
 
         print(f"  Inserted {self.stats['weekly_stats_inserted']} ride weekly stats")
 
-    def _seed_monthly_stats(self, conn):
+    def _seed_monthly_stats(self, session):
         """Insert monthly statistics for the past 3 months."""
         print("\nSeeding monthly stats...")
         today = date.today()
@@ -641,7 +677,7 @@ class TestDataSeeder:
             year = month_date.year
             month = month_date.month
 
-            # Ride monthly stats
+            # Ride monthly stats - Keep text() - no ORM model exists yet
             for (park_id, ride_name), ride_id in self.ride_ids.items():
                 park_name = park_id_to_name.get(park_id, "")
                 stats = self._get_stats_for_ride(ride_id, park_name, month_offset * 30)
@@ -656,9 +692,9 @@ class TestDataSeeder:
                 if month_offset > 0:
                     prev_stats = self._get_stats_for_ride(ride_id, park_name, (month_offset + 1) * 30)
                     if prev_stats["uptime_percentage"] > 0:
-                        trend = round(stats["uptime_percentage"] - prev_stats["uptime_percentage"], 2)
+                        trend = round(float(stats["uptime_percentage"] - prev_stats["uptime_percentage"]), 2)
 
-                conn.execute(text("""
+                session.execute(text("""
                     INSERT INTO ride_monthly_stats
                     (ride_id, year, month, uptime_minutes, downtime_minutes, uptime_percentage,
                      operating_hours_minutes, avg_wait_time, peak_wait_time, status_changes,
@@ -671,16 +707,16 @@ class TestDataSeeder:
                     "month": month,
                     "uptime": uptime_monthly,
                     "downtime": downtime_monthly,
-                    "uptime_pct": stats["uptime_percentage"],
+                    "uptime_pct": float(stats["uptime_percentage"]),
                     "op_minutes": op_minutes_monthly,
-                    "avg_wait": stats["avg_wait_time"],
+                    "avg_wait": float(stats["avg_wait_time"]),
                     "peak_wait": stats["peak_wait_time"],
                     "status_changes": stats["status_changes"] * 30,
                     "trend": trend,
                 })
                 self.stats['monthly_stats_inserted'] += 1
 
-            # Park monthly stats
+            # Park monthly stats - Keep text() - no ORM model exists yet
             for park_name, park_id in self.park_ids.items():
                 park_rides = [(pid, rn, rid) for (pid, rn), rid in self.ride_ids.items() if pid == park_id]
                 if not park_rides:
@@ -692,7 +728,7 @@ class TestDataSeeder:
                 for _, _, ride_id in park_rides:
                     stats = self._get_stats_for_ride(ride_id, park_name, month_offset * 30)
                     total_downtime_hours += (stats["downtime_minutes"] * 30) / 60
-                    uptimes.append(stats["uptime_percentage"])
+                    uptimes.append(float(stats["uptime_percentage"]))
 
                 avg_uptime = sum(uptimes) / len(uptimes) if uptimes else 0
                 rides_with_downtime = sum(1 for u in uptimes if u < 100)
@@ -703,12 +739,12 @@ class TestDataSeeder:
                     prev_uptimes = []
                     for _, _, ride_id in park_rides:
                         prev_stats = self._get_stats_for_ride(ride_id, park_name, (month_offset + 1) * 30)
-                        prev_uptimes.append(prev_stats["uptime_percentage"])
+                        prev_uptimes.append(float(prev_stats["uptime_percentage"]))
                     if prev_uptimes:
                         prev_avg = sum(prev_uptimes) / len(prev_uptimes)
                         trend = round(avg_uptime - prev_avg, 2)
 
-                conn.execute(text("""
+                session.execute(text("""
                     INSERT INTO park_monthly_stats
                     (park_id, year, month, total_rides_tracked, avg_uptime_percentage,
                      total_downtime_hours, rides_with_downtime, trend_vs_previous_month)

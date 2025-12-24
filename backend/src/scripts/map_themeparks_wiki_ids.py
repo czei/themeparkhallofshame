@@ -27,8 +27,9 @@ sys.path.insert(0, str(backend_src.absolute()))
 
 from utils.logger import logger
 from collector.themeparks_wiki_client import get_themeparks_wiki_client
-from database.connection import get_db_connection
-from sqlalchemy import text
+from database.connection import get_db_session
+from sqlalchemy import select, update
+from models import Park, Ride
 
 
 def normalize_name(name: str) -> str:
@@ -113,17 +114,16 @@ def map_themeparks_wiki_ids(dry_run: bool = False):
     }
 
     try:
-        with get_db_connection() as conn:
+        with get_db_session() as session:
             # Step 1: Get all parks with themeparks_wiki_id
-            parks_query = text("""
-                SELECT park_id, name, themeparks_wiki_id
-                FROM parks
-                WHERE themeparks_wiki_id IS NOT NULL
-                  AND is_active = TRUE
-                ORDER BY name
-            """)
+            parks_stmt = (
+                select(Park.park_id, Park.name, Park.themeparks_wiki_id)
+                .where(Park.themeparks_wiki_id.isnot(None))
+                .where(Park.is_active == True)
+                .order_by(Park.name)
+            )
 
-            parks = conn.execute(parks_query).fetchall()
+            parks = session.execute(parks_stmt).fetchall()
             logger.info(f"Found {len(parks)} parks with ThemeParks.wiki IDs")
 
             for park in parks:
@@ -144,14 +144,13 @@ def map_themeparks_wiki_ids(dry_run: bool = False):
                     logger.info(f"  Found {len(attractions)} attractions from API")
 
                     # Step 3: Get existing rides for this park
-                    rides_query = text("""
-                        SELECT ride_id, name, themeparks_wiki_id, category
-                        FROM rides
-                        WHERE park_id = :park_id
-                          AND is_active = TRUE
-                    """)
+                    rides_stmt = (
+                        select(Ride.ride_id, Ride.name, Ride.themeparks_wiki_id, Ride.category)
+                        .where(Ride.park_id == park_id)
+                        .where(Ride.is_active == True)
+                    )
 
-                    db_rides = conn.execute(rides_query, {"park_id": park_id}).fetchall()
+                    db_rides = session.execute(rides_stmt).fetchall()
 
                     # Build a lookup by normalized name
                     db_rides_by_name = {}
@@ -165,11 +164,11 @@ def map_themeparks_wiki_ids(dry_run: bool = False):
                         api_name = attraction.get('name', '')
 
                         # Check if already mapped
-                        existing_check = text("""
-                            SELECT ride_id FROM rides
-                            WHERE themeparks_wiki_id = :wiki_id
-                        """)
-                        existing = conn.execute(existing_check, {"wiki_id": api_id}).fetchone()
+                        existing_stmt = (
+                            select(Ride.ride_id)
+                            .where(Ride.themeparks_wiki_id == api_id)
+                        )
+                        existing = session.execute(existing_stmt).fetchone()
 
                         if existing:
                             stats['rides_already_mapped'] += 1
@@ -206,16 +205,19 @@ def map_themeparks_wiki_ids(dry_run: bool = False):
 
                             # Update the ride with themeparks_wiki_id
                             if not dry_run:
-                                update_query = text("""
-                                    UPDATE rides
-                                    SET themeparks_wiki_id = :wiki_id,
-                                        category = COALESCE(category, 'ATTRACTION')
-                                    WHERE ride_id = :ride_id
-                                """)
-                                conn.execute(update_query, {
-                                    "wiki_id": api_id,
-                                    "ride_id": matched_ride.ride_id
-                                })
+                                # Use COALESCE logic: only set category if it's currently NULL
+                                current_category = matched_ride.category
+                                new_category = current_category if current_category else 'ATTRACTION'
+
+                                update_stmt = (
+                                    update(Ride)
+                                    .where(Ride.ride_id == matched_ride.ride_id)
+                                    .values(
+                                        themeparks_wiki_id=api_id,
+                                        category=new_category
+                                    )
+                                )
+                                session.execute(update_stmt)
 
                             stats['rides_matched'] += 1
                             logger.info(f"    Mapped: {api_name}")
@@ -228,7 +230,7 @@ def map_themeparks_wiki_ids(dry_run: bool = False):
                     stats['errors'] += 1
 
             if not dry_run:
-                conn.commit()
+                session.commit()
 
             # Print summary
             logger.info("")

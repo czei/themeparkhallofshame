@@ -25,41 +25,43 @@ import argparse
 from pathlib import Path
 from datetime import datetime, timedelta
 
-from sqlalchemy import text
+from sqlalchemy import select, update, func, or_
 
 # Add src to path
 backend_src = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_src.absolute()))
 
-from database.connection import get_db_connection
+from database.connection import get_db_session
 from utils.logger import logger
+from models import Park, Ride, RideClassification, RideStatusSnapshot, ParkActivitySnapshot
 
 
-def get_snapshots_to_backfill(conn, batch_size: int = 1000):
+def get_snapshots_to_backfill(session, batch_size: int = 1000):
     """
     Get park_activity_snapshots that need shame_score backfilled.
 
     Returns snapshots with shame_score IS NULL, ordered by recorded_at DESC
     (most recent first for faster verification of results).
     """
-    result = conn.execute(text("""
-        SELECT
-            pas.snapshot_id,
-            pas.park_id,
-            pas.recorded_at,
-            pas.park_appears_open,
-            p.name as park_name
-        FROM park_activity_snapshots pas
-        JOIN parks p ON pas.park_id = p.park_id
-        WHERE pas.shame_score IS NULL
-        ORDER BY pas.recorded_at DESC
-        LIMIT :batch_size
-    """), {"batch_size": batch_size})
+    stmt = (
+        select(
+            ParkActivitySnapshot.snapshot_id,
+            ParkActivitySnapshot.park_id,
+            ParkActivitySnapshot.recorded_at,
+            ParkActivitySnapshot.park_appears_open,
+            Park.name.label('park_name')
+        )
+        .join(Park, ParkActivitySnapshot.park_id == Park.park_id)
+        .where(ParkActivitySnapshot.shame_score.is_(None))
+        .order_by(ParkActivitySnapshot.recorded_at.desc())
+        .limit(batch_size)
+    )
 
+    result = session.execute(stmt)
     return [dict(row._mapping) for row in result]
 
 
-def calculate_historical_shame_score(conn, park_id: int, snapshot_time: datetime) -> float:
+def calculate_historical_shame_score(session, park_id: int, snapshot_time: datetime) -> float:
     """
     Calculate shame score for a historical snapshot.
 
@@ -68,7 +70,7 @@ def calculate_historical_shame_score(conn, park_id: int, snapshot_time: datetime
     recorded at the same time.
 
     Args:
-        conn: Database connection
+        session: Database session
         park_id: Park ID
         snapshot_time: The recorded_at timestamp of the park_activity_snapshot
 
@@ -78,35 +80,47 @@ def calculate_historical_shame_score(conn, park_id: int, snapshot_time: datetime
     # Step 1: Get effective park weight (rides that operated in 7 days PRIOR to snapshot)
     seven_days_before = snapshot_time - timedelta(days=7)
 
-    effective_result = conn.execute(text("""
-        SELECT COALESCE(SUM(COALESCE(rc.tier_weight, 2)), 0) AS effective_weight
-        FROM rides r
-        LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-        WHERE r.park_id = :park_id
-          AND r.is_active = TRUE
-          AND r.category = 'ATTRACTION'
-          AND r.last_operated_at IS NOT NULL
-          AND r.last_operated_at >= :seven_days_before
-          AND r.last_operated_at <= :snapshot_time
-    """), {
-        "park_id": park_id,
-        "seven_days_before": seven_days_before,
-        "snapshot_time": snapshot_time
-    })
+    effective_stmt = (
+        select(
+            func.coalesce(
+                func.sum(
+                    func.coalesce(RideClassification.tier_weight, 2)
+                ),
+                0
+            ).label('effective_weight')
+        )
+        .select_from(Ride)
+        .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+        .where(Ride.park_id == park_id)
+        .where(Ride.is_active == True)
+        .where(Ride.category == 'ATTRACTION')
+        .where(Ride.last_operated_at.isnot(None))
+        .where(Ride.last_operated_at >= seven_days_before)
+        .where(Ride.last_operated_at <= snapshot_time)
+    )
+    effective_result = session.execute(effective_stmt)
     effective_weight = effective_result.scalar() or 0
 
     # Zero-denominator protection
     if not effective_weight:
         # Fallback: use full roster weight if no rides have last_operated_at set
         # This handles historical data before last_operated_at was populated
-        fallback_result = conn.execute(text("""
-            SELECT COALESCE(SUM(COALESCE(rc.tier_weight, 2)), 0) AS total_weight
-            FROM rides r
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE r.park_id = :park_id
-              AND r.is_active = TRUE
-              AND r.category = 'ATTRACTION'
-        """), {"park_id": park_id})
+        fallback_stmt = (
+            select(
+                func.coalesce(
+                    func.sum(
+                        func.coalesce(RideClassification.tier_weight, 2)
+                    ),
+                    0
+                ).label('total_weight')
+            )
+            .select_from(Ride)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+        )
+        fallback_result = session.execute(fallback_stmt)
         effective_weight = fallback_result.scalar() or 0
 
         if not effective_weight:
@@ -116,23 +130,30 @@ def calculate_historical_shame_score(conn, park_id: int, snapshot_time: datetime
     # For ThemeParks.wiki data: status = 'DOWN'
     # For Queue-Times data: computed_is_open = FALSE (they don't distinguish DOWN vs CLOSED)
     # We need to use the snapshot from the same recorded_at timestamp
-    down_result = conn.execute(text("""
-        SELECT COALESCE(SUM(COALESCE(rc.tier_weight, 2)), 0) AS down_weight
-        FROM rides r
-        LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-        INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-        WHERE r.park_id = :park_id
-          AND r.is_active = TRUE
-          AND r.category = 'ATTRACTION'
-          AND rss.recorded_at = :snapshot_time
-          AND (
-              rss.status = 'DOWN'
-              OR (rss.status IS NULL AND rss.computed_is_open = FALSE)
-          )
-    """), {
-        "park_id": park_id,
-        "snapshot_time": snapshot_time
-    })
+    down_stmt = (
+        select(
+            func.coalesce(
+                func.sum(
+                    func.coalesce(RideClassification.tier_weight, 2)
+                ),
+                0
+            ).label('down_weight')
+        )
+        .select_from(Ride)
+        .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+        .join(RideStatusSnapshot, Ride.ride_id == RideStatusSnapshot.ride_id)
+        .where(Ride.park_id == park_id)
+        .where(Ride.is_active == True)
+        .where(Ride.category == 'ATTRACTION')
+        .where(RideStatusSnapshot.recorded_at == snapshot_time)
+        .where(
+            or_(
+                RideStatusSnapshot.status == 'DOWN',
+                (RideStatusSnapshot.status.is_(None) & (RideStatusSnapshot.computed_is_open == False))
+            )
+        )
+    )
+    down_result = session.execute(down_stmt)
     down_weight = down_result.scalar() or 0
 
     # Step 3: Calculate shame score
@@ -143,12 +164,12 @@ def calculate_historical_shame_score(conn, park_id: int, snapshot_time: datetime
     return min(shame_score, 10.0)  # Cap at 10.0
 
 
-def backfill_batch(conn, snapshots: list, dry_run: bool = False) -> dict:
+def backfill_batch(session, snapshots: list, dry_run: bool = False) -> dict:
     """
     Backfill shame scores for a batch of snapshots.
 
     Args:
-        conn: Database connection
+        session: Database session
         snapshots: List of snapshot dicts to process
         dry_run: If True, don't actually update the database
 
@@ -175,23 +196,25 @@ def backfill_batch(conn, snapshots: list, dry_run: bool = False) -> dict:
             # Skip closed parks - they should have shame_score = 0 or NULL
             if not park_appears_open:
                 if not dry_run:
-                    conn.execute(text("""
-                        UPDATE park_activity_snapshots
-                        SET shame_score = 0.0
-                        WHERE snapshot_id = :snapshot_id
-                    """), {"snapshot_id": snapshot_id})
+                    stmt = (
+                        update(ParkActivitySnapshot)
+                        .where(ParkActivitySnapshot.snapshot_id == snapshot_id)
+                        .values(shame_score=0.0)
+                    )
+                    session.execute(stmt)
                 stats["skipped_closed"] += 1
                 continue
 
             # Calculate shame score for this snapshot
-            shame_score = calculate_historical_shame_score(conn, park_id, recorded_at)
+            shame_score = calculate_historical_shame_score(session, park_id, recorded_at)
 
             if not dry_run:
-                conn.execute(text("""
-                    UPDATE park_activity_snapshots
-                    SET shame_score = :shame_score
-                    WHERE snapshot_id = :snapshot_id
-                """), {"snapshot_id": snapshot_id, "shame_score": shame_score})
+                stmt = (
+                    update(ParkActivitySnapshot)
+                    .where(ParkActivitySnapshot.snapshot_id == snapshot_id)
+                    .values(shame_score=shame_score)
+                )
+                session.execute(stmt)
 
             stats["updated"] += 1
 
@@ -227,11 +250,14 @@ def main():
         "batches": 0
     }
 
-    with get_db_connection() as conn:
+    with get_db_session() as session:
         # Check how many snapshots need backfilling
-        count_result = conn.execute(text("""
-            SELECT COUNT(*) FROM park_activity_snapshots WHERE shame_score IS NULL
-        """))
+        count_stmt = (
+            select(func.count())
+            .select_from(ParkActivitySnapshot)
+            .where(ParkActivitySnapshot.shame_score.is_(None))
+        )
+        count_result = session.execute(count_stmt)
         total_to_process = count_result.scalar()
         logger.info(f"Total snapshots to backfill: {total_to_process}")
 
@@ -241,7 +267,7 @@ def main():
 
         # Process in batches
         while True:
-            snapshots = get_snapshots_to_backfill(conn, args.batch_size)
+            snapshots = get_snapshots_to_backfill(session, args.batch_size)
 
             if not snapshots:
                 break
@@ -249,7 +275,7 @@ def main():
             total_stats["batches"] += 1
             logger.info(f"\nProcessing batch {total_stats['batches']} ({len(snapshots)} snapshots)...")
 
-            batch_stats = backfill_batch(conn, snapshots, args.dry_run)
+            batch_stats = backfill_batch(session, snapshots, args.dry_run)
 
             for key in ["processed", "updated", "skipped_closed", "errors"]:
                 total_stats[key] += batch_stats[key]

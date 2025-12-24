@@ -25,23 +25,20 @@ Example Response:
 from datetime import date, timedelta
 from typing import List, Dict, Any
 
-from sqlalchemy import select, func, and_
-from sqlalchemy.engine import Connection
+from sqlalchemy import select, func, and_, or_
+from sqlalchemy.orm import Session, aliased
 
-from database.schema import parks, park_weekly_stats
-from database.queries.builders import Filters
+from src.models import Park, ParkWeeklyStats
+from src.utils.query_helpers import QueryClassBase
 
 
 DECLINE_THRESHOLD = 5.0
 
 
-class DecliningParksQuery:
+class DecliningParksQuery(QueryClassBase):
     """
     Query for parks showing uptime decline.
     """
-
-    def __init__(self, connection: Connection):
-        self.conn = connection
 
     def get_declining(
         self,
@@ -67,54 +64,53 @@ class DecliningParksQuery:
         prev_week_date = today - timedelta(weeks=1)
         prev_year = prev_week_date.year
         prev_week_number = prev_week_date.isocalendar()[1]
-        prev_week = park_weekly_stats.alias("prev_week")
+        prev_week = aliased(ParkWeeklyStats, name="prev_week")
 
         conditions = [
-            parks.c.is_active == True,
-            park_weekly_stats.c.year == year,
-            park_weekly_stats.c.week_number == week_number,
+            Park.is_active == True,
+            ParkWeeklyStats.year == year,
+            ParkWeeklyStats.week_number == week_number,
             # Positive trend = declining (more downtime)
-            park_weekly_stats.c.trend_vs_previous_week > DECLINE_THRESHOLD,
+            ParkWeeklyStats.trend_vs_previous_week > DECLINE_THRESHOLD,
         ]
 
         if filter_disney_universal:
-            conditions.append(Filters.disney_universal(parks))
+            conditions.append(or_(Park.is_disney == True, Park.is_universal == True))
 
         stmt = (
             select(
-                parks.c.park_id,
-                parks.c.queue_times_id,
-                parks.c.name.label("park_name"),
-                func.concat(parks.c.city, ", ", parks.c.state_province).label("location"),
-                park_weekly_stats.c.avg_uptime_percentage.label("current_uptime"),
+                Park.park_id,
+                Park.queue_times_id,
+                Park.name.label("park_name"),
+                func.concat(Park.city, ", ", Park.state_province).label("location"),
+                ParkWeeklyStats.avg_uptime_percentage.label("current_uptime"),
                 func.round(
-                    park_weekly_stats.c.avg_uptime_percentage
-                    / (1 + park_weekly_stats.c.trend_vs_previous_week / 100),
+                    ParkWeeklyStats.avg_uptime_percentage
+                    / (1 + ParkWeeklyStats.trend_vs_previous_week / 100),
                     2,
                 ).label("previous_uptime"),
-                park_weekly_stats.c.trend_vs_previous_week.label("decline_percentage"),
-                park_weekly_stats.c.total_downtime_hours.label("current_downtime_hours"),
+                ParkWeeklyStats.trend_vs_previous_week.label("decline_percentage"),
+                ParkWeeklyStats.total_downtime_hours.label("current_downtime_hours"),
                 func.coalesce(
-                    prev_week.c.total_downtime_hours,
+                    prev_week.total_downtime_hours,
                     0,
                 ).label("previous_downtime_hours"),
             )
             .select_from(
-                parks.join(
-                    park_weekly_stats, parks.c.park_id == park_weekly_stats.c.park_id
+                Park.__table__.join(
+                    ParkWeeklyStats, Park.park_id == ParkWeeklyStats.park_id
                 ).outerjoin(
                     prev_week,
                     and_(
-                        prev_week.c.park_id == park_weekly_stats.c.park_id,
-                        prev_week.c.year == prev_year,
-                        prev_week.c.week_number == prev_week_number,
+                        prev_week.park_id == ParkWeeklyStats.park_id,
+                        prev_week.year == prev_year,
+                        prev_week.week_number == prev_week_number,
                     ),
                 )
             )
             .where(and_(*conditions))
-            .order_by(park_weekly_stats.c.trend_vs_previous_week.desc())  # Most declined first
+            .order_by(ParkWeeklyStats.trend_vs_previous_week.desc())  # Most declined first
             .limit(limit)
         )
 
-        result = self.conn.execute(stmt)
-        return [dict(row._mapping) for row in result]
+        return self.execute_and_fetchall(stmt)

@@ -20,20 +20,22 @@ Cron example (every 10 minutes):
 
 import sys
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Optional, Any
 
-from sqlalchemy import text
+from sqlalchemy import select, func
+from sqlalchemy.orm import Session
 
 # Add src to path
 backend_src = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_src.absolute()))
 
 from utils.logger import logger
+from src.models import Ride, RideClassification
 from collector.queue_times_client import QueueTimesClient
 from collector.themeparks_wiki_client import get_themeparks_wiki_client
 from collector.status_calculator import computed_is_open, validate_wait_time
-from database.connection import get_db_connection
+from database.connection import get_db_connection, get_db_session
 from database.repositories.park_repository import ParkRepository
 from database.repositories.ride_repository import RideRepository
 from database.repositories.snapshot_repository import RideStatusSnapshotRepository, ParkActivitySnapshotRepository
@@ -78,15 +80,15 @@ class SnapshotCollector:
         logger.info("=" * 60)
 
         try:
-            # Step 1: Get all active parks with database connection
-            with get_db_connection() as conn:
-                park_repo = ParkRepository(conn)
-                ride_repo = RideRepository(conn)
-                snapshot_repo = RideStatusSnapshotRepository(conn)
-                park_activity_repo = ParkActivitySnapshotRepository(conn)
-                status_change_repo = RideStatusChangeRepository(conn)
-                schedule_repo = ScheduleRepository(conn)
-                data_quality_repo = DataQualityRepository(conn)
+            # Step 1: Get all active parks with database session
+            with get_db_session() as session:
+                park_repo = ParkRepository(session)
+                ride_repo = RideRepository(session)
+                snapshot_repo = RideStatusSnapshotRepository(session)
+                park_activity_repo = ParkActivitySnapshotRepository(session)
+                status_change_repo = RideStatusChangeRepository(session)
+                schedule_repo = ScheduleRepository(session)
+                data_quality_repo = DataQualityRepository(session)
 
                 parks = park_repo.get_all_active()
                 logger.info(f"Processing {len(parks)} active parks...")
@@ -266,7 +268,7 @@ class SnapshotCollector:
                     down_ride_ids.append(ride.ride_id)
 
         # Calculate shame score (THE single source of truth)
-        shame_score = self.calculate_shame_score(park_id, down_ride_ids, ride_repo.conn)
+        shame_score = self.calculate_shame_score(park_id, down_ride_ids, ride_repo.session)
 
         self._store_park_activity(park_id, park_appears_open, total_rides,
                                  rides_operating, rides_closed + rides_down,
@@ -586,7 +588,7 @@ class SnapshotCollector:
                         down_ride_ids.append(ride.ride_id)
 
             # Calculate shame score (THE single source of truth)
-            shame_score = self.calculate_shame_score(park_id, down_ride_ids, ride_repo.conn)
+            shame_score = self.calculate_shame_score(park_id, down_ride_ids, ride_repo.session)
 
             self._store_park_activity(park_id, park_appears_open, total_rides, rides_open,
                                       rides_closed, avg_wait, max_wait, park_activity_repo, shame_score,
@@ -644,7 +646,7 @@ class SnapshotCollector:
         except Exception as e:
             logger.error(f"Failed to store park activity: {e}")
 
-    def calculate_shame_score(self, park_id: int, down_ride_ids: List[int], conn) -> Optional[float]:
+    def calculate_shame_score(self, park_id: int, down_ride_ids: List[int], session: Session) -> Optional[float]:
         """
         THE ONLY PLACE shame score is calculated.
 
@@ -660,23 +662,25 @@ class SnapshotCollector:
         Args:
             park_id: Database park ID
             down_ride_ids: List of ride_ids that are currently DOWN
-            conn: Database connection
+            session: Database session
 
         Returns:
             Shame score as float (0.0-10.0), or None if no eligible rides
         """
         try:
             # Get effective park weight (rides that operated in last 7 days)
-            effective_weight_result = conn.execute(text("""
-                SELECT COALESCE(SUM(COALESCE(rc.tier_weight, 2)), 0) AS effective_weight
-                FROM rides r
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE r.park_id = :park_id
-                  AND r.is_active = TRUE
-                  AND r.category = 'ATTRACTION'
-                  AND r.last_operated_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY
-            """), {"park_id": park_id})
-            effective_weight = effective_weight_result.scalar() or 0
+            seven_days_ago = datetime.utcnow() - timedelta(days=7)
+
+            effective_weight_stmt = (
+                select(func.coalesce(func.sum(func.coalesce(RideClassification.tier_weight, 2)), 0))
+                .select_from(Ride)
+                .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+                .where(Ride.park_id == park_id)
+                .where(Ride.is_active == True)
+                .where(Ride.category == 'ATTRACTION')
+                .where(Ride.last_operated_at >= seven_days_ago)
+            )
+            effective_weight = session.execute(effective_weight_stmt).scalar() or 0
 
             # Zero-denominator protection (Zen review fix)
             if not effective_weight:
@@ -686,15 +690,15 @@ class SnapshotCollector:
             if not down_ride_ids:
                 return 0.0
 
-            down_weight_result = conn.execute(text("""
-                SELECT COALESCE(SUM(COALESCE(rc.tier_weight, 2)), 0) AS down_weight
-                FROM rides r
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE r.ride_id IN :ride_ids
-                  AND r.is_active = TRUE
-                  AND r.category = 'ATTRACTION'
-            """), {"ride_ids": tuple(down_ride_ids)})
-            down_weight = down_weight_result.scalar() or 0
+            down_weight_stmt = (
+                select(func.coalesce(func.sum(func.coalesce(RideClassification.tier_weight, 2)), 0))
+                .select_from(Ride)
+                .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+                .where(Ride.ride_id.in_(down_ride_ids))
+                .where(Ride.is_active == True)
+                .where(Ride.category == 'ATTRACTION')
+            )
+            down_weight = session.execute(down_weight_stmt).scalar() or 0
 
             # Calculate shame score: (down_weight / effective_weight) * 10
             shame_score = round((down_weight / effective_weight) * 10, 1)

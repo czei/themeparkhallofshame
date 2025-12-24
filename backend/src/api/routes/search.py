@@ -11,9 +11,10 @@ GET /search/index → Returns all parks and rides for client-side search index
 
 from flask import Blueprint, jsonify
 from datetime import datetime, timezone
-from sqlalchemy import text
+from sqlalchemy import select
 
-from database.connection import get_db_connection
+from database.connection import get_db_session
+from models import Park, Ride
 from utils.cache import get_query_cache, generate_cache_key
 from utils.logger import logger
 
@@ -45,33 +46,36 @@ def get_search_index():
         return jsonify(cached_result)
 
     try:
-        with get_db_connection() as conn:
-            # Fetch all active parks
-            parks_result = conn.execute(text("""
-                SELECT
-                    park_id,
-                    name,
-                    city,
-                    state_province
-                FROM parks
-                WHERE is_active = TRUE
-                ORDER BY name
-            """))
+        with get_db_session() as session:
+            # Fetch all active parks using ORM
+            parks_stmt = (
+                select(
+                    Park.park_id,
+                    Park.name,
+                    Park.city,
+                    Park.state_province
+                )
+                .where(Park.is_active == True)
+                .order_by(Park.name)
+            )
+            parks_result = session.execute(parks_stmt)
             parks_rows = parks_result.fetchall()
 
-            # Fetch all rides with their park names
-            rides_result = conn.execute(text("""
-                SELECT
-                    r.ride_id,
-                    r.name AS ride_name,
-                    p.name AS park_name,
-                    r.park_id
-                FROM rides r
-                JOIN parks p ON r.park_id = p.park_id
-                WHERE r.is_active = TRUE
-                  AND p.is_active = TRUE
-                ORDER BY r.name
-            """))
+            # Fetch all rides with their park names using ORM
+            rides_stmt = (
+                select(
+                    Ride.ride_id,
+                    Ride.name.label('ride_name'),
+                    Park.name.label('park_name'),
+                    Ride.park_id
+                )
+                .select_from(Ride)
+                .join(Park, Ride.park_id == Park.park_id)
+                .where(Ride.is_active == True)
+                .where(Park.is_active == True)
+                .order_by(Ride.name)
+            )
+            rides_result = session.execute(rides_stmt)
             rides_rows = rides_result.fetchall()
 
         # Format parks for search index

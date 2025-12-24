@@ -24,19 +24,20 @@ Usage:
     anomalies = detector.detect_anomalies(target_date)
 
 How to Add Validation Rules:
-1. Add rule definition to VALIDATION_RULES in validation_checks.py
-2. Rule format: {name: {query, max_rows, severity, message}}
-3. Severity: CRITICAL (halt), WARNING (flag), INFO (log)
+1. Add rule metadata to VALIDATION_RULES_METADATA in validation_checks.py
+2. Add corresponding _query_{name} method to ValidationChecker class
+3. Rule format: {name: {max_rows, severity, message}}
+4. Severity: CRITICAL (halt), WARNING (flag), INFO (log)
 """
 
-from .validation_checks import ValidationChecker, VALIDATION_RULES
+from .validation_checks import ValidationChecker, VALIDATION_RULES_METADATA
 from .anomaly_detector import AnomalyDetector
 from .computation_trace import ComputationTracer
 from .aggregate_verification import AggregateVerifier, AggregateAuditResult, AuditSummary
 
 __all__ = [
     "ValidationChecker",
-    "VALIDATION_RULES",
+    "VALIDATION_RULES_METADATA",
     "AnomalyDetector",
     "ComputationTracer",
     "AggregateVerifier",

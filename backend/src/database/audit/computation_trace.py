@@ -19,7 +19,7 @@ When a user clicks "Verify this number", they see:
 Usage:
     from database.audit import ComputationTracer
 
-    tracer = ComputationTracer(conn)
+    tracer = ComputationTracer(session)
 
     # User clicked on a park shame score
     trace = tracer.trace_park_shame_score(
@@ -32,15 +32,21 @@ Usage:
 
 Created: 2024-11 (Data Accuracy Audit Framework)
 Updated: 2024-11 (Rewritten to use pre-aggregated tables)
+Updated: 2024-12 (Converted to SQLAlchemy ORM)
 """
 
 from datetime import date, timedelta
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from utils.timezone import get_today_pacific
+from src.models.orm_park import Park
+from src.models.orm_ride import Ride
+from src.models.orm_classification import RideClassification
+from src.models.orm_stats import RideDailyStats, ParkDailyStats
+from src.models.orm_snapshots import RideStatusSnapshot
 
 
 @dataclass
@@ -85,15 +91,15 @@ class ComputationTracer:
     # Tolerance for matching displayed vs computed (handles rounding)
     DEFAULT_TOLERANCE = 0.05
 
-    def __init__(self, conn: Connection, tolerance: float = DEFAULT_TOLERANCE):
+    def __init__(self, session: Session, tolerance: float = DEFAULT_TOLERANCE):
         """
-        Initialize with database connection.
+        Initialize with database session.
 
         Args:
-            conn: SQLAlchemy connection
+            session: SQLAlchemy session
             tolerance: Max difference between displayed and computed for "verified"
         """
-        self.conn = conn
+        self.session = session
         self.tolerance = tolerance
 
     def trace_park_shame_score(
@@ -355,109 +361,167 @@ class ComputationTracer:
 
     def _get_park_info(self, park_id: int) -> Dict[str, Any]:
         """Get basic park information."""
-        query = text("SELECT park_id, name AS park_name FROM parks WHERE park_id = :park_id")
-        result = self.conn.execute(query, {"park_id": park_id}).fetchone()
-        return dict(result._mapping) if result else {}
+        park = self.session.query(Park).filter(Park.park_id == park_id).first()
+        if not park:
+            return {}
+        return {
+            "park_id": park.park_id,
+            "park_name": park.name
+        }
 
     def _get_ride_info(self, ride_id: int) -> Dict[str, Any]:
         """Get basic ride information."""
-        query = text("""
-            SELECT r.ride_id, r.name AS ride_name, p.name AS park_name
-            FROM rides r
-            JOIN parks p ON r.park_id = p.park_id
-            WHERE r.ride_id = :ride_id
-        """)
-        result = self.conn.execute(query, {"ride_id": ride_id}).fetchone()
-        return dict(result._mapping) if result else {}
+        result = (
+            self.session.query(Ride, Park)
+            .join(Park, Ride.park_id == Park.park_id)
+            .filter(Ride.ride_id == ride_id)
+            .first()
+        )
+        if not result:
+            return {}
+
+        ride, park = result
+        return {
+            "ride_id": ride.ride_id,
+            "ride_name": ride.name,
+            "park_name": park.name
+        }
 
     def _get_snapshot_counts(self, park_id: int, start_date: date, end_date: date) -> Dict[str, int]:
         """Get snapshot counts for a park."""
-        query = text("""
-            SELECT
-                COUNT(*) AS total_snapshots,
-                COUNT(DISTINCT r.ride_id) AS rides_tracked,
-                COUNT(DISTINCT DATE(rss.recorded_at)) AS days_with_data
-            FROM ride_status_snapshots rss
-            JOIN rides r ON rss.ride_id = r.ride_id
-            WHERE r.park_id = :park_id
-            AND DATE(rss.recorded_at) BETWEEN :start_date AND :end_date
-            AND r.is_active = 1
-            AND r.category = 'ATTRACTION'
-        """)
-        result = self.conn.execute(
-            query, {"park_id": park_id, "start_date": start_date, "end_date": end_date}
-        ).fetchone()
-        return dict(result._mapping) if result else {}
+        result = (
+            self.session.query(
+                func.count(RideStatusSnapshot.snapshot_id).label('total_snapshots'),
+                func.count(func.distinct(Ride.ride_id)).label('rides_tracked'),
+                func.count(func.distinct(func.date(RideStatusSnapshot.recorded_at))).label('days_with_data')
+            )
+            .join(Ride, RideStatusSnapshot.ride_id == Ride.ride_id)
+            .filter(
+                Ride.park_id == park_id,
+                func.date(RideStatusSnapshot.recorded_at).between(start_date, end_date),
+                Ride.is_active == True,
+                Ride.category == 'ATTRACTION'
+            )
+            .first()
+        )
+
+        if not result:
+            return {}
+
+        return {
+            "total_snapshots": result.total_snapshots or 0,
+            "rides_tracked": result.rides_tracked or 0,
+            "days_with_data": result.days_with_data or 0
+        }
 
     def _get_ride_level_stats(
         self, park_id: int, start_date: date, end_date: date
     ) -> List[Dict[str, Any]]:
         """Get ride-level stats from pre-aggregated tables."""
-        query = text("""
-            SELECT
-                rds.ride_id,
-                r.name AS ride_name,
-                SUM(rds.operating_hours_minutes) AS operating_minutes,
-                SUM(rds.downtime_minutes) AS downtime_minutes,
-                ROUND(SUM(rds.downtime_minutes) / 60.0, 2) AS downtime_hours,
-                rc.tier,
-                COALESCE(rc.tier_weight, 2) AS tier_weight
-            FROM ride_daily_stats rds
-            JOIN rides r ON rds.ride_id = r.ride_id
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE r.park_id = :park_id
-            AND rds.stat_date BETWEEN :start_date AND :end_date
-            GROUP BY rds.ride_id, r.name, rc.tier, rc.tier_weight
-            ORDER BY downtime_hours DESC
-        """)
-        result = self.conn.execute(
-            query, {"park_id": park_id, "start_date": start_date, "end_date": end_date}
+        results = (
+            self.session.query(
+                RideDailyStats.ride_id,
+                Ride.name.label('ride_name'),
+                func.sum(RideDailyStats.uptime_minutes).label('operating_minutes'),
+                func.sum(RideDailyStats.downtime_minutes).label('downtime_minutes'),
+                func.round(func.sum(RideDailyStats.downtime_minutes) / 60.0, 2).label('downtime_hours'),
+                RideClassification.tier,
+                func.coalesce(RideClassification.tier_weight, 2).label('tier_weight')
+            )
+            .join(Ride, RideDailyStats.ride_id == Ride.ride_id)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .filter(
+                Ride.park_id == park_id,
+                RideDailyStats.stat_date.between(start_date, end_date)
+            )
+            .group_by(
+                RideDailyStats.ride_id,
+                Ride.name,
+                RideClassification.tier,
+                RideClassification.tier_weight
+            )
+            .order_by(func.sum(RideDailyStats.downtime_minutes).desc())
+            .all()
         )
-        return [dict(row._mapping) for row in result.fetchall()]
+
+        return [
+            {
+                "ride_id": r.ride_id,
+                "ride_name": r.ride_name,
+                "operating_minutes": r.operating_minutes or 0,
+                "downtime_minutes": r.downtime_minutes or 0,
+                "downtime_hours": float(r.downtime_hours or 0),
+                "tier": r.tier,
+                "tier_weight": r.tier_weight or 2
+            }
+            for r in results
+        ]
 
     def _get_weighted_stats(
         self, park_id: int, start_date: date, end_date: date
     ) -> Dict[str, Any]:
         """Get weighted downtime calculation from pre-aggregated tables."""
-        query = text("""
-            SELECT
-                ROUND(SUM((rds.downtime_minutes / 60.0) * COALESCE(rc.tier_weight, 2)), 2) AS weighted_downtime_hours,
-                SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight,
-                COUNT(DISTINCT rds.ride_id) AS total_rides
-            FROM ride_daily_stats rds
-            JOIN rides r ON rds.ride_id = r.ride_id
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE r.park_id = :park_id
-            AND rds.stat_date BETWEEN :start_date AND :end_date
-        """)
-        result = self.conn.execute(
-            query, {"park_id": park_id, "start_date": start_date, "end_date": end_date}
-        ).fetchone()
-        return dict(result._mapping) if result else {}
+        result = (
+            self.session.query(
+                func.round(
+                    func.sum((RideDailyStats.downtime_minutes / 60.0) * func.coalesce(RideClassification.tier_weight, 2)),
+                    2
+                ).label('weighted_downtime_hours'),
+                func.sum(func.coalesce(RideClassification.tier_weight, 2)).label('total_park_weight'),
+                func.count(func.distinct(RideDailyStats.ride_id)).label('total_rides')
+            )
+            .join(Ride, RideDailyStats.ride_id == Ride.ride_id)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .filter(
+                Ride.park_id == park_id,
+                RideDailyStats.stat_date.between(start_date, end_date)
+            )
+            .first()
+        )
+
+        if not result:
+            return {}
+
+        return {
+            "weighted_downtime_hours": float(result.weighted_downtime_hours or 0),
+            "total_park_weight": int(result.total_park_weight or 0),
+            "total_rides": result.total_rides or 0
+        }
 
     def _calculate_shame_score(
         self, park_id: int, start_date: date, end_date: date
     ) -> Dict[str, Any]:
         """Calculate final shame score from pre-aggregated tables."""
-        query = text("""
-            SELECT
-                ROUND(SUM((rds.downtime_minutes / 60.0) * COALESCE(rc.tier_weight, 2)), 2) AS weighted_downtime_hours,
-                SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight,
-                ROUND(
-                    SUM((rds.downtime_minutes / 60.0) * COALESCE(rc.tier_weight, 2)) /
-                    NULLIF(SUM(COALESCE(rc.tier_weight, 2)), 0),
+        result = (
+            self.session.query(
+                func.round(
+                    func.sum((RideDailyStats.downtime_minutes / 60.0) * func.coalesce(RideClassification.tier_weight, 2)),
                     2
-                ) AS shame_score
-            FROM ride_daily_stats rds
-            JOIN rides r ON rds.ride_id = r.ride_id
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE r.park_id = :park_id
-            AND rds.stat_date BETWEEN :start_date AND :end_date
-        """)
-        result = self.conn.execute(
-            query, {"park_id": park_id, "start_date": start_date, "end_date": end_date}
-        ).fetchone()
-        return dict(result._mapping) if result else {}
+                ).label('weighted_downtime_hours'),
+                func.sum(func.coalesce(RideClassification.tier_weight, 2)).label('total_park_weight'),
+                func.round(
+                    func.sum((RideDailyStats.downtime_minutes / 60.0) * func.coalesce(RideClassification.tier_weight, 2)) /
+                    func.nullif(func.sum(func.coalesce(RideClassification.tier_weight, 2)), 0),
+                    2
+                ).label('shame_score')
+            )
+            .join(Ride, RideDailyStats.ride_id == Ride.ride_id)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .filter(
+                Ride.park_id == park_id,
+                RideDailyStats.stat_date.between(start_date, end_date)
+            )
+            .first()
+        )
+
+        if not result:
+            return {}
+
+        return {
+            "weighted_downtime_hours": float(result.weighted_downtime_hours or 0),
+            "total_park_weight": int(result.total_park_weight or 0),
+            "shame_score": float(result.shame_score or 0)
+        }
 
     def _get_ride_snapshot_breakdown(
         self, ride_id: int, start_date: date, end_date: date
@@ -465,57 +529,73 @@ class ComputationTracer:
         """Get ride stats breakdown from pre-aggregated tables."""
         # Note: Pre-aggregated tables have minutes, not snapshot counts
         # We convert to equivalent metrics
-        query = text("""
-            SELECT
-                SUM(rds.operating_hours_minutes) AS operating_minutes,
-                SUM(rds.uptime_minutes) AS uptime_minutes,
-                SUM(rds.downtime_minutes) AS downtime_minutes,
-                -- Convert to snapshot equivalents (5 min intervals)
-                ROUND(SUM(rds.operating_hours_minutes) / 5) AS park_open_snapshots,
-                ROUND(SUM(rds.uptime_minutes) / 5) AS operating_snapshots,
-                ROUND(SUM(rds.downtime_minutes) / 5) AS down_snapshots,
-                ROUND((SUM(rds.operating_hours_minutes) - SUM(rds.uptime_minutes) - SUM(rds.downtime_minutes)) / 5) AS other_snapshots
-            FROM ride_daily_stats rds
-            WHERE rds.ride_id = :ride_id
-            AND rds.stat_date BETWEEN :start_date AND :end_date
-        """)
-        result = self.conn.execute(
-            query, {"ride_id": ride_id, "start_date": start_date, "end_date": end_date}
-        ).fetchone()
-        return dict(result._mapping) if result else {}
+        result = (
+            self.session.query(
+                func.sum(RideDailyStats.operating_hours_minutes).label('operating_minutes'),
+                func.sum(RideDailyStats.uptime_minutes).label('uptime_minutes'),
+                func.sum(RideDailyStats.downtime_minutes).label('downtime_minutes'),
+                # Convert to snapshot equivalents (5 min intervals)
+                func.round(func.sum(RideDailyStats.operating_hours_minutes) / 5).label('park_open_snapshots'),
+                func.round(func.sum(RideDailyStats.uptime_minutes) / 5).label('operating_snapshots'),
+                func.round(func.sum(RideDailyStats.downtime_minutes) / 5).label('down_snapshots'),
+                func.round(
+                    (func.sum(RideDailyStats.operating_hours_minutes) -
+                     func.sum(RideDailyStats.uptime_minutes) -
+                     func.sum(RideDailyStats.downtime_minutes)) / 5
+                ).label('other_snapshots')
+            )
+            .filter(
+                RideDailyStats.ride_id == ride_id,
+                RideDailyStats.stat_date.between(start_date, end_date)
+            )
+            .first()
+        )
+
+        if not result:
+            return {}
+
+        return {
+            "operating_minutes": result.operating_minutes or 0,
+            "uptime_minutes": result.uptime_minutes or 0,
+            "downtime_minutes": result.downtime_minutes or 0,
+            "park_open_snapshots": int(result.park_open_snapshots or 0),
+            "operating_snapshots": int(result.operating_snapshots or 0),
+            "down_snapshots": int(result.down_snapshots or 0),
+            "other_snapshots": int(result.other_snapshots or 0),
+            "total_snapshots": int(result.park_open_snapshots or 0)
+        }
 
     def _get_data_quality(
         self, park_id: int, start_date: date, end_date: date
     ) -> Dict[str, Any]:
         """Get data quality metrics for a park from pre-aggregated tables."""
-        query = text("""
-            SELECT
-                AVG(pds.total_rides_tracked) AS avg_rides_tracked,
-                SUM(pds.total_downtime_hours) AS total_downtime_hours,
-                AVG(pds.avg_uptime_percentage) AS avg_uptime_percentage,
-                COUNT(DISTINCT pds.stat_date) AS days_with_data
-            FROM park_daily_stats pds
-            WHERE pds.park_id = :park_id
-            AND pds.stat_date BETWEEN :start_date AND :end_date
-        """)
-        result = self.conn.execute(
-            query, {"park_id": park_id, "start_date": start_date, "end_date": end_date}
-        ).fetchone()
+        result = (
+            self.session.query(
+                func.avg(ParkDailyStats.total_rides_tracked).label('avg_rides_tracked'),
+                func.sum(ParkDailyStats.total_downtime_hours).label('total_downtime_hours'),
+                func.avg(ParkDailyStats.avg_uptime_percentage).label('avg_uptime_percentage'),
+                func.count(func.distinct(ParkDailyStats.stat_date)).label('days_with_data')
+            )
+            .filter(
+                ParkDailyStats.park_id == park_id,
+                ParkDailyStats.stat_date.between(start_date, end_date)
+            )
+            .first()
+        )
 
         if not result:
             return {}
 
-        data = dict(result._mapping)
         days = (end_date - start_date).days + 1
 
         return {
-            "avg_rides_tracked": data.get("avg_rides_tracked", 0),
-            "total_downtime_hours": data.get("total_downtime_hours", 0),
-            "avg_uptime_percentage": round(data.get("avg_uptime_percentage") or 0, 1),
-            "days_with_data": data.get("days_with_data", 0),
+            "avg_rides_tracked": float(result.avg_rides_tracked or 0),
+            "total_downtime_hours": float(result.total_downtime_hours or 0),
+            "avg_uptime_percentage": round(float(result.avg_uptime_percentage or 0), 1),
+            "days_with_data": result.days_with_data or 0,
             "expected_days": days,
             "data_completeness": round(
-                100.0 * (data.get("days_with_data") or 0) / max(days, 1), 1
+                100.0 * (result.days_with_data or 0) / max(days, 1), 1
             ),
         }
 

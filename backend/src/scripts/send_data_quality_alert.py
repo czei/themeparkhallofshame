@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail, Email, To, Content
 
-from database.connection import get_db_connection
+from database.connection import get_db_connection, get_db_session
 from database.repositories.data_quality_repository import DataQualityRepository
 from database.queries.trends.least_reliable_rides import LeastReliableRidesQuery
 from database.queries.trends.longest_wait_times import LongestWaitTimesQuery
@@ -55,8 +55,8 @@ MIN_WAIT_TIME_MINUTES = 0  # Can't be negative
 
 def get_significant_issues(hours: int = 24) -> list:
     """Get data quality issues worth alerting about."""
-    with get_db_connection() as conn:
-        repo = DataQualityRepository(conn)
+    with get_db_session() as session:
+        repo = DataQualityRepository(session)
         issues = repo.get_recent_issues(
             hours=hours,
             data_source="themeparks_wiki",
@@ -76,8 +76,8 @@ def get_significant_issues(hours: int = 24) -> list:
 
 def get_summary_stats() -> dict:
     """Get summary statistics for the email."""
-    with get_db_connection() as conn:
-        repo = DataQualityRepository(conn)
+    with get_db_session() as session:
+        repo = DataQualityRepository(session)
         summary = repo.get_summary_for_reporting(days=7, data_source="themeparks_wiki")
 
         # Filter out CLOSED status - those are expected for seasonal parks

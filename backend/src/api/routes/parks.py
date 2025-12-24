@@ -301,76 +301,83 @@ def get_park_wait_times():
             logger.info(f"Cache HIT for park waittimes: period={period}, filter={filter_type}")
             return jsonify(cached_result), 200
 
-        with get_db_connection() as conn:
-            filter_disney_universal = (filter_type == 'disney-universal')
+        # Note: Mixed session/connection usage during ORM migration
+        # - TODAY period uses Session (TodayParkWaitTimesQuery converted to ORM)
+        # - Other periods still use Connection (not yet converted)
+        filter_disney_universal = (filter_type == 'disney-universal')
 
-            # Route to appropriate query based on period
-            if period == 'live':
-                # LIVE data - instantaneous current wait times
-                stats_repo = StatsRepository(conn)
-                wait_times = stats_repo.get_park_live_wait_time_rankings(
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
-            elif period == 'today':
+        if period == 'today':
+            # ORM-based query - uses Session
+            with get_db_session() as session:
                 # TODAY data - cumulative from midnight Pacific to now
                 # See: database/queries/today/today_park_wait_times.py
-                query = TodayParkWaitTimesQuery(conn)
+                query = TodayParkWaitTimesQuery(session)
                 wait_times = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
-            elif period == 'yesterday':
-                # YESTERDAY data - full previous Pacific day
-                # See: database/queries/yesterday/yesterday_park_wait_times.py
-                query = YesterdayParkWaitTimesQuery(conn)
-                wait_times = query.get_rankings(
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
-            else:
-                # Historical data from aggregated stats (calendar-based periods)
-                # See: database/queries/rankings/park_wait_time_rankings.py
-                query = ParkWaitTimeRankingsQuery(conn)
-                if period == 'last_week':
-                    wait_times = query.get_weekly(
+        else:
+            # Legacy queries - still use Connection
+            with get_db_connection() as conn:
+                # Route to appropriate query based on period
+                if period == 'live':
+                    # LIVE data - instantaneous current wait times
+                    stats_repo = StatsRepository(conn)
+                    wait_times = stats_repo.get_park_live_wait_time_rankings(
                         filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
-                else:  # last_month
-                    wait_times = query.get_monthly(
+                elif period == 'yesterday':
+                    # YESTERDAY data - full previous Pacific day
+                    # See: database/queries/yesterday/yesterday_park_wait_times.py
+                    query = YesterdayParkWaitTimesQuery(conn)
+                    wait_times = query.get_rankings(
                         filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
+                else:
+                    # Historical data from aggregated stats (calendar-based periods)
+                    # See: database/queries/rankings/park_wait_time_rankings.py
+                    query = ParkWaitTimeRankingsQuery(conn)
+                    if period == 'last_week':
+                        wait_times = query.get_weekly(
+                            filter_disney_universal=filter_disney_universal,
+                            limit=limit
+                        )
+                    else:  # last_month
+                        wait_times = query.get_monthly(
+                            filter_disney_universal=filter_disney_universal,
+                            limit=limit
+                        )
 
-            # Add external URLs and rank to wait times
-            wait_times_with_urls = []
-            for rank_idx, park in enumerate(wait_times, start=1):
-                park_dict = dict(park) if hasattr(park, '_mapping') else dict(park)
-                park_dict['rank'] = rank_idx
-                if 'queue_times_id' in park_dict:
-                    park_dict['queue_times_url'] = f"https://queue-times.com/parks/{park_dict['queue_times_id']}"
-                wait_times_with_urls.append(park_dict)
+        # Add external URLs and rank to wait times (applies to all periods)
+        wait_times_with_urls = []
+        for rank_idx, park in enumerate(wait_times, start=1):
+            park_dict = dict(park) if hasattr(park, '_mapping') else dict(park)
+            park_dict['rank'] = rank_idx
+            if 'queue_times_id' in park_dict:
+                park_dict['queue_times_url'] = f"https://queue-times.com/parks/{park_dict['queue_times_id']}"
+            wait_times_with_urls.append(park_dict)
 
-            # Build response
-            response = {
-                "success": True,
-                "period": period,
-                "filter": filter_type,
-                "data": wait_times_with_urls,
-                "attribution": {
-                    "data_source": "ThemeParks.wiki",
-                    "url": "https://themeparks.wiki"
-                }
+        # Build response
+        response = {
+            "success": True,
+            "period": period,
+            "filter": filter_type,
+            "data": wait_times_with_urls,
+            "attribution": {
+                "data_source": "ThemeParks.wiki",
+                "url": "https://themeparks.wiki"
             }
+        }
 
-            logger.info(f"Park wait times requested: period={period}, filter={filter_type}, results={len(wait_times_with_urls)}")
+        logger.info(f"Park wait times requested: period={period}, filter={filter_type}, results={len(wait_times_with_urls)}")
 
-            # Cache the result (5-minute TTL)
-            cache.set(cache_key, response)
-            logger.info(f"Cache STORE for park waittimes: period={period}, filter={filter_type}")
+        # Cache the result (5-minute TTL)
+        cache.set(cache_key, response)
+        logger.info(f"Cache STORE for park waittimes: period={period}, filter={filter_type}")
 
-            return jsonify(response), 200
+        return jsonify(response), 200
 
     except Exception as e:
         logger.error(f"Error fetching park wait times: {e}", exc_info=True)

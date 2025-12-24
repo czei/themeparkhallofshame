@@ -509,6 +509,77 @@ query.filter(Snapshot.is_operating())  # SQL
 
 ---
 
+## No Backfill Benefit: Instant Bug Fixes
+
+One of the primary benefits of the ORM refactoring is **instant bug fixes** across all historical data.
+
+### The Old Problem: Aggregation Tables
+
+With aggregation tables (like `hourly_stats`), fixing a calculation bug required:
+
+1. Fix the aggregation code
+2. Re-run aggregation job for **all affected historical data** (potentially millions of rows)
+3. Wait hours for backfill to complete
+4. Deal with stale data during backfill window
+5. Hope the backfill doesn't fail partway through
+
+**Example**: If we discovered that Disney parks were incorrectly counting CLOSED status as downtime (when it should only count DOWN), we would need to:
+- Stop the aggregation job
+- Fix the code
+- Delete all historical hourly_stats records
+- Re-run backfill for 90+ days of data
+- This could take 30+ minutes even with optimized queries
+
+### The New Solution: On-the-Fly ORM Queries
+
+With ORM queries that compute metrics on-the-fly from raw snapshot data:
+
+1. Fix the ORM query code
+2. Deploy
+3. **Done!** All historical queries immediately return correct values
+
+**Why?** Because there's no pre-computed cache to invalidate. Every API request recalculates from the source of truth (raw snapshots).
+
+### Example: Park-Type Aware Downtime Fix
+
+```python
+# OLD (buggy): Counted CLOSED as downtime for all parks
+.filter(RideStatusSnapshot.status.in_(['DOWN', 'CLOSED']))
+
+# NEW (fixed): Only count CLOSED for non-Disney/Universal parks
+.filter(
+    or_(
+        RideStatusSnapshot.status == 'DOWN',
+        and_(
+            RideStatusSnapshot.status == 'CLOSED',
+            Park.is_disney == False,
+            Park.is_universal == False
+        )
+    )
+)
+```
+
+After deploying this fix:
+- Query for **today**: Returns corrected values ✅
+- Query for **yesterday**: Returns corrected values ✅
+- Query for **last week**: Returns corrected values ✅
+- Query for **last month**: Returns corrected values ✅
+
+**All historical periods instantly see the fix without any backfill!**
+
+### Validation Test
+
+See `tests/golden_data/test_orm_query_parity.py::TestInstantBugFixValidation` for a regression test that validates this behavior.
+
+### Trade-offs
+
+- **Pro**: Instant bug fixes, no backfill maintenance
+- **Pro**: Single source of truth (raw snapshots)
+- **Con**: Slightly higher query cost (computing on-the-fly vs reading pre-aggregated)
+- **Mitigated by**: Composite indexes on snapshot tables make on-the-fly queries fast (<100ms for hourly data)
+
+---
+
 ## Summary
 
 **Key Takeaways**:

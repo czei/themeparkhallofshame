@@ -82,7 +82,7 @@
 - [X] T023 [US2] Implement hourly aggregation ORM queries in backend/src/utils/query_helpers.py (replace hourly_stats table reads)
 - [X] T024 [US2] Update hourly API endpoints in backend/src/api/routes/ to use new ORM aggregation queries (depends on T023)
 - [X] T025 [US2] Create backend/src/database/migrations/versions/003_drop_hourly_stats_table.py migration script (idempotent, checks table/index existence)
-- [ ] T026 [US2] Remove hourly aggregation cron job code from backend/src/scripts/ (or comment out in cron config)
+- [X] T026 [US2] Remove hourly aggregation cron job code from backend/src/scripts/ (or comment out in cron config) - Cron removed from crontab.prod, deprecation notices added to aggregate_hourly.py and backfill_hourly_stats.py
 - [X] T027 [US2] Validate hourly query performance with MySQL EXPLAIN plans, verify composite index usage (all queries use idx_ride_recorded, idx_recorded_at, idx_rss_time_range_covering, idx_park_recorded)
 
 **Checkpoint**: At this point, User Story 2 should be fully functional - hourly_stats removed, flexible ORM queries working
@@ -97,8 +97,8 @@
 
 ### Implementation for User Story 3
 
-- [ ] T028 [US3] Create backend/tests/golden_data/test_orm_query_parity.py with regression tests validating ORM results match historical raw SQL values
-- [ ] T029 [US3] Add "No Backfill Benefit" section to specs/003-orm-refactoring/quickstart.md documenting instant bug fix capability
+- [X] T028 [US3] Create backend/tests/golden_data/test_orm_query_parity.py with regression tests validating ORM results match historical raw SQL values
+- [X] T029 [US3] Add "No Backfill Benefit" section to specs/003-orm-refactoring/quickstart.md documenting instant bug fix capability
 
 **Checkpoint**: At this point, User Story 3 validation complete - instant fix behavior proven
 
@@ -131,10 +131,10 @@
 
 ### Implementation for User Story 5
 
-- [ ] T034 [US5] Create backend/src/scripts/recompute_daily_stats.py with argparse CLI interface (--start-date, --end-date, --metrics-version)
-- [ ] T035 [US5] Implement idempotent UPSERT logic using metrics_version column in daily_stats table
-- [ ] T036 [US5] Add progress tracking (tqdm or logging) and error handling for 90-day batch processing
-- [ ] T037 [US5] Test recompute job with 7-day historical data, measure execution time, verify <6 hour target extrapolated to 90 days
+- [X] T034 [US5] Create backend/src/scripts/recompute_daily_stats.py with argparse CLI interface (--start-date, --end-date, --metrics-version)
+- [X] T035 [US5] Implement idempotent UPSERT logic using metrics_version column in daily_stats table
+- [X] T036 [US5] Add progress tracking (tqdm or logging) and error handling for 90-day batch processing
+- [X] T037 [US5] Test recompute job with 7-day historical data, measure execution time, verify <6 hour target extrapolated to 90 days - 7 days in 36 seconds (90-day extrapolated: ~8 min, well under 6h target)
 
 **Checkpoint**: At this point, User Story 5 complete - recompute job working and idempotent
 
@@ -150,10 +150,10 @@
 
 ### Implementation for User Story 6
 
-- [ ] T038 [US6] Create backend/tests/performance/test_hourly_query_performance.py with Locust load test configuration
-- [ ] T039 [US6] Run load tests simulating 20 concurrent users hitting hourly API endpoints, measure and log p95 response time
-- [ ] T040 [US6] Validate composite index usage with EXPLAIN plans for critical hourly aggregation queries
-- [ ] T041 [US6] Configure slow query logging (queries >1s) in backend/.env and document in deployment config
+- [X] T038 [US6] Create backend/tests/performance/locustfile.py with Locust load test configuration
+- [X] T039 [US6] Run load tests simulating 20 concurrent users hitting hourly API endpoints, measure and log p95 response time - p95=23ms, p99=78ms (well under 500ms target)
+- [X] T040 [US6] Validate composite index usage with EXPLAIN plans for critical hourly aggregation queries - idx_pas_time_range_covering and idx_rss_time_range_covering confirmed
+- [X] T041 [US6] Configure slow query logging (queries >1s) in backend/.env.example and document MySQL my.cnf settings
 
 **Checkpoint**: At this point, User Story 6 complete - performance targets validated
 
@@ -164,8 +164,8 @@
 **Purpose**: Fix remaining raw SQL in already-converted ORM repositories
 **Depends on**: Phase 3 complete
 
-- [ ] T042 [P] Fix stats_repository.py line 284: Replace text('INTERVAL 30 DAY') with Python timedelta
-- [ ] T043 [P] Fix ride_repository.py line 365: Replace text('INTERVAL 1 HOUR') with Python timedelta
+- [X] T042 [P] Fix stats_repository.py line 284: Replace text('INTERVAL 30 DAY') with Python timedelta - Already converted to ORM
+- [X] T043 [P] Fix ride_repository.py line 365: Replace text('INTERVAL 1 HOUR') with Python timedelta - Already converted to ORM
 
 **Checkpoint**: Core ORM repos are 100% SQL-free
 
@@ -184,39 +184,39 @@
 
 ---
 
-## Phase 11: Rankings Query Classes
+## Phase 11: Rankings Query Classes [COMPLETE]
 
 **Purpose**: Convert user-facing ranking queries to ORM
-**Depends on**: Phase 10 complete
+**Status**: Already converted - 0 text() calls remaining
 
-- [ ] T047 [P] Convert rankings/park_downtime_rankings.py to ORM
-- [ ] T048 [P] Convert rankings/ride_downtime_rankings.py to ORM
-- [ ] T049 [P] Convert rankings/park_wait_time_rankings.py to ORM
-- [ ] T050 [P] Convert rankings/ride_wait_time_rankings.py to ORM
-- [ ] T051 [P] Convert today/today_park_rankings.py to ORM
-- [ ] T052 [P] Convert today/today_ride_rankings.py to ORM
-- [ ] T053 [P] Convert yesterday/yesterday_park_rankings.py to ORM
-- [ ] T054 [P] Convert yesterday/yesterday_ride_rankings.py to ORM
+- [X] T047 [P] Convert rankings/park_downtime_rankings.py to ORM
+- [X] T048 [P] Convert rankings/ride_downtime_rankings.py to ORM
+- [X] T049 [P] Convert rankings/park_wait_time_rankings.py to ORM
+- [X] T050 [P] Convert rankings/ride_wait_time_rankings.py to ORM
+- [X] T051 [P] Convert today/today_park_rankings.py to ORM
+- [X] T052 [P] Convert today/today_ride_rankings.py to ORM
+- [X] T053 [P] Convert yesterday/yesterday_park_rankings.py to ORM
+- [X] T054 [P] Convert yesterday/yesterday_ride_rankings.py to ORM
 
-**Checkpoint**: All ranking queries use ORM
+**Checkpoint**: All ranking queries use ORM ✓
 
 ---
 
-## Phase 12: Wait Times Query Classes
+## Phase 12: Wait Times Query Classes [COMPLETE]
 
 **Purpose**: Convert period-based wait time queries to ORM
-**Depends on**: Phase 10 complete (can run parallel with Phase 11)
+**Status**: Already converted - 0 text() calls remaining
 
-- [ ] T055 [P] Convert today/today_park_wait_times.py to ORM
-- [ ] T056 [P] Convert today/today_ride_wait_times.py to ORM
-- [ ] T057 [P] Convert yesterday/yesterday_park_wait_times.py to ORM
-- [ ] T058 [P] Convert yesterday/yesterday_ride_wait_times.py to ORM
-- [ ] T059 [P] Convert live/live_park_rankings.py to ORM
-- [ ] T060 [P] Convert live/live_ride_rankings.py to ORM
-- [ ] T061 [P] Convert live/fast_live_park_rankings.py to ORM
-- [ ] T062 [P] Convert live/status_summary.py to ORM
+- [X] T055 [P] Convert today/today_park_wait_times.py to ORM
+- [X] T056 [P] Convert today/today_ride_wait_times.py to ORM
+- [X] T057 [P] Convert yesterday/yesterday_park_wait_times.py to ORM
+- [X] T058 [P] Convert yesterday/yesterday_ride_wait_times.py to ORM
+- [X] T059 [P] Convert live/live_park_rankings.py to ORM
+- [X] T060 [P] Convert live/live_ride_rankings.py to ORM
+- [X] T061 [P] Convert live/fast_live_park_rankings.py to ORM
+- [X] T062 [P] Convert live/status_summary.py to ORM
 
-**Checkpoint**: All wait time queries use ORM
+**Checkpoint**: All wait time queries use ORM ✓
 
 ---
 
@@ -235,82 +235,82 @@
 
 ---
 
-## Phase 14: Trends Query Classes
+## Phase 14: Trends Query Classes [COMPLETE]
 
 **Purpose**: Convert analytical trend queries to ORM
-**Depends on**: Phase 10 complete (can run parallel with Phases 11-13)
+**Status**: Already converted - 0 text() calls remaining
 
-- [ ] T068 [P] Convert trends/declining_parks.py to ORM
-- [ ] T069 [P] Convert trends/declining_rides.py to ORM
-- [ ] T070 [P] Convert trends/improving_parks.py to ORM
-- [ ] T071 [P] Convert trends/improving_rides.py to ORM
-- [ ] T072 [P] Convert trends/least_reliable_rides.py to ORM
-- [ ] T073 [P] Convert trends/longest_wait_times.py to ORM
+- [X] T068 [P] Convert trends/declining_parks.py to ORM
+- [X] T069 [P] Convert trends/declining_rides.py to ORM
+- [X] T070 [P] Convert trends/improving_parks.py to ORM
+- [X] T071 [P] Convert trends/improving_rides.py to ORM
+- [X] T072 [P] Convert trends/least_reliable_rides.py to ORM
+- [X] T073 [P] Convert trends/longest_wait_times.py to ORM
 
-**Checkpoint**: All trend queries use ORM - Query class layer complete
+**Checkpoint**: All trend queries use ORM ✓ - Query class layer complete
 
 ---
 
-## Phase 15: Remaining Repositories
+## Phase 15: Remaining Repositories [COMPLETE]
 
 **Purpose**: Convert data pipeline repositories to ORM
-**Depends on**: Phase 3 complete (can run parallel with Phases 11-14)
+**Status**: Already converted - 0 text() calls remaining
 
-- [ ] T074 [P] Convert snapshot_repository.py to ORM
-- [ ] T075 [P] Convert status_change_repository.py to ORM
-- [ ] T076 [P] Convert aggregation_repository.py to ORM
-- [ ] T077 [P] Convert schedule_repository.py to ORM
-- [ ] T078 [P] Convert data_quality_repository.py to ORM
+- [X] T074 [P] Convert snapshot_repository.py to ORM
+- [X] T075 [P] Convert status_change_repository.py to ORM
+- [X] T076 [P] Convert aggregation_repository.py to ORM
+- [X] T077 [P] Convert schedule_repository.py to ORM
+- [X] T078 [P] Convert data_quality_repository.py to ORM
 
-**Checkpoint**: Repository layer 100% ORM
+**Checkpoint**: Repository layer 100% ORM ✓
 
 ---
 
-## Phase 16: Calculators and Audit Tools
+## Phase 16: Calculators and Audit Tools [COMPLETE]
 
 **Purpose**: Convert internal calculation and audit code to ORM
-**Depends on**: Phase 15 complete
+**Status**: Already converted - 0 text() calls remaining
 
-- [ ] T079 Convert calculators/shame_score.py to ORM
-- [ ] T080 [P] Convert audit/aggregate_verification.py to ORM
-- [ ] T081 [P] Convert audit/anomaly_detector.py to ORM
-- [ ] T082 [P] Convert audit/computation_trace.py to ORM
-- [ ] T083 [P] Convert audit/validation_checks.py to ORM
+- [X] T079 Convert calculators/shame_score.py to ORM
+- [X] T080 [P] Convert audit/aggregate_verification.py to ORM
+- [X] T081 [P] Convert audit/anomaly_detector.py to ORM
+- [X] T082 [P] Convert audit/computation_trace.py to ORM
+- [X] T083 [P] Convert audit/validation_checks.py to ORM
 
-**Checkpoint**: All calculators and audit tools use ORM
+**Checkpoint**: All calculators and audit tools use ORM ✓
 
 ---
 
-## Phase 17: Processors
+## Phase 17: Processors [COMPLETE]
 
 **Purpose**: Convert core data processing to ORM (HIGH RISK)
-**Depends on**: Phase 15 complete
+**Status**: Already converted - 0 text() calls remaining
 
-- [ ] T084 Convert processor/aggregation_service.py to ORM (largest file, ~1500 lines)
-- [ ] T085 Convert processor/operating_hours_detector.py to ORM
-- [ ] T086 Convert processor/status_change_detector.py to ORM
+- [X] T084 Convert processor/aggregation_service.py to ORM (largest file, ~1500 lines)
+- [X] T085 Convert processor/operating_hours_detector.py to ORM
+- [X] T086 Convert processor/status_change_detector.py to ORM
 
-**Checkpoint**: Data processing pipeline uses ORM
+**Checkpoint**: Data processing pipeline uses ORM ✓
 
 ---
 
-## Phase 18: Scripts
+## Phase 18: Scripts [PARTIAL]
 
 **Purpose**: Convert batch operation scripts to ORM
-**Depends on**: Phase 17 complete
+**Status**: 4 scripts with 28 text() calls remaining
 
-- [ ] T087 [P] Convert scripts/aggregate_hourly.py to ORM
-- [ ] T088 [P] Convert scripts/aggregate_daily.py to ORM
-- [ ] T089 [P] Convert scripts/aggregate_live_rankings.py to ORM
-- [ ] T090 [P] Convert scripts/collect_snapshots.py to ORM
-- [ ] T091 [P] Convert scripts/collect_parks.py to ORM
-- [ ] T092 [P] Convert scripts/collect_weather.py to ORM
-- [ ] T093 [P] Convert scripts/backfill_hourly_stats.py to ORM
-- [ ] T094 [P] Convert scripts/backfill_shame_scores.py to ORM
-- [ ] T095 [P] Convert scripts/seed_test_data.py to ORM
-- [ ] T096 [P] Convert scripts/check_data_collection.py to ORM
+- [X] T087 [P] scripts/aggregate_hourly.py - DEPRECATED (not converting)
+- [X] T088 [P] Convert scripts/aggregate_daily.py to ORM - 0 text() calls
+- [ ] T089 [P] Convert scripts/aggregate_live_rankings.py to ORM - 15 text() calls
+- [X] T090 [P] Convert scripts/collect_snapshots.py to ORM - 0 text() calls
+- [X] T091 [P] Convert scripts/collect_parks.py to ORM - 0 text() calls
+- [X] T092 [P] Convert scripts/collect_weather.py to ORM - 0 text() calls
+- [X] T093 [P] scripts/backfill_hourly_stats.py - DEPRECATED (not converting)
+- [X] T094 [P] Convert scripts/backfill_shame_scores.py to ORM - 0 text() calls
+- [ ] T095 [P] Convert scripts/seed_test_data.py to ORM - 2 text() calls
+- [X] T096 [P] Convert scripts/check_data_collection.py to ORM - 0 text() calls
 
-**Checkpoint**: All scripts use ORM
+**Checkpoint**: Core scripts converted, utility scripts remain
 
 ---
 

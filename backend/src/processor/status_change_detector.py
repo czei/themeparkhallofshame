@@ -5,9 +5,10 @@ Detects ride status transitions (open ↔ closed) and calculates downtime durati
 
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy import select, insert, func
+from sqlalchemy.orm import Session
 
+from src.models import Park, Ride, RideStatusSnapshot, RideStatusChange
 from utils.logger import logger
 
 
@@ -19,14 +20,14 @@ class StatusChangeDetector:
     and closed → open (downtime end), then calculates duration.
     """
 
-    def __init__(self, connection: Connection):
+    def __init__(self, session: Session):
         """
-        Initialize detector with database connection.
+        Initialize detector with database session.
 
         Args:
-            connection: SQLAlchemy connection object
+            session: SQLAlchemy session object
         """
-        self.conn = connection
+        self.session = session
 
     def detect_status_changes(
         self,
@@ -46,25 +47,22 @@ class StatusChangeDetector:
             List of status change dictionaries
         """
         # Get all snapshots ordered by time
-        query = text("""
-            SELECT
-                snapshot_id,
-                ride_id,
-                recorded_at,
-                computed_is_open
-            FROM ride_status_snapshots
-            WHERE ride_id = :ride_id
-                AND recorded_at >= :start_time
-                AND recorded_at <= :end_time
-            ORDER BY recorded_at ASC
-        """)
+        stmt = (
+            select(
+                RideStatusSnapshot.snapshot_id,
+                RideStatusSnapshot.ride_id,
+                RideStatusSnapshot.recorded_at,
+                RideStatusSnapshot.computed_is_open
+            )
+            .where(
+                RideStatusSnapshot.ride_id == ride_id,
+                RideStatusSnapshot.recorded_at >= start_time,
+                RideStatusSnapshot.recorded_at <= end_time
+            )
+            .order_by(RideStatusSnapshot.recorded_at.asc())
+        )
 
-        result = self.conn.execute(query, {
-            "ride_id": ride_id,
-            "start_time": start_time,
-            "end_time": end_time
-        })
-
+        result = self.session.execute(stmt)
         snapshots = [dict(row._mapping) for row in result]
 
         if len(snapshots) < 2:
@@ -120,18 +118,17 @@ class StatusChangeDetector:
         Returns:
             Inserted change_id
         """
-        query = text("""
-            INSERT INTO ride_status_changes (
-                ride_id, previous_status, new_status,
-                change_detected_at, downtime_duration_minutes
-            )
-            VALUES (
-                :ride_id, :previous_status, :new_status,
-                :change_detected_at, :downtime_duration_minutes
-            )
-        """)
+        # Map internal field names to database schema
+        stmt = insert(RideStatusChange).values(
+            ride_id=change_data['ride_id'],
+            previous_status=change_data['previous_status'],
+            new_status=change_data['new_status'],
+            changed_at=change_data['change_detected_at'],
+            duration_in_previous_status=change_data.get('downtime_duration_minutes', 0) or 0,
+            wait_time_at_change=change_data.get('wait_time_at_change')
+        )
 
-        result = self.conn.execute(query, change_data)
+        result = self.session.execute(stmt)
         change_id = result.lastrowid
 
         logger.debug(f"Saved status change {change_id} for ride {change_data['ride_id']}")
@@ -153,14 +150,13 @@ class StatusChangeDetector:
             Dictionary mapping ride_id to list of changes
         """
         # Get all active rides
-        rides_query = text("""
-            SELECT ride_id
-            FROM rides
-            WHERE is_active = TRUE
-            ORDER BY ride_id
-        """)
+        stmt = (
+            select(Ride.ride_id)
+            .where(Ride.is_active == True)
+            .order_by(Ride.ride_id)
+        )
 
-        result = self.conn.execute(rides_query)
+        result = self.session.execute(stmt)
         ride_ids = [row.ride_id for row in result]
 
         all_changes = {}
@@ -237,41 +233,35 @@ class StatusChangeDetector:
         Returns:
             List of longest downtime events
         """
-        park_filter = "AND r.park_id = :park_id" if park_id else ""
-        time_filter = ""
+        # Build query with ORM models
+        stmt = (
+            select(
+                RideStatusChange.change_id,
+                RideStatusChange.ride_id,
+                Ride.name.label('ride_name'),
+                Park.name.label('park_name'),
+                RideStatusChange.changed_at.label('change_detected_at'),
+                RideStatusChange.duration_in_previous_status.label('downtime_duration_minutes'),
+                func.round(RideStatusChange.duration_in_previous_status / 60.0, 2).label('downtime_hours')
+            )
+            .select_from(RideStatusChange)
+            .join(Ride, RideStatusChange.ride_id == Ride.ride_id)
+            .join(Park, Ride.park_id == Park.park_id)
+            .where(
+                RideStatusChange.duration_in_previous_status.isnot(None),
+                RideStatusChange.new_status == True
+            )
+        )
 
-        if start_time:
-            time_filter += "AND rsc.change_detected_at >= :start_time "
-        if end_time:
-            time_filter += "AND rsc.change_detected_at <= :end_time "
-
-        query = text(f"""
-            SELECT
-                rsc.change_id,
-                rsc.ride_id,
-                r.name AS ride_name,
-                p.name AS park_name,
-                rsc.change_detected_at,
-                rsc.downtime_duration_minutes,
-                ROUND(rsc.downtime_duration_minutes / 60.0, 2) AS downtime_hours
-            FROM ride_status_changes rsc
-            INNER JOIN rides r ON rsc.ride_id = r.ride_id
-            INNER JOIN parks p ON r.park_id = p.park_id
-            WHERE rsc.downtime_duration_minutes IS NOT NULL
-                AND rsc.new_status = TRUE
-                {park_filter}
-                {time_filter}
-            ORDER BY rsc.downtime_duration_minutes DESC
-            LIMIT :limit
-        """)
-
-        params = {"limit": limit}
+        # Add optional filters
         if park_id:
-            params["park_id"] = park_id
+            stmt = stmt.where(Ride.park_id == park_id)
         if start_time:
-            params["start_time"] = start_time
+            stmt = stmt.where(RideStatusChange.changed_at >= start_time)
         if end_time:
-            params["end_time"] = end_time
+            stmt = stmt.where(RideStatusChange.changed_at <= end_time)
 
-        result = self.conn.execute(query, params)
+        stmt = stmt.order_by(RideStatusChange.duration_in_previous_status.desc()).limit(limit)
+
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]

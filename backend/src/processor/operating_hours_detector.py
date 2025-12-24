@@ -6,10 +6,12 @@ Detects park operating hours from ride activity in local timezone.
 from datetime import datetime, date, time, timedelta
 from typing import Optional, List, Dict, Any
 from zoneinfo import ZoneInfo
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy import select, func, case
+from sqlalchemy.orm import Session
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 from utils.logger import logger
+from src.models import Park, Ride, RideStatusSnapshot, ParkOperatingSession
 
 
 class OperatingHoursDetector:
@@ -20,14 +22,14 @@ class OperatingHoursDetector:
     All times are handled in the park's local timezone (parks.timezone field).
     """
 
-    def __init__(self, connection: Connection):
+    def __init__(self, session: Session):
         """
-        Initialize detector with database connection.
+        Initialize detector with database session.
 
         Args:
-            connection: SQLAlchemy connection object
+            session: SQLAlchemy session object
         """
-        self.conn = connection
+        self.session = session
 
     def detect_operating_session(
         self,
@@ -55,26 +57,26 @@ class OperatingHoursDetector:
         utc_end = local_end.astimezone(ZoneInfo('UTC'))
 
         # Find first and last ride activity
-        query = text("""
-            SELECT
-                MIN(rss.recorded_at) AS first_activity,
-                MAX(rss.recorded_at) AS last_activity,
-                COUNT(DISTINCT rss.ride_id) AS active_rides_count,
-                SUM(CASE WHEN rss.computed_is_open = TRUE THEN 1 ELSE 0 END) AS open_ride_snapshots
-            FROM ride_status_snapshots rss
-            INNER JOIN rides r ON rss.ride_id = r.ride_id
-            WHERE r.park_id = :park_id
-                AND rss.recorded_at >= :utc_start
-                AND rss.recorded_at <= :utc_end
-                AND r.is_active = TRUE
-        """)
+        stmt = (
+            select(
+                func.min(RideStatusSnapshot.recorded_at).label('first_activity'),
+                func.max(RideStatusSnapshot.recorded_at).label('last_activity'),
+                func.count(func.distinct(RideStatusSnapshot.ride_id)).label('active_rides_count'),
+                func.sum(
+                    case((RideStatusSnapshot.computed_is_open == True, 1), else_=0)
+                ).label('open_ride_snapshots')
+            )
+            .select_from(RideStatusSnapshot)
+            .join(Ride, RideStatusSnapshot.ride_id == Ride.ride_id)
+            .where(
+                Ride.park_id == park_id,
+                RideStatusSnapshot.recorded_at >= utc_start,
+                RideStatusSnapshot.recorded_at <= utc_end,
+                Ride.is_active == True
+            )
+        )
 
-        result = self.conn.execute(query, {
-            "park_id": park_id,
-            "utc_start": utc_start,
-            "utc_end": utc_end
-        })
-
+        result = self.session.execute(stmt)
         row = result.fetchone()
 
         if not row or not row.first_activity:
@@ -125,20 +127,23 @@ class OperatingHoursDetector:
         Returns:
             Inserted session_id
         """
-        query = text("""
-            INSERT INTO park_operating_sessions (
-                park_id, session_date, session_start_utc, session_end_utc, operating_minutes
-            )
-            VALUES (
-                :park_id, :session_date, :session_start_utc, :session_end_utc, :operating_minutes
-            )
-            ON DUPLICATE KEY UPDATE
-                session_start_utc = VALUES(session_start_utc),
-                session_end_utc = VALUES(session_end_utc),
-                operating_minutes = VALUES(operating_minutes)
-        """)
+        # Use MySQL ON DUPLICATE KEY UPDATE for upsert
+        stmt = mysql_insert(ParkOperatingSession).values(
+            park_id=session_data['park_id'],
+            session_date=session_data['session_date'],
+            session_start_utc=session_data['session_start_utc'],
+            session_end_utc=session_data['session_end_utc'],
+            operating_minutes=session_data['operating_minutes']
+        )
 
-        result = self.conn.execute(query, session_data)
+        # On duplicate (park_id, session_date), update the values
+        stmt = stmt.on_duplicate_key_update(
+            session_start_utc=stmt.inserted.session_start_utc,
+            session_end_utc=stmt.inserted.session_end_utc,
+            operating_minutes=stmt.inserted.operating_minutes
+        )
+
+        result = self.session.execute(stmt)
         session_id = result.lastrowid
 
         logger.info(f"Saved operating session {session_id} for park {session_data['park_id']}")
@@ -158,14 +163,13 @@ class OperatingHoursDetector:
             List of operating session dictionaries
         """
         # Get all active parks with their timezones
-        parks_query = text("""
-            SELECT park_id, name, timezone
-            FROM parks
-            WHERE is_active = TRUE
-            ORDER BY park_id
-        """)
+        stmt = (
+            select(Park.park_id, Park.name, Park.timezone)
+            .where(Park.is_active == True)
+            .order_by(Park.park_id)
+        )
 
-        result = self.conn.execute(parks_query)
+        result = self.session.execute(stmt)
         parks = [dict(row._mapping) for row in result]
 
         sessions = []

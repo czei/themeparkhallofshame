@@ -27,7 +27,7 @@ All other methods have been migrated to modular query classes or are deprecated.
 """
 
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, text, distinct
 
@@ -279,9 +279,9 @@ class StatsRepository:
         if start_date:
             query = query.filter(func.date(ParkActivitySnapshot.recorded_at) >= start_date)
         else:
-            # Default to 30 days ago
+            # Default to 30 days ago - use timedelta for database-agnostic date math
             query = query.filter(
-                func.date(ParkActivitySnapshot.recorded_at) >= func.date_sub(func.curdate(), text('INTERVAL 30 DAY'))
+                func.date(ParkActivitySnapshot.recorded_at) >= (date.today() - timedelta(days=30))
             )
 
         if end_date:
@@ -668,12 +668,13 @@ class StatsRepository:
             park_id: Park ID
 
         Returns:
-            List of excluded ride dictionaries
+            List of excluded ride dictionaries with tier, last_operated_at, days_since_operation
         """
         from datetime import timedelta
 
         # Get rides that haven't operated in last 7 days
-        seven_days_ago = datetime.utcnow() - timedelta(days=7)
+        now = datetime.utcnow()
+        seven_days_ago = now - timedelta(days=7)
 
         # Subquery for rides that have operated recently
         # (status='OPERATING' or computed_is_open=TRUE)
@@ -701,14 +702,24 @@ class StatsRepository:
             .all()
         )
 
-        return [
-            {
+        result = []
+        for r in excluded:
+            # Calculate days_since_operation using last_operated_at
+            days_since = None
+            if r.last_operated_at:
+                days_since = (now - r.last_operated_at).days
+
+            result.append({
                 'ride_id': r.ride_id,
-                'name': r.name,
+                'ride_name': r.name,
+                'tier': r.tier,
+                'tier_weight': {1: 3, 2: 2, 3: 1}.get(r.tier, 2),
+                'last_operated_at': r.last_operated_at,
+                'days_since_operation': days_since,
                 'reason': 'No operation in last 7 days'
-            }
-            for r in excluded
-        ]
+            })
+
+        return result
 
     def get_active_rides(self, park_id: int) -> List[Dict[str, Any]]:
         """

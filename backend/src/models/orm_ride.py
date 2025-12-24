@@ -95,6 +95,17 @@ class Ride(Base):
         back_populates="ride",
         lazy="select"
     )
+    weekly_stats: Mapped[List["RideWeeklyStats"]] = relationship(
+        "RideWeeklyStats",
+        back_populates="ride",
+        lazy="select"
+    )
+    classification: Mapped[Optional["RideClassification"]] = relationship(
+        "RideClassification",
+        back_populates="ride",
+        lazy="select",
+        uselist=False
+    )
 
     # Model Methods (Business Logic)
     def get_current_status(self, session: Optional["Session"] = None):

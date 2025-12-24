@@ -362,7 +362,7 @@ class RideRepository:
             .where(
                 and_(
                     RideStatusSnapshot.ride_id == RideORM.ride_id,
-                    RideStatusSnapshot.recorded_at >= func.date_sub(func.now(), text("INTERVAL 1 HOUR"))
+                    RideStatusSnapshot.recorded_at >= (datetime.utcnow() - timedelta(hours=1))
                 )
             )
             .order_by(RideStatusSnapshot.recorded_at.desc(), RideStatusSnapshot.snapshot_id.desc())

@@ -50,10 +50,12 @@ Example Response:
 from datetime import date
 from typing import List, Dict, Any
 
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy import select, func, and_, or_, case, literal_column
+from sqlalchemy.orm import Session, aliased
 
-from utils.timezone import get_last_week_date_range, get_last_month_date_range
+from src.models import Park, Ride, RideClassification, ParkDailyStats, RideDailyStats
+from src.utils.timezone import get_last_week_date_range, get_last_month_date_range
+from src.utils.query_helpers import QueryClassBase
 
 
 # =============================================================================
@@ -75,7 +77,7 @@ from utils.timezone import get_last_week_date_range, get_last_month_date_range
 # =============================================================================
 
 
-class ParkDowntimeRankingsQuery:
+class ParkDowntimeRankingsQuery(QueryClassBase):
     """
     Query handler for park downtime rankings.
 
@@ -85,15 +87,6 @@ class ParkDowntimeRankingsQuery:
 
     For live (today) rankings, use live/live_park_rankings.py instead.
     """
-
-    def __init__(self, connection: Connection):
-        """
-        Initialize with database connection.
-
-        Args:
-            connection: SQLAlchemy connection (from get_db_connection())
-        """
-        self.conn = connection
 
     def get_weekly(
         self,
@@ -188,112 +181,146 @@ class ParkDowntimeRankingsQuery:
         Returns:
             List of park ranking dictionaries with period_label included
         """
-        # Build filter clause for Disney/Universal if needed
-        filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+        # Build CTEs
 
-        # Determine sort column
-        sort_column = {
+        # CTE 1: park_weights - Total tier weight for each park
+        park_weights = (
+            select(
+                Park.park_id,
+                func.sum(func.coalesce(RideClassification.tier_weight, 2)).label('total_park_weight'),
+                func.count(func.distinct(Ride.ride_id)).label('total_rides')
+            )
+            .select_from(Park)
+            .join(Ride, and_(
+                Park.park_id == Ride.park_id,
+                Ride.is_active == True,
+                Ride.category == 'ATTRACTION'
+            ))
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .where(Park.is_active == True)
+        )
+
+        if filter_disney_universal:
+            park_weights = park_weights.where(or_(Park.is_disney == True, Park.is_universal == True))
+
+        park_weights = park_weights.group_by(Park.park_id).cte('park_weights')
+
+        # CTE 2: daily_weighted_downtime - Weighted downtime per park per day
+        daily_weighted_downtime = (
+            select(
+                Ride.park_id,
+                RideDailyStats.stat_date,
+                func.sum(
+                    RideDailyStats.downtime_minutes / 60.0 * func.coalesce(RideClassification.tier_weight, 2)
+                ).label('weighted_downtime_hours')
+            )
+            .select_from(RideDailyStats)
+            .join(Ride, and_(
+                RideDailyStats.ride_id == Ride.ride_id,
+                Ride.is_active == True,
+                Ride.category == 'ATTRACTION'
+            ))
+            .join(Park, and_(
+                Ride.park_id == Park.park_id,
+                Park.is_active == True
+            ))
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .where(and_(
+                RideDailyStats.stat_date >= start_date,
+                RideDailyStats.stat_date <= end_date
+            ))
+        )
+
+        if filter_disney_universal:
+            daily_weighted_downtime = daily_weighted_downtime.where(
+                or_(Park.is_disney == True, Park.is_universal == True)
+            )
+
+        daily_weighted_downtime = daily_weighted_downtime.group_by(
+            Ride.park_id, RideDailyStats.stat_date
+        ).cte('daily_weighted_downtime')
+
+        # CTE 3: daily_shame_scores - Per-day shame score
+        daily_shame_scores = (
+            select(
+                daily_weighted_downtime.c.park_id,
+                daily_weighted_downtime.c.stat_date,
+                func.coalesce(
+                    (daily_weighted_downtime.c.weighted_downtime_hours /
+                     func.nullif(park_weights.c.total_park_weight, 0)) * 10,
+                    0
+                ).label('daily_shame_score')
+            )
+            .select_from(daily_weighted_downtime)
+            .join(park_weights, daily_weighted_downtime.c.park_id == park_weights.c.park_id)
+        ).cte('daily_shame_scores')
+
+        # Main query - Build the rankings
+        base_query = (
+            select(
+                Park.park_id,
+                Park.name.label('park_name'),
+                (Park.city + ', ' + Park.state_province).label('location'),
+
+                # Total downtime hours (sum across period)
+                func.round(func.sum(ParkDailyStats.total_downtime_hours), 2).label('total_downtime_hours'),
+
+                # AVERAGE Shame Score = average of per-day shame scores
+                func.round(
+                    select(func.avg(daily_shame_scores.c.daily_shame_score))
+                    .where(daily_shame_scores.c.park_id == Park.park_id)
+                    .scalar_subquery(),
+                    1
+                ).label('shame_score'),
+
+                # Max rides affected on any day (named rides_down for frontend compatibility)
+                func.max(ParkDailyStats.rides_with_downtime).label('rides_down'),
+
+                # Average uptime percentage across days
+                func.round(func.avg(ParkDailyStats.avg_uptime_percentage), 2).label('uptime_percentage'),
+
+                # Trend not available for aggregated queries
+                literal_column('NULL').label('trend_percentage')
+            )
+            .select_from(Park)
+            .join(ParkDailyStats, Park.park_id == ParkDailyStats.park_id)
+            .join(park_weights, Park.park_id == park_weights.c.park_id)
+            .where(and_(
+                ParkDailyStats.stat_date >= start_date,
+                ParkDailyStats.stat_date <= end_date,
+                Park.is_active == True,
+                ParkDailyStats.operating_hours_minutes > 0
+            ))
+        )
+
+        if filter_disney_universal:
+            base_query = base_query.where(or_(Park.is_disney == True, Park.is_universal == True))
+
+        base_query = base_query.group_by(Park.park_id, Park.name, Park.city, Park.state_province)
+        base_query = base_query.having(func.sum(ParkDailyStats.total_downtime_hours) > 0)
+
+        # Apply sorting
+        sort_column_map = {
             "total_downtime_hours": "total_downtime_hours",
-            "uptime_percentage": "uptime_percentage",  # Will use ASC for this
+            "uptime_percentage": "uptime_percentage",
             "rides_down": "rides_down",
-        }.get(sort_by, "shame_score")
+        }
+        sort_column = sort_column_map.get(sort_by, "shame_score")
 
         # Sort direction - lower uptime is worse, so ASC for that column
-        sort_direction = "ASC" if sort_by == "uptime_percentage" else "DESC"
+        if sort_by == "uptime_percentage":
+            base_query = base_query.order_by(literal_column(sort_column).asc())
+        else:
+            base_query = base_query.order_by(literal_column(sort_column).desc())
 
-        query = text(f"""
-            WITH
-            park_weights AS (
-                -- Total tier weight for each park (for shame score normalization)
-                SELECT
-                    p.park_id,
-                    SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight,
-                    COUNT(DISTINCT r.ride_id) AS total_rides
-                FROM parks p
-                INNER JOIN rides r ON p.park_id = r.park_id
-                    AND r.is_active = TRUE AND r.category = 'ATTRACTION'
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE p.is_active = TRUE
-                    {filter_clause}
-                GROUP BY p.park_id
-            ),
-            daily_weighted_downtime AS (
-                -- Weighted downtime per park per day
-                -- weighted_downtime = SUM(downtime_minutes * tier_weight) / 60
-                SELECT
-                    r.park_id,
-                    rds.stat_date,
-                    SUM(rds.downtime_minutes / 60.0 * COALESCE(rc.tier_weight, 2)) AS weighted_downtime_hours
-                FROM ride_daily_stats rds
-                INNER JOIN rides r ON rds.ride_id = r.ride_id
-                    AND r.is_active = TRUE AND r.category = 'ATTRACTION'
-                INNER JOIN parks p ON r.park_id = p.park_id
-                    AND p.is_active = TRUE
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE rds.stat_date >= :start_date AND rds.stat_date <= :end_date
-                    {filter_clause}
-                GROUP BY r.park_id, rds.stat_date
-            ),
-            daily_shame_scores AS (
-                -- Per-day shame score = (daily_weighted_downtime / total_park_weight) × 10
-                SELECT
-                    dwd.park_id,
-                    dwd.stat_date,
-                    COALESCE(
-                        (dwd.weighted_downtime_hours / NULLIF(pw.total_park_weight, 0)) * 10,
-                        0
-                    ) AS daily_shame_score
-                FROM daily_weighted_downtime dwd
-                INNER JOIN park_weights pw ON dwd.park_id = pw.park_id
-            )
-            SELECT
-                p.park_id,
-                p.name AS park_name,
-                CONCAT(p.city, ', ', p.state_province) AS location,
+        base_query = base_query.limit(limit)
 
-                -- Total downtime hours (sum across period)
-                ROUND(SUM(pds.total_downtime_hours), 2) AS total_downtime_hours,
-
-                -- AVERAGE Shame Score = average of per-day shame scores
-                -- This makes LAST_WEEK/LAST_MONTH comparable to LIVE/TODAY
-                ROUND(
-                    (SELECT AVG(dss.daily_shame_score) FROM daily_shame_scores dss WHERE dss.park_id = p.park_id),
-                    1
-                ) AS shame_score,
-
-                -- Max rides affected on any day (named rides_down for frontend compatibility)
-                MAX(pds.rides_with_downtime) AS rides_down,
-
-                -- Average uptime percentage across days
-                ROUND(AVG(pds.avg_uptime_percentage), 2) AS uptime_percentage,
-
-                -- Trend not available for aggregated queries
-                NULL AS trend_percentage
-
-            FROM parks p
-            INNER JOIN park_daily_stats pds ON p.park_id = pds.park_id
-            INNER JOIN park_weights pw ON p.park_id = pw.park_id
-            WHERE pds.stat_date >= :start_date AND pds.stat_date <= :end_date
-                AND p.is_active = TRUE
-                AND pds.operating_hours_minutes > 0
-                {filter_clause}
-            GROUP BY p.park_id, p.name, p.city, p.state_province
-            HAVING SUM(pds.total_downtime_hours) > 0
-            ORDER BY {sort_column} {sort_direction}
-            LIMIT :limit
-        """)
-
-        result = self.conn.execute(query, {
-            "start_date": start_date,
-            "end_date": end_date,
-            "limit": limit
-        })
+        # Execute and fetch results
+        rankings = self.execute_and_fetchall(base_query)
 
         # Add period_label to each result
-        rankings = []
-        for row in result:
-            row_dict = dict(row._mapping)
-            if period_label:
-                row_dict['period_label'] = period_label
-            rankings.append(row_dict)
+        if period_label:
+            for row in rankings:
+                row['period_label'] = period_label
+
         return rankings

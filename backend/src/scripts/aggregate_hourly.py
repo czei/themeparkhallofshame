@@ -1,6 +1,25 @@
 #!/usr/bin/env python3
 """
 Theme Park Downtime Tracker - Hourly Aggregation Script
+
+DEPRECATED (2025-12-24 - ORM Refactoring Feature 003):
+=======================================================
+This script is no longer used in production. Hourly metrics are now computed
+on-the-fly via ORM queries from ride_status_snapshots table.
+
+The cron job has been removed from deployment/config/crontab.prod.
+The hourly_stats table has been dropped via migration 003.
+
+This script is retained only for:
+1. Historical reference
+2. Potential backfill scenarios during migration rollback
+
+DO NOT re-enable the cron job unless reverting the ORM refactoring.
+See specs/003-orm-refactoring/tasks.md for migration context.
+
+---
+ORIGINAL DOCSTRING (for reference):
+
 Pre-computes hourly statistics from raw snapshots for fast chart queries.
 
 This script should be run at :05 past each hour to aggregate the previous completed hour.
@@ -23,7 +42,7 @@ Performance:
 import sys
 import argparse
 from pathlib import Path
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 from typing import Optional, Tuple
 import pytz
 
@@ -37,8 +56,15 @@ from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
 from database.repositories.park_repository import ParkRepository
 from database.repositories.ride_repository import RideRepository
 from database.repositories.aggregation_repository import AggregationLogRepository
-from database.connection import get_db_connection
-from sqlalchemy import text
+from database.connection import get_db_session
+from sqlalchemy import text, select, func, distinct, and_, or_
+from sqlalchemy.dialects.mysql import insert as mysql_insert
+from src.models import (
+    Park, Ride,
+    RideStatusSnapshot, ParkActivitySnapshot,
+    ParkHourlyStats,
+    AggregationLog, AggregationType, AggregationStatus
+)
 
 
 def get_pacific_day_range_utc(utc_dt: datetime) -> Tuple[datetime, datetime]:
@@ -106,10 +132,10 @@ class HourlyAggregator:
 
         log_id = None  # Initialize before try block for exception handler
         try:
-            with get_db_connection() as conn:
-                aggregation_repo = AggregationLogRepository(conn)
-                park_repo = ParkRepository(conn)
-                ride_repo = RideRepository(conn)
+            with get_db_session() as session:
+                aggregation_repo = AggregationLogRepository(session)
+                park_repo = ParkRepository(session)
+                ride_repo = RideRepository(session)
 
                 # Check if aggregation already completed for this hour
                 if self._check_already_aggregated(aggregation_repo):
@@ -142,8 +168,8 @@ class HourlyAggregator:
             logger.error(f"Fatal error during aggregation: {e}", exc_info=True)
             if log_id is not None:
                 try:
-                    with get_db_connection() as conn:
-                        aggregation_repo = AggregationLogRepository(conn)
+                    with get_db_session() as session:
+                        aggregation_repo = AggregationLogRepository(session)
                         self._fail_aggregation_log(log_id, str(e), aggregation_repo)
                 except:
                     pass  # Best effort logging
@@ -162,14 +188,14 @@ class HourlyAggregator:
         try:
             # Check if park_hourly_stats has data for this hour
             # (More reliable than aggregation_log for hourly granularity)
-            with get_db_connection() as conn:
-                result = conn.execute(text("""
-                    SELECT COUNT(*) as count
-                    FROM park_hourly_stats
-                    WHERE hour_start_utc = :hour_start
-                """), {'hour_start': self.target_hour})
-                row = result.fetchone()
-                return row is not None and row[0] > 0
+            with get_db_session() as session:
+                stmt = (
+                    select(func.count())
+                    .select_from(ParkHourlyStats)
+                    .where(ParkHourlyStats.hour_start_utc == self.target_hour)
+                )
+                count = session.execute(stmt).scalar()
+                return count > 0
         except:
             return False
 
@@ -188,36 +214,21 @@ class HourlyAggregator:
             log_id (newly created)
         """
         try:
-            with get_db_connection() as conn:
-                # Use 'hourly' aggregation type (matches enum in 014 migration)
-                aggregation_type = "hourly"
-
+            with get_db_session() as session:
                 # Insert a new log entry for each hourly run
                 # Migration 015 removed unique constraint to allow multiple hourly entries per day
                 # This enables proper hourly progress monitoring in health checks
-                result = conn.execute(text("""
-                    INSERT INTO aggregation_log (
-                        aggregation_date,
-                        aggregation_type,
-                        aggregated_until_ts,
-                        started_at,
-                        status,
-                        parks_processed,
-                        rides_processed
-                    ) VALUES (
-                        :aggregation_date,
-                        :aggregation_type,
-                        :until_ts,
-                        NOW(),
-                        'running',
-                        0,
-                        0
-                    )
-                """), {
-                    'aggregation_date': self.target_hour.date(),
-                    'aggregation_type': aggregation_type,
-                    'until_ts': self.hour_end
-                })
+                stmt = mysql_insert(AggregationLog).values(
+                    aggregation_date=self.target_hour.date(),
+                    aggregation_type=AggregationType.HOURLY,
+                    aggregated_until_ts=self.hour_end,
+                    started_at=datetime.now(),
+                    status=AggregationStatus.RUNNING,
+                    parks_processed=0,
+                    rides_processed=0
+                )
+                result = session.execute(stmt)
+                session.flush()  # Ensure we can get lastrowid
 
                 log_id = result.lastrowid
                 logger.info(f"Aggregation log entry created: {log_id} for hour {self.target_hour.hour}:00 UTC")
@@ -235,7 +246,7 @@ class HourlyAggregator:
             ride_repo: Ride repository
         """
         try:
-            with get_db_connection() as conn:
+            with get_db_session() as session:
                 # Calculate Pacific day range for "operated today" CTE
                 day_start_utc, day_end_utc = get_pacific_day_range_utc(self.target_hour)
 
@@ -247,33 +258,41 @@ class HourlyAggregator:
                 #   Fixes DINOSAUR bug where ride was DOWN before showing OPERATING
                 # - Other parks: Require OPERATING status only (they use CLOSED for everything)
                 #   Fixes Kennywood bug where rides showing only CLOSED were incorrectly counted
-                operated_today_result = conn.execute(text("""
-                    SELECT DISTINCT rss_day.ride_id
-                    FROM ride_status_snapshots rss_day
-                    JOIN rides r_day ON rss_day.ride_id = r_day.ride_id
-                    JOIN parks p_day ON r_day.park_id = p_day.park_id
-                    JOIN park_activity_snapshots pas_day
-                        ON r_day.park_id = pas_day.park_id
-                        AND pas_day.recorded_at = rss_day.recorded_at
-                    WHERE rss_day.recorded_at >= :day_start_utc
-                        AND rss_day.recorded_at < :day_end_utc
-                        AND (pas_day.park_appears_open = TRUE OR pas_day.rides_open > 0)
-                        AND (
-                            -- Standard: ride showed OPERATING
-                            rss_day.status = 'OPERATING' OR rss_day.computed_is_open = TRUE
-                            -- Disney/Universal: DOWN is valid signal that ride attempted to operate
-                            -- (distinguishes from seasonal closures which show CLOSED)
-                            -- Other parks: Don't use DOWN as signal (they only report CLOSED)
-                            OR (
-                                rss_day.status = 'DOWN'
-                                AND (p_day.is_disney = TRUE OR p_day.is_universal = TRUE)
+                stmt = (
+                    select(distinct(RideStatusSnapshot.ride_id))
+                    .select_from(RideStatusSnapshot)
+                    .join(Ride, RideStatusSnapshot.ride_id == Ride.ride_id)
+                    .join(Park, Ride.park_id == Park.park_id)
+                    .join(
+                        ParkActivitySnapshot,
+                        and_(
+                            Ride.park_id == ParkActivitySnapshot.park_id,
+                            ParkActivitySnapshot.recorded_at == RideStatusSnapshot.recorded_at
+                        )
+                    )
+                    .where(
+                        and_(
+                            RideStatusSnapshot.recorded_at >= day_start_utc,
+                            RideStatusSnapshot.recorded_at < day_end_utc,
+                            or_(
+                                ParkActivitySnapshot.park_appears_open.is_(True),
+                                ParkActivitySnapshot.rides_open > 0
+                            ),
+                            or_(
+                                # Standard: ride showed OPERATING
+                                RideStatusSnapshot.status == 'OPERATING',
+                                RideStatusSnapshot.computed_is_open.is_(True),
+                                # Disney/Universal: DOWN is valid signal that ride attempted to operate
+                                and_(
+                                    RideStatusSnapshot.status == 'DOWN',
+                                    or_(Park.is_disney.is_(True), Park.is_universal.is_(True))
+                                )
                             )
                         )
-                """), {
-                    'day_start_utc': day_start_utc,
-                    'day_end_utc': day_end_utc
-                })
-                operated_today_ride_ids = {row.ride_id for row in operated_today_result}
+                    )
+                )
+                operated_today_result = session.execute(stmt)
+                operated_today_ride_ids = {row[0] for row in operated_today_result}
                 logger.info(f"  Pre-calculated {len(operated_today_ride_ids)} rides that operated today")
 
                 # Get all active rides
@@ -281,7 +300,7 @@ class HourlyAggregator:
 
                 for ride in rides:
                     try:
-                        self._aggregate_ride(conn, ride, operated_today_ride_ids)
+                        self._aggregate_ride(session, ride, operated_today_ride_ids)
                         self.stats['rides_processed'] += 1
                     except Exception as e:
                         logger.error(f"Error aggregating ride {ride.name}: {e}")
@@ -293,12 +312,12 @@ class HourlyAggregator:
             logger.error(f"Failed to aggregate rides: {e}")
             raise
 
-    def _aggregate_ride(self, conn, ride, operated_today_ride_ids: set):
+    def _aggregate_ride(self, session, ride, operated_today_ride_ids: set):
         """
         Aggregate statistics for a single ride for the target hour.
 
         Args:
-            conn: Database connection
+            session: Database session
             ride: Ride model object
             operated_today_ride_ids: Set of ride IDs that operated anywhere during the Pacific calendar day
 
@@ -318,18 +337,18 @@ class HourlyAggregator:
 
         # Pre-check: Skip rides with no snapshots during this hour
         # (avoids NULL ride_operated errors for rides that didn't operate)
-        check = conn.execute(text("""
-            SELECT 1 FROM ride_status_snapshots
-            WHERE ride_id = :ride_id
-              AND recorded_at >= :hour_start
-              AND recorded_at < :hour_end
-            LIMIT 1
-        """), {
-            'ride_id': ride_id,
-            'hour_start': self.target_hour,
-            'hour_end': self.hour_end
-        })
-        if check.fetchone() is None:
+        check_stmt = (
+            select(RideStatusSnapshot.ride_id)
+            .where(
+                and_(
+                    RideStatusSnapshot.ride_id == ride_id,
+                    RideStatusSnapshot.recorded_at >= self.target_hour,
+                    RideStatusSnapshot.recorded_at < self.hour_end
+                )
+            )
+            .limit(1)
+        )
+        if session.execute(check_stmt).first() is None:
             # No snapshots for this ride during this hour - skip
             return
 
@@ -337,10 +356,9 @@ class HourlyAggregator:
         is_down_sql = RideStatusSQL.is_down("rss", parks_alias="p")
         park_open_sql = ParkStatusSQL.park_appears_open_filter("pas", with_fallback=True)
 
-        # NEW: "Operated Today" subquery to fix multi-hour outage bug
-        # MySQL doesn't support CTEs with INSERT ... ON DUPLICATE KEY UPDATE
-        # So we use a derived table (subquery) instead
-        result = conn.execute(text(f"""
+        # Complex INSERT ... SELECT with SQL helper injections must remain as text()
+        # (Too complex for ORM: f-string injection from SQL helpers, INSERT ... ON DUPLICATE KEY UPDATE)
+        session.execute(text(f"""
             INSERT INTO ride_hourly_stats (
                 ride_id,
                 park_id,
@@ -431,13 +449,13 @@ class HourlyAggregator:
             park_repo: Park repository
         """
         try:
-            with get_db_connection() as conn:
+            with get_db_session() as session:
                 # Get all active parks
                 parks = park_repo.get_all_active()
 
                 for park in parks:
                     try:
-                        self._aggregate_park(conn, park)
+                        self._aggregate_park(session, park)
                         self.stats['parks_processed'] += 1
                     except Exception as e:
                         logger.error(f"Error aggregating park {park.name}: {e}")
@@ -449,12 +467,12 @@ class HourlyAggregator:
             logger.error(f"Failed to aggregate parks: {e}")
             raise
 
-    def _aggregate_park(self, conn, park):
+    def _aggregate_park(self, session, park):
         """
         Aggregate statistics for a single park for the target hour.
 
         Args:
-            conn: Database connection
+            session: Database session
             park: Park model object
 
         Key Differences from Daily:
@@ -467,24 +485,25 @@ class HourlyAggregator:
         park_id = park.park_id
 
         # Check if park has any snapshots for this hour
-        check_result = conn.execute(text("""
-            SELECT COUNT(*) as snapshot_count
-            FROM park_activity_snapshots
-            WHERE park_id = :park_id
-              AND recorded_at >= :hour_start
-              AND recorded_at < :hour_end
-        """), {
-            'park_id': park_id,
-            'hour_start': self.target_hour,
-            'hour_end': self.hour_end
-        })
-
-        row = check_result.fetchone()
-        if row is None or row[0] == 0:
+        check_stmt = (
+            select(func.count())
+            .select_from(ParkActivitySnapshot)
+            .where(
+                and_(
+                    ParkActivitySnapshot.park_id == park_id,
+                    ParkActivitySnapshot.recorded_at >= self.target_hour,
+                    ParkActivitySnapshot.recorded_at < self.hour_end
+                )
+            )
+        )
+        count = session.execute(check_stmt).scalar()
+        if count == 0:
             # No snapshot data for this park during this hour, skip
             return
 
-        result = conn.execute(text("""
+        # Complex INSERT ... SELECT with nested correlated subqueries must remain as text()
+        # (Too complex for ORM: nested subqueries for shame_score calculation)
+        session.execute(text("""
             INSERT INTO park_hourly_stats (
                 park_id,
                 hour_start_utc,

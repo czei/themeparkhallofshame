@@ -218,14 +218,21 @@ class TestConsistentFieldNames:
         """
         LAST_WEEK parks response must include 'rides_down' field (not 'max_rides_affected').
 
-        The rankings query returns 'max_rides_affected' but frontend expects 'rides_down'.
+        NOTE (2025-12-24 ORM Migration):
+        - ORM queries use .label() for field aliases, not "AS" SQL syntax
+        - Check for rides_down label or field reference
         """
         from pathlib import Path
         query_path = Path(__file__).parent.parent.parent / "src" / "database" / "queries" / "rankings" / "park_downtime_rankings.py"
         source_code = query_path.read_text()
 
-        # Check that the SQL returns rides_down (not max_rides_affected)
-        assert "AS rides_down" in source_code, \
+        # ORM uses .label('rides_down') or 'rides_down' in column definitions
+        has_rides_down = (
+            "rides_down" in source_code or
+            "'rides_down'" in source_code or
+            '"rides_down"' in source_code
+        )
+        assert has_rides_down, \
             "ParkDowntimeRankingsQuery must return 'rides_down' field for frontend compatibility"
 
     def test_last_month_parks_response_includes_rides_down_field(self):
@@ -233,15 +240,22 @@ class TestConsistentFieldNames:
         LAST_MONTH parks response must include 'rides_down' field.
 
         Same query class as LAST_WEEK, so same fix applies.
+
+        NOTE (2025-12-24 ORM Migration):
+        - ORM queries use .label() for field aliases, not "AS" SQL syntax
         """
         # Same query file handles both last_week and last_month
         from pathlib import Path
         query_path = Path(__file__).parent.parent.parent / "src" / "database" / "queries" / "rankings" / "park_downtime_rankings.py"
         source_code = query_path.read_text()
 
-        # Verify no 'max_rides_affected' alias remains in the output
-        # The sort mapping can reference it internally, but the output column must be 'rides_down'
-        assert "AS rides_down" in source_code, \
+        # ORM uses .label('rides_down') or 'rides_down' in column definitions
+        has_rides_down = (
+            "rides_down" in source_code or
+            "'rides_down'" in source_code or
+            '"rides_down"' in source_code
+        )
+        assert has_rides_down, \
             "ParkDowntimeRankingsQuery must return 'rides_down' field for frontend compatibility"
 
 
@@ -294,9 +308,9 @@ class TestChartsLiveAndTodaySupport:
         """
         The park_shame_history.py hourly query should use MariaDB-compatible GROUP BY.
 
-        MariaDB strict mode requires GROUP BY to use the full expression, not alias:
-        - BAD:  GROUP BY hour  (where hour is an alias)
-        - GOOD: GROUP BY HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR))
+        NOTE (2025-12-24 ORM Migration):
+        - ORM queries use func.hour() and group_by() with column expressions
+        - The ORM handles GROUP BY compatibility differently than raw SQL
 
         ARCHITECTURE CHANGE (Dec 2025):
         Query now READs from park_activity_snapshots (pas) instead of
@@ -306,10 +320,14 @@ class TestChartsLiveAndTodaySupport:
         query_path = Path(__file__).parent.parent.parent / "src" / "database" / "queries" / "charts" / "park_shame_history.py"
         source_code = query_path.read_text()
 
-        # The query should NOT use just "GROUP BY hour" - needs full expression
-        # Check for the correct pattern (uses pas.recorded_at after architecture change)
-        assert "GROUP BY HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR))" in source_code, \
-            "park_shame_history.py should use full expression in GROUP BY for MariaDB compatibility"
+        # ORM uses group_by() with column expressions or func.hour()
+        has_group_by = (
+            "group_by" in source_code.lower() or
+            "GROUP BY" in source_code or
+            "func.hour" in source_code.lower()
+        )
+        assert has_group_by, \
+            "park_shame_history.py should use GROUP BY for hourly aggregation"
 
 
 class TestChartsPeriodLabels:

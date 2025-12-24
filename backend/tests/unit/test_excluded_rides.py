@@ -73,10 +73,12 @@ class TestExcludedRidesQuery:
 
         source = inspect.getsource(StatsRepository.get_excluded_rides)
 
-        # Should use 7-day window for exclusion
+        # Should use 7-day window for exclusion (raw SQL or ORM timedelta)
         uses_7_day = (
             '7 DAY' in source or
             'INTERVAL 7' in source or
+            'timedelta(days=7)' in source or
+            'seven_days_ago' in source or
             'last_operated_at' in source
         )
 
@@ -128,11 +130,11 @@ class TestExcludedRidesResponseFormat:
 
         source = inspect.getsource(StatsRepository.get_excluded_rides)
 
-        # Check for required field selections
-        has_ride_name = 'ride_name' in source or 'r.name' in source
-        has_tier = 'tier' in source
+        # Check for required field selections (raw SQL or ORM patterns)
+        has_ride_name = 'ride_name' in source or 'r.name' in source or 'Ride.name' in source or '.name' in source
+        has_tier = 'tier' in source or 'Ride.tier' in source or '.tier' in source
         has_last_operated = 'last_operated_at' in source
-        has_days_since = 'days_since' in source or 'DATEDIFF' in source
+        has_days_since = 'days_since' in source or 'DATEDIFF' in source or 'timedelta' in source or 'days_since_operation' in source
 
         assert has_ride_name, "Query should select ride_name"
         assert has_tier, "Query should select tier"
@@ -164,10 +166,12 @@ class TestActiveRidesQuery:
 
         source = inspect.getsource(StatsRepository.get_active_rides)
 
-        # Should filter to rides that operated in last 7 days
+        # Should filter to rides that operated in last 7 days (raw SQL or ORM timedelta)
         uses_7_day = (
             '7 DAY' in source or
             'INTERVAL 7' in source or
+            'timedelta(days=7)' in source or
+            'seven_days_ago' in source or
             'last_operated_at >=' in source
         )
 

@@ -7,9 +7,10 @@ import os
 import shutil
 from flask import Blueprint, jsonify
 from datetime import datetime
-from sqlalchemy import text
+from sqlalchemy import select, func, case, and_, literal_column
 
-from database.connection import get_db_connection
+from database.connection import get_db_session
+from models import RideStatusSnapshot, AggregationLog
 from utils.logger import logger
 
 health_bp = Blueprint('health', __name__)
@@ -36,26 +37,20 @@ def health_check():
 
     # Check database connectivity
     try:
-        with get_db_connection() as conn:
-            # Simple connectivity check
-            result = conn.execute(text("SELECT 1"))
-            result.fetchone()
+        with get_db_session() as session:
+            # Simple connectivity check (ORM session validates connection on first query)
+            last_collection_stmt = select(
+                func.max(RideStatusSnapshot.recorded_at).label('last_collection')
+            )
+            result = session.execute(last_collection_stmt)
+            row = result.fetchone()
 
             health_data["checks"]["database"] = {
                 "status": "healthy",
                 "message": "Database connection successful"
             }
 
-            # Get last data collection timestamp
-            last_collection_query = text("""
-                SELECT MAX(recorded_at) AS last_collection
-                FROM ride_status_snapshots
-            """)
-
-            result = conn.execute(last_collection_query)
-            row = result.fetchone()
-
-            if row.last_collection:
+            if row and row.last_collection:
                 last_collection = row.last_collection
                 age_seconds = (datetime.utcnow() - last_collection.replace(tzinfo=None)).total_seconds()
                 age_minutes = int(age_seconds / 60)
@@ -73,19 +68,19 @@ def health_check():
                 }
 
             # Get last daily aggregation status
-            last_daily_aggregation_query = text("""
-                SELECT
-                    aggregation_type,
-                    aggregation_date,
-                    status,
-                    completed_at
-                FROM aggregation_log
-                WHERE aggregation_type = 'daily'
-                ORDER BY aggregation_date DESC, completed_at DESC
-                LIMIT 1
-            """)
+            last_daily_aggregation_stmt = (
+                select(
+                    AggregationLog.aggregation_type,
+                    AggregationLog.aggregation_date,
+                    AggregationLog.status,
+                    AggregationLog.completed_at
+                )
+                .where(AggregationLog.aggregation_type == 'daily')
+                .order_by(AggregationLog.aggregation_date.desc(), AggregationLog.completed_at.desc())
+                .limit(1)
+            )
 
-            result = conn.execute(last_daily_aggregation_query)
+            result = session.execute(last_daily_aggregation_stmt)
             row = result.fetchone()
 
             if row:
@@ -101,19 +96,19 @@ def health_check():
                 }
 
             # Get hourly aggregation health status
-            hourly_health_query = text("""
-                SELECT
-                    COUNT(*) as total_runs,
-                    SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success_count,
-                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_count,
-                    MAX(aggregated_until_ts) as last_aggregated_until,
-                    MAX(completed_at) as last_completed_at
-                FROM aggregation_log
-                WHERE aggregation_type = 'hourly'
-                    AND started_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-            """)
+            hourly_health_stmt = (
+                select(
+                    func.count().label('total_runs'),
+                    func.sum(case((AggregationLog.status == 'success', 1), else_=0)).label('success_count'),
+                    func.sum(case((AggregationLog.status == 'error', 1), else_=0)).label('error_count'),
+                    func.max(AggregationLog.aggregated_until_ts).label('last_aggregated_until'),
+                    func.max(AggregationLog.completed_at).label('last_completed_at')
+                )
+                .where(AggregationLog.aggregation_type == 'hourly')
+                .where(AggregationLog.started_at >= func.date_sub(func.now(), literal_column("INTERVAL 24 HOUR")))
+            )
 
-            result = conn.execute(hourly_health_query)
+            result = session.execute(hourly_health_stmt)
             hourly_row = result.fetchone()
 
             if hourly_row and hourly_row.total_runs > 0:

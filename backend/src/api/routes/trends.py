@@ -22,7 +22,7 @@ from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 
-from database.connection import get_db_connection
+from database.connection import get_db_connection, get_db_session
 
 # New query imports - each file handles one specific data source
 from database.queries.trends import (
@@ -124,40 +124,43 @@ def get_trends():
         filter_disney_universal = (park_filter == 'disney-universal')
 
         # Get database connection using context manager
-        with get_db_connection() as conn:
-            # Route to appropriate query class based on category
-            if category == 'parks-improving':
-                # See: database/queries/trends/improving_parks.py
-                query = ImprovingParksQuery(conn)
+        # Note: ImprovingParksQuery uses ORM (Session), others still use Core (Connection)
+        if category == 'parks-improving':
+            # See: database/queries/trends/improving_parks.py (ORM)
+            with get_db_session() as session:
+                query = ImprovingParksQuery(session)
                 results = query.get_improving(
                     period=normalized_period,
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
-            elif category == 'parks-declining':
-                # See: database/queries/trends/declining_parks.py
-                query = DecliningParksQuery(conn)
-                results = query.get_declining(
-                    period=normalized_period,
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
-            elif category == 'rides-improving':
-                # See: database/queries/trends/improving_rides.py
-                query = ImprovingRidesQuery(conn)
-                results = query.get_improving(
-                    period=normalized_period,
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
-            elif category == 'rides-declining':
-                # See: database/queries/trends/declining_rides.py
-                query = DecliningRidesQuery(conn)
-                results = query.get_declining(
-                    period=normalized_period,
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
+        else:
+            with get_db_connection() as conn:
+                # Route to appropriate query class based on category
+                if category == 'parks-declining':
+                    # See: database/queries/trends/declining_parks.py
+                    query = DecliningParksQuery(conn)
+                    results = query.get_declining(
+                        period=normalized_period,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                elif category == 'rides-improving':
+                    # See: database/queries/trends/improving_rides.py
+                    query = ImprovingRidesQuery(conn)
+                    results = query.get_improving(
+                        period=normalized_period,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                elif category == 'rides-declining':
+                    # See: database/queries/trends/declining_rides.py
+                    query = DecliningRidesQuery(conn)
+                    results = query.get_declining(
+                        period=normalized_period,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
 
         results = _attach_queue_times_urls(category, results)
 
@@ -647,8 +650,8 @@ def get_least_reliable():
         )
 
         def compute_results():
-            with get_db_connection() as conn:
-                query = LeastReliableRidesQuery(conn)
+            with get_db_session() as session:
+                query = LeastReliableRidesQuery(session)
                 if entity == 'parks':
                     return query.get_park_rankings(
                         period=period,

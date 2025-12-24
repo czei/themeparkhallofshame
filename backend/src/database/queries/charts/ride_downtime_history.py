@@ -25,13 +25,15 @@ Output Format:
 from datetime import date, timedelta, datetime, timezone
 from typing import List, Dict, Any
 
-from sqlalchemy import select, func, and_, text
+from sqlalchemy import select, func, and_, or_, case, literal_column
 from sqlalchemy.engine import Connection
 
 from database.schema import parks, rides, ride_daily_stats, ride_classifications
 from database.queries.builders import Filters
 from utils.timezone import get_pacific_day_range_utc
-from utils.sql_helpers import ParkStatusSQL, RideStatusSQL, timestamp_match_condition
+
+# ORM models for query conversion
+from src.models import Park, Ride, ParkActivitySnapshot, RideStatusSnapshot, RideClassification
 
 
 class RideDowntimeHistoryQuery:
@@ -123,45 +125,58 @@ class RideDowntimeHistoryQuery:
         # Get UTC time range for the target date in Pacific timezone
         start_utc, end_utc = get_pacific_day_range_utc(target_date)
 
-        # Build filter clause
-        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
+        # ORM condition for ride being down
+        is_down_cond = or_(
+            RideStatusSnapshot.status == 'DOWN',
+            and_(
+                RideStatusSnapshot.status.is_(None),
+                RideStatusSnapshot.computed_is_open == 0
+            )
+        )
 
         # Get top rides with most downtime today
         # Only include rides from parks that appear OPEN (excludes seasonal closures)
-        open_parks_join = ParkStatusSQL.latest_snapshot_join_sql("p")
-        top_rides_query = text(f"""
-            SELECT
-                r.ride_id,
-                p.park_id,
-                r.name AS ride_name,
-                p.name AS park_name,
-                rc.tier,
-                SUM(CASE
-                    WHEN rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0)
-                    THEN 5  -- 5-minute interval
-                    ELSE 0
-                END) / 60.0 AS total_downtime_hours
-            FROM rides r
-            INNER JOIN parks p ON r.park_id = p.park_id
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            {open_parks_join}
-            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND p.is_active = TRUE
-                {disney_filter}
-            GROUP BY r.ride_id, p.park_id, r.name, p.name, rc.tier
-            HAVING total_downtime_hours > 0
-            ORDER BY total_downtime_hours DESC
-            LIMIT :limit
-        """)
+        top_rides_stmt = (
+            select(
+                Ride.ride_id,
+                Park.park_id,
+                Ride.name.label("ride_name"),
+                Park.name.label("park_name"),
+                RideClassification.tier,
+                (func.sum(
+                    case((is_down_cond, 5), else_=0)
+                ) / 60.0).label("total_downtime_hours")
+            )
+            .select_from(Ride)
+            .join(Park, Ride.park_id == Park.park_id)
+            .join(RideStatusSnapshot, Ride.ride_id == RideStatusSnapshot.ride_id)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .where(
+                and_(
+                    RideStatusSnapshot.recorded_at >= start_utc,
+                    RideStatusSnapshot.recorded_at < end_utc,
+                    Ride.is_active == True,
+                    Ride.category == 'ATTRACTION',
+                    Park.is_active == True
+                )
+            )
+        )
 
-        result = self.conn.execute(top_rides_query, {
-            "start_utc": start_utc,
-            "end_utc": end_utc,
-            "limit": limit
-        })
+        # Apply Disney/Universal filter if requested
+        if filter_disney_universal:
+            top_rides_stmt = top_rides_stmt.where(
+                or_(Park.is_disney == True, Park.is_universal == True)
+            )
+
+        top_rides_stmt = (
+            top_rides_stmt
+            .group_by(Ride.ride_id, Park.park_id, Ride.name, Park.name, RideClassification.tier)
+            .having(func.sum(case((is_down_cond, 5), else_=0)) / 60.0 > 0)
+            .order_by((func.sum(case((is_down_cond, 5), else_=0)) / 60.0).desc())
+            .limit(limit)
+        )
+
+        result = self.conn.execute(top_rides_stmt)
         top_rides = [dict(row._mapping) for row in result]
 
         if not top_rides:
@@ -199,8 +214,6 @@ class RideDowntimeHistoryQuery:
         """
         now_utc = datetime.now(timezone.utc)
         start_utc = now_utc - timedelta(minutes=minutes)
-        ts_match = timestamp_match_condition("pas.recorded_at", "rss.recorded_at")
-        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
 
         labels = []
         current = start_utc
@@ -208,40 +221,79 @@ class RideDowntimeHistoryQuery:
             labels.append(current.strftime("%H:%M"))
             current += timedelta(minutes=5)
 
-        disney_filter = (
-            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"
-            if filter_disney_universal
-            else ""
+        # ORM timestamp matching condition: match at minute precision
+        ts_match_cond = (
+            func.date_format(ParkActivitySnapshot.recorded_at, '%Y-%m-%d %H:%i') ==
+            func.date_format(RideStatusSnapshot.recorded_at, '%Y-%m-%d %H:%i')
         )
 
-        top_rides_query = text(f"""
-            SELECT
-                r.ride_id,
-                p.park_id,
-                r.name AS ride_name,
-                p.name AS park_name,
-                SUM(CASE WHEN {is_down} AND pas.park_appears_open = TRUE THEN 5 ELSE 0 END) / 60.0 AS total_downtime_hours
-            FROM rides r
-            INNER JOIN parks p ON r.park_id = p.park_id
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND {ts_match}
-            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at <= :end_utc
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND p.is_active = TRUE
-                {disney_filter}
-            GROUP BY r.ride_id, p.park_id, r.name, p.name
-            HAVING total_downtime_hours > 0
-            ORDER BY total_downtime_hours DESC
-            LIMIT :limit
-        """)
+        # ORM condition for ride being down (with park type awareness for Disney/Universal)
+        # For Disney/Universal: only DOWN status counts as down
+        # For others: CLOSED also counts as down
+        is_down_cond = or_(
+            RideStatusSnapshot.status == 'DOWN',
+            and_(
+                RideStatusSnapshot.status.is_(None),
+                RideStatusSnapshot.computed_is_open == 0
+            ),
+            # For non-Disney/Universal parks, CLOSED also counts
+            and_(
+                RideStatusSnapshot.status == 'CLOSED',
+                Park.is_disney == False,
+                Park.is_universal == False
+            )
+        )
 
-        result = self.conn.execute(top_rides_query, {
-            "start_utc": start_utc,
-            "end_utc": now_utc,
-            "limit": limit
-        })
+        top_rides_stmt = (
+            select(
+                Ride.ride_id,
+                Park.park_id,
+                Ride.name.label("ride_name"),
+                Park.name.label("park_name"),
+                (func.sum(
+                    case(
+                        (and_(is_down_cond, ParkActivitySnapshot.park_appears_open == True), 5),
+                        else_=0
+                    )
+                ) / 60.0).label("total_downtime_hours")
+            )
+            .select_from(Ride)
+            .join(Park, Ride.park_id == Park.park_id)
+            .join(RideStatusSnapshot, Ride.ride_id == RideStatusSnapshot.ride_id)
+            .join(ParkActivitySnapshot, and_(Park.park_id == ParkActivitySnapshot.park_id, ts_match_cond))
+            .where(
+                and_(
+                    RideStatusSnapshot.recorded_at >= start_utc,
+                    RideStatusSnapshot.recorded_at <= now_utc,
+                    Ride.is_active == True,
+                    Ride.category == 'ATTRACTION',
+                    Park.is_active == True
+                )
+            )
+        )
+
+        # Apply Disney/Universal filter if requested
+        if filter_disney_universal:
+            top_rides_stmt = top_rides_stmt.where(
+                or_(Park.is_disney == True, Park.is_universal == True)
+            )
+
+        downtime_expr = func.sum(
+            case(
+                (and_(is_down_cond, ParkActivitySnapshot.park_appears_open == True), 5),
+                else_=0
+            )
+        ) / 60.0
+
+        top_rides_stmt = (
+            top_rides_stmt
+            .group_by(Ride.ride_id, Park.park_id, Ride.name, Park.name)
+            .having(downtime_expr > 0)
+            .order_by(downtime_expr.desc())
+            .limit(limit)
+        )
+
+        result = self.conn.execute(top_rides_stmt)
         top_rides = [dict(row._mapping) for row in result]
 
         if not top_rides:
@@ -249,25 +301,31 @@ class RideDowntimeHistoryQuery:
 
         datasets = []
         for ride in top_rides:
-            series_query = text(f"""
-                SELECT
-                    DATE_FORMAT(rss.recorded_at, '%H:%i') AS minute_label,
-                    SUM(CASE WHEN {is_down} AND pas.park_appears_open = TRUE THEN 5 ELSE 0 END) / 60.0 AS downtime_hours
-                FROM ride_status_snapshots rss
-                INNER JOIN rides r ON rss.ride_id = r.ride_id
-                INNER JOIN parks p ON r.park_id = p.park_id
-                INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                    AND {ts_match}
-                WHERE rss.ride_id = :ride_id
-                    AND rss.recorded_at >= :start_utc AND rss.recorded_at <= :end_utc
-                GROUP BY minute_label
-                ORDER BY minute_label
-            """)
-            series_result = self.conn.execute(series_query, {
-                "ride_id": ride["ride_id"],
-                "start_utc": start_utc,
-                "end_utc": now_utc
-            })
+            series_stmt = (
+                select(
+                    func.date_format(RideStatusSnapshot.recorded_at, '%H:%i').label("minute_label"),
+                    (func.sum(
+                        case(
+                            (and_(is_down_cond, ParkActivitySnapshot.park_appears_open == True), 5),
+                            else_=0
+                        )
+                    ) / 60.0).label("downtime_hours")
+                )
+                .select_from(RideStatusSnapshot)
+                .join(Ride, RideStatusSnapshot.ride_id == Ride.ride_id)
+                .join(Park, Ride.park_id == Park.park_id)
+                .join(ParkActivitySnapshot, and_(Park.park_id == ParkActivitySnapshot.park_id, ts_match_cond))
+                .where(
+                    and_(
+                        RideStatusSnapshot.ride_id == ride["ride_id"],
+                        RideStatusSnapshot.recorded_at >= start_utc,
+                        RideStatusSnapshot.recorded_at <= now_utc
+                    )
+                )
+                .group_by(func.date_format(RideStatusSnapshot.recorded_at, '%H:%i'))
+                .order_by(literal_column("minute_label"))
+            )
+            series_result = self.conn.execute(series_stmt)
             points = {row.minute_label: float(row.downtime_hours) for row in series_result}
             aligned = [points.get(label) for label in labels]
             datasets.append({
@@ -291,62 +349,99 @@ class RideDowntimeHistoryQuery:
         1. Only count hours where park_appears_open = TRUE
         2. Only count downtime AFTER the ride first operated today
         """
-        # Use DATE_SUB with 8-hour offset for PST (UTC-8)
-        # IMPORTANT: Use timestamp-level comparison, not hour-level, to avoid
-        # counting pre-opening time within an hour as downtime
-        query = text("""
-            WITH ride_first_operating AS (
-                -- Find the exact timestamp this ride first operated today
-                SELECT
-                    MIN(rss_inner.recorded_at) as first_op_time
-                FROM ride_status_snapshots rss_inner
-                WHERE rss_inner.ride_id = :ride_id
-                    AND rss_inner.recorded_at >= :start_utc AND rss_inner.recorded_at < :end_utc
-                    AND (rss_inner.status = 'OPERATING'
-                         OR (rss_inner.status IS NULL AND rss_inner.computed_is_open = 1))
-            ),
-            park_hourly_open AS (
-                -- Check if park was open during each hour
-                SELECT
-                    HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR)) as hour,
-                    MAX(pas.park_appears_open) as park_open
-                FROM park_activity_snapshots pas
-                WHERE pas.park_id = :park_id
-                    AND pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
-                GROUP BY HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR))
-            )
-            SELECT
-                HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) AS hour,
-                ROUND(
-                    SUM(CASE
-                        WHEN pho.park_open = 1
-                            AND rfo.first_op_time IS NOT NULL
-                            AND rss.recorded_at >= rfo.first_op_time
-                            AND (rss.status = 'DOWN' OR (rss.status IS NULL AND rss.computed_is_open = 0))
-                        THEN 5
-                        ELSE 0
-                    END) / 60.0,
-                    2
-                ) AS downtime_hours
-            FROM ride_status_snapshots rss
-            CROSS JOIN ride_first_operating rfo
-            LEFT JOIN park_hourly_open pho
-                ON HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) = pho.hour
-            WHERE rss.ride_id = :ride_id
-                AND rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                AND pho.park_open = 1  -- Only include hours when park is open
-                AND rfo.first_op_time IS NOT NULL  -- Only if ride has operated
-                AND rss.recorded_at >= rfo.first_op_time
-            GROUP BY HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR))
-            ORDER BY hour
-        """)
+        # Calculate Pacific hour: UTC - 8 hours
+        pacific_hour = func.hour(func.date_sub(
+            RideStatusSnapshot.recorded_at,
+            literal_column("INTERVAL 8 HOUR")
+        ))
+        pas_pacific_hour = func.hour(func.date_sub(
+            ParkActivitySnapshot.recorded_at,
+            literal_column("INTERVAL 8 HOUR")
+        ))
 
-        result = self.conn.execute(query, {
-            "ride_id": ride_id,
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
+        # CTE 1: ride_first_operating - Find when ride first operated today
+        ride_first_op_cte = (
+            select(
+                func.min(RideStatusSnapshot.recorded_at).label("first_op_time")
+            )
+            .where(
+                and_(
+                    RideStatusSnapshot.ride_id == ride_id,
+                    RideStatusSnapshot.recorded_at >= start_utc,
+                    RideStatusSnapshot.recorded_at < end_utc,
+                    or_(
+                        RideStatusSnapshot.status == 'OPERATING',
+                        and_(
+                            RideStatusSnapshot.status.is_(None),
+                            RideStatusSnapshot.computed_is_open == 1
+                        )
+                    )
+                )
+            )
+        ).cte("ride_first_operating")
+
+        # CTE 2: park_hourly_open - Check if park was open during each hour
+        park_hourly_cte = (
+            select(
+                pas_pacific_hour.label("hour"),
+                func.max(ParkActivitySnapshot.park_appears_open).label("park_open")
+            )
+            .where(
+                and_(
+                    ParkActivitySnapshot.park_id == park_id,
+                    ParkActivitySnapshot.recorded_at >= start_utc,
+                    ParkActivitySnapshot.recorded_at < end_utc
+                )
+            )
+            .group_by(pas_pacific_hour)
+        ).cte("park_hourly_open")
+
+        # ORM condition for ride being down
+        is_down_cond = or_(
+            RideStatusSnapshot.status == 'DOWN',
+            and_(
+                RideStatusSnapshot.status.is_(None),
+                RideStatusSnapshot.computed_is_open == 0
+            )
+        )
+
+        # Main query
+        stmt = (
+            select(
+                pacific_hour.label("hour"),
+                func.round(
+                    func.sum(
+                        case(
+                            (and_(
+                                park_hourly_cte.c.park_open == 1,
+                                ride_first_op_cte.c.first_op_time.isnot(None),
+                                RideStatusSnapshot.recorded_at >= ride_first_op_cte.c.first_op_time,
+                                is_down_cond
+                            ), 5),
+                            else_=0
+                        )
+                    ) / 60.0,
+                    2
+                ).label("downtime_hours")
+            )
+            .select_from(RideStatusSnapshot)
+            .join(ride_first_op_cte, literal_column("1") == literal_column("1"))  # CROSS JOIN
+            .outerjoin(park_hourly_cte, pacific_hour == park_hourly_cte.c.hour)
+            .where(
+                and_(
+                    RideStatusSnapshot.ride_id == ride_id,
+                    RideStatusSnapshot.recorded_at >= start_utc,
+                    RideStatusSnapshot.recorded_at < end_utc,
+                    park_hourly_cte.c.park_open == 1,
+                    ride_first_op_cte.c.first_op_time.isnot(None),
+                    RideStatusSnapshot.recorded_at >= ride_first_op_cte.c.first_op_time
+                )
+            )
+            .group_by(pacific_hour)
+            .order_by(literal_column("hour"))
+        )
+
+        result = self.conn.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def _get_top_rides(

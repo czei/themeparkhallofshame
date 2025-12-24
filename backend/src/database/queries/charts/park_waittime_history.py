@@ -28,13 +28,16 @@ Output Format:
 from datetime import date, timedelta, datetime, timezone
 from typing import List, Dict, Any
 
-from sqlalchemy import select, func, and_, text
+from sqlalchemy import select, func, and_, or_, literal_column
 from sqlalchemy.engine import Connection
 
 from database.schema import parks, park_daily_stats
 from database.queries.builders import Filters
 from utils.timezone import get_pacific_day_range_utc
 from utils.sql_helpers import timestamp_match_condition
+
+# ORM models for query conversion
+from src.models import Park, Ride, ParkActivitySnapshot, RideStatusSnapshot
 
 
 class ParkWaitTimeHistoryQuery:
@@ -129,40 +132,44 @@ class ParkWaitTimeHistoryQuery:
         # Get UTC time range for the target date in Pacific timezone
         start_utc, end_utc = get_pacific_day_range_utc(target_date)
 
-        # Build filter clause
-        disney_filter = (
-            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"
-            if filter_disney_universal
-            else ""
-        )
-
         # Get top parks by average wait time today
         # Only include parks that appear OPEN
-        top_parks_query = text(f"""
-            SELECT
-                p.park_id,
-                p.name AS park_name,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-                AVG(pas.avg_wait_time) AS overall_avg_wait
-            FROM parks p
-            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-            WHERE pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
-                AND pas.park_appears_open = TRUE
-                AND pas.avg_wait_time IS NOT NULL
-                AND pas.avg_wait_time > 0
-                AND p.is_active = TRUE
-                {disney_filter}
-            GROUP BY p.park_id, p.name, p.city, p.state_province
-            HAVING overall_avg_wait > 0
-            ORDER BY overall_avg_wait DESC
-            LIMIT :limit
-        """)
+        top_parks_stmt = (
+            select(
+                Park.park_id,
+                Park.name.label("park_name"),
+                func.concat(Park.city, ', ', Park.state_province).label("location"),
+                func.avg(ParkActivitySnapshot.avg_wait_time).label("overall_avg_wait")
+            )
+            .select_from(Park)
+            .join(ParkActivitySnapshot, Park.park_id == ParkActivitySnapshot.park_id)
+            .where(
+                and_(
+                    ParkActivitySnapshot.recorded_at >= start_utc,
+                    ParkActivitySnapshot.recorded_at < end_utc,
+                    ParkActivitySnapshot.park_appears_open == True,
+                    ParkActivitySnapshot.avg_wait_time.isnot(None),
+                    ParkActivitySnapshot.avg_wait_time > 0,
+                    Park.is_active == True
+                )
+            )
+        )
 
-        result = self.conn.execute(top_parks_query, {
-            "start_utc": start_utc,
-            "end_utc": end_utc,
-            "limit": limit
-        })
+        # Apply Disney/Universal filter if requested
+        if filter_disney_universal:
+            top_parks_stmt = top_parks_stmt.where(
+                or_(Park.is_disney == True, Park.is_universal == True)
+            )
+
+        top_parks_stmt = (
+            top_parks_stmt
+            .group_by(Park.park_id, Park.name, Park.city, Park.state_province)
+            .having(func.avg(ParkActivitySnapshot.avg_wait_time) > 0)
+            .order_by(func.avg(ParkActivitySnapshot.avg_wait_time).desc())
+            .limit(limit)
+        )
+
+        result = self.conn.execute(top_parks_stmt)
         top_parks = [dict(row._mapping) for row in result]
 
         if not top_parks:
@@ -199,7 +206,6 @@ class ParkWaitTimeHistoryQuery:
         """
         now_utc = datetime.now(timezone.utc)
         start_utc = now_utc - timedelta(minutes=minutes)
-        ts_match = timestamp_match_condition("pas.recorded_at", "rss.recorded_at")
 
         # Build 10-minute labels aligned to :00, :10, :20, :30, :40, :50
         # Data is collected every 10 minutes at these marks
@@ -213,40 +219,48 @@ class ParkWaitTimeHistoryQuery:
             labels.append(current.strftime("%H:%M"))
             current += timedelta(minutes=10)
 
-        disney_filter = (
-            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)"
-            if filter_disney_universal
-            else ""
+        # ORM timestamp matching condition: match at minute precision
+        ts_match_cond = (
+            func.date_format(ParkActivitySnapshot.recorded_at, '%Y-%m-%d %H:%i') ==
+            func.date_format(RideStatusSnapshot.recorded_at, '%Y-%m-%d %H:%i')
         )
 
-        top_parks_query = text(f"""
-            SELECT
-                p.park_id,
-                p.name AS park_name,
-                AVG(rss.wait_time) AS avg_wait
-            FROM parks p
-            INNER JOIN rides r ON p.park_id = r.park_id
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND {ts_match}
-            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at <= :end_utc
-                AND p.is_active = TRUE
-                AND pas.park_appears_open = TRUE
-                AND rss.wait_time IS NOT NULL
-                {disney_filter}
-            GROUP BY p.park_id, p.name
-            HAVING avg_wait > 0
-            ORDER BY avg_wait DESC
-            LIMIT :limit
-        """)
+        top_parks_stmt = (
+            select(
+                Park.park_id,
+                Park.name.label("park_name"),
+                func.avg(RideStatusSnapshot.wait_time).label("avg_wait")
+            )
+            .select_from(Park)
+            .join(Ride, and_(Park.park_id == Ride.park_id, Ride.is_active == True, Ride.category == 'ATTRACTION'))
+            .join(RideStatusSnapshot, Ride.ride_id == RideStatusSnapshot.ride_id)
+            .join(ParkActivitySnapshot, and_(Park.park_id == ParkActivitySnapshot.park_id, ts_match_cond))
+            .where(
+                and_(
+                    RideStatusSnapshot.recorded_at >= start_utc,
+                    RideStatusSnapshot.recorded_at <= now_utc,
+                    Park.is_active == True,
+                    ParkActivitySnapshot.park_appears_open == True,
+                    RideStatusSnapshot.wait_time.isnot(None)
+                )
+            )
+        )
 
-        result = self.conn.execute(top_parks_query, {
-            "start_utc": start_utc,
-            "end_utc": now_utc,
-            "limit": limit
-        })
+        # Apply Disney/Universal filter if requested
+        if filter_disney_universal:
+            top_parks_stmt = top_parks_stmt.where(
+                or_(Park.is_disney == True, Park.is_universal == True)
+            )
+
+        top_parks_stmt = (
+            top_parks_stmt
+            .group_by(Park.park_id, Park.name)
+            .having(func.avg(RideStatusSnapshot.wait_time) > 0)
+            .order_by(func.avg(RideStatusSnapshot.wait_time).desc())
+            .limit(limit)
+        )
+
+        result = self.conn.execute(top_parks_stmt)
         parks_in_view = [dict(row._mapping) for row in result]
 
         if not parks_in_view:
@@ -254,26 +268,27 @@ class ParkWaitTimeHistoryQuery:
 
         datasets = []
         for park in parks_in_view:
-            series_query = text(f"""
-                SELECT
-                    DATE_FORMAT(rss.recorded_at, '%H:%i') AS minute_label,
-                    AVG(rss.wait_time) AS avg_wait
-                FROM ride_status_snapshots rss
-                INNER JOIN rides r ON rss.ride_id = r.ride_id
-                INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND {ts_match}
-                WHERE r.park_id = :park_id
-                    AND rss.recorded_at >= :start_utc AND rss.recorded_at <= :end_utc
-                    AND pas.park_appears_open = TRUE
-                    AND rss.wait_time IS NOT NULL
-                GROUP BY minute_label
-                ORDER BY minute_label
-            """)
-            series_result = self.conn.execute(series_query, {
-                "park_id": park["park_id"],
-                "start_utc": start_utc,
-                "end_utc": now_utc
-            })
+            series_stmt = (
+                select(
+                    func.date_format(RideStatusSnapshot.recorded_at, '%H:%i').label("minute_label"),
+                    func.avg(RideStatusSnapshot.wait_time).label("avg_wait")
+                )
+                .select_from(RideStatusSnapshot)
+                .join(Ride, RideStatusSnapshot.ride_id == Ride.ride_id)
+                .join(ParkActivitySnapshot, and_(Ride.park_id == ParkActivitySnapshot.park_id, ts_match_cond))
+                .where(
+                    and_(
+                        Ride.park_id == park["park_id"],
+                        RideStatusSnapshot.recorded_at >= start_utc,
+                        RideStatusSnapshot.recorded_at <= now_utc,
+                        ParkActivitySnapshot.park_appears_open == True,
+                        RideStatusSnapshot.wait_time.isnot(None)
+                    )
+                )
+                .group_by(func.date_format(RideStatusSnapshot.recorded_at, '%H:%i'))
+                .order_by(literal_column("minute_label"))
+            )
+            series_result = self.conn.execute(series_stmt)
             points = {row.minute_label: float(row.avg_wait) for row in series_result}
             aligned = [points.get(label) for label in labels]
             datasets.append({
@@ -290,25 +305,32 @@ class ParkWaitTimeHistoryQuery:
         end_utc,
     ) -> List[Dict[str, Any]]:
         """Get hourly average wait times for a specific park from live snapshots."""
-        # Use DATE_SUB with 8-hour offset for PST (UTC-8)
-        query = text("""
-            SELECT
-                HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR)) AS hour,
-                ROUND(AVG(pas.avg_wait_time), 0) AS avg_wait
-            FROM park_activity_snapshots pas
-            WHERE pas.park_id = :park_id
-                AND pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
-                AND pas.park_appears_open = TRUE
-                AND pas.avg_wait_time IS NOT NULL
-            GROUP BY hour
-            ORDER BY hour
-        """)
+        # Calculate Pacific hour: UTC - 8 hours
+        pacific_time = func.date_sub(
+            ParkActivitySnapshot.recorded_at,
+            literal_column("INTERVAL 8 HOUR")
+        )
+        hour_expr = func.hour(pacific_time)
 
-        result = self.conn.execute(query, {
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
+        stmt = (
+            select(
+                hour_expr.label("hour"),
+                func.round(func.avg(ParkActivitySnapshot.avg_wait_time), 0).label("avg_wait")
+            )
+            .where(
+                and_(
+                    ParkActivitySnapshot.park_id == park_id,
+                    ParkActivitySnapshot.recorded_at >= start_utc,
+                    ParkActivitySnapshot.recorded_at < end_utc,
+                    ParkActivitySnapshot.park_appears_open == True,
+                    ParkActivitySnapshot.avg_wait_time.isnot(None)
+                )
+            )
+            .group_by(hour_expr)
+            .order_by(literal_column("hour"))
+        )
+
+        result = self.conn.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def _get_top_parks_by_wait_time(

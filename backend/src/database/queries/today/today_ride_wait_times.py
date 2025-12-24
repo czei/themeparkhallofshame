@@ -25,14 +25,15 @@ Single Source of Truth:
 
 from typing import List, Dict, Any
 
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy import select, func, and_, case, literal_column
+from sqlalchemy.orm import Session
 
+from src.models import Park, Ride, RideClassification, RideStatusSnapshot, ParkActivitySnapshot
+from src.utils.query_helpers import QueryClassBase
 from utils.timezone import get_today_range_to_now_utc
-from utils.sql_helpers import ParkStatusSQL, RideFilterSQL
 
 
-class TodayRideWaitTimesQuery:
+class TodayRideWaitTimesQuery(QueryClassBase):
     """
     Query handler for today's CUMULATIVE ride wait time rankings.
 
@@ -40,9 +41,6 @@ class TodayRideWaitTimesQuery:
     this aggregates ALL wait times from ride_status_snapshots
     since midnight Pacific to now.
     """
-
-    def __init__(self, connection: Connection):
-        self.conn = connection
 
     def get_rankings(
         self,
@@ -62,97 +60,152 @@ class TodayRideWaitTimesQuery:
         # Get time range from midnight Pacific to now
         start_utc, now_utc = get_today_range_to_now_utc()
 
-        # Use centralized SQL helpers for consistent logic
-        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
-        park_open = ParkStatusSQL.park_appears_open_filter("pas")
-
         # PERFORMANCE: Use CTE to get latest snapshot per ride once,
         # avoiding correlated subqueries that run per-row
-        query = text(f"""
-            WITH latest_snapshots AS (
-                -- Get the most recent snapshot for each ride (runs once, not per-row)
-                SELECT
-                    rss_inner.ride_id,
-                    rss_inner.wait_time AS current_wait_time,
-                    rss_inner.status AS current_status,
-                    rss_inner.computed_is_open AS current_is_open
-                FROM ride_status_snapshots rss_inner
-                INNER JOIN (
-                    SELECT ride_id, MAX(recorded_at) AS max_recorded_at
-                    FROM ride_status_snapshots
-                    GROUP BY ride_id
-                ) latest ON rss_inner.ride_id = latest.ride_id
-                    AND rss_inner.recorded_at = latest.max_recorded_at
-            ),
-            latest_park_status AS (
-                -- Get the most recent park status for each park (runs once)
-                SELECT
-                    pas_inner.park_id,
-                    pas_inner.park_appears_open AS park_is_open
-                FROM park_activity_snapshots pas_inner
-                INNER JOIN (
-                    SELECT park_id, MAX(recorded_at) AS max_recorded_at
-                    FROM park_activity_snapshots
-                    GROUP BY park_id
-                ) latest_pas ON pas_inner.park_id = latest_pas.park_id
-                    AND pas_inner.recorded_at = latest_pas.max_recorded_at
+
+        # CTE 1: Latest snapshot per ride
+        latest_snapshot_subq = (
+            select(
+                RideStatusSnapshot.ride_id,
+                func.max(RideStatusSnapshot.recorded_at).label('max_recorded_at')
             )
-            SELECT
-                r.ride_id,
-                r.queue_times_id,
-                p.queue_times_id AS park_queue_times_id,
-                r.name AS ride_name,
-                p.name AS park_name,
-                p.park_id,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-                rc.tier,
+            .group_by(RideStatusSnapshot.ride_id)
+            .subquery()
+        )
 
-                -- Average wait time (only when park is open and wait > 0)
-                -- IMPORTANT: Use avg_wait_minutes (not avg_wait_time) for frontend compatibility
-                ROUND(
-                    AVG(CASE
-                        WHEN {park_open} AND rss.wait_time > 0
-                        THEN rss.wait_time
-                    END),
-                    1
-                ) AS avg_wait_minutes,
+        latest_snapshots = (
+            select(
+                RideStatusSnapshot.ride_id,
+                RideStatusSnapshot.wait_time.label('current_wait_time'),
+                RideStatusSnapshot.status.label('current_status'),
+                RideStatusSnapshot.computed_is_open.label('current_is_open')
+            )
+            .select_from(RideStatusSnapshot)
+            .join(
+                latest_snapshot_subq,
+                and_(
+                    RideStatusSnapshot.ride_id == latest_snapshot_subq.c.ride_id,
+                    RideStatusSnapshot.recorded_at == latest_snapshot_subq.c.max_recorded_at
+                )
+            )
+        ).cte('latest_snapshots')
 
-                -- Peak wait time today
-                -- IMPORTANT: Use peak_wait_minutes (not peak_wait_time) for frontend compatibility
-                MAX(CASE
-                    WHEN {park_open}
-                    THEN rss.wait_time
-                END) AS peak_wait_minutes,
+        # CTE 2: Latest park status per park
+        latest_park_subq = (
+            select(
+                ParkActivitySnapshot.park_id,
+                func.max(ParkActivitySnapshot.recorded_at).label('max_recorded_at')
+            )
+            .group_by(ParkActivitySnapshot.park_id)
+            .subquery()
+        )
 
-                -- Current values from pre-computed CTE (no correlated subqueries)
-                ls.current_wait_time,
-                ls.current_status,
-                ls.current_is_open,
-                lps.park_is_open
+        latest_park_status = (
+            select(
+                ParkActivitySnapshot.park_id,
+                ParkActivitySnapshot.park_appears_open.label('park_is_open')
+            )
+            .select_from(ParkActivitySnapshot)
+            .join(
+                latest_park_subq,
+                and_(
+                    ParkActivitySnapshot.park_id == latest_park_subq.c.park_id,
+                    ParkActivitySnapshot.recorded_at == latest_park_subq.c.max_recorded_at
+                )
+            )
+        ).cte('latest_park_status')
 
-            FROM rides r
-            INNER JOIN parks p ON r.park_id = p.park_id
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
-            LEFT JOIN latest_snapshots ls ON r.ride_id = ls.ride_id
-            LEFT JOIN latest_park_status lps ON p.park_id = lps.park_id
-            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :now_utc
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND p.is_active = TRUE
-                {filter_clause}
-            GROUP BY r.ride_id, r.name, p.name, p.park_id, p.city, p.state_province, rc.tier,
-                     ls.current_wait_time, ls.current_status, ls.current_is_open, lps.park_is_open
-            HAVING avg_wait_minutes IS NOT NULL
-            ORDER BY avg_wait_minutes DESC
-            LIMIT :limit
-        """)
+        # Main query
+        # Average wait time (only when park is open and wait > 0)
+        avg_wait_minutes = func.round(
+            func.avg(
+                case(
+                    (
+                        and_(
+                            ParkActivitySnapshot.park_appears_open == True,
+                            RideStatusSnapshot.wait_time > 0
+                        ),
+                        RideStatusSnapshot.wait_time
+                    )
+                )
+            ),
+            1
+        ).label('avg_wait_minutes')
 
-        result = self.conn.execute(query, {
-            "start_utc": start_utc,
-            "now_utc": now_utc,
-            "limit": limit
-        })
-        return [dict(row._mapping) for row in result]
+        # Peak wait time today (only when park is open)
+        peak_wait_minutes = func.max(
+            case(
+                (
+                    ParkActivitySnapshot.park_appears_open == True,
+                    RideStatusSnapshot.wait_time
+                )
+            )
+        ).label('peak_wait_minutes')
+
+        # Location concatenation
+        location = func.concat(Park.city, literal_column("', '"), Park.state_province).label('location')
+
+        stmt = (
+            select(
+                Ride.ride_id,
+                Ride.queue_times_id,
+                Park.queue_times_id.label('park_queue_times_id'),
+                Ride.name.label('ride_name'),
+                Park.name.label('park_name'),
+                Park.park_id,
+                location,
+                RideClassification.tier,
+                avg_wait_minutes,
+                peak_wait_minutes,
+                latest_snapshots.c.current_wait_time,
+                latest_snapshots.c.current_status,
+                latest_snapshots.c.current_is_open,
+                latest_park_status.c.park_is_open
+            )
+            .select_from(Ride)
+            .join(Park, Ride.park_id == Park.park_id)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .join(RideStatusSnapshot, Ride.ride_id == RideStatusSnapshot.ride_id)
+            .join(
+                ParkActivitySnapshot,
+                and_(
+                    Park.park_id == ParkActivitySnapshot.park_id,
+                    ParkActivitySnapshot.recorded_at == RideStatusSnapshot.recorded_at
+                )
+            )
+            .outerjoin(latest_snapshots, Ride.ride_id == latest_snapshots.c.ride_id)
+            .outerjoin(latest_park_status, Park.park_id == latest_park_status.c.park_id)
+            .where(
+                and_(
+                    RideStatusSnapshot.recorded_at >= start_utc,
+                    RideStatusSnapshot.recorded_at < now_utc,
+                    Ride.is_active == True,
+                    Ride.category == 'ATTRACTION',
+                    Park.is_active == True
+                )
+            )
+            .group_by(
+                Ride.ride_id,
+                Ride.name,
+                Park.name,
+                Park.park_id,
+                Park.city,
+                Park.state_province,
+                RideClassification.tier,
+                latest_snapshots.c.current_wait_time,
+                latest_snapshots.c.current_status,
+                latest_snapshots.c.current_is_open,
+                latest_park_status.c.park_is_open
+            )
+            .having(avg_wait_minutes.isnot(None))
+            .order_by(avg_wait_minutes.desc())
+            .limit(limit)
+        )
+
+        # Apply Disney/Universal filter if requested
+        if filter_disney_universal:
+            stmt = stmt.where(
+                Park.name.like('%Disney%') | Park.name.like('%Universal%')
+            )
+
+        return self.execute_and_fetchall(stmt)

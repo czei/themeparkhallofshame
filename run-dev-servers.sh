@@ -21,6 +21,14 @@ export FLASK_APP=src.api.app
 export FLASK_ENV=production
 export FLASK_DEBUG=0
 
+# Database config for local dev (uses dev database, not test)
+export DB_NAME="${DB_NAME:-themepark_tracker_dev}"
+export DB_HOST="${DB_HOST:-localhost}"
+export DB_USER="${DB_USER:-root}"
+export DB_PASSWORD="${DB_PASSWORD:-294e043ww}"
+# Unset all TEST_DB_* vars to avoid picking up test database config
+unset TEST_DB_NAME TEST_DB_HOST TEST_DB_USER TEST_DB_PASSWORD TEST_DB_PORT
+
 BACKEND_PORT=${BACKEND_PORT:-5001}
 FRONTEND_PORT=${FRONTEND_PORT:-8000}
 

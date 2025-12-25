@@ -2355,6 +2355,18 @@ def test_park_details_yesterday_shame_breakdown(client, comprehensive_test_data)
     breakdown = data['shame_breakdown']
     assert 'shame_score' in breakdown
 
+    # CRITICAL: shame_breakdown must include 'rides' array for frontend to render
+    # Frontend expects: [{ride_id, ride_name, tier, downtime_hours, ...}, ...]
+    assert 'rides' in breakdown, "shame_breakdown must include 'rides' array for frontend"
+    assert isinstance(breakdown['rides'], list), "rides must be an array, not a count"
+
+    # If there are rides with downtime, validate structure
+    if len(breakdown['rides']) > 0:
+        ride = breakdown['rides'][0]
+        assert 'ride_id' in ride, "Each ride must have ride_id"
+        assert 'ride_name' in ride, "Each ride must have ride_name"
+        assert 'downtime_hours' in ride, "Each ride must have downtime_hours"
+
 
 @freeze_time(MOCKED_NOW_UTC)
 def test_park_details_last_week_shame_breakdown(client, comprehensive_test_data):

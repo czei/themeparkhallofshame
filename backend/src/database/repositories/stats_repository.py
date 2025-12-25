@@ -33,7 +33,7 @@ from sqlalchemy import func, and_, text, distinct
 
 from src.models.orm_park import Park
 from src.models.orm_ride import Ride
-from src.models.orm_stats import ParkDailyStats, ParkHourlyStats
+from src.models.orm_stats import ParkDailyStats, ParkHourlyStats, RideDailyStats
 from src.models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
 
 
@@ -540,6 +540,65 @@ class StatsRepository:
             'hours_tracked': len(hourly_stats)
         }
 
+    def _get_rides_with_downtime_for_date(
+        self,
+        park_id: int,
+        stat_date: date
+    ) -> List[Dict[str, Any]]:
+        """
+        Get rides with downtime for a park on a specific date.
+
+        Args:
+            park_id: Park ID
+            stat_date: The date to query
+
+        Returns:
+            List of ride dictionaries with downtime details, sorted by weighted downtime desc
+        """
+        # Tier weights for calculating weighted contribution
+        TIER_WEIGHTS = {1: 10, 2: 5, 3: 2}
+
+        # Query ride daily stats joined with ride info
+        # Sort by tier-weighted downtime (tier 1 = 10x, tier 2 = 5x, tier 3 = 2x)
+        results = (
+            self.session.query(
+                RideDailyStats.ride_id,
+                Ride.name.label('ride_name'),
+                Ride.tier,
+                RideDailyStats.downtime_minutes
+            )
+            .join(Ride, RideDailyStats.ride_id == Ride.ride_id)
+            .filter(
+                and_(
+                    Ride.park_id == park_id,
+                    RideDailyStats.stat_date == stat_date,
+                    RideDailyStats.downtime_minutes > 0
+                )
+            )
+            .order_by(RideDailyStats.downtime_minutes.desc())
+            .all()
+        )
+
+        rides = []
+        for r in results:
+            tier = r.tier or 3  # Default to tier 3 if unclassified
+            tier_weight = TIER_WEIGHTS.get(tier, 2)
+            downtime_hours = r.downtime_minutes / 60
+            weighted_contribution = downtime_hours * tier_weight
+
+            rides.append({
+                'ride_id': r.ride_id,
+                'ride_name': r.ride_name,
+                'tier': tier,
+                'downtime_hours': round(downtime_hours, 2),
+                'weighted_contribution': round(weighted_contribution, 2),
+                'status': 'DOWN'
+            })
+
+        # Sort by weighted contribution (descending)
+        rides.sort(key=lambda x: x['weighted_contribution'], reverse=True)
+        return rides
+
     def get_park_yesterday_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
         """
         Get shame breakdown for yesterday using daily stats.
@@ -567,13 +626,17 @@ class StatsRepository:
         )
 
         if not daily_stat:
-            return {'shame_score': 0, 'total_downtime_hours': 0}
+            return {'shame_score': 0, 'total_downtime_hours': 0, 'rides': []}
+
+        # Get detailed ride-level downtime data for frontend
+        rides = self._get_rides_with_downtime_for_date(park_id, start_date)
 
         return {
             'shame_score': float(daily_stat.shame_score or 0),
             'total_downtime_hours': float(daily_stat.total_downtime_hours or 0),
             'avg_uptime_percentage': float(daily_stat.avg_uptime_percentage or 0),
-            'rides_with_downtime': daily_stat.rides_with_downtime or 0
+            'rides_with_downtime': daily_stat.rides_with_downtime or 0,  # Keep original count for backwards compatibility
+            'rides': rides  # Array of rides with downtime details for frontend
         }
 
     def get_park_weekly_shame_breakdown(self, park_id: int) -> Dict[str, Any]:

@@ -618,8 +618,8 @@ def get_ride_details(ride_id: int):
             logger.info(f"Cache HIT for ride details: ride_id={ride_id}, period={period}")
             return jsonify(cached_result), 200
 
-        with get_db_connection() as conn:
-            ride_repo = RideRepository(conn)
+        with get_db_session() as session:
+            ride_repo = RideRepository(session)
 
             # Get ride basic info
             ride = ride_repo.get_by_id(ride_id)
@@ -901,7 +901,8 @@ def _get_ride_summary_stats(ride_id, start_date, end_date, period):
     wait_values = [m.avg_wait_time_minutes for m in operated_metrics if m.avg_wait_time_minutes is not None]
     avg_wait_time = (sum(wait_values) / len(wait_values)) if wait_values else None
 
-    total_operating_hours = sum(1 for m in operated_metrics if (m.operating_snapshots or 0) > 0)
+    # Count hours where the ride was actually operating (uptime > 0%)
+    total_operating_hours = sum(1 for m in operated_metrics if (m.uptime_percentage or 0) > 0)
 
     return {
         "total_downtime_hours": float(total_downtime_hours) if total_downtime_hours is not None else None,
@@ -964,10 +965,10 @@ def _get_ride_downtime_events(ride_id, start_date, end_date, period):
         )
         raise
 
-    # Match SQL: AND down_snapshots > 0 and ORDER BY hour_start_utc DESC
+    # Match SQL: AND downtime_hours > 0 and ORDER BY hour_start_utc DESC
     events = []
     for m in sorted(metrics, key=lambda x: x.hour_start_utc, reverse=True):
-        if (m.down_snapshots or 0) <= 0:
+        if (m.downtime_hours or 0) <= 0:
             continue
 
         events.append({
@@ -1092,14 +1093,20 @@ def _get_ride_hourly_breakdown(ride_id, start_date, end_date, period):
     # ORDER BY hour_start_utc DESC (match SQL)
     breakdown = []
     for m in sorted(metrics, key=lambda x: x.hour_start_utc, reverse=True):
+        # Derive operating/down snapshots from uptime_percentage and snapshot_count
+        total_snapshots = m.snapshot_count or 0
+        uptime_pct = m.uptime_percentage or 0
+        operating = int(round(total_snapshots * uptime_pct / 100)) if total_snapshots > 0 else 0
+        down = total_snapshots - operating
+
         breakdown.append({
             "hour_start_utc": m.hour_start_utc,
             "avg_wait_time_minutes": float(m.avg_wait_time_minutes) if m.avg_wait_time_minutes is not None else None,
-            "operating_snapshots": int(m.operating_snapshots or 0),
-            "down_snapshots": int(m.down_snapshots or 0),
+            "operating_snapshots": operating,
+            "down_snapshots": down,
             "downtime_hours": float(m.downtime_hours) if m.downtime_hours is not None else None,
             "uptime_percentage": float(m.uptime_percentage) if m.uptime_percentage is not None else None,
-            "snapshot_count": int(m.snapshot_count or 0),
+            "snapshot_count": int(total_snapshots),
         })
 
     return breakdown

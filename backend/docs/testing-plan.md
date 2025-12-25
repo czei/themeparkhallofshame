@@ -1,5 +1,184 @@
 # Testing Strategy: Hybrid Approach for Time-Based Data
 
+## Required API Coverage Matrix
+
+This section defines the **mandatory** test coverage for all public API endpoints. Every combination in this matrix MUST have an integration test.
+
+### Primary API Endpoints
+
+The application has two main data tables (Shame Score/Downtime, Wait Times), two entity types (Parks, Rides), five time periods (LIVE, TODAY, YESTERDAY, LAST_WEEK, LAST_MONTH), and two filter modes (All Parks, Disney & Universal).
+
+#### Coverage Matrix: Rankings APIs
+
+| Endpoint | Entity | Period | Filter | Test File | Status |
+|----------|--------|--------|--------|-----------|--------|
+| `/parks/downtime` | Parks | LIVE | all-parks | `test_api_endpoints_integration.py` | ✅ `test_parks_downtime_live_all_parks` |
+| `/parks/downtime` | Parks | LIVE | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_parks_downtime_live_disney_universal` |
+| `/parks/downtime` | Parks | TODAY | all-parks | `test_api_endpoints_integration.py` | ✅ `test_parks_downtime_today_all_parks` |
+| `/parks/downtime` | Parks | TODAY | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_parks_downtime_today_disney_universal_filter` |
+| `/parks/downtime` | Parks | YESTERDAY | all-parks | `test_api_endpoints_integration.py` | ✅ `test_parks_downtime_yesterday_all_parks` |
+| `/parks/downtime` | Parks | YESTERDAY | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_parks_downtime_yesterday_disney_universal` |
+| `/parks/downtime` | Parks | LAST_WEEK | all-parks | `test_api_endpoints_integration.py` | ✅ `test_parks_downtime_last_week_all_parks` |
+| `/parks/downtime` | Parks | LAST_WEEK | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_parks_downtime_last_week_disney_universal` |
+| `/parks/downtime` | Parks | LAST_MONTH | all-parks | `test_api_endpoints_integration.py` | ✅ `test_parks_downtime_last_month_all_parks` |
+| `/parks/downtime` | Parks | LAST_MONTH | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_parks_downtime_last_month_disney_universal` |
+| `/rides/downtime` | Rides | LIVE | all-parks | `test_api_endpoints_integration.py` | ✅ `test_rides_downtime_live_all_parks` |
+| `/rides/downtime` | Rides | LIVE | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_rides_downtime_live_disney_universal` |
+| `/rides/downtime` | Rides | TODAY | all-parks | `test_api_endpoints_integration.py` | ✅ `test_rides_downtime_today` |
+| `/rides/downtime` | Rides | TODAY | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_rides_downtime_disney_universal_filter` |
+| `/rides/downtime` | Rides | YESTERDAY | all-parks | `test_api_endpoints_integration.py` | ✅ `test_rides_downtime_yesterday_all_parks` |
+| `/rides/downtime` | Rides | YESTERDAY | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_rides_downtime_yesterday_disney_universal` |
+| `/rides/downtime` | Rides | LAST_WEEK | all-parks | `test_api_endpoints_integration.py` | ✅ `test_rides_downtime_last_week_all_parks` |
+| `/rides/downtime` | Rides | LAST_WEEK | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_rides_downtime_last_week_disney_universal` |
+| `/rides/downtime` | Rides | LAST_MONTH | all-parks | `test_api_endpoints_integration.py` | ✅ `test_rides_downtime_last_month_all_parks` |
+| `/rides/downtime` | Rides | LAST_MONTH | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_rides_downtime_last_month_disney_universal` |
+| `/parks/waittimes` | Parks | LIVE | all-parks | `test_api_endpoints_integration.py` | ✅ `test_parks_waittimes_live_all_parks` |
+| `/parks/waittimes` | Parks | LIVE | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_parks_waittimes_live_disney_universal` |
+| `/parks/waittimes` | Parks | TODAY | all-parks | `test_api_endpoints_integration.py` | ✅ `test_parks_waittimes_today_all_parks` |
+| `/parks/waittimes` | Parks | TODAY | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_parks_waittimes_today_disney_universal` |
+| `/parks/waittimes` | Parks | YESTERDAY | all-parks | `test_api_endpoints_integration.py` | ✅ `test_parks_waittimes_yesterday_all_parks` |
+| `/parks/waittimes` | Parks | YESTERDAY | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_parks_waittimes_yesterday_disney_universal` |
+| `/parks/waittimes` | Parks | LAST_WEEK | all-parks | `test_api_endpoints_integration.py` | ✅ `test_parks_waittimes_last_week_all_parks` |
+| `/parks/waittimes` | Parks | LAST_WEEK | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_parks_waittimes_last_week_disney_universal` |
+| `/parks/waittimes` | Parks | LAST_MONTH | all-parks | `test_api_endpoints_integration.py` | ✅ `test_parks_waittimes_last_month_all_parks` |
+| `/parks/waittimes` | Parks | LAST_MONTH | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_parks_waittimes_last_month_disney_universal` |
+| `/rides/waittimes` | Rides | LIVE | all-parks | `test_api_endpoints_integration.py` | ⚠️ `test_rides_waittimes_live_mode` (API not implemented, returns empty) |
+| `/rides/waittimes` | Rides | LIVE | disney-universal | `test_api_endpoints_integration.py` | ⚠️ `test_rides_waittimes_disney_universal_filter` (API not implemented) |
+| `/rides/waittimes` | Rides | TODAY | all-parks | `test_api_endpoints_integration.py` | ✅ `test_rides_waittimes_today_all_parks` |
+| `/rides/waittimes` | Rides | TODAY | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_rides_waittimes_today_disney_universal` |
+| `/rides/waittimes` | Rides | YESTERDAY | all-parks | `test_api_endpoints_integration.py` | ✅ `test_rides_waittimes_yesterday_all_parks` |
+| `/rides/waittimes` | Rides | YESTERDAY | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_rides_waittimes_yesterday_disney_universal` |
+| `/rides/waittimes` | Rides | LAST_WEEK | all-parks | `test_api_endpoints_integration.py` | ✅ `test_rides_waittimes_last_week_all_parks` |
+| `/rides/waittimes` | Rides | LAST_WEEK | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_rides_waittimes_last_week_disney_universal` |
+| `/rides/waittimes` | Rides | LAST_MONTH | all-parks | `test_api_endpoints_integration.py` | ✅ `test_rides_waittimes_last_month_all_parks` |
+| `/rides/waittimes` | Rides | LAST_MONTH | disney-universal | `test_api_endpoints_integration.py` | ✅ `test_rides_waittimes_last_month_disney_universal` |
+
+**Coverage: 40/40 (100%) - All implemented periods tested**
+
+**Note**: `/rides/waittimes` with `mode=live`, `mode=7day-average`, and `mode=peak-times` are NOT YET IMPLEMENTED (API returns empty data). Tests exist but verify the stub behavior.
+
+#### Coverage Matrix: Detail & Explanation APIs
+
+| Endpoint | Description | Test File | Status |
+|----------|-------------|-----------|--------|
+| `/parks/<id>/details` | Park details with ride breakdown | `test_api_endpoints_integration.py` | ✅ `test_park_details_success/not_found` |
+| `/parks/<id>/details?period=live` | Shame breakdown (live) | `test_api_endpoints_integration.py` | ✅ `test_park_details_live_shame_breakdown` |
+| `/parks/<id>/details?period=today` | Shame breakdown (today) | `test_api_endpoints_integration.py` | ✅ `test_park_details_today_shame_breakdown` |
+| `/parks/<id>/details?period=yesterday` | Shame breakdown (yesterday) | `test_api_endpoints_integration.py` | ✅ `test_park_details_yesterday_shame_breakdown` |
+| `/parks/<id>/details?period=last_week` | Shame breakdown (weekly) | `test_api_endpoints_integration.py` | ✅ `test_park_details_last_week_shame_breakdown` |
+| `/parks/<id>/details?period=last_month` | Shame breakdown (monthly) | `test_api_endpoints_integration.py` | ✅ `test_park_details_last_month_shame_breakdown` |
+| `/rides/<id>/details` | Ride details with hourly breakdown | `test_ride_details_daily_aggregation_api.py` | ✅ 8 tests (periods: today, yesterday, last_week, last_month) |
+| `/live/status-summary` | Live status counts (rides down/open) | `test_api_endpoints_integration.py` | ✅ `test_live_status_summary_*` (5 tests) |
+
+**Coverage: 8/8 (100%) - All detail/explanation endpoints covered**
+
+#### Coverage Matrix: Trends APIs
+
+| Endpoint | Category | Period | Filter | Test File | Status |
+|----------|----------|--------|--------|-----------|--------|
+| `/trends/parks/improving` | improving | today | both | `test_api_endpoints_integration.py` | ✅ 2 tests |
+| `/trends/parks/declining` | declining | today | all-parks | `test_api_endpoints_integration.py` | ✅ 1 test |
+| `/trends/rides/improving` | improving | today | all-parks | `test_api_endpoints_integration.py` | ✅ 1 test |
+| `/trends/rides/declining` | declining | today/7days | all-parks | `test_api_endpoints_integration.py` | ✅ 2 tests |
+
+**Missing: YESTERDAY and LAST_MONTH periods for all trends categories**
+
+**Coverage: 6/16 (38%) - yesterday, last_month periods not tested**
+
+### COVERAGE SUMMARY (Updated 2025-12-25)
+
+| Category | Coverage | Status |
+|----------|----------|--------|
+| Rankings APIs | 40/40 (100%) | ✅ Complete |
+| Detail & Explanation APIs | 8/8 (100%) | ✅ Complete |
+| Trends APIs | 6/16 (38%) | 🟡 Needs work |
+
+### REMAINING GAPS
+
+| Priority | Endpoint | Issue |
+|----------|----------|-------|
+| 🟡 MEDIUM | `/trends/*` | Missing YESTERDAY, LAST_MONTH periods |
+| 🔵 LOW | `/rides/waittimes` mode=live | API not implemented (returns empty) |
+| 🔵 LOW | `/rides/waittimes` mode=7day-average | API not implemented (returns empty) |
+| 🔵 LOW | `/rides/waittimes` mode=peak-times | API not implemented (returns empty) |
+
+**Total Missing Tests: 10 for trends (non-critical), 0 for core ranking APIs**
+
+### RECENTLY ADDED TESTS (2025-12-25)
+
+- `/rides/waittimes` - Added TODAY, YESTERDAY, LAST_WEEK, LAST_MONTH for both filters ✅
+- `/parks/downtime` - Added disney-universal filter for LAST_WEEK, LAST_MONTH ✅
+- `/rides/downtime` - Added disney-universal filter for LAST_WEEK ✅
+- Full matrix coverage for all core ranking APIs complete ✅
+
+### PREVIOUSLY ADDED (2025-12-24)
+
+- `/parks/waittimes` - All 10 period/filter combinations ✅
+- `/parks/downtime` - LIVE and YESTERDAY periods ✅
+- `/rides/downtime` - LIVE, YESTERDAY, LAST_MONTH periods ✅
+- `/live/status-summary` - 5 API integration tests ✅
+- `/parks/<id>/details` - All 5 period variations with shame breakdown ✅
+
+### Test Data Strategy
+
+All integration tests MUST use one of these approaches:
+
+#### Approach 1: Frozen Time with Fixtures (Preferred for CI)
+```python
+from freezegun import freeze_time
+from datetime import datetime, timezone, timedelta
+
+MOCKED_NOW_UTC = datetime(2025, 12, 24, 20, 0, 0, tzinfo=timezone.utc)  # 12 PM PST
+
+@freeze_time(MOCKED_NOW_UTC)
+def test_today_parks_downtime_all(self, mysql_session):
+    """Test TODAY parks downtime with all-parks filter."""
+    # Create test data relative to MOCKED_NOW_UTC
+    create_test_park(mysql_session, name="Test Park", is_disney=False)
+    create_test_snapshot(mysql_session, recorded_at=MOCKED_NOW_UTC - timedelta(hours=2))
+
+    response = client.get('/api/parks/downtime?period=today&filter=all-parks')
+    assert response.status_code == 200
+    assert len(response.json['parks']) > 0
+```
+
+#### Approach 2: Mirrored Production Data (For Smoke Tests)
+```python
+@pytest.mark.requires_mirror
+def test_today_with_real_data(self, mysql_session):
+    """Smoke test with mirrored production data."""
+    # Assumes mirror-production-db.sh was run recently
+    response = client.get('/api/parks/downtime?period=today&filter=all-parks')
+
+    # Sanity checks only - don't assert specific values
+    assert response.status_code == 200
+    assert 'parks' in response.json
+    # Today should have some data during park hours
+```
+
+### Test File Organization
+
+```
+tests/integration/api/
+├── conftest.py                    # Shared fixtures, Flask test client
+├── test_live_rankings.py          # LIVE period: parks/rides × downtime/waittimes × filters
+├── test_today_rankings.py         # TODAY period: parks/rides × downtime/waittimes × filters
+├── test_yesterday_rankings.py     # YESTERDAY period: parks/rides × downtime/waittimes × filters
+├── test_weekly_rankings.py        # LAST_WEEK period: parks/rides × downtime/waittimes × filters
+├── test_monthly_rankings.py       # LAST_MONTH period: parks/rides × downtime/waittimes × filters
+├── test_park_details.py           # Park details endpoint
+├── test_ride_details.py           # Ride details endpoint
+├── test_shame_breakdown.py        # Shame score explanation
+├── test_trends.py                 # All trends endpoints
+└── test_live_status.py            # Live status summary
+
+tests/integration/api/smoke/       # Optional: requires mirrored data
+├── test_smoke_all_periods.py      # Quick smoke test all periods with real data
+└── test_smoke_details.py          # Smoke test detail pages
+```
+
+---
+
 ## Overview
 
 Theme Park Hall of Shame has time-sensitive data that spans multiple periods (LIVE, TODAY, YESTERDAY, last_week, last_month). This creates testing challenges because:

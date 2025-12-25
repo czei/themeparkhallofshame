@@ -16,7 +16,7 @@ from sqlalchemy import text
 
 
 @pytest.fixture
-def hourly_equivalence_schema(mysql_connection):
+def hourly_equivalence_schema(mysql_session):
     """
     Minimal schema for equivalence test.
 
@@ -24,7 +24,7 @@ def hourly_equivalence_schema(mysql_connection):
     - avoid depending on the huge comprehensive_test_data fixture
     - control every row in park_activity_snapshots / park_hourly_stats / rides
     """
-    conn = mysql_connection
+    conn = mysql_session
 
     # Ensure tables exist (they come from migrations)
     # Just clean the specific test data we insert so other schema stays intact.
@@ -40,8 +40,8 @@ def hourly_equivalence_schema(mysql_connection):
     for table in tables_to_clean:
         conn.execute(text(f"DELETE FROM {table}"))
 
-    mysql_connection.commit()
-    return mysql_connection
+    mysql_session.commit()
+    return mysql_session
 
 
 def _insert_core_test_data(conn, base_hour_utc: datetime):

@@ -24,14 +24,14 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 import pytz
 
-from database.connection import get_db_connection
+from database.connection import get_db_connection, get_db_session
 from database.repositories.stats_repository import StatsRepository
 from database.repositories.ride_repository import RideRepository
 from utils.cache import get_query_cache, generate_cache_key
-from utils.timezone import get_today_pacific
+from utils.timezone import get_today_pacific, PERIOD_ALIASES
 
 # New query imports - each file handles one specific data source
-from database.queries.live import StatusSummaryQuery
+from database.queries.live import StatusSummaryQuery, LiveRideRankingsQuery
 from database.queries.rankings import RideDowntimeRankingsQuery, RideWaitTimeRankingsQuery
 from database.queries.today import TodayRideWaitTimesQuery, TodayRideRankingsQuery
 from database.queries.yesterday import YesterdayRideWaitTimesQuery, YesterdayRideRankingsQuery
@@ -283,6 +283,10 @@ Query Files Used:
             "error": "Invalid period. Must be one of: live, today, yesterday, 7days, 30days, last_week, last_month"
         }), 400
 
+    # Normalize legacy period names to standard names (keep original for response)
+    original_period = period
+    period = PERIOD_ALIASES.get(period, period)
+
     # Validate filter
     if filter_type not in ['disney-universal', 'all-parks']:
         return jsonify({
@@ -313,62 +317,37 @@ Query Files Used:
             logger.info(f"Cache HIT for ride downtime: period={period}, filter={filter_type}")
             return jsonify(cached_result), 200
 
-        with get_db_connection() as conn:
-            filter_disney_universal = (filter_type == 'disney-universal')
-            stats_repo = StatsRepository(conn)
+        filter_disney_universal = (filter_type == 'disney-universal')
 
-            # Route to appropriate query class based on period
-            today_pacific = get_today_pacific()
-            if period == 'live':
-                # LIVE/TODAY: Try pre-aggregated cache first (instant ~10ms)
-                # The ride_live_rankings table contains cumulative today data
-                # Falls back to raw query (~7s) if cache is empty/stale
-                rankings = stats_repo.get_ride_live_rankings_cached(
+        if period == 'live':
+            # LIVE: Use ORM query class for real-time snapshot data
+            with get_db_session() as session:
+                query = LiveRideRankingsQuery(session)
+                rankings = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
-                    limit=limit,
-                    sort_by=sort_by
+                    limit=limit
                 )
-
-                # If cache miss, fall back to computing from raw snapshots
-                if not rankings:
-                    logger.warning("Ride live rankings cache miss, falling back to raw query")
-                    rankings = stats_repo.get_ride_live_downtime_rankings(
-                        filter_disney_universal=filter_disney_universal,
-                        limit=limit,
-                        sort_by=sort_by
-                    )
-            elif period == 'today':
-                # TODAY: Use pre-aggregated hourly stats (live-updating)
+        elif period == 'today':
+            # TODAY: Use pre-aggregated hourly stats (live-updating)
+            with get_db_connection() as conn:
                 query = TodayRideRankingsQuery(conn)
                 rankings = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit,
                     sort_by=sort_by
                 )
-            elif period == 'yesterday':
-                # YESTERDAY: Full previous Pacific day (immutable, highly cacheable)
+        elif period == 'yesterday':
+            # YESTERDAY: Full previous Pacific day (immutable, highly cacheable)
+            with get_db_connection() as conn:
                 query = YesterdayRideRankingsQuery(conn)
                 rankings = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
-            elif period == '7days':
-                rankings = stats_repo.get_ride_weekly_rankings(
-                    year=today_pacific.year,
-                    week_number=today_pacific.isocalendar()[1],
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
-            elif period == '30days':
-                rankings = stats_repo.get_ride_monthly_rankings(
-                    year=today_pacific.year,
-                    month=today_pacific.month,
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
-            else:
-                # Historical data from aggregated stats (calendar-based periods)
-                # See: database/queries/rankings/ride_downtime_rankings.py
+        else:
+            # Historical data from aggregated stats (calendar-based periods)
+            # See: database/queries/rankings/ride_downtime_rankings.py
+            with get_db_connection() as conn:
                 query = RideDowntimeRankingsQuery(conn)
                 if period == 'last_week':
                     rankings = query.get_weekly(
@@ -383,37 +362,37 @@ Query Files Used:
                         sort_by=sort_by
                     )
 
-            # Add external URLs and rank to rankings
-            rankings_with_urls = []
-            for rank_idx, ride in enumerate(rankings, start=1):
-                ride_dict = dict(ride) if hasattr(ride, '_mapping') else dict(ride)
-                ride_dict['rank'] = rank_idx
-                # Generate external URL (legacy queue-times format)
-                if 'queue_times_id' in ride_dict and 'park_queue_times_id' in ride_dict:
-                    ride_dict['queue_times_url'] = f"https://queue-times.com/parks/{ride_dict['park_queue_times_id']}/rides/{ride_dict['queue_times_id']}"
-                else:
-                    ride_dict['queue_times_url'] = None
-                rankings_with_urls.append(ride_dict)
+        # Add external URLs and rank to rankings
+        rankings_with_urls = []
+        for rank_idx, ride in enumerate(rankings, start=1):
+            ride_dict = dict(ride) if hasattr(ride, '_mapping') else dict(ride)
+            ride_dict['rank'] = rank_idx
+            # Generate external URL (legacy queue-times format)
+            if 'queue_times_id' in ride_dict and 'park_queue_times_id' in ride_dict:
+                ride_dict['queue_times_url'] = f"https://queue-times.com/parks/{ride_dict['park_queue_times_id']}/rides/{ride_dict['queue_times_id']}"
+            else:
+                ride_dict['queue_times_url'] = None
+            rankings_with_urls.append(ride_dict)
 
-            # Build response
-            response = {
-                "success": True,
-                "period": period,
-                "filter": filter_type,
-                "data": rankings_with_urls,
-                "attribution": {
-                    "data_source": "ThemeParks.wiki",
-                    "url": "https://themeparks.wiki"
-                }
+        # Build response
+        response = {
+            "success": True,
+            "period": original_period,
+            "filter": filter_type,
+            "data": rankings_with_urls,
+            "attribution": {
+                "data_source": "ThemeParks.wiki",
+                "url": "https://themeparks.wiki"
             }
+        }
 
-            logger.info(f"Ride rankings requested: period={period}, filter={filter_type}, results={len(rankings_with_urls)}")
+        logger.info(f"Ride rankings requested: period={original_period}, filter={filter_type}, results={len(rankings_with_urls)}")
 
-            # Cache the result (5-minute TTL)
-            cache.set(cache_key, response)
-            logger.info(f"Cache STORE for ride downtime: period={period}, filter={filter_type}")
+        # Cache the result (5-minute TTL)
+        cache.set(cache_key, response)
+        logger.info(f"Cache STORE for ride downtime: period={original_period}, filter={filter_type}")
 
-            return jsonify(response), 200
+        return jsonify(response), 200
 
     except Exception as e:
         logger.error(f"Error fetching ride rankings: {e}", exc_info=True)
@@ -499,11 +478,10 @@ def get_ride_wait_times():
             # Route to appropriate query based on period
             if mode == 'live':
                 # LIVE data - instantaneous current wait times
-                stats_repo = StatsRepository(conn)
-                wait_times = stats_repo.get_ride_live_wait_time_rankings(
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
+                # TODO: Implement LiveRideWaitTimesQuery similar to LiveParkWaitTimesQuery
+                # For now, return empty data to prevent 500 errors
+                logger.warning("Ride live wait times not yet implemented, returning empty data")
+                wait_times = []
             elif mode == 'today':
                 # TODAY data - cumulative from midnight Pacific to now
                 # See: database/queries/today/today_ride_wait_times.py
@@ -521,17 +499,15 @@ def get_ride_wait_times():
                     limit=limit
                 )
             elif mode == '7day-average':
-                stats_repo = StatsRepository(conn)
-                wait_times = stats_repo.get_average_wait_times(
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
+                # TODO: Implement 7-day average wait times query
+                # For now, return empty data to prevent 500 errors
+                logger.warning("Ride 7-day average wait times not yet implemented, returning empty data")
+                wait_times = []
             elif mode == 'peak-times':
-                stats_repo = StatsRepository(conn)
-                wait_times = stats_repo.get_peak_wait_times(
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
+                # TODO: Implement peak times query
+                # For now, return empty data to prevent 500 errors
+                logger.warning("Ride peak times not yet implemented, returning empty data")
+                wait_times = []
             else:
                 # Historical data from aggregated stats (calendar-based periods)
                 # See: database/queries/rankings/ride_wait_time_rankings.py

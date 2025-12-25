@@ -20,18 +20,18 @@ class TestHourlyMultiHourOutages:
     """
 
     @pytest.fixture
-    def park_and_ride(self, mysql_connection):
+    def park_and_ride(self, mysql_session):
         """Creates a single park and ride for each test (function scope)."""
         # Using a high ID to avoid conflicts
         park_id = 9501
         ride_id = 95001
 
-        mysql_connection.execute(text("""
+        mysql_session.execute(text("""
             INSERT INTO parks (park_id, queue_times_id, name, city, state_province, country, timezone, is_disney, is_universal, is_active)
             VALUES (:id, :id, 'Test Park East', 'Orlando', 'FL', 'US', 'America/New_York', FALSE, FALSE, TRUE)
         """), {'id': park_id})
 
-        mysql_connection.execute(text("""
+        mysql_session.execute(text("""
             INSERT INTO rides (ride_id, queue_times_id, park_id, name, is_active, category, last_operated_at)
             VALUES (:id, :id, :park_id, 'Outage Coaster', TRUE, 'ATTRACTION', NOW())
         """), {'id': ride_id, 'park_id': park_id})
@@ -39,7 +39,7 @@ class TestHourlyMultiHourOutages:
         return park_id, ride_id
 
     def test_ride_down_for_multiple_hours_is_counted(
-        self, mysql_connection, patched_hourly_aggregator, snapshot_creator, park_and_ride
+        self, mysql_session, patched_hourly_aggregator, snapshot_creator, park_and_ride
     ):
         """
         Scenario: A ride operates at 10:05, goes down at 10:30, and stays down.
@@ -69,7 +69,7 @@ class TestHourlyMultiHourOutages:
         )
         aggregator_11.run()
 
-        result_11 = mysql_connection.execute(text("""
+        result_11 = mysql_session.execute(text("""
             SELECT ride_operated, downtime_hours, operating_snapshots FROM ride_hourly_stats
             WHERE ride_id = :ride_id AND hour_start_utc = :hour
         """), {'ride_id': ride_id, 'hour': aggregator_11.target_hour}).fetchone()
@@ -85,7 +85,7 @@ class TestHourlyMultiHourOutages:
         )
         aggregator_12.run()
 
-        result_12 = mysql_connection.execute(text("""
+        result_12 = mysql_session.execute(text("""
             SELECT ride_operated, downtime_hours FROM ride_hourly_stats
             WHERE ride_id = :ride_id AND hour_start_utc = :hour
         """), {'ride_id': ride_id, 'hour': aggregator_12.target_hour}).fetchone()
@@ -95,7 +95,7 @@ class TestHourlyMultiHourOutages:
         assert pytest.approx(result_12._mapping['downtime_hours']) == 1.0, "Should have 1 full hour of downtime for 12:00 hour"
 
     def test_ride_recovers_and_stops_counting_downtime(
-        self, mysql_connection, patched_hourly_aggregator, snapshot_creator, park_and_ride
+        self, mysql_session, patched_hourly_aggregator, snapshot_creator, park_and_ride
     ):
         """
         Scenario: Ride operates at 10:05, is down until 11:55, then recovers at 12:05.
@@ -129,7 +129,7 @@ class TestHourlyMultiHourOutages:
         aggregator_11.run()
 
         # Assert for 11:00 hour
-        result_11 = mysql_connection.execute(text("""
+        result_11 = mysql_session.execute(text("""
             SELECT ride_operated, downtime_hours FROM ride_hourly_stats
             WHERE ride_id = :ride_id AND hour_start_utc = :hour
         """), {'ride_id': ride_id, 'hour': aggregator_11.target_hour}).fetchone()
@@ -145,7 +145,7 @@ class TestHourlyMultiHourOutages:
         aggregator_12.run()
 
         # Assert for 12:00 hour
-        result_12 = mysql_connection.execute(text("""
+        result_12 = mysql_session.execute(text("""
             SELECT ride_operated, downtime_hours, operating_snapshots FROM ride_hourly_stats
             WHERE ride_id = :ride_id AND hour_start_utc = :hour
         """), {'ride_id': ride_id, 'hour': aggregator_12.target_hour}).fetchone()
@@ -156,7 +156,7 @@ class TestHourlyMultiHourOutages:
         assert result_12._mapping['downtime_hours'] == 0.0 # It was operating at 12:00, so 0 downtime for this hour.
 
     def test_outage_crossing_pacific_day_boundary_is_not_counted_on_next_day(
-        self, mysql_connection, patched_hourly_aggregator, snapshot_creator, park_and_ride
+        self, mysql_session, patched_hourly_aggregator, snapshot_creator, park_and_ride
     ):
         """
         Scenario: Ride operates at 11:55 PM on Day 1, then goes down. It remains
@@ -188,7 +188,7 @@ class TestHourlyMultiHourOutages:
         aggregator_day2.run()
 
         # Assert
-        result_day2 = mysql_connection.execute(text("""
+        result_day2 = mysql_session.execute(text("""
             SELECT ride_operated, downtime_hours FROM ride_hourly_stats
             WHERE ride_id = :ride_id AND hour_start_utc = :hour
         """), {'ride_id': ride_id, 'hour': aggregator_day2.target_hour}).fetchone()

@@ -50,7 +50,7 @@ class TestWeeklyAggregationMath:
     """Test mathematical correctness of weekly aggregation calculations."""
 
     def test_single_ride_full_week_aggregation(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test weekly aggregation for a single ride across 7 days.
@@ -73,9 +73,9 @@ class TestWeeklyAggregationMath:
         from tests.conftest import insert_sample_park, insert_sample_ride
 
         # Setup: Create park and ride
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         # Setup: Insert 7 days of daily stats for week 48 (Nov 24-30, 2025)
         week_start = date(2025, 11, 24)  # Monday
@@ -93,7 +93,7 @@ class TestWeeklyAggregationMath:
 
         for day_offset in range(7):
             stat_date = week_start + timedelta(days=day_offset)
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": stat_date,
                 "uptime_minutes": 761,
@@ -109,7 +109,7 @@ class TestWeeklyAggregationMath:
             })
 
         # Act: Run weekly aggregation for week 48 of 2025
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_weekly(
             year=2025,
             week_number=48
@@ -134,7 +134,7 @@ class TestWeeklyAggregationMath:
             FROM ride_weekly_stats
             WHERE ride_id = :ride_id AND year = :year AND week_number = :week_number
         """)
-        ride_stats = mysql_connection.execute(ride_stats_query, {
+        ride_stats = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id,
             "year": 2025,
             "week_number": 48
@@ -162,7 +162,7 @@ class TestWeeklyAggregationMath:
         assert ride_stats.week_start_date == week_start
 
     def test_weekly_aggregation_with_missing_days(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test weekly aggregation when some days have no data.
@@ -177,9 +177,9 @@ class TestWeeklyAggregationMath:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         # Insert data for only 3 days
         week_start = date(2025, 11, 24)
@@ -195,13 +195,13 @@ class TestWeeklyAggregationMath:
         # Only Mon (0), Wed (2), Fri (4)
         for day_offset in [0, 2, 4]:
             stat_date = week_start + timedelta(days=day_offset)
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": stat_date
             })
 
         # Act
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_weekly(year=2025, week_number=48)
 
         # Assert: Should sum only 3 days
@@ -210,7 +210,7 @@ class TestWeeklyAggregationMath:
             FROM ride_weekly_stats
             WHERE ride_id = :ride_id AND year = 2025 AND week_number = 48
         """)
-        ride_stats = mysql_connection.execute(ride_stats_query, {
+        ride_stats = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id
         }).fetchone()
 
@@ -219,7 +219,7 @@ class TestWeeklyAggregationMath:
         assert ride_stats.operating_hours_minutes == 2490, "3 days × 830"
 
     def test_weekly_trend_calculation(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test trend_vs_previous_week calculation.
@@ -234,9 +234,9 @@ class TestWeeklyAggregationMath:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         # Insert daily stats for week 47 (Nov 17-23)
         week_47_start = date(2025, 11, 17)
@@ -251,7 +251,7 @@ class TestWeeklyAggregationMath:
 
         # Week 47: Total 400 downtime minutes across 7 days
         for day_offset in range(7):
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": week_47_start + timedelta(days=day_offset),
                 "uptime": 650,
@@ -261,7 +261,7 @@ class TestWeeklyAggregationMath:
         # Insert daily stats for week 48 (Nov 24-30)
         week_48_start = date(2025, 11, 24)
         for day_offset in range(7):
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": week_48_start + timedelta(days=day_offset),
                 "uptime": 760,
@@ -269,7 +269,7 @@ class TestWeeklyAggregationMath:
             })
 
         # Act: Aggregate week 47 first
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         service.aggregate_weekly(year=2025, week_number=47)
 
         # Then aggregate week 48 (should calculate trend)
@@ -281,7 +281,7 @@ class TestWeeklyAggregationMath:
             FROM ride_weekly_stats
             WHERE ride_id = :ride_id AND year = 2025 AND week_number = 48
         """)
-        ride_stats = mysql_connection.execute(ride_stats_query, {
+        ride_stats = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id
         }).fetchone()
 
@@ -295,7 +295,7 @@ class TestParkWeeklyAggregation:
     """Test park-level weekly aggregation."""
 
     def test_park_weekly_aggregation_multiple_rides(
-        self, mysql_connection, sample_park_data
+        self, mysql_session, sample_park_data
     ):
         """
         Test park weekly stats aggregate correctly across multiple rides.
@@ -310,7 +310,7 @@ class TestParkWeeklyAggregation:
         """
         from tests.conftest import insert_sample_park
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
 
         # Create 3 rides
         ride_ids = []
@@ -319,7 +319,7 @@ class TestParkWeeklyAggregation:
                 INSERT INTO rides (park_id, queue_times_id, name, is_active)
                 VALUES (:park_id, :queue_times_id, :name, 1)
             """)
-            result = mysql_connection.execute(ride_insert, {
+            result = mysql_session.execute(ride_insert, {
                 "park_id": park_id,
                 "queue_times_id": 2000 + i,
                 "name": f"Ride {chr(65 + i)}"
@@ -348,14 +348,14 @@ class TestParkWeeklyAggregation:
         for ride_idx, ride_id in enumerate(ride_ids):
             pattern = ride_patterns[ride_idx]
             for day_offset in range(7):
-                mysql_connection.execute(daily_stats_insert, {
+                mysql_session.execute(daily_stats_insert, {
                     "ride_id": ride_id,
                     "stat_date": week_start + timedelta(days=day_offset),
                     **pattern
                 })
 
         # Act
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_weekly(year=2025, week_number=48)
 
         assert result['status'] == 'success'
@@ -372,7 +372,7 @@ class TestParkWeeklyAggregation:
             FROM park_weekly_stats
             WHERE park_id = :park_id AND year = 2025 AND week_number = 48
         """)
-        park_stats = mysql_connection.execute(park_stats_query, {
+        park_stats = mysql_session.execute(park_stats_query, {
             "park_id": park_id
         }).fetchone()
 
@@ -396,7 +396,7 @@ class TestWeeklyAggregationEdgeCases:
     """Test edge cases and boundary conditions."""
 
     def test_no_daily_stats_for_week(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test weekly aggregation when no daily stats exist for the week.
@@ -407,12 +407,12 @@ class TestWeeklyAggregationEdgeCases:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         # Act: Try to aggregate week 48 with no daily data
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_weekly(year=2025, week_number=48)
 
         # Assert: Completes but processes nothing
@@ -425,11 +425,11 @@ class TestWeeklyAggregationEdgeCases:
             SELECT COUNT(*) FROM ride_weekly_stats
             WHERE year = 2025 AND week_number = 48
         """)
-        count = mysql_connection.execute(ride_count_query).scalar()
+        count = mysql_session.execute(ride_count_query).scalar()
         assert count == 0
 
     def test_weekly_upsert_behavior(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test that running weekly aggregation twice updates existing records.
@@ -445,9 +445,9 @@ class TestWeeklyAggregationEdgeCases:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         week_start = date(2025, 11, 24)
         daily_stats_insert = text("""
@@ -461,13 +461,13 @@ class TestWeeklyAggregationEdgeCases:
 
         # Insert 5 days
         for day_offset in range(5):
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": week_start + timedelta(days=day_offset)
             })
 
         # First aggregation
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         service.aggregate_weekly(year=2025, week_number=48)
 
         # Get initial values
@@ -475,7 +475,7 @@ class TestWeeklyAggregationEdgeCases:
             SELECT downtime_minutes FROM ride_weekly_stats
             WHERE ride_id = :ride_id AND year = 2025 AND week_number = 48
         """)
-        initial_downtime = mysql_connection.execute(ride_stats_query, {
+        initial_downtime = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id
         }).scalar()
 
@@ -483,7 +483,7 @@ class TestWeeklyAggregationEdgeCases:
 
         # Add 2 more days
         for day_offset in range(5, 7):
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": week_start + timedelta(days=day_offset)
             })
@@ -496,10 +496,10 @@ class TestWeeklyAggregationEdgeCases:
             SELECT COUNT(*) FROM ride_weekly_stats
             WHERE ride_id = :ride_id AND year = 2025 AND week_number = 48
         """)
-        count = mysql_connection.execute(count_query, {"ride_id": ride_id}).scalar()
+        count = mysql_session.execute(count_query, {"ride_id": ride_id}).scalar()
         assert count == 1, "Should have exactly 1 record (UPSERT)"
 
-        updated_downtime = mysql_connection.execute(ride_stats_query, {
+        updated_downtime = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id
         }).scalar()
         assert updated_downtime == 483, "7 days × 69"

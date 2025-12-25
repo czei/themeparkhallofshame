@@ -36,14 +36,13 @@ Example Response:
 from datetime import date
 from typing import List, Dict, Any
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import Session
 
 from src.models.orm_park import Park
 from src.models.orm_ride import Ride
 from src.models.orm_stats import RideDailyStats
 from src.database.schema import ride_classifications
-from src.database.queries.builders import Filters
 from src.utils.timezone import get_last_week_date_range, get_last_month_date_range
 from src.utils.query_helpers import QueryClassBase
 
@@ -167,7 +166,8 @@ class RideDowntimeRankingsQuery(QueryClassBase):
         ]
 
         if filter_disney_universal:
-            conditions.append(Filters.disney_universal())
+            # Use ORM Park model directly (not Filters class which uses Core tables)
+            conditions.append(or_(Park.is_disney == True, Park.is_universal == True))
 
         stmt = (
             select(
@@ -178,7 +178,7 @@ class RideDowntimeRankingsQuery(QueryClassBase):
                 ride_classifications.c.tier,
                 func.round(
                     func.sum(RideDailyStats.downtime_minutes) / 60.0, 2
-                ).label("total_downtime_hours"),
+                ).label("downtime_hours"),
                 func.round(func.avg(RideDailyStats.uptime_percentage), 2).label(
                     "uptime_percentage"
                 ),

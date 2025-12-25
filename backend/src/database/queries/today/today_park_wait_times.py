@@ -112,8 +112,8 @@ class TodayParkWaitTimesQuery(QueryClassBase):
             if filter_disney_universal:
                 stmt = stmt.where(
                     or_(
-                        Park.brand == 'Disney',
-                        Park.brand == 'Universal'
+                        Park.is_disney == True,
+                        Park.is_universal == True
                     )
                 )
 

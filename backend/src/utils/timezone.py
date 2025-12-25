@@ -47,6 +47,16 @@ def get_now_pacific() -> datetime:
     return datetime.now(PACIFIC_TZ)
 
 
+def get_current_utc() -> datetime:
+    """
+    Get current datetime in UTC.
+
+    Returns:
+        datetime: Current datetime with UTC timezone
+    """
+    return datetime.now(UTC_TZ)
+
+
 def get_pacific_day_range_utc(target_date: date) -> tuple[datetime, datetime]:
     """
     Get UTC datetime range for a Pacific Time calendar day.

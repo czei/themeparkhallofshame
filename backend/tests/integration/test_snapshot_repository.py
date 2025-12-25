@@ -38,6 +38,8 @@ class TestRideStatusSnapshotRepository:
         park = Park(
             queue_times_id=101,
             name='Magic Kingdom',
+            city='Orlando',
+            country='US',
             timezone='America/New_York',
             is_active=True
         )
@@ -80,6 +82,8 @@ class TestRideStatusSnapshotRepository:
         park = Park(
             queue_times_id=102,
             name='Disneyland',
+            city='Anaheim',
+            country='US',
             timezone='America/Los_Angeles',
             is_active=True
         )
@@ -146,6 +150,8 @@ class TestParkActivitySnapshotRepository:
         park = Park(
             queue_times_id=103,
             name='EPCOT',
+            city='Orlando',
+            country='US',
             timezone='America/New_York',
             is_active=True
         )
@@ -179,6 +185,8 @@ class TestParkActivitySnapshotRepository:
         park = Park(
             queue_times_id=104,
             name='Hollywood Studios',
+            city='Orlando',
+            country='US',
             timezone='America/New_York',
             is_active=True
         )

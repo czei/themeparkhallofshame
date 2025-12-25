@@ -43,7 +43,7 @@ class TestMonthlyAggregationMath:
     """Test mathematical correctness of monthly aggregation calculations."""
 
     def test_full_month_aggregation_30_days(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test monthly aggregation for a 30-day month (November).
@@ -66,9 +66,9 @@ class TestMonthlyAggregationMath:
         from tests.conftest import insert_sample_park, insert_sample_ride
 
         # Setup: Create park and ride
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         # Setup: Insert 30 days of daily stats for November 2025
         daily_stats_insert = text("""
@@ -85,7 +85,7 @@ class TestMonthlyAggregationMath:
 
         for day_num in range(1, 31):  # November has 30 days
             stat_date = date(2025, 11, day_num)
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": stat_date,
                 "uptime_minutes": 780,
@@ -101,7 +101,7 @@ class TestMonthlyAggregationMath:
             })
 
         # Act: Run monthly aggregation for November 2025
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_monthly(year=2025, month=11)
 
         # Assert: Aggregation succeeded
@@ -122,7 +122,7 @@ class TestMonthlyAggregationMath:
             FROM ride_monthly_stats
             WHERE ride_id = :ride_id AND year = :year AND month = :month
         """)
-        ride_stats = mysql_connection.execute(ride_stats_query, {
+        ride_stats = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id,
             "year": 2025,
             "month": 11
@@ -150,7 +150,7 @@ class TestMonthlyAggregationMath:
         assert ride_stats.peak_wait_time == 54
 
     def test_full_month_aggregation_31_days(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test monthly aggregation for a 31-day month (January).
@@ -159,9 +159,9 @@ class TestMonthlyAggregationMath:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         daily_stats_insert = text("""
             INSERT INTO ride_daily_stats (
@@ -175,7 +175,7 @@ class TestMonthlyAggregationMath:
 
         for day_num in range(1, 32):  # January has 31 days
             stat_date = date(2025, 1, day_num)
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": stat_date,
                 "uptime": 800,
@@ -188,7 +188,7 @@ class TestMonthlyAggregationMath:
             })
 
         # Act
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_monthly(year=2025, month=1)
 
         # Assert
@@ -200,7 +200,7 @@ class TestMonthlyAggregationMath:
             FROM ride_monthly_stats
             WHERE ride_id = :ride_id AND year = 2025 AND month = 1
         """)
-        ride_stats = mysql_connection.execute(ride_stats_query, {
+        ride_stats = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id
         }).fetchone()
 
@@ -210,7 +210,7 @@ class TestMonthlyAggregationMath:
         assert ride_stats.operating_hours_minutes == 25730, "Sum of 31 days: 830 × 31"
 
     def test_leap_year_february_aggregation(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test February aggregation in leap year (29 days).
@@ -219,9 +219,9 @@ class TestMonthlyAggregationMath:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         daily_stats_insert = text("""
             INSERT INTO ride_daily_stats (
@@ -235,13 +235,13 @@ class TestMonthlyAggregationMath:
         # 2024 is a leap year
         for day_num in range(1, 30):  # February 2024 has 29 days
             stat_date = date(2024, 2, day_num)
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": stat_date
             })
 
         # Act
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_monthly(year=2024, month=2)
 
         # Assert
@@ -252,7 +252,7 @@ class TestMonthlyAggregationMath:
             FROM ride_monthly_stats
             WHERE ride_id = :ride_id AND year = 2024 AND month = 2
         """)
-        ride_stats = mysql_connection.execute(ride_stats_query, {
+        ride_stats = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id
         }).fetchone()
 
@@ -261,7 +261,7 @@ class TestMonthlyAggregationMath:
         assert ride_stats.downtime_minutes == 2610, "Sum of 29 days: 90 × 29"
 
     def test_non_leap_year_february_aggregation(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test February aggregation in non-leap year (28 days).
@@ -270,9 +270,9 @@ class TestMonthlyAggregationMath:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         daily_stats_insert = text("""
             INSERT INTO ride_daily_stats (
@@ -286,13 +286,13 @@ class TestMonthlyAggregationMath:
         # 2025 is NOT a leap year
         for day_num in range(1, 29):  # February 2025 has 28 days
             stat_date = date(2025, 2, day_num)
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": stat_date
             })
 
         # Act
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_monthly(year=2025, month=2)
 
         # Assert
@@ -303,7 +303,7 @@ class TestMonthlyAggregationMath:
             FROM ride_monthly_stats
             WHERE ride_id = :ride_id AND year = 2025 AND month = 2
         """)
-        ride_stats = mysql_connection.execute(ride_stats_query, {
+        ride_stats = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id
         }).fetchone()
 
@@ -312,7 +312,7 @@ class TestMonthlyAggregationMath:
         assert ride_stats.downtime_minutes == 2520, "Sum of 28 days: 90 × 28"
 
     def test_monthly_trend_calculation(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test month-over-month trend calculation.
@@ -324,9 +324,9 @@ class TestMonthlyAggregationMath:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         daily_stats_insert = text("""
             INSERT INTO ride_daily_stats (
@@ -339,7 +339,7 @@ class TestMonthlyAggregationMath:
 
         # October 2025: 31 days with lower downtime (40 min/day = 1,240 total)
         for day_num in range(1, 32):
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": date(2025, 10, day_num),
                 "uptime": 800,
@@ -349,7 +349,7 @@ class TestMonthlyAggregationMath:
 
         # November 2025: 30 days with higher downtime (60 min/day = 1,800 total)
         for day_num in range(1, 31):
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": date(2025, 11, day_num),
                 "uptime": 780,
@@ -358,7 +358,7 @@ class TestMonthlyAggregationMath:
             })
 
         # Act: Aggregate October first (needed for trend calculation)
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         service.aggregate_monthly(year=2025, month=10)
 
         # Then aggregate November
@@ -372,7 +372,7 @@ class TestMonthlyAggregationMath:
             FROM ride_monthly_stats
             WHERE ride_id = :ride_id AND year = 2025 AND month = 11
         """)
-        ride_stats = mysql_connection.execute(ride_stats_query, {
+        ride_stats = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id
         }).fetchone()
 
@@ -384,7 +384,7 @@ class TestMonthlyAggregationMath:
         assert abs(trend - expected_trend) < 0.5, f"Expected trend ~{expected_trend:.2f}%, got {trend}%"
 
     def test_monthly_trend_year_boundary(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test trend calculation across year boundary (Dec -> Jan).
@@ -396,9 +396,9 @@ class TestMonthlyAggregationMath:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         daily_stats_insert = text("""
             INSERT INTO ride_daily_stats (
@@ -411,7 +411,7 @@ class TestMonthlyAggregationMath:
 
         # December 2024: 31 days with higher downtime
         for day_num in range(1, 32):
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": date(2024, 12, day_num),
                 "uptime": 800,
@@ -421,7 +421,7 @@ class TestMonthlyAggregationMath:
 
         # January 2025: 31 days with lower downtime
         for day_num in range(1, 32):
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": date(2025, 1, day_num),
                 "uptime": 810,
@@ -430,7 +430,7 @@ class TestMonthlyAggregationMath:
             })
 
         # Act
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         service.aggregate_monthly(year=2024, month=12)
         result = service.aggregate_monthly(year=2025, month=1)
 
@@ -442,7 +442,7 @@ class TestMonthlyAggregationMath:
             FROM ride_monthly_stats
             WHERE ride_id = :ride_id AND year = 2025 AND month = 1
         """)
-        ride_stats = mysql_connection.execute(ride_stats_query, {
+        ride_stats = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id
         }).fetchone()
 
@@ -452,7 +452,7 @@ class TestMonthlyAggregationMath:
         assert abs(trend - expected_trend) < 0.5, f"Expected trend ~{expected_trend:.2f}%, got {trend}%"
 
     def test_partial_month_aggregation(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test aggregation with partial month data (only 15 days).
@@ -461,9 +461,9 @@ class TestMonthlyAggregationMath:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         daily_stats_insert = text("""
             INSERT INTO ride_daily_stats (
@@ -476,13 +476,13 @@ class TestMonthlyAggregationMath:
 
         # Only first 15 days of November 2025
         for day_num in range(1, 16):
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": date(2025, 11, day_num)
             })
 
         # Act
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_monthly(year=2025, month=11)
 
         # Assert: Should aggregate partial data correctly
@@ -494,7 +494,7 @@ class TestMonthlyAggregationMath:
             FROM ride_monthly_stats
             WHERE ride_id = :ride_id AND year = 2025 AND month = 11
         """)
-        ride_stats = mysql_connection.execute(ride_stats_query, {
+        ride_stats = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id
         }).fetchone()
 
@@ -507,7 +507,7 @@ class TestParkMonthlyAggregation:
     """Test park-level monthly aggregation."""
 
     def test_park_monthly_aggregation_multiple_rides(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test park-level monthly aggregation across multiple rides.
@@ -519,7 +519,7 @@ class TestParkMonthlyAggregation:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
 
         # Create 3 rides with unique queue_times_id
         ride_ids = []
@@ -529,7 +529,7 @@ class TestParkMonthlyAggregation:
             ride_data['queue_times_id'] = sample_ride_data['queue_times_id'] + i
             ride_data['name'] = f"Test Ride {i+1}"
             ride_data['thrill_level'] = ['family', 'moderate', 'extreme'][i]
-            ride_id = insert_sample_ride(mysql_connection, ride_data)
+            ride_id = insert_sample_ride(mysql_session, ride_data)
             ride_ids.append(ride_id)
 
         # Insert daily stats with different patterns
@@ -553,14 +553,14 @@ class TestParkMonthlyAggregation:
         for ride_idx, ride_id in enumerate(ride_ids):
             pattern = ride_patterns[ride_idx]
             for day_num in range(1, 31):  # 30 days
-                mysql_connection.execute(daily_stats_insert, {
+                mysql_session.execute(daily_stats_insert, {
                     "ride_id": ride_id,
                     "stat_date": date(2025, 11, day_num),
                     **pattern
                 })
 
         # Act
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_monthly(year=2025, month=11)
 
         assert result['status'] == 'success'
@@ -579,7 +579,7 @@ class TestParkMonthlyAggregation:
             FROM park_monthly_stats
             WHERE park_id = :park_id AND year = 2025 AND month = 11
         """)
-        park_stats = mysql_connection.execute(park_stats_query, {
+        park_stats = mysql_session.execute(park_stats_query, {
             "park_id": park_id
         }).fetchone()
 
@@ -604,7 +604,7 @@ class TestMonthlyAggregationEdgeCases:
     """Test edge cases and boundary conditions."""
 
     def test_no_daily_stats_for_month(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test monthly aggregation when no daily stats exist.
@@ -613,12 +613,12 @@ class TestMonthlyAggregationEdgeCases:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         # Act: No daily stats inserted
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_monthly(year=2025, month=11)
 
         # Assert: Should succeed with zero rides processed
@@ -627,7 +627,7 @@ class TestMonthlyAggregationEdgeCases:
         assert result['parks_processed'] == 0
 
     def test_monthly_upsert_behavior(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test UPSERT behavior when running monthly aggregation twice.
@@ -636,9 +636,9 @@ class TestMonthlyAggregationEdgeCases:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         # Insert daily stats
         daily_stats_insert = text("""
@@ -651,13 +651,13 @@ class TestMonthlyAggregationEdgeCases:
         """)
 
         for day_num in range(1, 31):
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": date(2025, 11, day_num)
             })
 
         # Act: Run aggregation twice
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result1 = service.aggregate_monthly(year=2025, month=11)
         result2 = service.aggregate_monthly(year=2025, month=11)
 
@@ -671,14 +671,14 @@ class TestMonthlyAggregationEdgeCases:
             FROM ride_monthly_stats
             WHERE ride_id = :ride_id AND year = 2025 AND month = 11
         """)
-        count_result = mysql_connection.execute(count_query, {
+        count_result = mysql_session.execute(count_query, {
             "ride_id": ride_id
         }).fetchone()
 
         assert count_result.count == 1, "Should have exactly 1 record (UPSERT, not duplicate)"
 
     def test_zero_downtime_month(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test month with zero downtime (perfect uptime).
@@ -687,9 +687,9 @@ class TestMonthlyAggregationEdgeCases:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         daily_stats_insert = text("""
             INSERT INTO ride_daily_stats (
@@ -701,13 +701,13 @@ class TestMonthlyAggregationEdgeCases:
         """)
 
         for day_num in range(1, 31):
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": date(2025, 11, day_num)
             })
 
         # Act
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_monthly(year=2025, month=11)
 
         # Assert
@@ -718,7 +718,7 @@ class TestMonthlyAggregationEdgeCases:
             FROM ride_monthly_stats
             WHERE ride_id = :ride_id AND year = 2025 AND month = 11
         """)
-        ride_stats = mysql_connection.execute(ride_stats_query, {
+        ride_stats = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id
         }).fetchone()
 
@@ -727,7 +727,7 @@ class TestMonthlyAggregationEdgeCases:
         assert float(ride_stats.uptime_percentage) == 100.0, "Perfect uptime"
 
     def test_100_percent_downtime_month(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test month with 100% downtime (ride closed all month).
@@ -736,9 +736,9 @@ class TestMonthlyAggregationEdgeCases:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         daily_stats_insert = text("""
             INSERT INTO ride_daily_stats (
@@ -750,13 +750,13 @@ class TestMonthlyAggregationEdgeCases:
         """)
 
         for day_num in range(1, 31):
-            mysql_connection.execute(daily_stats_insert, {
+            mysql_session.execute(daily_stats_insert, {
                 "ride_id": ride_id,
                 "stat_date": date(2025, 11, day_num)
             })
 
         # Act
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_monthly(year=2025, month=11)
 
         # Assert
@@ -767,7 +767,7 @@ class TestMonthlyAggregationEdgeCases:
             FROM ride_monthly_stats
             WHERE ride_id = :ride_id AND year = 2025 AND month = 11
         """)
-        ride_stats = mysql_connection.execute(ride_stats_query, {
+        ride_stats = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id
         }).fetchone()
 

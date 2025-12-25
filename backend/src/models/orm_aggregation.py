@@ -60,6 +60,7 @@ class AggregationLog(Base):
     )
     completed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime,
+        nullable=True,
         comment="When aggregation job completed successfully"
     )
     status: Mapped[AggregationStatus] = mapped_column(

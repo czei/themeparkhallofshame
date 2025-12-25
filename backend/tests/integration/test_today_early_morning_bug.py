@@ -40,7 +40,7 @@ class TestTodayEarlyMorningBug:
     Then we'll fix the code to make it pass (GREEN).
     """
 
-    def test_today_shame_score_matches_downtime_hours(self, mysql_connection):
+    def test_today_shame_score_matches_downtime_hours(self, mysql_session):
         """
         TODAY rankings should have CONSISTENT shame_score and total_downtime_hours.
 
@@ -62,7 +62,7 @@ class TestTodayEarlyMorningBug:
         - Either BOTH use "operated TODAY" or BOTH use "7-day hybrid"
         """
         # Arrange: Get TODAY rankings
-        query = TodayParkRankingsQuery(mysql_connection)
+        query = TodayParkRankingsQuery(mysql_session)
 
         # Act: Get rankings for today (early morning)
         rankings = query.get_rankings(limit=50)
@@ -101,7 +101,7 @@ class TestTodayEarlyMorningBug:
             ])
 
 
-    def test_today_early_morning_should_have_zero_or_consistent_data(self, mysql_connection):
+    def test_today_early_morning_should_have_zero_or_consistent_data(self, mysql_session):
         """
         At 5:41 AM PST, most parks haven't opened yet.
 
@@ -112,7 +112,7 @@ class TestTodayEarlyMorningBug:
         NOT acceptable:
         - Parks with high shame_score but zero downtime (current bug)
         """
-        query = TodayParkRankingsQuery(mysql_connection)
+        query = TodayParkRankingsQuery(mysql_session)
         rankings = query.get_rankings(limit=50)
 
         for park in rankings:
@@ -126,7 +126,7 @@ class TestTodayEarlyMorningBug:
                     f"{park['park_name']} has shame_score={shame_score} but downtime_hours={downtime_hours}"
 
 
-    def test_timestamp_bug_investigation(self, mysql_connection):
+    def test_timestamp_bug_investigation(self, mysql_session):
         """
         User reports: "Last Updated says 8:41:33 AM PST when it's around 5:41 AM PST"
 
@@ -144,7 +144,7 @@ class TestTodayEarlyMorningBug:
         # For now, let's check the most recent snapshot times
         from sqlalchemy import text
 
-        result = mysql_connection.execute(text("""
+        result = mysql_session.execute(text("""
             SELECT MAX(recorded_at) as last_snapshot
             FROM park_activity_snapshots
         """))

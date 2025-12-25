@@ -9,9 +9,9 @@ from sqlalchemy import text
 
 
 @pytest.mark.integration
-def test_park_daily_matches_ride_rollup(mysql_connection):
+def test_park_daily_matches_ride_rollup(mysql_session):
     # Pick latest stat_date present in both tables
-    row = mysql_connection.execute(
+    row = mysql_session.execute(
         text(
             """
             SELECT MAX(p.stat_date) AS stat_date
@@ -24,7 +24,7 @@ def test_park_daily_matches_ride_rollup(mysql_connection):
     stat_date = row.stat_date
 
     # Roll up ride counts per park (simple, stable sanity check)
-    ride_rollups = mysql_connection.execute(
+    ride_rollups = mysql_session.execute(
         text(
             """
             SELECT
@@ -40,7 +40,7 @@ def test_park_daily_matches_ride_rollup(mysql_connection):
     ).fetchall()
     ride_by_park = {r.park_id: r for r in ride_rollups}
 
-    parks = mysql_connection.execute(
+    parks = mysql_session.execute(
         text(
             """
             SELECT park_id, total_rides_tracked

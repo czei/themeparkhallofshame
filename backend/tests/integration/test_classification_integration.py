@@ -47,15 +47,15 @@ class TestClassificationDatabasePersistence:
     """Test classification data is correctly saved to database."""
 
     def test_save_classification_creates_database_records(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """Saving a classification should create records in both rides and ride_classifications tables."""
         from tests.conftest import insert_sample_park, insert_sample_ride
 
         # Setup: Create park and ride
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         # Create classification service
         service = ClassificationService(
@@ -82,11 +82,11 @@ class TestClassificationDatabasePersistence:
         )
 
         # Act: Save classification (pass connection for transaction)
-        service.save_classification(result, conn=mysql_connection)
+        service.save_classification(result, conn=mysql_session)
 
         # Assert 1: rides.tier and rides.category updated
         ride_query = text("SELECT tier, category FROM rides WHERE ride_id = :ride_id")
-        ride_result = mysql_connection.execute(ride_query, {"ride_id": ride_id}).fetchone()
+        ride_result = mysql_session.execute(ride_query, {"ride_id": ride_id}).fetchone()
         assert ride_result is not None
         assert ride_result[0] == 1, "rides.tier should be updated to 1"
         assert ride_result[1] == "ATTRACTION", "rides.category should be ATTRACTION"
@@ -98,7 +98,7 @@ class TestClassificationDatabasePersistence:
             FROM ride_classifications
             WHERE ride_id = :ride_id
         """)
-        classification_result = mysql_connection.execute(
+        classification_result = mysql_session.execute(
             classification_query, {"ride_id": ride_id}
         ).fetchone()
 
@@ -113,15 +113,15 @@ class TestClassificationDatabasePersistence:
         assert classification_result[7] == f"{park_id}:{ride_id}", "cache_key should match"
 
     def test_save_classification_updates_existing_records(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """Saving a classification twice should UPDATE existing records (UPSERT)."""
         from tests.conftest import insert_sample_park, insert_sample_ride
 
         # Setup: Create park and ride
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         service = ClassificationService(
             manual_overrides_path='data/manual_overrides.csv',
@@ -145,7 +145,7 @@ class TestClassificationDatabasePersistence:
             cache_key=f"{park_id}:{ride_id}",
             flagged_for_review=False
         )
-        service.save_classification(result_tier_2, conn=mysql_connection)
+        service.save_classification(result_tier_2, conn=mysql_session)
 
         # Act 2: Update to Tier 1 (re-classification)
         result_tier_1 = ClassificationResult(
@@ -164,11 +164,11 @@ class TestClassificationDatabasePersistence:
             cache_key=f"{park_id}:{ride_id}",
             flagged_for_review=False
         )
-        service.save_classification(result_tier_1, conn=mysql_connection)
+        service.save_classification(result_tier_1, conn=mysql_session)
 
         # Assert 1: rides.tier and category updated to new value
         ride_query = text("SELECT tier, category FROM rides WHERE ride_id = :ride_id")
-        ride_result = mysql_connection.execute(ride_query, {"ride_id": ride_id}).fetchone()
+        ride_result = mysql_session.execute(ride_query, {"ride_id": ride_id}).fetchone()
         assert ride_result[0] == 1, "rides.tier should be updated to 1"
         assert ride_result[1] == "ATTRACTION", "rides.category should remain ATTRACTION"
 
@@ -176,7 +176,7 @@ class TestClassificationDatabasePersistence:
         count_query = text(
             "SELECT COUNT(*) FROM ride_classifications WHERE ride_id = :ride_id"
         )
-        count = mysql_connection.execute(count_query, {"ride_id": ride_id}).fetchone()[0]
+        count = mysql_session.execute(count_query, {"ride_id": ride_id}).fetchone()[0]
         assert count == 1, "Should have exactly 1 record (UPSERT, not duplicate)"
 
         # Assert 3: Classification data updated
@@ -185,7 +185,7 @@ class TestClassificationDatabasePersistence:
             FROM ride_classifications
             WHERE ride_id = :ride_id
         """)
-        result = mysql_connection.execute(classification_query, {"ride_id": ride_id}).fetchone()
+        result = mysql_session.execute(classification_query, {"ride_id": ride_id}).fetchone()
         assert result[0] == 1, "tier should be updated to 1"
         assert result[1] == 3, "tier_weight should be updated to 3"
         assert result[2] == "ATTRACTION", "category should be ATTRACTION"
@@ -194,14 +194,14 @@ class TestClassificationDatabasePersistence:
         assert "Upgraded to signature" in result[5], "reasoning_text should be updated"
 
     def test_rides_tier_and_classifications_tier_match(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """The tier and category values in rides table should always match ride_classifications table."""
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         service = ClassificationService(
             manual_overrides_path='data/manual_overrides.csv',
@@ -226,7 +226,7 @@ class TestClassificationDatabasePersistence:
                 cache_key=f"{park_id}:{ride_id}",
                 flagged_for_review=False
             )
-            service.save_classification(result, conn=mysql_connection)
+            service.save_classification(result, conn=mysql_session)
 
             # Verify consistency
             consistency_query = text("""
@@ -236,7 +236,7 @@ class TestClassificationDatabasePersistence:
                 JOIN ride_classifications rc ON r.ride_id = rc.ride_id
                 WHERE r.ride_id = :ride_id
             """)
-            row = mysql_connection.execute(consistency_query, {"ride_id": ride_id}).fetchone()
+            row = mysql_session.execute(consistency_query, {"ride_id": ride_id}).fetchone()
 
             assert row[0] == row[1], f"rides.tier ({row[0]}) should match ride_classifications.tier ({row[1]})"
             assert row[0] == tier, f"Both tiers should be {tier}"
@@ -249,13 +249,13 @@ class TestClassificationIntegrationWithCalculations:
     """Test that saved classifications work correctly with weighted downtime calculations."""
 
     def test_classification_available_for_weighted_calculations(
-        self, mysql_connection, sample_park_data
+        self, mysql_session, sample_park_data
     ):
         """After saving a classification, ParkRepository should retrieve correct tier_weight for calculations."""
         from tests.conftest import insert_sample_park
 
         # Setup: Create park with 3 rides of different tiers
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
 
         # Insert 3 rides
         rides_data = [
@@ -270,7 +270,7 @@ class TestClassificationIntegrationWithCalculations:
                 INSERT INTO rides (ride_id, park_id, queue_times_id, name, is_active)
                 VALUES (:ride_id, :park_id, :queue_times_id, :name, 1)
             """)
-            mysql_connection.execute(insert_ride, {
+            mysql_session.execute(insert_ride, {
                 "ride_id": ride_id,
                 "park_id": park_id,
                 "queue_times_id": 1000 + ride_id,  # Unique queue_times_id
@@ -298,7 +298,7 @@ class TestClassificationIntegrationWithCalculations:
                 cache_key=f"{park_id}:{ride_id}",
                 flagged_for_review=False
             )
-            service.save_classification(result, conn=mysql_connection)
+            service.save_classification(result, conn=mysql_session)
 
         # Verify: Query tier_weight from ride_classifications (as weighted calculations do)
         weighted_query = text("""
@@ -308,25 +308,25 @@ class TestClassificationIntegrationWithCalculations:
             WHERE r.park_id = :park_id
             ORDER BY r.ride_id
         """)
-        results = mysql_connection.execute(weighted_query, {"park_id": park_id}).fetchall()
+        results = mysql_session.execute(weighted_query, {"park_id": park_id}).fetchall()
 
         assert len(results) == 3, "Should have 3 rides"
         assert results[0][2] == 3, "Ride 1 should have tier_weight 3"
         assert results[1][2] == 2, "Ride 2 should have tier_weight 2"
         assert results[2][2] == 1, "Ride 3 should have tier_weight 1"
 
-    def test_unclassified_ride_defaults_to_weight_2(self, mysql_connection, sample_park_data):
+    def test_unclassified_ride_defaults_to_weight_2(self, mysql_session, sample_park_data):
         """Unclassified rides should default to tier_weight=2 in weighted calculations."""
         from tests.conftest import insert_sample_park
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
 
         # Insert ride WITHOUT classification
         insert_ride = text("""
             INSERT INTO rides (ride_id, park_id, queue_times_id, name, is_active)
             VALUES (:ride_id, :park_id, :queue_times_id, :name, 1)
         """)
-        mysql_connection.execute(insert_ride, {
+        mysql_session.execute(insert_ride, {
             "ride_id": 999,
             "park_id": park_id,
             "queue_times_id": 999999,  # Unique queue_times_id
@@ -340,18 +340,18 @@ class TestClassificationIntegrationWithCalculations:
             LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
             WHERE r.ride_id = 999
         """)
-        result = mysql_connection.execute(weighted_query).fetchone()
+        result = mysql_session.execute(weighted_query).fetchone()
 
         assert result is not None, "Unclassified ride should exist"
         assert result[2] == 2, "Unclassified ride should default to tier_weight=2"
 
-    def test_classification_metadata_persists(self, mysql_connection, sample_park_data, sample_ride_data):
+    def test_classification_metadata_persists(self, mysql_session, sample_park_data, sample_ride_data):
         """All classification metadata fields should be correctly persisted."""
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         service = ClassificationService(
             manual_overrides_path='data/manual_overrides.csv',
@@ -375,7 +375,7 @@ class TestClassificationIntegrationWithCalculations:
             cache_key=f"{park_id}:{ride_id}",
             flagged_for_review=False
         )
-        service.save_classification(result, conn=mysql_connection)
+        service.save_classification(result, conn=mysql_session)
 
         # Verify all fields
         query = text("""
@@ -385,7 +385,7 @@ class TestClassificationIntegrationWithCalculations:
             FROM ride_classifications
             WHERE ride_id = :ride_id
         """)
-        row = mysql_connection.execute(query, {"ride_id": ride_id}).fetchone()
+        row = mysql_session.execute(query, {"ride_id": ride_id}).fetchone()
 
         assert row[0] == 1, "tier should be 1"
         assert row[1] == 3, "tier_weight should be 3"

@@ -29,7 +29,7 @@ class TestKennywoodYesterdayBug:
     Then we'll fix the code to make it pass (GREEN).
     """
 
-    def test_kennywood_yesterday_shame_score_is_reasonable(self, mysql_connection):
+    def test_kennywood_yesterday_shame_score_is_reasonable(self, mysql_session):
         """
         Kennywood should have a reasonable shame score for YESTERDAY,
         not the insane value of 99.
@@ -51,7 +51,7 @@ class TestKennywoodYesterdayBug:
         This test will FAIL initially, documenting the bug.
         """
         # Arrange: Get YESTERDAY rankings
-        query = YesterdayParkRankingsQuery(mysql_connection)
+        query = YesterdayParkRankingsQuery(mysql_session)
 
         # Act: Get rankings for yesterday
         rankings = query.get_rankings(limit=50)
@@ -80,7 +80,7 @@ class TestKennywoodYesterdayBug:
             assert True
 
 
-    def test_yesterday_query_uses_correct_formula(self, mysql_connection):
+    def test_yesterday_query_uses_correct_formula(self, mysql_session):
         """
         Verify that YESTERDAY query calculates shame_score correctly.
 
@@ -90,7 +90,7 @@ class TestKennywoodYesterdayBug:
 
         This test documents the expected calculation method.
         """
-        query = YesterdayParkRankingsQuery(mysql_connection)
+        query = YesterdayParkRankingsQuery(mysql_session)
         rankings = query.get_rankings(limit=5)
 
         # Verify all shame scores are reasonable (not inflated)

@@ -27,7 +27,7 @@ from database.repositories.stats_repository import StatsRepository
 # ============================================================================
 
 @pytest.fixture
-def comprehensive_api_test_data(mysql_connection):
+def comprehensive_api_test_data(mysql_session):
     """
     Create comprehensive test dataset with:
     - 10 parks (5 Disney, 3 Universal, 2 Other)
@@ -39,7 +39,7 @@ def comprehensive_api_test_data(mysql_connection):
 
     This dataset allows us to MANUALLY VERIFY all calculations.
     """
-    conn = mysql_connection
+    conn = mysql_session
 
     # Clean up any existing test data
     conn.execute(text("DELETE FROM ride_status_snapshots"))
@@ -484,14 +484,14 @@ def comprehensive_api_test_data(mysql_connection):
 # TEST: Park Daily Rankings - Unweighted
 # ============================================================================
 
-def test_park_daily_rankings_unweighted_calculations(mysql_connection, comprehensive_api_test_data):
+def test_park_daily_rankings_unweighted_calculations(mysql_session, comprehensive_api_test_data):
     """
     Test park daily rankings with MANUAL CALCULATION VERIFICATION.
 
     Expected per park: 2*180 + 5*60 + 3*30 = 750 minutes = 12.5 hours
     This is CRITICAL - the math must be perfect.
     """
-    repo = StatsRepository(mysql_connection)
+    repo = StatsRepository(mysql_session)
 
     rankings = repo.get_park_daily_rankings(
         stat_date=comprehensive_api_test_data['today'],
@@ -527,11 +527,11 @@ def test_park_daily_rankings_unweighted_calculations(mysql_connection, comprehen
     print(f"\n✓ VERIFIED: All {len(rankings)} parks have correct downtime of {expected_downtime} hours")
 
 
-def test_park_daily_rankings_disney_universal_filter(mysql_connection, comprehensive_api_test_data):
+def test_park_daily_rankings_disney_universal_filter(mysql_session, comprehensive_api_test_data):
     """
     Test Disney & Universal filter returns exactly 8 parks (5 Disney + 3 Universal).
     """
-    repo = StatsRepository(mysql_connection)
+    repo = StatsRepository(mysql_session)
 
     rankings = repo.get_park_daily_rankings(
         stat_date=comprehensive_api_test_data['today'],
@@ -546,7 +546,7 @@ def test_park_daily_rankings_disney_universal_filter(mysql_connection, comprehen
     print(f"\n✓ VERIFIED: Disney/Universal filter returns {len(rankings)} parks")
 
 
-def test_park_daily_rankings_weighted_calculations(mysql_connection, comprehensive_api_test_data):
+def test_park_daily_rankings_weighted_calculations(mysql_session, comprehensive_api_test_data):
     """
     Test weighted scoring with MANUAL CALCULATION VERIFICATION.
 
@@ -559,7 +559,7 @@ def test_park_daily_rankings_weighted_calculations(mysql_connection, comprehensi
 
     This MUST be exact or users will get wrong rankings.
     """
-    repo = StatsRepository(mysql_connection)
+    repo = StatsRepository(mysql_session)
 
     rankings = repo.get_park_daily_rankings(
         stat_date=comprehensive_api_test_data['today'],
@@ -584,11 +584,11 @@ def test_park_daily_rankings_weighted_calculations(mysql_connection, comprehensi
     print("  Breakdown: 2×180×3 + 5×60×2 + 3×30×1 = 1080 + 600 + 90 = 1770 min = 29.5 hrs")
 
 
-def test_park_weekly_rankings_calculations(mysql_connection, comprehensive_api_test_data):
+def test_park_weekly_rankings_calculations(mysql_session, comprehensive_api_test_data):
     """
     Test weekly rankings: 750 min/day × 7 days = 5250 min = 87.5 hours
     """
-    repo = StatsRepository(mysql_connection)
+    repo = StatsRepository(mysql_session)
 
     rankings = repo.get_park_weekly_rankings(
         year=comprehensive_api_test_data['current_year'],
@@ -610,11 +610,11 @@ def test_park_weekly_rankings_calculations(mysql_connection, comprehensive_api_t
     print(f"\n✓ VERIFIED: Weekly downtime calculation is CORRECT: {expected_weekly} hours per park")
 
 
-def test_park_monthly_rankings_calculations(mysql_connection, comprehensive_api_test_data):
+def test_park_monthly_rankings_calculations(mysql_session, comprehensive_api_test_data):
     """
     Test monthly rankings: 750 min/day × 30 days = 22500 min = 375 hours
     """
-    repo = StatsRepository(mysql_connection)
+    repo = StatsRepository(mysql_session)
 
     rankings = repo.get_park_monthly_rankings(
         year=comprehensive_api_test_data['current_year'],
@@ -640,7 +640,7 @@ def test_park_monthly_rankings_calculations(mysql_connection, comprehensive_api_
 # TEST: Ride Rankings
 # ============================================================================
 
-def test_ride_daily_rankings_all_tiers(mysql_connection, comprehensive_api_test_data):
+def test_ride_daily_rankings_all_tiers(mysql_session, comprehensive_api_test_data):
     """
     Test ride rankings return all 100 rides sorted correctly.
 
@@ -649,7 +649,7 @@ def test_ride_daily_rankings_all_tiers(mysql_connection, comprehensive_api_test_
     - 50 Tier 2 rides (10 parks × 5 each) with 60 min = 1 hour
     - 30 Tier 3 rides (10 parks × 3 each) with 30 min = 0.5 hours
     """
-    repo = StatsRepository(mysql_connection)
+    repo = StatsRepository(mysql_session)
 
     rankings = repo.get_ride_daily_rankings(
         stat_date=comprehensive_api_test_data['today'],
@@ -674,7 +674,7 @@ def test_ride_daily_rankings_all_tiers(mysql_connection, comprehensive_api_test_
     print(f"\n✓ VERIFIED: All {len(rankings)} rides sorted correctly by downtime")
 
 
-def test_ride_weekly_rankings_calculations(mysql_connection, comprehensive_api_test_data):
+def test_ride_weekly_rankings_calculations(mysql_session, comprehensive_api_test_data):
     """
     Test ride weekly rankings.
 
@@ -683,7 +683,7 @@ def test_ride_weekly_rankings_calculations(mysql_connection, comprehensive_api_t
     - Tier 2: 60 × 7 = 420 min = 7 hours
     - Tier 3: 30 × 7 = 210 min = 3.5 hours
     """
-    repo = StatsRepository(mysql_connection)
+    repo = StatsRepository(mysql_session)
 
     rankings = repo.get_ride_weekly_rankings(
         year=comprehensive_api_test_data['current_year'],
@@ -708,7 +708,7 @@ def test_ride_weekly_rankings_calculations(mysql_connection, comprehensive_api_t
     print("\n✓ VERIFIED: Weekly ride downtime calculations correct for all tiers")
 
 
-def test_ride_monthly_rankings_calculations(mysql_connection, comprehensive_api_test_data):
+def test_ride_monthly_rankings_calculations(mysql_session, comprehensive_api_test_data):
     """
     Test ride monthly rankings.
 
@@ -717,7 +717,7 @@ def test_ride_monthly_rankings_calculations(mysql_connection, comprehensive_api_
     - Tier 2: 60 × 30 = 1800 min = 30 hours
     - Tier 3: 30 × 30 = 900 min = 15 hours
     """
-    repo = StatsRepository(mysql_connection)
+    repo = StatsRepository(mysql_session)
 
     rankings = repo.get_ride_monthly_rankings(
         year=comprehensive_api_test_data['current_year'],
@@ -746,7 +746,7 @@ def test_ride_monthly_rankings_calculations(mysql_connection, comprehensive_api_
 # TEST: Wait Times
 # ============================================================================
 
-def test_live_wait_times_sorted_correctly(mysql_connection, comprehensive_api_test_data):
+def test_live_wait_times_sorted_correctly(mysql_session, comprehensive_api_test_data):
     """
     Test live wait times return rides sorted by longest waits.
 
@@ -755,7 +755,7 @@ def test_live_wait_times_sorted_correctly(mysql_connection, comprehensive_api_te
     - Tier 2: 40 min wait
     - Tier 3: 20 min wait
     """
-    repo = StatsRepository(mysql_connection)
+    repo = StatsRepository(mysql_session)
 
     wait_times = repo.get_live_wait_times(
         filter_disney_universal=False,
@@ -780,7 +780,7 @@ def test_live_wait_times_sorted_correctly(mysql_connection, comprehensive_api_te
     print(f"\n✓ VERIFIED: Live wait times sorted correctly for all {len(wait_times)} rides")
 
 
-def test_average_wait_times_calculations(mysql_connection, comprehensive_api_test_data):
+def test_average_wait_times_calculations(mysql_session, comprehensive_api_test_data):
     """
     Test 7-day average wait times.
 
@@ -789,7 +789,7 @@ def test_average_wait_times_calculations(mysql_connection, comprehensive_api_tes
     - Tier 2: 30 min average
     - Tier 3: 15 min average
     """
-    repo = StatsRepository(mysql_connection)
+    repo = StatsRepository(mysql_session)
 
     wait_times = repo.get_average_wait_times(
         filter_disney_universal=False,
@@ -812,7 +812,7 @@ def test_average_wait_times_calculations(mysql_connection, comprehensive_api_tes
     print("\n✓ VERIFIED: Average wait times correct for all tiers")
 
 
-def test_peak_wait_times_calculations(mysql_connection, comprehensive_api_test_data):
+def test_peak_wait_times_calculations(mysql_session, comprehensive_api_test_data):
     """
     Test peak wait times from weekly stats.
 
@@ -821,7 +821,7 @@ def test_peak_wait_times_calculations(mysql_connection, comprehensive_api_test_d
     - Tier 2: 70 min peak
     - Tier 3: 35 min peak
     """
-    repo = StatsRepository(mysql_connection)
+    repo = StatsRepository(mysql_session)
 
     wait_times = repo.get_peak_wait_times(
         filter_disney_universal=False,
@@ -848,13 +848,13 @@ def test_peak_wait_times_calculations(mysql_connection, comprehensive_api_test_d
 # TEST: Data Consistency
 # ============================================================================
 
-def test_park_downtime_equals_sum_of_rides(mysql_connection, comprehensive_api_test_data):
+def test_park_downtime_equals_sum_of_rides(mysql_session, comprehensive_api_test_data):
     """
     CRITICAL: Verify park downtime = sum of its rides' downtime.
 
     This ensures our aggregation logic is mathematically sound.
     """
-    repo = StatsRepository(mysql_connection)
+    repo = StatsRepository(mysql_session)
 
     park_rankings = repo.get_park_daily_rankings(
         stat_date=comprehensive_api_test_data['today'],

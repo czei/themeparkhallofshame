@@ -11,9 +11,9 @@ from sqlalchemy import text
 
 
 @pytest.mark.integration
-def test_snapshots_present(mysql_connection):
+def test_snapshots_present(mysql_session):
     """Ride/park snapshots should not be empty after a full mirror."""
-    counts = mysql_connection.execute(
+    counts = mysql_session.execute(
         text(
             """
             SELECT
@@ -28,18 +28,18 @@ def test_snapshots_present(mysql_connection):
 
 
 @pytest.mark.integration
-def test_weather_observations_present(mysql_connection):
+def test_weather_observations_present(mysql_session):
     """Weather observations should mirror production (non-empty in prod)."""
-    count = mysql_connection.execute(
+    count = mysql_session.execute(
         text("SELECT COUNT(*) AS c FROM weather_observations")
     ).scalar()
     assert count > 0, "weather_observations is empty; mirror likely missed weather data"
 
 
 @pytest.mark.integration
-def test_stats_daily_present(mysql_connection):
+def test_stats_daily_present(mysql_session):
     """Daily stats should exist for at least one park and one ride."""
-    ride_daily, park_daily = mysql_connection.execute(
+    ride_daily, park_daily = mysql_session.execute(
         text(
             """
             SELECT

@@ -16,7 +16,7 @@ from decimal import Decimal
 class TestParkDetailsAPI:
     """Test park details endpoint functionality."""
 
-    def test_park_details_returns_park_info(self, mysql_connection):
+    def test_park_details_returns_park_info(self, mysql_session):
         """
         Verify park details endpoint returns basic park information.
 
@@ -51,26 +51,41 @@ class TestParkDetailsAPI:
             assert result.name == 'Test Park for Details'
             assert result.park_id == 9999
 
-    def test_park_repository_requires_session_not_connection(self, mysql_connection):
+    def test_park_repository_works_with_session(self, mysql_session):
         """
-        Verify that ParkRepository raises error when given Connection instead of Session.
+        Verify that ParkRepository works correctly with Session.
 
-        This documents the bug where routes were passing Connection to ORM repositories.
+        ORM repositories require Session, not Connection.
         """
         from src.database.repositories.park_repository import ParkRepository
+        from src.models.orm_park import Park
 
-        # This should fail because ParkRepository uses ORM patterns that require Session
-        repo = ParkRepository(mysql_connection)
+        # Create test park
+        park = Park(
+            park_id=9998,
+            name='Test Park for Session',
+            queue_times_id=99998,
+            city='Test City',
+            country='US',
+            timezone='America/Los_Angeles',
+            is_active=True
+        )
+        mysql_session.merge(park)
+        mysql_session.flush()
 
-        with pytest.raises(AttributeError, match="'Connection' object has no attribute 'query'"):
-            repo.get_by_id(1)
+        # Repository should work with Session
+        repo = ParkRepository(mysql_session)
+        result = repo.get_by_id(9998)
+
+        assert result is not None
+        assert result.name == 'Test Park for Session'
 
 
 @pytest.mark.integration
 class TestStatsRepositoryShameBreakdown:
     """Test StatsRepository shame breakdown methods."""
 
-    def test_get_park_weekly_shame_breakdown(self, mysql_connection):
+    def test_get_park_weekly_shame_breakdown(self, mysql_session):
         """Test weekly shame breakdown returns correct structure."""
         from src.database.connection import get_db_session
         from src.database.repositories.stats_repository import StatsRepository
@@ -126,7 +141,7 @@ class TestStatsRepositoryShameBreakdown:
             # Shame score should be calculated correctly (average of available days)
             assert result['shame_score'] > 0
 
-    def test_get_park_yesterday_shame_breakdown(self, mysql_connection):
+    def test_get_park_yesterday_shame_breakdown(self, mysql_session):
         """Test yesterday shame breakdown returns correct structure."""
         from src.database.connection import get_db_session
         from src.database.repositories.stats_repository import StatsRepository
@@ -176,7 +191,7 @@ class TestStatsRepositoryShameBreakdown:
             assert result['total_downtime_hours'] == pytest.approx(10.0, rel=0.01)
             assert result['rides_with_downtime'] == 5
 
-    def test_get_park_monthly_shame_breakdown(self, mysql_connection):
+    def test_get_park_monthly_shame_breakdown(self, mysql_session):
         """Test monthly shame breakdown returns correct structure."""
         from src.database.connection import get_db_session
         from src.database.repositories.stats_repository import StatsRepository
@@ -232,7 +247,7 @@ class TestStatsRepositoryShameBreakdown:
             # Shame score should be calculated correctly (average of available days)
             assert result['shame_score'] > 0
 
-    def test_get_park_shame_breakdown_live(self, mysql_connection):
+    def test_get_park_shame_breakdown_live(self, mysql_session):
         """Test live shame breakdown returns most recent snapshot."""
         from src.database.connection import get_db_session
         from src.database.repositories.stats_repository import StatsRepository
@@ -276,7 +291,7 @@ class TestStatsRepositoryShameBreakdown:
             assert result['shame_score'] == pytest.approx(4.5, rel=0.01)
             assert result.get('is_live') == True
 
-    def test_shame_breakdown_returns_zero_for_missing_data(self, mysql_connection):
+    def test_shame_breakdown_returns_zero_for_missing_data(self, mysql_session):
         """Test shame breakdown returns zero when no data exists."""
         from src.database.connection import get_db_session
         from src.database.repositories.stats_repository import StatsRepository
@@ -296,7 +311,7 @@ class TestStatsRepositoryShameBreakdown:
 class TestStatsRepositoryRideMethods:
     """Test StatsRepository methods for excluded and active rides."""
 
-    def test_get_excluded_rides(self, mysql_connection):
+    def test_get_excluded_rides(self, mysql_session):
         """Test get_excluded_rides returns rides not operated in 7 days."""
         from src.database.connection import get_db_session
         from src.database.repositories.stats_repository import StatsRepository
@@ -337,10 +352,10 @@ class TestStatsRepositoryRideMethods:
             assert result is not None
             assert isinstance(result, list)
             # Should have at least our test ride since it never operated
-            ride_names = [r['name'] for r in result]
+            ride_names = [r['ride_name'] for r in result]
             assert 'Never Operating Ride' in ride_names
 
-    def test_get_active_rides(self, mysql_connection):
+    def test_get_active_rides(self, mysql_session):
         """Test get_active_rides returns rides that operated recently."""
         from src.database.connection import get_db_session
         from src.database.repositories.stats_repository import StatsRepository
@@ -407,7 +422,7 @@ class TestStatsRepositoryRideMethods:
 class TestStatsRepositoryMethods:
     """Test StatsRepository methods used by park details."""
 
-    def test_stats_repo_get_hourly_stats_exists(self, mysql_connection):
+    def test_stats_repo_get_hourly_stats_exists(self, mysql_session):
         """
         Verify StatsRepository has get_hourly_stats method.
 
@@ -428,7 +443,7 @@ class TestStatsRepositoryMethods:
 class TestRideRankingsAPI:
     """Test ride rankings endpoint for yesterday period."""
 
-    def test_ride_rankings_yesterday_uses_correct_query(self, mysql_connection):
+    def test_ride_rankings_yesterday_uses_correct_query(self, mysql_session):
         """
         Verify ride rankings for 'yesterday' period uses the correct query class.
 

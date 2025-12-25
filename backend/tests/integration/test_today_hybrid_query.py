@@ -62,7 +62,7 @@ from utils import timezone as timezone_module
 
 
 @pytest.fixture
-def today_hybrid_schema(mysql_connection):
+def today_hybrid_schema(mysql_session):
     """
     Ensure minimal schema for TODAY hybrid query integration tests.
 
@@ -76,7 +76,7 @@ def today_hybrid_schema(mysql_connection):
 
     Tables are truncated before each test to avoid cross-test contamination.
     """
-    conn = mysql_connection
+    conn = mysql_session
 
     # Create minimal schema pieces if they do not exist
     # NOTE: These definitions must be compatible with production schema columns

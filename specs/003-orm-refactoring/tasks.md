@@ -327,16 +327,56 @@
 
 ---
 
-## Phase 20: Polish & Cross-Cutting Concerns
+## Phase 20: Test Suite Migration [IN PROGRESS]
+
+**Purpose**: Update test suite to use ORM Session fixtures instead of raw Connection fixtures
+**Status**: Unit tests COMPLETE (805 passed), Integration tests IN PROGRESS
+
+### Unit Test Migration (COMPLETE - 805 tests passing)
+
+- [X] T100 Update unit tests checking StatsRepository methods to use ORM query classes
+- [X] T101 Update unit tests checking SQL patterns (e.g., "AS rides_down") to ORM-compatible patterns
+- [X] T102 Update unit tests using mock params to test ORM logic directly
+
+### Integration Test Migration (IN PROGRESS)
+
+Integration tests updated to use `mysql_session` fixture instead of `mysql_connection`:
+
+**Completed (200 tests passing):**
+- [X] T103 [P] Update tests/integration/test_snapshot_repository.py to use mysql_session fixture
+- [X] T104 [P] Update tests/integration/test_aggregation_repository.py to use mysql_session fixture
+- [X] T105 [P] Update tests/integration/test_aggregation_service_integration.py to use mysql_session
+- [X] T106 [P] Update tests/integration/test_api_calculations_integration.py to use mysql_session
+- [X] T107 [P] Update tests/integration/test_classification_integration.py to use mysql_session
+- [X] T108 [P] Update tests/integration/test_daily_consistency_park_vs_rides.py to use mysql_session
+- [X] T109 [P] Update tests/integration/test_data_presence_after_mirror.py to use mysql_session
+- [X] T110 [P] Update tests/integration/test_heatmap_api.py to use mysql_session
+- [X] T111 [P] Update tests/integration/test_park_details_api.py to use mysql_session
+- [X] T112 [P] Update tests/integration/test_chart_equivalence.py to use mysql_session
+- [X] T113 [P] Update tests/integration/test_api_endpoints_integration.py to use mysql_session
+- [X] T114 [P] Update tests/integration/test_today_api_contract.py to use mysql_session
+- [X] T115 [P] Batch update all remaining test files to mysql_session
+
+**Remaining failures (66 tests) - Complex issues:**
+- [ ] T116 Fix tests using get_db_session() that bypass test fixture transaction
+- [ ] T117 Fix monthly/weekly aggregation tests with data dependencies
+- [ ] T118 Fix ride details API tests with Flask app context issues
+- [ ] T119 Fix timestamp drift and fallback heuristic tests
+
+**Checkpoint**: 200 integration tests pass with ORM Session fixtures
+
+---
+
+## Phase 21: Polish & Cross-Cutting Concerns
 
 **Purpose**: Documentation, code cleanup, and deployment readiness
 **Depends on**: All SQL elimination phases complete
 
-- [ ] T100 [P] Verify specs/003-orm-refactoring/quickstart.md has complete ORM usage examples
-- [ ] T101 [P] Run backend test suite with coverage report (pytest --cov=backend/src --cov-report=term-missing), verify >80% coverage
-- [ ] T102 Code cleanup: remove commented-out raw SQL queries, unused imports - Done when: grep finds 0 occurrences of text() in active code paths (excluding migrations)
-- [ ] T103 Update deployment/deploy.sh to include alembic upgrade head step before restarting services
-- [ ] T104 Update CLAUDE.md: Add "No Raw SQL Policy" section documenting ORM-only requirement
+- [ ] T116 [P] Verify specs/003-orm-refactoring/quickstart.md has complete ORM usage examples
+- [ ] T117 [P] Run backend test suite with coverage report (pytest --cov=backend/src --cov-report=term-missing), verify >80% coverage
+- [ ] T118 Code cleanup: remove commented-out raw SQL queries, unused imports - Done when: grep finds 0 occurrences of text() in active code paths (excluding migrations)
+- [ ] T119 Update deployment/deploy.sh to include alembic upgrade head step before restarting services
+- [ ] T120 Update CLAUDE.md: Add "No Raw SQL Policy" section documenting ORM-only requirement
 
 ---
 
@@ -513,9 +553,10 @@ Each increment adds value without breaking previous functionality.
 
 ## Summary
 
-- **Total Tasks**: 104 tasks across 20 phases
-- **Original ORM Refactoring**: 41 tasks (Phases 1-8) - MOSTLY COMPLETE
-- **SQL Elimination Extension**: 63 tasks (Phases 9-20) - NEW
+- **Total Tasks**: 120 tasks across 21 phases
+- **Original ORM Refactoring**: 41 tasks (Phases 1-8) - COMPLETE
+- **SQL Elimination Extension**: 63 tasks (Phases 9-19) - MOSTLY COMPLETE
+- **Test Suite Migration**: 16 tasks (Phase 20) - IN PROGRESS (Unit tests DONE, Integration tests WIP)
 - **Parallel Opportunities**: 55+ tasks marked [P] for concurrent execution
 - **MVP Scope**: Phase 1-2 (foundational) + Phase 3 (US1) = 22 tasks
 - **User Stories**: 6 stories (3 P1, 3 P2) with independent test criteria

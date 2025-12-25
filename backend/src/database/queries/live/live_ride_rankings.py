@@ -157,32 +157,35 @@ class LiveRideRankingsQuery(QueryClassBase):
         )
 
         # Current status expression
+        # Use MAX() around subquery columns for MySQL GROUP BY compatibility
         current_status_expr = case(
-            (park_status_subq.c.park_appears_open == False, literal('PARK_CLOSED')),
+            (func.max(park_status_subq.c.park_appears_open) == False, literal('PARK_CLOSED')),
             else_=func.coalesce(
-                latest_snapshot_subq.c.status,
+                func.max(latest_snapshot_subq.c.status),
                 case(
-                    (latest_snapshot_subq.c.computed_is_open == True, literal('OPERATING')),
+                    (func.max(latest_snapshot_subq.c.computed_is_open) == True, literal('OPERATING')),
                     else_=literal('DOWN')
                 )
             )
         ).label('current_status')
 
         # Current is_open boolean
+        # Use MAX() around subquery columns for MySQL GROUP BY compatibility
         current_is_open_expr = case(
-            (park_status_subq.c.park_appears_open == False, literal(False)),
+            (func.max(park_status_subq.c.park_appears_open) == False, literal(False)),
             else_=or_(
-                latest_snapshot_subq.c.status == 'OPERATING',
+                func.max(latest_snapshot_subq.c.status) == 'OPERATING',
                 and_(
-                    latest_snapshot_subq.c.status.is_(None),
-                    latest_snapshot_subq.c.computed_is_open == True
+                    func.max(latest_snapshot_subq.c.status).is_(None),
+                    func.max(latest_snapshot_subq.c.computed_is_open) == True
                 )
             )
         ).label('current_is_open')
 
         # Park is_open boolean
+        # Use MAX() around subquery column for MySQL GROUP BY compatibility
         park_is_open_expr = func.coalesce(
-            park_status_subq.c.park_appears_open,
+            func.max(park_status_subq.c.park_appears_open),
             literal(False)
         ).label('park_is_open')
 

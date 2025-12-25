@@ -11,7 +11,7 @@ GET /parks/downtime?period=today      → database/queries/today/today_park_rank
 GET /parks/downtime?period=yesterday  → StatsRepository.get_park_daily_rankings(stat_date=yesterday)
 GET /parks/downtime?period=last_week  → database/queries/rankings/park_downtime_rankings.py
 GET /parks/downtime?period=last_month → database/queries/rankings/park_downtime_rankings.py
-GET /parks/waittimes?period=live      → StatsRepository.get_park_live_wait_time_rankings()
+GET /parks/waittimes?period=live      → database/queries/live/live_park_wait_times.py (instantaneous via snapshots)
 GET /parks/waittimes?period=today     → database/queries/today/today_park_wait_times.py (cumulative)
 GET /parks/waittimes?period=yesterday → database/queries/yesterday/yesterday_park_wait_times.py (full prev day)
 GET /parks/waittimes?period=last_week   → database/queries/rankings/park_wait_time_rankings.py
@@ -35,6 +35,7 @@ from database.queries.today import TodayParkWaitTimesQuery, TodayParkRankingsQue
 from database.queries.yesterday import YesterdayParkWaitTimesQuery, YesterdayParkRankingsQuery
 from database.queries.charts import ParkShameHistoryQuery, ParkRidesComparisonQuery
 from database.queries.live.fast_live_park_rankings import FastLiveParkRankingsQuery
+from database.queries.live.live_park_wait_times import LiveParkWaitTimesQuery
 from database.calculators.shame_score import ShameScoreCalculator
 
 from utils.logger import logger
@@ -86,6 +87,10 @@ def get_park_downtime_rankings():
             "success": False,
             "error": "Invalid period. Must be one of: live, today, yesterday, 7days, 30days, last_week, last_month"
         }), 400
+
+    # Normalize legacy period names to standard names (keep original for response)
+    original_period = period
+    period = PERIOD_ALIASES.get(period, period)
 
     # Validate filter
     if filter_type not in ['disney-universal', 'all-parks']:
@@ -149,22 +154,6 @@ def get_park_downtime_rankings():
                     limit=limit,
                     sort_by=sort_by
                 )
-            elif period == '7days':
-                rankings = stats_repo.get_park_weekly_rankings(
-                    year=today_pacific.year,
-                    week_number=today_pacific.isocalendar()[1],
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit,
-                    weighted=weighted
-                )
-            elif period == '30days':
-                rankings = stats_repo.get_park_monthly_rankings(
-                    year=today_pacific.year,
-                    month=today_pacific.month,
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit,
-                    weighted=weighted
-                )
             else:
                 # Historical data from aggregated stats (calendar-based periods)
                 # See: database/queries/rankings/park_downtime_rankings.py
@@ -214,7 +203,7 @@ def get_park_downtime_rankings():
             # Build response
             response = {
                 "success": True,
-                "period": period,
+                "period": original_period,
                 "filter": filter_type,
                 "weighted": weighted,
                 "sort_by": sort_by,
@@ -316,18 +305,21 @@ def get_park_wait_times():
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
+        elif period == 'live':
+            # ORM-based query - uses Session
+            with get_db_session() as session:
+                # LIVE data - instantaneous current wait times from latest snapshots
+                # See: database/queries/live/live_park_wait_times.py
+                query = LiveParkWaitTimesQuery(session)
+                wait_times = query.get_rankings(
+                    filter_disney_universal=filter_disney_universal,
+                    limit=limit
+                )
         else:
             # Legacy queries - still use Connection
             with get_db_connection() as conn:
                 # Route to appropriate query based on period
-                if period == 'live':
-                    # LIVE data - instantaneous current wait times
-                    stats_repo = StatsRepository(conn)
-                    wait_times = stats_repo.get_park_live_wait_time_rankings(
-                        filter_disney_universal=filter_disney_universal,
-                        limit=limit
-                    )
-                elif period == 'yesterday':
+                if period == 'yesterday':
                     # YESTERDAY data - full previous Pacific day
                     # See: database/queries/yesterday/yesterday_park_wait_times.py
                     query = YesterdayParkWaitTimesQuery(conn)

@@ -497,14 +497,19 @@ def get_park_details(park_id: int):
             # Each period returns data appropriate for that time range
             if period == 'today':
                 shame_breakdown = stats_repo.get_park_today_shame_breakdown(park_id)
+                shame_breakdown['breakdown_type'] = 'today'
             elif period == 'yesterday':
                 shame_breakdown = stats_repo.get_park_yesterday_shame_breakdown(park_id)
+                shame_breakdown['breakdown_type'] = 'yesterday'
             elif period == 'last_week':
                 shame_breakdown = stats_repo.get_park_weekly_shame_breakdown(park_id)
+                shame_breakdown['breakdown_type'] = 'last_week'
             elif period == 'last_month':
                 shame_breakdown = stats_repo.get_park_monthly_shame_breakdown(park_id)
+                shame_breakdown['breakdown_type'] = 'last_month'
             else:  # live
                 shame_breakdown = stats_repo.get_park_shame_breakdown(park_id)
+                shame_breakdown['breakdown_type'] = 'live'
 
             # Get chart data for all periods
             # - LIVE: 5-minute granularity for last 60 minutes (recent snapshots)

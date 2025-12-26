@@ -36,6 +36,83 @@ class RideHourlyMetrics(NamedTuple):
     ride_operated: bool
 
 
+class RideStatusExpressions:
+    """
+    SINGLE SOURCE OF TRUTH for ride status expressions in ORM queries.
+
+    All ride status logic MUST use these expressions to ensure consistency.
+
+    Business Rules:
+    1. Disney/Universal parks: Only status='DOWN' counts as downtime
+       (CLOSED = scheduled closure, not a breakdown)
+    2. Other parks: Both DOWN and CLOSED count as downtime
+       (they don't distinguish between the two)
+    3. Park must be open (park_appears_open=TRUE) for any status to count
+    """
+
+    @staticmethod
+    def is_operating_expr():
+        """
+        SQLAlchemy expression for "ride is operating".
+
+        A ride is operating if:
+        - status='OPERATING' OR computed_is_open=TRUE
+        """
+        return or_(
+            RideStatusSnapshot.status == 'OPERATING',
+            RideStatusSnapshot.computed_is_open == True
+        )
+
+    @staticmethod
+    def is_down_disney_universal_expr():
+        """
+        SQLAlchemy expression for "ride is down" at Disney/Universal parks.
+
+        Disney/Universal properly distinguish:
+        - DOWN = unexpected breakdown (counts as downtime)
+        - CLOSED = scheduled closure (does NOT count as downtime)
+
+        Returns: Expression that is TRUE when ride is broken
+        """
+        return RideStatusSnapshot.status == 'DOWN'
+
+    @staticmethod
+    def is_down_other_parks_expr():
+        """
+        SQLAlchemy expression for "ride is down" at non-Disney/Universal parks.
+
+        Most other parks only report CLOSED for all non-operating rides.
+        We must include both DOWN and CLOSED.
+
+        Returns: Expression that is TRUE when ride is not operating
+        """
+        return or_(
+            RideStatusSnapshot.status == 'DOWN',
+            RideStatusSnapshot.status == 'CLOSED',
+            and_(
+                RideStatusSnapshot.status == None,
+                RideStatusSnapshot.computed_is_open == False
+            )
+        )
+
+    @staticmethod
+    def is_down_for_park(is_disney: bool, is_universal: bool):
+        """
+        Get the correct "is_down" expression based on park type.
+
+        Args:
+            is_disney: True if this is a Disney park
+            is_universal: True if this is a Universal park
+
+        Returns:
+            SQLAlchemy expression for "ride is down"
+        """
+        if is_disney or is_universal:
+            return RideStatusExpressions.is_down_disney_universal_expr()
+        else:
+            return RideStatusExpressions.is_down_other_parks_expr()
+
+
 class RideStatusQuery:
     """
     Helper methods for querying ride status snapshots.
@@ -374,14 +451,18 @@ class HourlyAggregationQuery:
         """
         Get hourly metrics for a ride within a UTC time range.
 
+        CRITICAL BUSINESS RULES (from CLAUDE.md):
+        1. Only count snapshots when park_appears_open = TRUE
+        2. Disney/Universal: Only status='DOWN' counts as downtime (not CLOSED)
+        3. Other parks: Both DOWN and CLOSED count as downtime
+        4. Ride must have operated while park was open to count toward metrics
+
         Computes metrics for each hour from ride_status_snapshots:
         - avg_wait_time_minutes: Average wait time (NULL if no wait data)
         - uptime_percentage: Percentage of snapshots where ride was operating
-        - snapshot_count: Total snapshots in the hour
+        - snapshot_count: Total snapshots in the hour (while park was open)
         - downtime_hours: Fractional hours of downtime (1.0 = full hour down)
-        - ride_operated: Whether ride operated at any point in the Pacific day
-
-        Performance: Uses a single grouped query instead of N queries per hour.
+        - ride_operated: Whether ride operated at any point while park was open
 
         Args:
             session: SQLAlchemy session
@@ -391,60 +472,100 @@ class HourlyAggregationQuery:
 
         Returns:
             List of RideHourlyMetrics, one per hour with data
-
-        Example:
-            >>> metrics = HourlyAggregationQuery.ride_hour_range_metrics(
-            ...     session, ride_id=123, start_utc=start, end_utc=end
-            ... )
-            >>> for m in metrics:
-            ...     print(f"Hour {m.hour_start_utc}: {m.uptime_percentage}% uptime")
         """
         from sqlalchemy import literal_column, case
-        from sqlalchemy.sql.expression import cast
-        from sqlalchemy.types import Integer
 
-        # First, determine if ride operated at all in the date range (Pacific day)
+        # First, get the park info to know if it's Disney/Universal
+        ride_info = session.execute(
+            select(Ride.park_id, Park.is_disney, Park.is_universal)
+            .join(Park, Ride.park_id == Park.park_id)
+            .where(Ride.ride_id == ride_id)
+        ).first()
+
+        if not ride_info:
+            return []
+
+        park_id = ride_info.park_id
+        is_disney = ride_info.is_disney
+        is_universal = ride_info.is_universal
+
+        # Determine if ride operated while park was open
+        # CRITICAL: Must join with ParkActivitySnapshot to check park_appears_open
         ride_operated_subquery = (
             select(func.count(RideStatusSnapshot.snapshot_id))
+            .select_from(RideStatusSnapshot)
+            .join(
+                ParkActivitySnapshot,
+                and_(
+                    ParkActivitySnapshot.park_id == park_id,
+                    func.date_format(ParkActivitySnapshot.recorded_at, '%Y-%m-%d %H:%i')
+                    == func.date_format(RideStatusSnapshot.recorded_at, '%Y-%m-%d %H:%i')
+                )
+            )
             .where(RideStatusSnapshot.ride_id == ride_id)
             .where(RideStatusSnapshot.recorded_at >= start_utc)
             .where(RideStatusSnapshot.recorded_at < end_utc)
-            .where(
-                or_(
-                    RideStatusSnapshot.status == 'OPERATING',
-                    RideStatusSnapshot.computed_is_open == True
-                )
-            )
+            .where(ParkActivitySnapshot.park_appears_open == True)  # CRITICAL: Park must be open
+            .where(RideStatusExpressions.is_operating_expr())
         )
         ride_operated_count = session.execute(ride_operated_subquery).scalar() or 0
         ride_operated = ride_operated_count > 0
 
-        # Single query with GROUP BY hour - uses MySQL DATE_FORMAT to truncate to hour
-        # DATE_FORMAT(recorded_at, '%Y-%m-%d %H:00:00') gives hour start
+        # Single query with GROUP BY hour
         hour_start_expr = func.date_format(
             RideStatusSnapshot.recorded_at,
             literal_column("'%Y-%m-%d %H:00:00'")
         ).label('hour_start')
 
-        # Use CASE expression for counting operating snapshots
-        is_operating = case(
-            (or_(
-                RideStatusSnapshot.status == 'OPERATING',
-                RideStatusSnapshot.computed_is_open == True
-            ), 1),
+        # Operating = status='OPERATING' OR computed_is_open=TRUE
+        is_operating_case = case(
+            (RideStatusExpressions.is_operating_expr(), 1),
             else_=0
         )
 
+        # Down count: Use park-type-aware logic
+        # Disney/Universal: Only DOWN counts
+        # Other parks: DOWN, CLOSED, or computed_is_open=FALSE
+        if is_disney or is_universal:
+            is_down_case = case(
+                (RideStatusSnapshot.status == 'DOWN', 1),
+                else_=0
+            )
+        else:
+            is_down_case = case(
+                (or_(
+                    RideStatusSnapshot.status == 'DOWN',
+                    RideStatusSnapshot.status == 'CLOSED',
+                    and_(
+                        RideStatusSnapshot.status == None,
+                        RideStatusSnapshot.computed_is_open == False
+                    )
+                ), 1),
+                else_=0
+            )
+
+        # CRITICAL: Join with ParkActivitySnapshot to filter by park_appears_open
         hourly_query = (
             select(
                 hour_start_expr,
                 func.count(RideStatusSnapshot.snapshot_id).label('total_count'),
                 func.avg(RideStatusSnapshot.wait_time).label('avg_wait'),
-                func.sum(is_operating).label('operating_count')
+                func.sum(is_operating_case).label('operating_count'),
+                func.sum(is_down_case).label('down_count')
+            )
+            .select_from(RideStatusSnapshot)
+            .join(
+                ParkActivitySnapshot,
+                and_(
+                    ParkActivitySnapshot.park_id == park_id,
+                    func.date_format(ParkActivitySnapshot.recorded_at, '%Y-%m-%d %H:%i')
+                    == func.date_format(RideStatusSnapshot.recorded_at, '%Y-%m-%d %H:%i')
+                )
             )
             .where(RideStatusSnapshot.ride_id == ride_id)
             .where(RideStatusSnapshot.recorded_at >= start_utc)
             .where(RideStatusSnapshot.recorded_at < end_utc)
+            .where(ParkActivitySnapshot.park_appears_open == True)  # CRITICAL: Only count when park is open
             .group_by(hour_start_expr)
             .order_by(hour_start_expr)
         )
@@ -456,13 +577,13 @@ class HourlyAggregationQuery:
             total_count = int(row.total_count or 0)
             if total_count > 0:
                 operating_count = int(row.operating_count or 0)
+                down_count = int(row.down_count or 0)
                 avg_wait = float(row.avg_wait) if row.avg_wait is not None else None
 
-                # Calculate uptime percentage
+                # Calculate uptime percentage (operating / total while park open)
                 uptime_pct = (operating_count / total_count) * 100.0
 
-                # Calculate downtime hours (fraction of hour)
-                down_count = total_count - operating_count
+                # Calculate downtime hours using park-type-aware down_count
                 downtime_hours = (down_count / total_count)
 
                 # Parse hour_start string back to datetime

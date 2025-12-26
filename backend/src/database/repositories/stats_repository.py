@@ -599,6 +599,69 @@ class StatsRepository:
         rides.sort(key=lambda x: x['weighted_contribution'], reverse=True)
         return rides
 
+    def _get_rides_with_downtime_for_date_range(
+        self,
+        park_id: int,
+        start_date: date,
+        end_date: date
+    ) -> List[Dict[str, Any]]:
+        """
+        Get aggregated rides with downtime for a park across a date range.
+
+        Args:
+            park_id: Park ID
+            start_date: Start date (inclusive)
+            end_date: End date (inclusive)
+
+        Returns:
+            List of ride dictionaries with total downtime across the period
+        """
+        from sqlalchemy import func
+
+        TIER_WEIGHTS = {1: 10, 2: 5, 3: 2}
+
+        # Aggregate downtime across all days in range
+        results = (
+            self.session.query(
+                RideDailyStats.ride_id,
+                Ride.name.label('ride_name'),
+                Ride.tier,
+                func.sum(RideDailyStats.downtime_minutes).label('total_downtime_minutes')
+            )
+            .join(Ride, RideDailyStats.ride_id == Ride.ride_id)
+            .filter(
+                and_(
+                    Ride.park_id == park_id,
+                    RideDailyStats.stat_date >= start_date,
+                    RideDailyStats.stat_date <= end_date,
+                    RideDailyStats.downtime_minutes > 0
+                )
+            )
+            .group_by(RideDailyStats.ride_id, Ride.name, Ride.tier)
+            .order_by(func.sum(RideDailyStats.downtime_minutes).desc())
+            .all()
+        )
+
+        rides = []
+        for r in results:
+            tier = r.tier or 3
+            tier_weight = TIER_WEIGHTS.get(tier, 2)
+            downtime_hours = float(r.total_downtime_minutes) / 60
+            weighted_contribution = downtime_hours * tier_weight
+
+            rides.append({
+                'ride_id': r.ride_id,
+                'ride_name': r.ride_name,
+                'tier': tier,
+                'tier_weight': tier_weight,
+                'downtime_hours': round(downtime_hours, 2),
+                'weighted_contribution': round(weighted_contribution, 2),
+                'status': 'DOWN'
+            })
+
+        rides.sort(key=lambda x: x['weighted_contribution'], reverse=True)
+        return rides
+
     def get_park_yesterday_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
         """
         Get shame breakdown for yesterday using daily stats.
@@ -626,17 +689,28 @@ class StatsRepository:
         )
 
         if not daily_stat:
-            return {'shame_score': 0, 'total_downtime_hours': 0, 'rides': []}
+            return {'shame_score': 0, 'total_downtime_hours': 0, 'rides': [],
+                    'weighted_downtime_hours': 0, 'total_park_weight': 0, 'rides_affected_count': 0}
 
         # Get detailed ride-level downtime data for frontend
         rides = self._get_rides_with_downtime_for_date(park_id, start_date)
+
+        # Calculate weighted downtime and total park weight from rides data
+        weighted_downtime_hours = sum(
+            float(r.get('downtime_hours', 0)) * float(r.get('tier_weight', 2))
+            for r in rides
+        )
+        total_park_weight = float(daily_stat.total_rides_tracked or 0) * 2  # Default tier weight
 
         return {
             'shame_score': float(daily_stat.shame_score or 0),
             'total_downtime_hours': float(daily_stat.total_downtime_hours or 0),
             'avg_uptime_percentage': float(daily_stat.avg_uptime_percentage or 0),
             'rides_with_downtime': daily_stat.rides_with_downtime or 0,  # Keep original count for backwards compatibility
-            'rides': rides  # Array of rides with downtime details for frontend
+            'rides': rides,  # Array of rides with downtime details for frontend
+            'weighted_downtime_hours': round(weighted_downtime_hours, 2),
+            'total_park_weight': total_park_weight,
+            'rides_affected_count': len(rides)
         }
 
     def get_park_weekly_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
@@ -667,17 +741,32 @@ class StatsRepository:
         )
 
         if not daily_stats:
-            return {'shame_score': 0, 'total_downtime_hours': 0, 'days_tracked': 0}
+            return {'shame_score': 0, 'total_downtime_hours': 0, 'days_tracked': 0,
+                    'rides': [], 'weighted_downtime_hours': 0, 'total_park_weight': 0,
+                    'rides_affected_count': 0, 'period_label': 'Last 7 Days'}
 
         # Calculate averages
         total_shame = sum(float(s.shame_score or 0) for s in daily_stats)
         total_downtime = sum(float(s.total_downtime_hours or 0) for s in daily_stats)
 
+        # Get aggregated ride-level downtime data for frontend
+        rides = self._get_rides_with_downtime_for_date_range(park_id, start_date, end_date)
+
+        # Calculate weighted downtime from rides
+        weighted_downtime_hours = sum(r.get('weighted_contribution', 0) for r in rides)
+        total_park_weight = sum(float(s.total_rides_tracked or 0) for s in daily_stats) * 2 / len(daily_stats)
+
         return {
             'shame_score': round(total_shame / len(daily_stats), 2),
             'total_downtime_hours': round(total_downtime, 2),
             'avg_daily_downtime': round(total_downtime / len(daily_stats), 2),
-            'days_tracked': len(daily_stats)
+            'days_tracked': len(daily_stats),
+            'days_in_period': len(daily_stats),
+            'rides': rides,
+            'weighted_downtime_hours': round(weighted_downtime_hours, 2),
+            'total_park_weight': round(total_park_weight, 2),
+            'rides_affected_count': len(rides),
+            'period_label': f'{start_date.strftime("%b %d")} - {end_date.strftime("%b %d, %Y")}'
         }
 
     def get_park_monthly_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
@@ -708,17 +797,32 @@ class StatsRepository:
         )
 
         if not daily_stats:
-            return {'shame_score': 0, 'total_downtime_hours': 0, 'days_tracked': 0}
+            return {'shame_score': 0, 'total_downtime_hours': 0, 'days_tracked': 0,
+                    'rides': [], 'weighted_downtime_hours': 0, 'total_park_weight': 0,
+                    'rides_affected_count': 0, 'period_label': 'Last 30 Days'}
 
         # Calculate averages
         total_shame = sum(float(s.shame_score or 0) for s in daily_stats)
         total_downtime = sum(float(s.total_downtime_hours or 0) for s in daily_stats)
 
+        # Get aggregated ride-level downtime data for frontend
+        rides = self._get_rides_with_downtime_for_date_range(park_id, start_date, end_date)
+
+        # Calculate weighted downtime from rides
+        weighted_downtime_hours = sum(r.get('weighted_contribution', 0) for r in rides)
+        total_park_weight = sum(float(s.total_rides_tracked or 0) for s in daily_stats) * 2 / len(daily_stats)
+
         return {
             'shame_score': round(total_shame / len(daily_stats), 2),
             'total_downtime_hours': round(total_downtime, 2),
             'avg_daily_downtime': round(total_downtime / len(daily_stats), 2),
-            'days_tracked': len(daily_stats)
+            'days_tracked': len(daily_stats),
+            'days_in_period': len(daily_stats),
+            'rides': rides,
+            'weighted_downtime_hours': round(weighted_downtime_hours, 2),
+            'total_park_weight': round(total_park_weight, 2),
+            'rides_affected_count': len(rides),
+            'period_label': f'{start_date.strftime("%b %d")} - {end_date.strftime("%b %d, %Y")}'
         }
 
     def get_excluded_rides(self, park_id: int) -> List[Dict[str, Any]]:

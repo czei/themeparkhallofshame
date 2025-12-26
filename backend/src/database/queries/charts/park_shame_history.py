@@ -478,10 +478,12 @@ class ParkShameHistoryQuery:
                     ParkActivitySnapshot.park_id == park_id,
                     ParkActivitySnapshot.recorded_at >= start_utc,
                     ParkActivitySnapshot.recorded_at < end_utc,
-                    or_(
-                        ParkActivitySnapshot.park_appears_open == True,
-                        ParkActivitySnapshot.rides_open > 0
-                    ),
+                    # CRITICAL: Only include data when park is officially open
+                    # The rides_open > 0 fallback was including closed hours where
+                    # a few rides show as "open" due to maintenance/test cycles.
+                    # For Disney parks, this was causing 23 rides to show as "down"
+                    # during closed hours, which is incorrect.
+                    ParkActivitySnapshot.park_appears_open == True,
                     ParkActivitySnapshot.shame_score.isnot(None)
                 )
             )

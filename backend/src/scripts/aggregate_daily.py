@@ -514,6 +514,30 @@ class DailyAggregator:
             return
 
         # Aggregation query
+        # Join with ride_classifications for tier weights (shame_score calculation)
+        from src.models import RideClassification
+        rc = RideClassification.__table__.alias('rc')
+
+        # Calculate weighted downtime and effective park weight for shame_score
+        # shame_score = (weighted_downtime / effective_park_weight) * 10
+        # - weighted_downtime = SUM(downtime_hours * tier_weight)
+        # - effective_park_weight = SUM(tier_weight) for rides that operated (had any uptime)
+        weighted_downtime = func.sum(
+            (rds.c.downtime_minutes / 60.0) * func.coalesce(rc.c.tier_weight, 2)
+        )
+        effective_park_weight = func.sum(
+            case(
+                # Only count rides that operated (uptime_percentage > 0 or had any snapshots)
+                (rds.c.uptime_percentage > 0, func.coalesce(rc.c.tier_weight, 2)),
+                else_=0
+            )
+        )
+        shame_score_expr = case(
+            (effective_park_weight > 0,
+             func.round((weighted_downtime / effective_park_weight) * 10, 2)),
+            else_=0
+        ).label('shame_score')
+
         agg_query = (
             select(
                 func.count().label('total_rides'),
@@ -530,10 +554,12 @@ class DailyAggregator:
                 ).label('rides_with_downtime'),
                 func.coalesce(func.round(func.avg(rds.c.avg_wait_time), 2), 0).label('avg_wait_time'),
                 func.coalesce(func.max(rds.c.peak_wait_time), 0).label('peak_wait_time'),
-                func.coalesce(func.avg(rds.c.operating_hours_minutes), 0).label('operating_hours_minutes')
+                func.coalesce(func.avg(rds.c.operating_hours_minutes), 0).label('operating_hours_minutes'),
+                shame_score_expr
             )
             .select_from(rds)
             .join(r, rds.c.ride_id == r.c.ride_id)
+            .outerjoin(rc, rds.c.ride_id == rc.c.ride_id)  # LEFT JOIN for tier weights
             .where(
                 and_(
                     r.c.park_id == park_id,
@@ -558,6 +584,7 @@ class DailyAggregator:
             avg_wait_time=float(result.avg_wait_time),
             peak_wait_time=int(result.peak_wait_time),
             operating_hours_minutes=int(result.operating_hours_minutes),
+            shame_score=float(result.shame_score or 0),
             created_at=datetime.now()
         )
 
@@ -568,7 +595,8 @@ class DailyAggregator:
             rides_with_downtime=stmt.inserted.rides_with_downtime,
             avg_wait_time=stmt.inserted.avg_wait_time,
             peak_wait_time=stmt.inserted.peak_wait_time,
-            operating_hours_minutes=stmt.inserted.operating_hours_minutes
+            operating_hours_minutes=stmt.inserted.operating_hours_minutes,
+            shame_score=stmt.inserted.shame_score
         )
 
         session.execute(stmt)

@@ -35,6 +35,7 @@ from src.models.orm_park import Park
 from src.models.orm_ride import Ride
 from src.models.orm_stats import ParkDailyStats, ParkHourlyStats, RideDailyStats
 from src.models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
+from src.models.orm_classification import RideClassification
 
 
 class StatsRepository:
@@ -558,16 +559,18 @@ class StatsRepository:
         # Tier weights for calculating weighted contribution
         TIER_WEIGHTS = {1: 10, 2: 5, 3: 2}
 
-        # Query ride daily stats joined with ride info
+        # Query ride daily stats joined with ride info and classification
         # Sort by tier-weighted downtime (tier 1 = 10x, tier 2 = 5x, tier 3 = 2x)
         results = (
             self.session.query(
                 RideDailyStats.ride_id,
                 Ride.name.label('ride_name'),
-                Ride.tier,
+                RideClassification.tier,
+                RideClassification.tier_weight,
                 RideDailyStats.downtime_minutes
             )
             .join(Ride, RideDailyStats.ride_id == Ride.ride_id)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
             .filter(
                 and_(
                     Ride.park_id == park_id,
@@ -582,14 +585,15 @@ class StatsRepository:
         rides = []
         for r in results:
             tier = r.tier or 3  # Default to tier 3 if unclassified
-            tier_weight = TIER_WEIGHTS.get(tier, 2)
-            downtime_hours = r.downtime_minutes / 60
+            tier_weight = r.tier_weight or TIER_WEIGHTS.get(tier, 2)
+            downtime_hours = float(r.downtime_minutes) / 60
             weighted_contribution = downtime_hours * tier_weight
 
             rides.append({
                 'ride_id': r.ride_id,
                 'ride_name': r.ride_name,
                 'tier': tier,
+                'tier_weight': tier_weight,
                 'downtime_hours': round(downtime_hours, 2),
                 'weighted_contribution': round(weighted_contribution, 2),
                 'status': 'DOWN'
@@ -620,15 +624,17 @@ class StatsRepository:
 
         TIER_WEIGHTS = {1: 10, 2: 5, 3: 2}
 
-        # Aggregate downtime across all days in range
+        # Aggregate downtime across all days in range, joining with classification for tier
         results = (
             self.session.query(
                 RideDailyStats.ride_id,
                 Ride.name.label('ride_name'),
-                Ride.tier,
+                RideClassification.tier,
+                RideClassification.tier_weight,
                 func.sum(RideDailyStats.downtime_minutes).label('total_downtime_minutes')
             )
             .join(Ride, RideDailyStats.ride_id == Ride.ride_id)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
             .filter(
                 and_(
                     Ride.park_id == park_id,
@@ -637,7 +643,7 @@ class StatsRepository:
                     RideDailyStats.downtime_minutes > 0
                 )
             )
-            .group_by(RideDailyStats.ride_id, Ride.name, Ride.tier)
+            .group_by(RideDailyStats.ride_id, Ride.name, RideClassification.tier, RideClassification.tier_weight)
             .order_by(func.sum(RideDailyStats.downtime_minutes).desc())
             .all()
         )
@@ -645,7 +651,7 @@ class StatsRepository:
         rides = []
         for r in results:
             tier = r.tier or 3
-            tier_weight = TIER_WEIGHTS.get(tier, 2)
+            tier_weight = r.tier_weight or TIER_WEIGHTS.get(tier, 2)
             downtime_hours = float(r.total_downtime_minutes) / 60
             weighted_contribution = downtime_hours * tier_weight
 

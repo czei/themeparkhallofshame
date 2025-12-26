@@ -112,6 +112,36 @@ class RideStatusExpressions:
         else:
             return RideStatusExpressions.is_down_other_parks_expr()
 
+    @staticmethod
+    def is_down_python(snapshot, park) -> bool:
+        """
+        Pure Python implementation of is_down logic for unit testing.
+
+        This mirrors the SQL logic but works with Python objects/mocks.
+
+        Args:
+            snapshot: Object with status and computed_is_open attributes
+            park: Object with is_disney and is_universal attributes
+
+        Returns:
+            True if the ride should be counted as "down"
+        """
+        status = getattr(snapshot, 'status', None)
+        computed_is_open = getattr(snapshot, 'computed_is_open', False)
+        is_disney = getattr(park, 'is_disney', False)
+        is_universal = getattr(park, 'is_universal', False)
+
+        # If ride is operating, it's not down
+        if status == 'OPERATING' or computed_is_open:
+            return False
+
+        # Disney/Universal: only DOWN counts
+        if is_disney or is_universal:
+            return status == 'DOWN'
+
+        # Other parks: DOWN or CLOSED counts
+        return status in ('DOWN', 'CLOSED') or (status is None and not computed_is_open)
+
 
 class RideStatusQuery:
     """

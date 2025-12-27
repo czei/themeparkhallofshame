@@ -22,6 +22,12 @@ BASH_ENV=/opt/themeparkhallofshame/backend/.env
 # Wrapped with cron_wrapper for failure alerts (timeout: 5 minutes)
 */10 * * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.cron_wrapper collect_weather --timeout=300 >> /opt/themeparkhallofshame/logs/collect_weather.log 2>&1
 
+# Refresh park schedules daily at 6:00 AM UTC (10 PM Pacific previous day)
+# Fetches operating hours from ThemeParks.wiki API for all parks
+# Schedule data is the SINGLE SOURCE OF TRUTH for determining park open/closed status
+# Wrapped with cron_wrapper for failure alerts (timeout: 10 minutes)
+0 6 * * * cd /opt/themeparkhallofshame/backend && source .env && /opt/themeparkhallofshame/venv/bin/python -m src.scripts.cron_wrapper refresh_schedules --timeout=600 >> /opt/themeparkhallofshame/logs/refresh_schedules.log 2>&1
+
 # =============================================================================
 # DATA AGGREGATION
 # =============================================================================

@@ -274,10 +274,9 @@ class HourlyAggregator:
                         and_(
                             RideStatusSnapshot.recorded_at >= day_start_utc,
                             RideStatusSnapshot.recorded_at < day_end_utc,
-                            or_(
-                                ParkActivitySnapshot.park_appears_open.is_(True),
-                                ParkActivitySnapshot.rides_open > 0
-                            ),
+                            # Use schedule-based park_appears_open (SINGLE SOURCE OF TRUTH)
+                            # Do NOT use rides_open > 0 fallback - test rides can show "open" when park is closed
+                            ParkActivitySnapshot.park_appears_open.is_(True),
                             or_(
                                 # Standard: ride showed OPERATING
                                 RideStatusSnapshot.status == 'OPERATING',
@@ -567,13 +566,14 @@ class HourlyAggregator:
                 ) as shame_score,
 
                 -- Average wait time across all operating rides
-                ROUND(AVG(CASE WHEN (pas.park_appears_open = 1 OR pas.rides_open > 0) THEN pas.avg_wait_time END), 2) as avg_wait_time_minutes,
+                -- Use schedule-based park_appears_open ONLY (no rides_open fallback)
+                ROUND(AVG(CASE WHEN pas.park_appears_open = 1 THEN pas.avg_wait_time END), 2) as avg_wait_time_minutes,
 
                 -- Average number of rides operating during hour
-                ROUND(AVG(CASE WHEN (pas.park_appears_open = 1 OR pas.rides_open > 0) THEN pas.rides_open END), 0) as rides_operating,
+                ROUND(AVG(CASE WHEN pas.park_appears_open = 1 THEN pas.rides_open END), 0) as rides_operating,
 
                 -- Average number of rides down during hour
-                ROUND(AVG(CASE WHEN (pas.park_appears_open = 1 OR pas.rides_open > 0) THEN pas.rides_closed END), 0) as rides_down,
+                ROUND(AVG(CASE WHEN pas.park_appears_open = 1 THEN pas.rides_closed END), 0) as rides_down,
 
                 -- Total downtime hours (unweighted, from ride_hourly_stats)
                 COALESCE((
@@ -613,8 +613,9 @@ class HourlyAggregator:
                 COUNT(*) as snapshot_count,
 
                 -- Was park open at all during hour?
-                -- Uses same fallback heuristic: TRUE if schedule says open OR rides operating
-                MAX(CASE WHEN pas.park_appears_open = 1 OR pas.rides_open > 0 THEN 1 ELSE 0 END) as park_was_open,
+                -- Uses schedule-based park_appears_open ONLY (SINGLE SOURCE OF TRUTH)
+                -- Do NOT use rides_open > 0 fallback - test rides can show "open" when park is closed
+                MAX(CASE WHEN pas.park_appears_open = 1 THEN 1 ELSE 0 END) as park_was_open,
 
                 NOW()
 

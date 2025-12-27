@@ -75,6 +75,9 @@ class DailyAggregator:
         logger.info(f"DAILY AGGREGATION - {self.target_date}")
         logger.info("=" * 60)
 
+        # Initialize log_id to None so exception handler can check if it was set
+        log_id = None
+
         try:
             with get_db_session() as session:
                 aggregation_repo = AggregationLogRepository(session)
@@ -110,9 +113,14 @@ class DailyAggregator:
 
         except Exception as e:
             logger.error(f"Fatal error during aggregation: {e}", exc_info=True)
-            with get_db_session() as session:
-                aggregation_repo = AggregationLogRepository(session)
-                self._fail_aggregation_log(log_id, str(e), aggregation_repo)
+            # Only try to mark as failed if we successfully created a log entry
+            if log_id is not None:
+                try:
+                    with get_db_session() as session:
+                        aggregation_repo = AggregationLogRepository(session)
+                        self._fail_aggregation_log(log_id, str(e), aggregation_repo)
+                except Exception as log_error:
+                    logger.error(f"Failed to update aggregation log: {log_error}")
             sys.exit(1)
 
     def _check_already_aggregated(self, aggregation_repo: AggregationLogRepository) -> bool:

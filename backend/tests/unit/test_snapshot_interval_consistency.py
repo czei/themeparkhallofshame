@@ -172,27 +172,31 @@ class TestDisneyUniversalDownStatusLogic:
         )
 
 
-class TestParkOpenFallbackHeuristic:
+class TestParkOpenScheduleBasedLogic:
     """
-    Ensure park_hourly_stats uses the same "park is open" heuristic as charts.
+    Ensure park open detection uses schedule data as SINGLE SOURCE OF TRUTH.
 
-    Bug Context (2025-12-18):
-    - Six Flags Fiesta Texas had park_appears_open=0 but rides_open=47
-    - Chart query used fallback: (park_appears_open = TRUE OR rides_open > 0)
-    - Hourly aggregation used: park_appears_open = 1 (strict, no fallback)
-    - Result: Charts showed Fiesta Texas with shame=2.4, rankings showed nothing
-    - This is a SINGLE SOURCE OF TRUTH violation
+    Architecture (2025-12-26):
+    - park_appears_open is set during snapshot collection based on schedule data
+    - collect_snapshots.py calls schedule_repo.is_park_open_now(park_id)
+    - NO rides_open > 0 fallback - this caused bugs (test rides during closed hours)
+
+    Bug Fixed (2025-12-26):
+    - DCA showed 23 rides "down" during hours 0-7 and 22-23 (park closed)
+    - Root cause: rides_open > 0 fallback set park_was_open=1 when 3 test rides showed as "open"
+    - Fix: Use schedule-based park_appears_open ONLY, no fallback
+    - Chart queries now filter by park_schedules table directly
     """
 
-    def test_aggregate_hourly_uses_park_open_fallback(self):
-        """aggregate_hourly.py must use fallback: (park_appears_open = 1 OR rides_open > 0)."""
+    def test_aggregate_hourly_does_not_use_rides_open_fallback(self):
+        """aggregate_hourly.py must NOT use rides_open > 0 as fallback for park open."""
         backend_root = Path(__file__).parent.parent.parent
         filepath = backend_root / "src/scripts/aggregate_hourly.py"
 
         content = filepath.read_text()
 
-        # The fallback pattern must exist in the park aggregation query
-        # Look for: (pas.park_appears_open = 1 OR pas.rides_open > 0)
+        # The old buggy fallback pattern should NOT exist
+        # Old pattern: (pas.park_appears_open = 1 OR pas.rides_open > 0)
         fallback_patterns = [
             r'park_appears_open\s*=\s*1\s+OR\s+.*rides_open\s*>\s*0',
             r'park_appears_open\s*=\s*TRUE\s+OR\s+.*rides_open\s*>\s*0',
@@ -201,37 +205,28 @@ class TestParkOpenFallbackHeuristic:
 
         has_fallback = any(re.search(p, content, re.IGNORECASE) for p in fallback_patterns)
 
-        assert has_fallback, (
-            "aggregate_hourly.py must use fallback heuristic for park open detection:\n"
-            "  (pas.park_appears_open = 1 OR pas.rides_open > 0)\n\n"
-            "Bug: Six Flags Fiesta Texas has park_appears_open=0 but 47 rides operating.\n"
-            "Without the fallback, shame_score becomes NULL in park_hourly_stats.\n"
-            "Charts use this fallback, so rankings must too for consistency."
+        assert not has_fallback, (
+            "aggregate_hourly.py must NOT use rides_open > 0 fallback!\n\n"
+            "Bug: Test rides showing 'open' during closed hours caused park_was_open=1\n"
+            "for ALL 24 hours, making charts show 23 rides 'down' at 3am.\n\n"
+            "Fix: Use schedule-based park_appears_open ONLY (SINGLE SOURCE OF TRUTH).\n"
+            "The schedule data is set during collection via schedule_repo.is_park_open_now()."
         )
 
-    def test_park_open_condition_consistent_with_charts(self):
-        """The park open condition in hourly aggregation must match charts query."""
+    def test_charts_filter_by_schedule_not_rides_open(self):
+        """Chart queries must filter by park_schedules table, not rides_open fallback."""
         backend_root = Path(__file__).parent.parent.parent
-
-        # Read both files
-        aggregation_path = backend_root / "src/scripts/aggregate_hourly.py"
         charts_path = backend_root / "src/database/queries/charts/park_shame_history.py"
 
-        aggregation_content = aggregation_path.read_text()
-        charts_content = charts_path.read_text()
+        content = charts_path.read_text()
 
-        # Charts use: AND (pas.park_appears_open = TRUE OR pas.rides_open > 0)
-        charts_has_fallback = 'rides_open > 0' in charts_content
+        # Should have schedule-based filtering
+        has_schedule_filter = '_get_schedule_for_date' in content or 'ParkSchedule' in content
 
-        # Aggregation must use the same logic
-        aggregation_has_fallback = 'rides_open > 0' in aggregation_content
-
-        if charts_has_fallback:
-            assert aggregation_has_fallback, (
-                "Charts query uses fallback (rides_open > 0) for park open detection,\n"
-                "but aggregate_hourly.py does not. This causes different parks to appear\n"
-                "in charts vs rankings. SINGLE SOURCE OF TRUTH VIOLATION!"
-            )
+        assert has_schedule_filter, (
+            "Chart queries must use park_schedules table for filtering hours.\n"
+            "This is the SINGLE SOURCE OF TRUTH for when a park is open."
+        )
 
 
 class TestSixFlagsFiestaTexasBugFixes:

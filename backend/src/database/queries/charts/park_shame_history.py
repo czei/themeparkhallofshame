@@ -54,6 +54,7 @@ from src.models import (
     RideDailyStats
 )
 from src.models.orm_stats import ParkHourlyStats as ParkHourlyStatsORM
+from src.models.orm_schedule import ParkSchedule
 
 
 class ParkShameHistoryQuery:
@@ -77,6 +78,109 @@ class ParkShameHistoryQuery:
         """
         self.conn = connection
         self.use_hourly_tables = use_hourly_tables if use_hourly_tables is not None else USE_HOURLY_TABLES
+
+    def _get_schedule_for_date(self, park_id: int, target_date: date) -> Dict[str, Any]:
+        """
+        Get park operating schedule for a specific date.
+
+        This is the SINGLE SOURCE OF TRUTH for determining when a park is open.
+        Chart data should only include hours within this schedule.
+
+        Args:
+            park_id: The park ID
+            target_date: The date to get schedule for
+
+        Returns:
+            Dict with 'opening_time' and 'closing_time' as datetime objects,
+            or None if no schedule exists.
+        """
+        stmt = (
+            select(
+                ParkSchedule.opening_time,
+                ParkSchedule.closing_time
+            )
+            .where(
+                and_(
+                    ParkSchedule.park_id == park_id,
+                    ParkSchedule.schedule_date == target_date,
+                    ParkSchedule.schedule_type == 'OPERATING',
+                    ParkSchedule.opening_time.isnot(None),
+                    ParkSchedule.closing_time.isnot(None)
+                )
+            )
+            .order_by(ParkSchedule.opening_time)
+            .limit(1)
+        )
+
+        result = self.conn.execute(stmt)
+        row = result.fetchone()
+
+        if row:
+            return {
+                'opening_time': row.opening_time,
+                'closing_time': row.closing_time
+            }
+        return None
+
+    def _filter_by_schedule(
+        self,
+        hourly_data: List[Dict[str, Any]],
+        schedule: Dict[str, Any],
+        target_date: date
+    ) -> List[Dict[str, Any]]:
+        """
+        Filter hourly data to only include hours within park schedule.
+
+        Args:
+            hourly_data: List of hourly data dicts with 'hour' key (Pacific hour 0-23)
+            schedule: Dict with 'opening_time' and 'closing_time' (UTC datetimes)
+            target_date: The date being queried
+
+        Returns:
+            Filtered list containing only hours within operating schedule.
+        """
+        if not schedule:
+            return []
+
+        opening_utc = schedule['opening_time']
+        closing_utc = schedule['closing_time']
+
+        # Convert UTC times to Pacific hours
+        # Pacific is UTC-8 (ignoring DST for simplicity)
+        opening_pacific_hour = (opening_utc.hour - 8) % 24
+
+        # Calculate closing hour in Pacific time
+        # Handle next-day closings (e.g., 6am UTC = 10pm Pacific previous day)
+        closing_pacific_hour = (closing_utc.hour - 8) % 24
+
+        # If closing is in next UTC day but still same Pacific day, adjust
+        # Example: 6am UTC on Dec 26 = 10pm Pacific on Dec 25
+        if closing_utc.date() > target_date:
+            # The closing hour (in Pacific) is before midnight
+            # e.g., 22:00 Pacific (10pm) for a 6am UTC closing
+            # We need to include hours up to but not including closing_pacific_hour
+            # For most parks (close before midnight), this is straightforward
+            if closing_pacific_hour == 0:
+                # Park closes at midnight Pacific (8am UTC next day)
+                closing_pacific_hour = 24
+            # Otherwise closing_pacific_hour is already correct (e.g., 22 for 10pm close)
+
+        # Filter data to only include hours within schedule
+        filtered = []
+        for row in hourly_data:
+            hour = row.get('hour')
+            if hour is None:
+                continue
+
+            # Check if this hour is within operating hours
+            if opening_pacific_hour <= hour < closing_pacific_hour:
+                filtered.append(row)
+            # Handle overnight parks (opening after closing time numerically, e.g., 22:00-02:00)
+            elif opening_pacific_hour > closing_pacific_hour:
+                if hour >= opening_pacific_hour or hour < closing_pacific_hour:
+                    filtered.append(row)
+
+        return filtered
 
     def get_daily(
         self,
@@ -261,11 +365,22 @@ class ParkShameHistoryQuery:
         else:
             start_utc, end_utc = get_pacific_day_range_utc(target_date)
 
+        # Get park schedule for the target date (SINGLE SOURCE OF TRUTH)
+        # This ensures we only show hours when the park was officially open
+        schedule = self._get_schedule_for_date(park_id, target_date)
+
         # Choose query method based on use_hourly_tables parameter
         if self.use_hourly_tables:
             hourly_data = self._query_hourly_tables(park_id, start_utc, end_utc, target_date)
         else:
             hourly_data = self._query_raw_snapshots(park_id, start_utc, end_utc, target_date)
+
+        # Filter hourly data by schedule (removes hours outside official operating times)
+        # This is critical for fixing the "23 rides down at 3am" bug where park_was_open
+        # or park_appears_open was incorrectly set due to fallback heuristics
+        if schedule and not is_today:
+            # Only filter historical data - TODAY data may not have complete schedule yet
+            hourly_data = self._filter_by_schedule(hourly_data, schedule, target_date)
 
         # Build data by hour for all metrics
         # Convert Decimal to float for JSON serialization

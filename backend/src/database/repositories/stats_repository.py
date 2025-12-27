@@ -679,6 +679,7 @@ class StatsRepository:
             Dictionary with shame score and breakdown metrics
         """
         from utils.timezone import get_yesterday_date_range
+        from utils.metrics import calculate_shame_score
 
         start_date, end_date, _ = get_yesterday_date_range()
 
@@ -706,10 +707,24 @@ class StatsRepository:
             float(r.get('downtime_hours', 0)) * float(r.get('tier_weight', 2))
             for r in rides
         )
-        total_park_weight = float(daily_stat.total_rides_tracked or 0) * 2  # Default tier weight
+
+        # Calculate total_park_weight from rides with tier info
+        # Use sum of tier weights for rides we have data for
+        total_park_weight = sum(float(r.get('tier_weight', 2)) for r in rides) if rides else 0
+
+        # Determine shame_score: use stored value if available, otherwise calculate fallback
+        if daily_stat.shame_score is not None:
+            shame_score = float(daily_stat.shame_score)
+        elif rides and total_park_weight > 0:
+            # Fallback: calculate from ride data when aggregation failed
+            # Uses same formula as metrics.py: (weighted_downtime / total_weight) * 10
+            calculated = calculate_shame_score(weighted_downtime_hours, total_park_weight)
+            shame_score = float(calculated) if calculated is not None else 0.0
+        else:
+            shame_score = 0.0
 
         return {
-            'shame_score': float(daily_stat.shame_score or 0),
+            'shame_score': shame_score,
             'total_downtime_hours': float(daily_stat.total_downtime_hours or 0),
             'avg_uptime_percentage': float(daily_stat.avg_uptime_percentage or 0),
             'rides_with_downtime': daily_stat.rides_with_downtime or 0,  # Keep original count for backwards compatibility
@@ -730,6 +745,7 @@ class StatsRepository:
             Dictionary with average shame score and breakdown metrics
         """
         from utils.timezone import get_last_week_date_range
+        from utils.metrics import calculate_shame_score
 
         start_date, end_date, _ = get_last_week_date_range()
 
@@ -751,19 +767,29 @@ class StatsRepository:
                     'rides': [], 'weighted_downtime_hours': 0, 'total_park_weight': 0,
                     'rides_affected_count': 0, 'period_label': 'Last 7 Days'}
 
-        # Calculate averages
-        total_shame = sum(float(s.shame_score or 0) for s in daily_stats)
-        total_downtime = sum(float(s.total_downtime_hours or 0) for s in daily_stats)
-
         # Get aggregated ride-level downtime data for frontend
         rides = self._get_rides_with_downtime_for_date_range(park_id, start_date, end_date)
 
         # Calculate weighted downtime from rides
         weighted_downtime_hours = sum(r.get('weighted_contribution', 0) for r in rides)
-        total_park_weight = sum(float(s.total_rides_tracked or 0) for s in daily_stats) * 2 / len(daily_stats)
+        total_park_weight = sum(float(r.get('tier_weight', 2)) for r in rides) if rides else 0
+
+        # Calculate shame_score: prefer stored values, fallback to ride data
+        valid_shame_scores = [float(s.shame_score) for s in daily_stats if s.shame_score is not None]
+        if valid_shame_scores:
+            # Use average of valid stored values
+            shame_score = round(sum(valid_shame_scores) / len(valid_shame_scores), 2)
+        elif rides and total_park_weight > 0:
+            # Fallback: calculate from ride data when all aggregations failed
+            calculated = calculate_shame_score(weighted_downtime_hours, total_park_weight)
+            shame_score = float(calculated) if calculated is not None else 0.0
+        else:
+            shame_score = 0.0
+
+        total_downtime = sum(float(s.total_downtime_hours or 0) for s in daily_stats)
 
         return {
-            'shame_score': round(total_shame / len(daily_stats), 2),
+            'shame_score': shame_score,
             'total_downtime_hours': round(total_downtime, 2),
             'avg_daily_downtime': round(total_downtime / len(daily_stats), 2),
             'days_tracked': len(daily_stats),
@@ -786,6 +812,7 @@ class StatsRepository:
             Dictionary with average shame score and breakdown metrics
         """
         from utils.timezone import get_last_month_date_range
+        from utils.metrics import calculate_shame_score
 
         start_date, end_date, _ = get_last_month_date_range()
 
@@ -807,19 +834,29 @@ class StatsRepository:
                     'rides': [], 'weighted_downtime_hours': 0, 'total_park_weight': 0,
                     'rides_affected_count': 0, 'period_label': 'Last 30 Days'}
 
-        # Calculate averages
-        total_shame = sum(float(s.shame_score or 0) for s in daily_stats)
-        total_downtime = sum(float(s.total_downtime_hours or 0) for s in daily_stats)
-
         # Get aggregated ride-level downtime data for frontend
         rides = self._get_rides_with_downtime_for_date_range(park_id, start_date, end_date)
 
         # Calculate weighted downtime from rides
         weighted_downtime_hours = sum(r.get('weighted_contribution', 0) for r in rides)
-        total_park_weight = sum(float(s.total_rides_tracked or 0) for s in daily_stats) * 2 / len(daily_stats)
+        total_park_weight = sum(float(r.get('tier_weight', 2)) for r in rides) if rides else 0
+
+        # Calculate shame_score: prefer stored values, fallback to ride data
+        valid_shame_scores = [float(s.shame_score) for s in daily_stats if s.shame_score is not None]
+        if valid_shame_scores:
+            # Use average of valid stored values
+            shame_score = round(sum(valid_shame_scores) / len(valid_shame_scores), 2)
+        elif rides and total_park_weight > 0:
+            # Fallback: calculate from ride data when all aggregations failed
+            calculated = calculate_shame_score(weighted_downtime_hours, total_park_weight)
+            shame_score = float(calculated) if calculated is not None else 0.0
+        else:
+            shame_score = 0.0
+
+        total_downtime = sum(float(s.total_downtime_hours or 0) for s in daily_stats)
 
         return {
-            'shame_score': round(total_shame / len(daily_stats), 2),
+            'shame_score': shame_score,
             'total_downtime_hours': round(total_downtime, 2),
             'avg_daily_downtime': round(total_downtime / len(daily_stats), 2),
             'days_tracked': len(daily_stats),

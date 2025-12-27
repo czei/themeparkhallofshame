@@ -26,6 +26,7 @@ from src.models import (
     RideStatusSnapshot, ParkActivitySnapshot,
     RideDailyStats, ParkDailyStats,
     RideWeeklyStats, ParkWeeklyStats,
+    RideMonthlyStats, ParkMonthlyStats,
     AggregationLog, AggregationType, AggregationStatus
 )
 
@@ -1035,9 +1036,6 @@ class AggregationService:
         """
         Aggregate a single ride's monthly stats from daily stats.
 
-        Note: Monthly stats tables don't exist in ORM models yet.
-        This method is a placeholder for future implementation.
-
         Args:
             ride_id: Ride ID
             year: Year
@@ -1045,9 +1043,77 @@ class AggregationService:
             month_start: First day of the month
             month_end: Last day of the month
         """
-        logger.warning(f"Monthly stats aggregation not yet implemented in ORM. Skipping ride {ride_id} for {year}-{month:02d}")
-        # TODO: Implement when RideMonthlyStats ORM model is created
-        pass
+        # Sum daily stats for the month
+        stmt = (
+            select(
+                func.sum(RideDailyStats.uptime_minutes).label('uptime_minutes'),
+                func.sum(RideDailyStats.downtime_minutes).label('downtime_minutes'),
+                func.sum(RideDailyStats.operating_hours_minutes).label('operating_hours_minutes'),
+                func.sum(RideDailyStats.status_changes).label('status_changes'),
+                func.max(RideDailyStats.peak_wait_time).label('peak_wait_time'),
+                func.sum(RideDailyStats.avg_wait_time * RideDailyStats.operating_hours_minutes).label('weighted_wait_sum'),
+                func.sum(RideDailyStats.operating_hours_minutes).label('total_operating_minutes')
+            )
+            .where(RideDailyStats.ride_id == ride_id)
+            .where(RideDailyStats.stat_date >= month_start)
+            .where(RideDailyStats.stat_date <= month_end)
+        )
+
+        result = self.session.execute(stmt)
+        row = result.one()
+
+        if not row or row.uptime_minutes is None:
+            logger.debug(f"No daily stats found for ride {ride_id} in month {year}-{month:02d}")
+            return
+
+        # Calculate uptime percentage
+        total_operating = int(row.operating_hours_minutes) if row.operating_hours_minutes else 0
+        uptime_percentage = 0.0
+        if total_operating > 0:
+            uptime_percentage = (float(row.uptime_minutes) / float(total_operating)) * 100.0
+
+        # Calculate weighted average wait time
+        avg_wait_time = None
+        if row.total_operating_minutes and row.total_operating_minutes > 0 and row.weighted_wait_sum:
+            avg_wait_time = round(float(row.weighted_wait_sum) / float(row.total_operating_minutes), 2)
+
+        # Calculate trend vs previous month
+        trend_vs_previous_month = self._calculate_monthly_trend(
+            ride_id=ride_id,
+            current_year=year,
+            current_month=month,
+            current_downtime=row.downtime_minutes
+        )
+
+        # Insert/update ride monthly stats
+        upsert_stmt = mysql_insert(RideMonthlyStats).values(
+            ride_id=ride_id,
+            year=year,
+            month=month,
+            uptime_minutes=row.uptime_minutes,
+            downtime_minutes=row.downtime_minutes,
+            uptime_percentage=round(uptime_percentage, 2),
+            operating_hours_minutes=row.operating_hours_minutes,
+            avg_wait_time=avg_wait_time,
+            peak_wait_time=row.peak_wait_time,
+            status_changes=row.status_changes,
+            trend_vs_previous_month=trend_vs_previous_month
+        )
+
+        upsert_stmt = upsert_stmt.on_duplicate_key_update(
+            uptime_minutes=upsert_stmt.inserted.uptime_minutes,
+            downtime_minutes=upsert_stmt.inserted.downtime_minutes,
+            uptime_percentage=upsert_stmt.inserted.uptime_percentage,
+            operating_hours_minutes=upsert_stmt.inserted.operating_hours_minutes,
+            avg_wait_time=upsert_stmt.inserted.avg_wait_time,
+            peak_wait_time=upsert_stmt.inserted.peak_wait_time,
+            status_changes=upsert_stmt.inserted.status_changes,
+            trend_vs_previous_month=upsert_stmt.inserted.trend_vs_previous_month
+        )
+
+        self.session.execute(upsert_stmt)
+
+        logger.debug(f"Aggregated monthly stats for ride {ride_id}, month {year}-{month:02d}")
 
     def _calculate_monthly_trend(
         self,
@@ -1059,9 +1125,6 @@ class AggregationService:
         """
         Calculate month-over-month downtime trend.
 
-        Note: Monthly stats tables don't exist in ORM models yet.
-        This method is a placeholder for future implementation.
-
         Args:
             ride_id: Ride ID
             current_year: Current year
@@ -1071,9 +1134,32 @@ class AggregationService:
         Returns:
             Percentage change (e.g., 20.75 for +20.75%) or None if no previous data
         """
-        logger.warning(f"Monthly trend calculation not yet implemented in ORM")
-        # TODO: Implement when RideMonthlyStats ORM model is created
-        return None
+        # Calculate previous month (handle year boundary)
+        if current_month == 1:
+            previous_year = current_year - 1
+            previous_month = 12
+        else:
+            previous_year = current_year
+            previous_month = current_month - 1
+
+        # Query previous month's downtime
+        stmt = (
+            select(RideMonthlyStats.downtime_minutes)
+            .where(RideMonthlyStats.ride_id == ride_id)
+            .where(RideMonthlyStats.year == previous_year)
+            .where(RideMonthlyStats.month == previous_month)
+        )
+
+        result = self.session.execute(stmt)
+        previous_row = result.first()
+
+        if not previous_row or previous_row.downtime_minutes is None or previous_row.downtime_minutes == 0:
+            return None
+
+        # Calculate percentage change: ((current - previous) / previous) * 100
+        prev_downtime = float(previous_row.downtime_minutes)
+        trend = ((float(current_downtime) - prev_downtime) / prev_downtime) * 100.0
+        return round(trend, 2)
 
     def _aggregate_parks_monthly_stats(
         self,
@@ -1083,9 +1169,6 @@ class AggregationService:
         """
         Aggregate park-level monthly stats from ride monthly stats.
 
-        Note: Monthly stats tables don't exist in ORM models yet.
-        This method is a placeholder for future implementation.
-
         Args:
             year: Year
             month: Month number (1-12)
@@ -1093,9 +1176,29 @@ class AggregationService:
         Returns:
             Number of parks processed
         """
-        logger.warning(f"Monthly stats aggregation not yet implemented in ORM for {year}-{month:02d}")
-        # TODO: Implement when ParkMonthlyStats ORM model is created
-        return 0
+        # Get all parks that have ride monthly stats
+        stmt = (
+            select(Ride.park_id)
+            .distinct()
+            .join(RideMonthlyStats, Ride.ride_id == RideMonthlyStats.ride_id)
+            .where(RideMonthlyStats.year == year)
+            .where(RideMonthlyStats.month == month)
+            .order_by(Ride.park_id)
+        )
+
+        result = self.session.execute(stmt)
+        park_ids = [row.park_id for row in result]
+
+        # Aggregate each park
+        for park_id in park_ids:
+            self._aggregate_single_park_monthly_stats(
+                park_id=park_id,
+                year=year,
+                month=month
+            )
+
+        logger.info(f"Processed {len(park_ids)} parks for monthly aggregation")
+        return len(park_ids)
 
     def _aggregate_single_park_monthly_stats(
         self,
@@ -1106,17 +1209,77 @@ class AggregationService:
         """
         Aggregate a single park's monthly stats from ride monthly stats.
 
-        Note: Monthly stats tables don't exist in ORM models yet.
-        This method is a placeholder for future implementation.
-
         Args:
             park_id: Park ID
             year: Year
             month: Month number (1-12)
         """
-        logger.warning(f"Monthly park stats aggregation not yet implemented in ORM. Skipping park {park_id} for {year}-{month:02d}")
-        # TODO: Implement when ParkMonthlyStats ORM model is created
-        pass
+        # Aggregate ride monthly stats for this park
+        stmt = (
+            select(
+                func.count(func.distinct(RideMonthlyStats.ride_id)).label('total_rides_tracked'),
+                func.avg(RideMonthlyStats.uptime_percentage).label('avg_uptime_percentage'),
+                (func.sum(RideMonthlyStats.downtime_minutes) / 60.0).label('total_downtime_hours'),
+                func.sum(case((RideMonthlyStats.downtime_minutes > 0, 1), else_=0)).label('rides_with_downtime'),
+                func.sum(RideMonthlyStats.avg_wait_time * RideMonthlyStats.operating_hours_minutes).label('weighted_wait_sum'),
+                func.sum(RideMonthlyStats.operating_hours_minutes).label('total_operating_minutes'),
+                func.max(RideMonthlyStats.peak_wait_time).label('peak_wait_time')
+            )
+            .select_from(RideMonthlyStats)
+            .join(Ride, RideMonthlyStats.ride_id == Ride.ride_id)
+            .where(Ride.park_id == park_id)
+            .where(RideMonthlyStats.year == year)
+            .where(RideMonthlyStats.month == month)
+            .where(Ride.is_active == True)
+        )
+
+        result = self.session.execute(stmt)
+        row = result.one()
+
+        if not row or row.total_rides_tracked == 0:
+            logger.debug(f"No ride monthly stats found for park {park_id} in month {year}-{month:02d}")
+            return
+
+        # Calculate weighted average wait time
+        avg_wait_time = None
+        if row.total_operating_minutes and row.total_operating_minutes > 0 and row.weighted_wait_sum:
+            avg_wait_time = round(float(row.weighted_wait_sum) / float(row.total_operating_minutes), 2)
+
+        # Calculate park-level trend
+        trend_vs_previous_month = self._calculate_park_monthly_trend(
+            park_id=park_id,
+            current_year=year,
+            current_month=month,
+            current_downtime_hours=row.total_downtime_hours
+        )
+
+        # Insert/update park monthly stats
+        upsert_stmt = mysql_insert(ParkMonthlyStats).values(
+            park_id=park_id,
+            year=year,
+            month=month,
+            total_rides_tracked=row.total_rides_tracked,
+            avg_uptime_percentage=round(float(row.avg_uptime_percentage), 2) if row.avg_uptime_percentage else None,
+            total_downtime_hours=round(float(row.total_downtime_hours), 2),
+            rides_with_downtime=row.rides_with_downtime,
+            avg_wait_time=avg_wait_time,
+            peak_wait_time=row.peak_wait_time,
+            trend_vs_previous_month=trend_vs_previous_month
+        )
+
+        upsert_stmt = upsert_stmt.on_duplicate_key_update(
+            total_rides_tracked=upsert_stmt.inserted.total_rides_tracked,
+            avg_uptime_percentage=upsert_stmt.inserted.avg_uptime_percentage,
+            total_downtime_hours=upsert_stmt.inserted.total_downtime_hours,
+            rides_with_downtime=upsert_stmt.inserted.rides_with_downtime,
+            avg_wait_time=upsert_stmt.inserted.avg_wait_time,
+            peak_wait_time=upsert_stmt.inserted.peak_wait_time,
+            trend_vs_previous_month=upsert_stmt.inserted.trend_vs_previous_month
+        )
+
+        self.session.execute(upsert_stmt)
+
+        logger.debug(f"Aggregated monthly stats for park {park_id}, month {year}-{month:02d}")
 
     def _calculate_park_monthly_trend(
         self,
@@ -1128,9 +1291,6 @@ class AggregationService:
         """
         Calculate month-over-month park downtime trend.
 
-        Note: Monthly stats tables don't exist in ORM models yet.
-        This method is a placeholder for future implementation.
-
         Args:
             park_id: Park ID
             current_year: Current year
@@ -1140,9 +1300,32 @@ class AggregationService:
         Returns:
             Percentage change or None if no previous data
         """
-        logger.warning(f"Monthly park trend calculation not yet implemented in ORM")
-        # TODO: Implement when ParkMonthlyStats ORM model is created
-        return None
+        # Calculate previous month (handle year boundary)
+        if current_month == 1:
+            previous_year = current_year - 1
+            previous_month = 12
+        else:
+            previous_year = current_year
+            previous_month = current_month - 1
+
+        # Query previous month's downtime
+        stmt = (
+            select(ParkMonthlyStats.total_downtime_hours)
+            .where(ParkMonthlyStats.park_id == park_id)
+            .where(ParkMonthlyStats.year == previous_year)
+            .where(ParkMonthlyStats.month == previous_month)
+        )
+
+        result = self.session.execute(stmt)
+        previous_row = result.first()
+
+        if not previous_row or previous_row.total_downtime_hours is None or previous_row.total_downtime_hours == 0:
+            return None
+
+        # Calculate percentage change: ((current - previous) / previous) * 100
+        prev_downtime = float(previous_row.total_downtime_hours)
+        trend = ((float(current_downtime_hours) - prev_downtime) / prev_downtime) * 100.0
+        return round(trend, 2)
 
     def _get_distinct_timezones(self) -> List[str]:
         """Get list of distinct timezones from active parks."""

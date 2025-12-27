@@ -26,7 +26,7 @@ from datetime import date, timedelta, datetime, timezone
 from typing import List, Dict, Any
 
 from sqlalchemy import select, func, and_, or_, case, literal_column
-from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session
 
 from database.schema import parks, rides, ride_daily_stats, ride_classifications
 from database.queries.builders import Filters
@@ -41,8 +41,8 @@ class RideDowntimeHistoryQuery:
     Query handler for ride downtime time-series.
     """
 
-    def __init__(self, connection: Connection):
-        self.conn = connection
+    def __init__(self, session: Session):
+        self.session = session
 
     def get_daily(
         self,
@@ -176,7 +176,7 @@ class RideDowntimeHistoryQuery:
             .limit(limit)
         )
 
-        result = self.conn.execute(top_rides_stmt)
+        result = self.session.execute(top_rides_stmt)
         top_rides = [dict(row._mapping) for row in result]
 
         if not top_rides:
@@ -293,7 +293,7 @@ class RideDowntimeHistoryQuery:
             .limit(limit)
         )
 
-        result = self.conn.execute(top_rides_stmt)
+        result = self.session.execute(top_rides_stmt)
         top_rides = [dict(row._mapping) for row in result]
 
         if not top_rides:
@@ -325,7 +325,7 @@ class RideDowntimeHistoryQuery:
                 .group_by(func.date_format(RideStatusSnapshot.recorded_at, '%H:%i'))
                 .order_by(literal_column("minute_label"))
             )
-            series_result = self.conn.execute(series_stmt)
+            series_result = self.session.execute(series_stmt)
             points = {row.minute_label: float(row.downtime_hours) for row in series_result}
             aligned = [points.get(label) for label in labels]
             datasets.append({
@@ -350,14 +350,8 @@ class RideDowntimeHistoryQuery:
         2. Only count downtime AFTER the ride first operated today
         """
         # Calculate Pacific hour: UTC - 8 hours
-        pacific_hour = func.hour(func.date_sub(
-            RideStatusSnapshot.recorded_at,
-            literal_column("INTERVAL 8 HOUR")
-        ))
-        pas_pacific_hour = func.hour(func.date_sub(
-            ParkActivitySnapshot.recorded_at,
-            literal_column("INTERVAL 8 HOUR")
-        ))
+        pacific_hour = func.hour(RideStatusSnapshot.recorded_at - timedelta(hours=8))
+        pas_pacific_hour = func.hour(ParkActivitySnapshot.recorded_at - timedelta(hours=8))
 
         # CTE 1: ride_first_operating - Find when ride first operated today
         ride_first_op_cte = (
@@ -441,7 +435,7 @@ class RideDowntimeHistoryQuery:
             .order_by(literal_column("hour"))
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def _get_top_rides(
@@ -482,7 +476,7 @@ class RideDowntimeHistoryQuery:
             .limit(limit)
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def _get_ride_daily_data(
@@ -509,5 +503,5 @@ class RideDowntimeHistoryQuery:
             .order_by(ride_daily_stats.c.stat_date)
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]

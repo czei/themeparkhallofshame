@@ -17,18 +17,19 @@ Expected runtime: ~10 seconds for all parks and rides.
 
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # Add src to path
 backend_src = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_src.absolute()))
 
-from sqlalchemy import select, func, and_, or_, case, text, literal, literal_column, Integer
+from sqlalchemy import select, func, and_, or_, case, text, literal, literal_column, Integer, insert
 from database.connection import get_db_session
 from models import (
     Park, Ride, RideClassification,
-    RideStatusSnapshot, ParkActivitySnapshot, RideStatusChange
+    RideStatusSnapshot, ParkActivitySnapshot, RideStatusChange,
+    ParkLiveRankingsStaging, RideLiveRankingsStaging
 )
 from utils.logger import logger
 from utils.timezone import get_today_pacific, get_pacific_day_range_utc
@@ -115,10 +116,7 @@ class LiveRankingsAggregator:
             )
             .where(RideStatusSnapshot.recorded_at >= start_utc)
             .where(RideStatusSnapshot.recorded_at < end_utc)
-            .where(RideStatusSnapshot.recorded_at >= func.date_sub(
-                func.now(),
-                literal_column(f"INTERVAL {LIVE_WINDOW_HOURS} HOUR")
-            ))
+            .where(RideStatusSnapshot.recorded_at >= func.now() - timedelta(hours=LIVE_WINDOW_HOURS))
             .group_by(RideStatusSnapshot.ride_id)
         ).cte('latest_snapshot')
 
@@ -164,7 +162,7 @@ class LiveRankingsAggregator:
             .where(Ride.category == 'ATTRACTION')
             .where(is_down_latest)
             .where(ParkActivitySnapshot.park_appears_open == True)
-            .where(Ride.last_operated_at >= func.utc_timestamp() - literal_column("INTERVAL 7 DAY"))
+            .where(Ride.last_operated_at >= func.utc_timestamp() - timedelta(days=7))
         ).cte('rides_currently_down')
 
         # CTE: park_weights - Total tier weight per park for 7-day active rides
@@ -180,7 +178,7 @@ class LiveRankingsAggregator:
             .where(Park.is_active == True)
             .where(Ride.is_active == True)
             .where(Ride.category == 'ATTRACTION')
-            .where(Ride.last_operated_at >= func.utc_timestamp() - literal_column("INTERVAL 7 DAY"))
+            .where(Ride.last_operated_at >= func.utc_timestamp() - timedelta(days=7))
             .group_by(Park.park_id)
         ).cte('park_weights')
 
@@ -317,23 +315,33 @@ class LiveRankingsAggregator:
             )
         )
 
-        # Execute INSERT via compiled SQL (staging table has no ORM model)
-        insert_sql = text(f"""
-            INSERT INTO park_live_rankings_staging (
-                park_id, queue_times_id, park_name, location, timezone,
-                is_disney, is_universal,
-                rides_down, total_rides, shame_score, park_is_open,
-                total_downtime_hours, weighted_downtime_hours, total_park_weight,
-                calculated_at
-            )
-            {park_rankings_select.compile(compile_kwargs={"literal_binds": True})}
-        """)
+        # Execute INSERT...SELECT using ORM table with compiled SELECT
+        # Note: insert().from_select() doesn't handle CTEs well with HAVING clauses,
+        # so we use the ORM table's insert() with compiled SELECT
+        park_columns = [
+            ParkLiveRankingsStaging.park_id,
+            ParkLiveRankingsStaging.queue_times_id,
+            ParkLiveRankingsStaging.park_name,
+            ParkLiveRankingsStaging.location,
+            ParkLiveRankingsStaging.timezone,
+            ParkLiveRankingsStaging.is_disney,
+            ParkLiveRankingsStaging.is_universal,
+            ParkLiveRankingsStaging.rides_down,
+            ParkLiveRankingsStaging.total_rides,
+            ParkLiveRankingsStaging.shame_score,
+            ParkLiveRankingsStaging.park_is_open,
+            ParkLiveRankingsStaging.total_downtime_hours,
+            ParkLiveRankingsStaging.weighted_downtime_hours,
+            ParkLiveRankingsStaging.total_park_weight,
+            ParkLiveRankingsStaging.calculated_at,
+        ]
+        insert_stmt = insert(ParkLiveRankingsStaging.__table__).from_select(
+            [c.key for c in park_columns], park_rankings_select
+        )
+        session.execute(insert_stmt)
 
-        session.execute(insert_sql)
-
-        # Get count before swap
-        result = session.execute(text("SELECT COUNT(*) FROM park_live_rankings_staging"))
-        count = result.scalar()
+        # Get count before swap using ORM
+        count = session.query(func.count(ParkLiveRankingsStaging.park_id)).scalar()
 
         # Step 3: Atomic table swap (DDL - keep as text)
         session.execute(text("""
@@ -367,234 +375,116 @@ class LiveRankingsAggregator:
         # Step 1: Truncate staging table (DDL - keep as text)
         session.execute(text("TRUNCATE TABLE ride_live_rankings_staging"))
 
-        # Step 2: Build CTEs
-
-        # CTE: latest_snapshot
-        latest_snapshot = (
-            select(
-                RideStatusSnapshot.ride_id,
-                func.max(RideStatusSnapshot.recorded_at).label('latest_recorded_at')
-            )
-            .where(RideStatusSnapshot.recorded_at >= start_utc)
-            .where(RideStatusSnapshot.recorded_at < end_utc)
-            .where(RideStatusSnapshot.recorded_at >= func.date_sub(
-                func.now(),
-                literal_column(f"INTERVAL {LIVE_WINDOW_HOURS} HOUR")
-            ))
-            .group_by(RideStatusSnapshot.ride_id)
-        ).cte('latest_snapshot')
-
-        # CTE: ride_current_status - Join to latest snapshot for current status
-        # Minute-level timestamp matching using DATE_FORMAT
-        ts_match_current = (
-            func.date_format(ParkActivitySnapshot.recorded_at, '%Y-%m-%d %H:%i') ==
-            func.date_format(RideStatusSnapshot.recorded_at, '%Y-%m-%d %H:%i')
-        )
-
-        ride_current_status = (
-            select(
-                RideStatusSnapshot.ride_id,
-                RideStatusSnapshot.status,
-                RideStatusSnapshot.status.label('current_status'),
-                RideStatusSnapshot.wait_time.label('current_wait_time'),
-                RideStatusSnapshot.computed_is_open,
-                ParkActivitySnapshot.park_appears_open
-            )
-            .select_from(RideStatusSnapshot)
-            .join(
-                latest_snapshot,
-                and_(
-                    RideStatusSnapshot.ride_id == latest_snapshot.c.ride_id,
-                    RideStatusSnapshot.recorded_at == latest_snapshot.c.latest_recorded_at
-                )
-            )
-            .join(Ride, RideStatusSnapshot.ride_id == Ride.ride_id)
-            .outerjoin(
-                ParkActivitySnapshot,
-                and_(
-                    ParkActivitySnapshot.park_id == Ride.park_id,
-                    ts_match_current
-                )
-            )
-        ).cte('ride_current_status')
-
-        # CTE: last_status_changes
-        last_status_changes = (
-            select(
-                RideStatusChange.ride_id,
-                func.max(RideStatusChange.changed_at).label('last_status_change')
-            )
-            .where(RideStatusChange.changed_at >= start_utc)
-            .group_by(RideStatusChange.ride_id)
-        ).cte('last_status_changes')
-
-        # Park-type aware is_down for main query
-        is_down = case(
-            (
-                or_(Park.is_disney == True, Park.is_universal == True),
-                RideStatusSnapshot.status == 'DOWN'
+        # Step 2: Execute INSERT...SELECT using raw SQL
+        # Note: MySQL can't resolve CTE references in HAVING within insert().from_select().
+        # Use raw SQL with proper parameter binding for this complex query.
+        insert_sql = text("""
+            INSERT INTO ride_live_rankings_staging
+                (ride_id, park_id, queue_times_id, ride_name, park_name,
+                 tier, tier_weight, category, is_disney, is_universal,
+                 is_down, current_status, current_wait_time, last_status_change,
+                 downtime_hours, downtime_incidents, avg_wait_time, max_wait_time,
+                 calculated_at)
+            WITH latest_snapshot AS (
+                SELECT ride_id, MAX(recorded_at) AS latest_recorded_at
+                FROM ride_status_snapshots
+                WHERE recorded_at >= :start_utc
+                  AND recorded_at < :end_utc
+                  AND recorded_at >= DATE_SUB(NOW(), INTERVAL :live_hours HOUR)
+                GROUP BY ride_id
             ),
-            else_=or_(
-                RideStatusSnapshot.status.in_(['DOWN', 'CLOSED']),
-                and_(
-                    RideStatusSnapshot.status == None,
-                    RideStatusSnapshot.computed_is_open == False
-                )
-            )
-        )
-
-        # Park-type aware is_down for current status (using ride_current_status CTE alias)
-        current_is_down = case(
-            (
-                or_(Park.is_disney == True, Park.is_universal == True),
-                ride_current_status.c.status == 'DOWN'
+            ride_current_status AS (
+                SELECT rss.ride_id, rss.status, rss.status AS current_status,
+                       rss.wait_time AS current_wait_time, rss.computed_is_open,
+                       pas.park_appears_open
+                FROM ride_status_snapshots rss
+                INNER JOIN latest_snapshot ls
+                    ON rss.ride_id = ls.ride_id AND rss.recorded_at = ls.latest_recorded_at
+                INNER JOIN rides r ON rss.ride_id = r.ride_id
+                LEFT OUTER JOIN park_activity_snapshots pas
+                    ON pas.park_id = r.park_id
+                   AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') =
+                       DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
             ),
-            else_=or_(
-                ride_current_status.c.status.in_(['DOWN', 'CLOSED']),
-                and_(
-                    ride_current_status.c.status == None,
-                    ride_current_status.c.computed_is_open == False
-                )
+            last_status_changes AS (
+                SELECT ride_id, MAX(changed_at) AS last_status_change
+                FROM ride_status_changes
+                WHERE changed_at >= :start_utc
+                GROUP BY ride_id
             )
-        )
-
-        # Main SELECT query
-        ride_rankings_select = (
-            select(
-                Ride.ride_id,
-                Ride.park_id,
-                Ride.queue_times_id,
-                Ride.name.label('ride_name'),
-                Park.name.label('park_name'),
-
-                func.coalesce(RideClassification.tier, 3).label('tier'),
-                func.coalesce(RideClassification.tier_weight, 2.0).label('tier_weight'),
-                Ride.category,
-
-                Park.is_disney,
-                Park.is_universal,
-
-                # Current status
-                case(
-                    (
-                        func.coalesce(ride_current_status.c.park_appears_open, False) == False,
-                        False
-                    ),
-                    (current_is_down, True),
-                    else_=False
-                ).label('is_down'),
-                ride_current_status.c.current_status,
-                ride_current_status.c.current_wait_time,
-                last_status_changes.c.last_status_change,
-
-                # Today's downtime hours
-                func.round(
-                    func.sum(
-                        case(
-                            (
-                                and_(
-                                    ParkActivitySnapshot.park_appears_open == True,
-                                    is_down
-                                ),
-                                5
-                            ),
-                            else_=0
-                        )
-                    ) / 60.0,
-                    2
-                ).label('downtime_hours'),
-
-                # Downtime incidents (simplified)
-                literal(0).label('downtime_incidents'),
-
-                # Wait time stats
-                func.round(
-                    func.avg(
-                        case(
-                            (RideStatusSnapshot.wait_time > 0, RideStatusSnapshot.wait_time),
-                            else_=None
-                        )
-                    ),
-                    1
-                ).label('avg_wait_time'),
-                func.max(RideStatusSnapshot.wait_time).label('max_wait_time'),
-
-                literal(calculated_at).label('calculated_at')
-            )
-            .select_from(Ride)
-            .join(Park, Ride.park_id == Park.park_id)
-            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
-            .join(RideStatusSnapshot, Ride.ride_id == RideStatusSnapshot.ride_id)
-            .join(
-                ParkActivitySnapshot,
-                and_(
-                    Park.park_id == ParkActivitySnapshot.park_id,
-                    ParkActivitySnapshot.recorded_at == RideStatusSnapshot.recorded_at
-                )
-            )
-            .outerjoin(ride_current_status, Ride.ride_id == ride_current_status.c.ride_id)
-            .outerjoin(last_status_changes, Ride.ride_id == last_status_changes.c.ride_id)
-            .where(RideStatusSnapshot.recorded_at >= start_utc)
-            .where(RideStatusSnapshot.recorded_at < end_utc)
-            .where(Ride.is_active == True)
-            .where(Ride.category == 'ATTRACTION')
-            .where(Park.is_active == True)
-            .where(Ride.last_operated_at >= func.utc_timestamp() - literal_column("INTERVAL 7 DAY"))
-            .group_by(
-                Ride.ride_id, Ride.name, Ride.park_id, Ride.queue_times_id, Ride.category,
-                Park.name, Park.is_disney, Park.is_universal,
-                RideClassification.tier, RideClassification.tier_weight,
-                ride_current_status.c.computed_is_open, ride_current_status.c.current_status,
-                ride_current_status.c.current_wait_time, ride_current_status.c.park_appears_open,
-                last_status_changes.c.last_status_change
-            )
-            .having(
-                or_(
-                    func.round(
-                        func.sum(
-                            case(
-                                (
-                                    and_(
-                                        ParkActivitySnapshot.park_appears_open == True,
-                                        is_down
-                                    ),
-                                    5
-                                ),
-                                else_=0
-                            )
-                        ) / 60.0,
-                        2
-                    ) > 0,
-                    case(
-                        (
-                            func.coalesce(ride_current_status.c.park_appears_open, False) == False,
-                            False
-                        ),
-                        (current_is_down, True),
-                        else_=False
-                    ) == True
-                )
-            )
-        )
-
-        # Execute INSERT via compiled SQL (staging table has no ORM model)
-        insert_sql = text(f"""
-            INSERT INTO ride_live_rankings_staging (
-                ride_id, park_id, queue_times_id, ride_name, park_name,
-                tier, tier_weight, category,
-                is_disney, is_universal,
-                is_down, current_status, current_wait_time, last_status_change,
-                downtime_hours, downtime_incidents, avg_wait_time, max_wait_time,
-                calculated_at
-            )
-            {ride_rankings_select.compile(compile_kwargs={"literal_binds": True})}
+            SELECT
+                r.ride_id, r.park_id, r.queue_times_id, r.name AS ride_name,
+                p.name AS park_name,
+                COALESCE(rc.tier, 3) AS tier,
+                COALESCE(rc.tier_weight, 2.0) AS tier_weight,
+                r.category,
+                p.is_disney, p.is_universal,
+                CASE
+                    WHEN COALESCE(rcs.park_appears_open, FALSE) = FALSE THEN FALSE
+                    WHEN CASE
+                        WHEN p.is_disney = TRUE OR p.is_universal = TRUE
+                            THEN rcs.status = 'DOWN'
+                        ELSE rcs.status IN ('DOWN', 'CLOSED')
+                            OR (rcs.status IS NULL AND rcs.computed_is_open = FALSE)
+                    END THEN TRUE
+                    ELSE FALSE
+                END AS is_down,
+                rcs.current_status,
+                rcs.current_wait_time,
+                lsc.last_status_change,
+                ROUND(SUM(CASE
+                    WHEN pas.park_appears_open = TRUE AND (
+                        CASE
+                            WHEN p.is_disney = TRUE OR p.is_universal = TRUE
+                                THEN rss.status = 'DOWN'
+                            ELSE rss.status IN ('DOWN', 'CLOSED')
+                                OR (rss.status IS NULL AND rss.computed_is_open = FALSE)
+                        END
+                    ) THEN 5 ELSE 0
+                END) / 60.0, 2) AS downtime_hours,
+                0 AS downtime_incidents,
+                ROUND(AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END), 1) AS avg_wait_time,
+                MAX(rss.wait_time) AS max_wait_time,
+                :calculated_at AS calculated_at
+            FROM rides r
+            INNER JOIN parks p ON r.park_id = p.park_id
+            LEFT OUTER JOIN ride_classifications rc ON r.ride_id = rc.ride_id
+            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
+            INNER JOIN park_activity_snapshots pas
+                ON p.park_id = pas.park_id AND pas.recorded_at = rss.recorded_at
+            LEFT OUTER JOIN ride_current_status rcs ON r.ride_id = rcs.ride_id
+            LEFT OUTER JOIN last_status_changes lsc ON r.ride_id = lsc.ride_id
+            WHERE rss.recorded_at >= :start_utc
+              AND rss.recorded_at < :end_utc
+              AND r.is_active = TRUE
+              AND r.category = 'ATTRACTION'
+              AND p.is_active = TRUE
+              AND r.last_operated_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY
+            GROUP BY r.ride_id, r.name, r.park_id, r.queue_times_id, r.category,
+                     p.name, p.is_disney, p.is_universal,
+                     rc.tier, rc.tier_weight,
+                     rcs.computed_is_open, rcs.current_status, rcs.current_wait_time,
+                     rcs.park_appears_open, lsc.last_status_change
+            HAVING ROUND(SUM(CASE
+                WHEN pas.park_appears_open = TRUE AND (
+                    CASE
+                        WHEN p.is_disney = TRUE OR p.is_universal = TRUE
+                            THEN rss.status = 'DOWN'
+                        ELSE rss.status IN ('DOWN', 'CLOSED')
+                            OR (rss.status IS NULL AND rss.computed_is_open = FALSE)
+                    END
+                ) THEN 5 ELSE 0
+            END) / 60.0, 2) > 0
         """)
+        session.execute(insert_sql, {
+            'start_utc': start_utc,
+            'end_utc': end_utc,
+            'live_hours': LIVE_WINDOW_HOURS,
+            'calculated_at': calculated_at
+        })
 
-        session.execute(insert_sql)
-
-        # Get count before swap
-        result = session.execute(text("SELECT COUNT(*) FROM ride_live_rankings_staging"))
-        count = result.scalar()
+        # Get count before swap using ORM
+        count = session.query(func.count(RideLiveRankingsStaging.ride_id)).scalar()
 
         # Step 3: Atomic table swap (DDL - keep as text)
         session.execute(text("""

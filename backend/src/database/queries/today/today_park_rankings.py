@@ -74,11 +74,9 @@ class TodayParkRankingsQuery(QueryClassBase):
         start_utc, end_utc = get_pacific_day_range_utc(today)
 
         # Build base query with aggregations
-        # Shame score: (SUM(weighted_downtime_hours) / AVG(effective_park_weight)) × 10
-        shame_score_expr = (
-            func.sum(ParkHourlyStats.weighted_downtime_hours) /
-            func.nullif(func.avg(ParkHourlyStats.effective_park_weight), 0)
-        ) * 10
+        # Shame score: Use pre-computed hourly shame_score (average across hours)
+        # park_hourly_stats already contains shame_score = (weighted_downtime_hours / effective_park_weight) * 10
+        shame_score_expr = func.avg(ParkHourlyStats.shame_score)
 
         stmt = (
             select(
@@ -87,9 +85,8 @@ class TodayParkRankingsQuery(QueryClassBase):
                 Park.name.label('park_name'),
                 (func.concat(Park.city, ', ', Park.state_province)).label('location'),
 
-                # Shame score: calculated from corrected downtime data (SINGLE SOURCE OF TRUTH)
-                # Uses same formula as detail popup: (weighted_downtime / park_weight) × 10
-                # This ensures rankings table EXACTLY matches detail popup
+                # Shame score: average of hourly pre-computed shame scores (0-10 scale)
+                # This ensures shame score stays in the 0-10 range
                 func.round(shame_score_expr, 1).label('shame_score'),
 
                 # Total downtime hours: sum across today

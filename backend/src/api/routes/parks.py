@@ -524,7 +524,7 @@ def get_park_details(park_id: int):
                 # Uses ORM via StatsRepository.get_live_shame_chart_data()
                 chart_data = stats_repo.get_live_shame_chart_data(park_id, minutes=60)
             elif period in ('today', 'yesterday'):
-                chart_query = ParkShameHistoryQuery(session.connection())
+                chart_query = ParkShameHistoryQuery(session)
                 today = get_today_pacific()
                 if period == 'today':
                     chart_data = chart_query.get_single_park_hourly(park_id, today, is_today=True)
@@ -544,7 +544,7 @@ def get_park_details(park_id: int):
             elif period in ('last_week', 'last_month'):
                 # WEEKLY/MONTHLY: Daily averages for the period
                 from utils.timezone import get_last_week_date_range, get_last_month_date_range
-                chart_query = ParkShameHistoryQuery(session.connection())
+                chart_query = ParkShameHistoryQuery(session)
 
                 if period == 'last_week':
                     start_date, end_date, _ = get_last_week_date_range()
@@ -653,8 +653,8 @@ def get_park_rides_comparison_chart(park_id: int):
         }), 400
 
     try:
-        with get_db_connection() as conn:
-            query = ParkRidesComparisonQuery(conn)
+        with get_db_session() as session:
+            query = ParkRidesComparisonQuery(session)
 
             if period == 'today':
                 target_date = get_today_pacific()

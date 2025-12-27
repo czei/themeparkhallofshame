@@ -100,6 +100,11 @@ class Ride(Base):
         back_populates="ride",
         lazy="select"
     )
+    monthly_stats: Mapped[List["RideMonthlyStats"]] = relationship(
+        "RideMonthlyStats",
+        back_populates="ride",
+        lazy="select"
+    )
     classification: Mapped[Optional["RideClassification"]] = relationship(
         "RideClassification",
         back_populates="ride",

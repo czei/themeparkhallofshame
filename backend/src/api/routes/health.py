@@ -6,8 +6,8 @@ Provides API health status, database connectivity, and data freshness.
 import os
 import shutil
 from flask import Blueprint, jsonify
-from datetime import datetime
-from sqlalchemy import select, func, case, and_, literal_column
+from datetime import datetime, timedelta
+from sqlalchemy import select, func, case, and_
 
 from database.connection import get_db_session
 from models import RideStatusSnapshot, AggregationLog
@@ -105,7 +105,7 @@ def health_check():
                     func.max(AggregationLog.completed_at).label('last_completed_at')
                 )
                 .where(AggregationLog.aggregation_type == 'hourly')
-                .where(AggregationLog.started_at >= func.date_sub(func.now(), literal_column("INTERVAL 24 HOUR")))
+                .where(AggregationLog.started_at >= func.now() - timedelta(hours=24))
             )
 
             result = session.execute(hourly_health_stmt)

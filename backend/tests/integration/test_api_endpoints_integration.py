@@ -77,7 +77,7 @@ def comprehensive_test_data(mysql_session):
     conn.execute(text("DELETE FROM ride_daily_stats"))
     conn.execute(text("DELETE FROM ride_weekly_stats"))
     conn.execute(text("DELETE FROM ride_monthly_stats"))
-    conn.execute(text("DELETE FROM ride_hourly_stats"))
+    # NOTE: ride_hourly_stats was dropped in migration 003
     conn.execute(text("DELETE FROM park_activity_snapshots"))
     conn.execute(text("DELETE FROM park_daily_stats"))
     conn.execute(text("DELETE FROM park_weekly_stats"))
@@ -588,7 +588,7 @@ def comprehensive_test_data(mysql_session):
 
     # === CREATE HOURLY STATS (for TODAY period) ===
     # Generate hourly stats for the MOCKED_TODAY date (8 AM to 8 PM Pacific = 12 hours)
-    # TODAY period queries use park_hourly_stats and ride_hourly_stats
+    # TODAY period queries use park_hourly_stats (ride_hourly_stats was dropped in migration 003)
     from utils.timezone import get_pacific_day_range_utc
 
     # Use the mocked date instead of actual today
@@ -638,39 +638,48 @@ def comprehensive_test_data(mysql_session):
                 'park_open': True
             })
 
-        # Create ride hourly stats for each ride (10 rides per park = 100 total)
-        ride_id = 1
-        for park_id in range(1, 11):
-            for i in range(10):
-                tier = 1 if i < 2 else (2 if i < 7 else 3)
-                # Tier 1 rides have more downtime
-                ride_downtime = 0.3 if tier == 1 else (0.1 if tier == 2 else 0.05)
-                down_snaps = 2 if tier == 1 else (1 if tier == 2 else 0)
-                operating_snaps = 6 - down_snaps
+        # Create ride_hourly_stats for each ride (100 total: rides 1-100)
+        # Each park has 10 rides: 2 Tier 1, 5 Tier 2, 3 Tier 3
+        for r_id in range(1, 101):
+            # Determine tier based on ride position within park (0-indexed within park)
+            ride_in_park = (r_id - 1) % 10  # 0-9
+            if ride_in_park < 2:
+                tier = 1
+                ride_downtime = 0.3
+                down_snaps = 2
+                op_snaps = 4
+            elif ride_in_park < 7:
+                tier = 2
+                ride_downtime = 0.1
+                down_snaps = 1
+                op_snaps = 5
+            else:
+                tier = 3
+                ride_downtime = 0.05
+                down_snaps = 0
+                op_snaps = 6
 
-                conn.execute(text("""
-                    INSERT INTO ride_hourly_stats (
-                        ride_id, park_id, hour_start_utc, avg_wait_time_minutes,
-                        operating_snapshots, down_snapshots, downtime_hours,
-                        uptime_percentage, snapshot_count, ride_operated
-                    ) VALUES (
-                        :ride_id, :park_id, :hour_start, :avg_wait,
-                        :operating, :down, :downtime,
-                        :uptime, :snapshots, :operated
-                    )
-                """), {
-                    'ride_id': ride_id,
-                    'park_id': park_id,
-                    'hour_start': hour_utc,
-                    'avg_wait': 60 if tier == 1 else (40 if tier == 2 else 20),
-                    'operating': operating_snaps,
-                    'down': down_snaps,
-                    'downtime': ride_downtime,
-                    'uptime': (operating_snaps / 6.0) * 100,
-                    'snapshots': 6,
-                    'operated': 1
-                })
-                ride_id += 1
+            conn.execute(text("""
+                INSERT INTO ride_hourly_stats (
+                    ride_id, hour_start_utc, avg_wait_time_minutes,
+                    operating_snapshots, down_snapshots, downtime_hours,
+                    uptime_percentage, snapshot_count, ride_operated
+                ) VALUES (
+                    :ride_id, :hour_start, :avg_wait,
+                    :op_snaps, :down_snaps, :downtime,
+                    :uptime, :snapshots, :operated
+                )
+            """), {
+                'ride_id': r_id,
+                'hour_start': hour_utc,
+                'avg_wait': 30.0 + tier * 5,
+                'op_snaps': op_snaps,
+                'down_snaps': down_snaps,
+                'downtime': ride_downtime,
+                'uptime': 100 - (down_snaps * 100.0 / 6),
+                'snapshots': 6,
+                'operated': True
+            })
 
         hour_utc = hour_utc + timedelta(hours=1)
         hours_created += 1
@@ -763,7 +772,7 @@ def comprehensive_test_data(mysql_session):
     conn.execute(text("DELETE FROM ride_daily_stats"))
     conn.execute(text("DELETE FROM ride_weekly_stats"))
     conn.execute(text("DELETE FROM ride_monthly_stats"))
-    conn.execute(text("DELETE FROM ride_hourly_stats"))
+    # NOTE: ride_hourly_stats was dropped in migration 003
     conn.execute(text("DELETE FROM park_activity_snapshots"))
     conn.execute(text("DELETE FROM park_daily_stats"))
     conn.execute(text("DELETE FROM park_weekly_stats"))
@@ -1178,7 +1187,7 @@ def test_rides_downtime_today(client, comprehensive_test_data):
     - Returns rides sorted by downtime descending
     - Tier 1 rides have more downtime than Tier 2/3
     - Response structure matches API spec for TODAY period
-    - TODAY period uses ride_hourly_stats
+    - TODAY period uses park_hourly_stats + ride_status_snapshots
     """
     response = client.get('/api/rides/downtime?period=today&filter=all-parks&limit=100')
 

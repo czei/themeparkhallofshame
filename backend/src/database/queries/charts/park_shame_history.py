@@ -34,7 +34,6 @@ from datetime import date, timedelta
 from typing import List, Dict, Any
 
 from sqlalchemy import select, func, and_, or_, case, literal_column, desc, null
-from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from database.schema import (
@@ -66,17 +65,17 @@ class ParkShameHistoryQuery:
     - Slow path: GROUP BY HOUR on raw park_activity_snapshots (rollback)
     """
 
-    def __init__(self, connection: Connection, use_hourly_tables: bool = None):
+    def __init__(self, session: Session, use_hourly_tables: bool = None):
         """
         Initialize query handler.
 
         Args:
-            connection: Database connection
+            session: SQLAlchemy Session
             use_hourly_tables: If True, use park_hourly_stats (fast path).
                              If False, use GROUP BY HOUR on raw snapshots (rollback).
                              If None, uses global USE_HOURLY_TABLES flag (default).
         """
-        self.conn = connection
+        self.session = session
         self.use_hourly_tables = use_hourly_tables if use_hourly_tables is not None else USE_HOURLY_TABLES
 
     def _get_schedule_for_date(self, park_id: int, target_date: date) -> Dict[str, Any]:
@@ -112,7 +111,7 @@ class ParkShameHistoryQuery:
             .limit(1)
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         row = result.fetchone()
 
         if row:
@@ -307,7 +306,7 @@ class ParkShameHistoryQuery:
             .limit(limit)
         )
 
-        result = self.conn.execute(top_parks_stmt)
+        result = self.session.execute(top_parks_stmt)
         top_parks = [dict(row._mapping) for row in result]
 
         if not top_parks:
@@ -482,7 +481,7 @@ class ParkShameHistoryQuery:
             .limit(limit)
         )
 
-        result = self.conn.execute(top_parks_stmt)
+        result = self.session.execute(top_parks_stmt)
         top_parks = [dict(row._mapping) for row in result]
 
         if not top_parks:
@@ -519,7 +518,7 @@ class ParkShameHistoryQuery:
                 .order_by(ParkActivitySnapshot.recorded_at)
             )
 
-            snapshot_result = self.conn.execute(snapshot_stmt)
+            snapshot_result = self.session.execute(snapshot_stmt)
             park_data = [dict(row._mapping) for row in snapshot_result]
 
             # Use the first park's labels as the shared labels
@@ -575,10 +574,7 @@ class ParkShameHistoryQuery:
         # Include rides_closed (as rides_down) and avg_wait_time for chart display
 
         # Calculate Pacific hour: UTC - 8 hours
-        pacific_time = func.date_sub(
-            ParkActivitySnapshot.recorded_at,
-            literal_column("INTERVAL 8 HOUR")
-        )
+        pacific_time = ParkActivitySnapshot.recorded_at - timedelta(hours=8)
         hour_expr = func.hour(pacific_time)
 
         stmt = (
@@ -607,7 +603,7 @@ class ParkShameHistoryQuery:
             .order_by(literal_column("hour"))
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def _query_hourly_tables(
@@ -627,10 +623,7 @@ class ParkShameHistoryQuery:
         # The chart shows actual downtime hours per hour, not shame intensity
 
         # Calculate Pacific hour: UTC - 8 hours
-        pacific_time = func.date_sub(
-            ParkHourlyStatsORM.hour_start_utc,
-            literal_column("INTERVAL 8 HOUR")
-        )
+        pacific_time = ParkHourlyStatsORM.hour_start_utc - timedelta(hours=8)
         hour_expr = func.hour(pacific_time)
 
         stmt = (
@@ -652,7 +645,7 @@ class ParkShameHistoryQuery:
             .order_by(ParkHourlyStatsORM.hour_start_utc)
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def get_single_park_daily(
@@ -746,7 +739,7 @@ class ParkShameHistoryQuery:
             .order_by(daily_weighted_cte.c.stat_date)
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         rows = [dict(row._mapping) for row in result]
 
         # Build labels and data arrays
@@ -812,7 +805,7 @@ class ParkShameHistoryQuery:
             .limit(limit)
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def _get_park_daily_data(
@@ -844,5 +837,5 @@ class ParkShameHistoryQuery:
             .order_by(park_daily_stats.c.stat_date)
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]

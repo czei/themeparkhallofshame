@@ -106,6 +106,11 @@ class Park(Base):
         back_populates="park",
         lazy="select"
     )
+    monthly_stats: Mapped[List["ParkMonthlyStats"]] = relationship(
+        "ParkMonthlyStats",
+        back_populates="park",
+        lazy="select"
+    )
     operating_sessions: Mapped[List["ParkOperatingSession"]] = relationship(
         "ParkOperatingSession",
         back_populates="park",

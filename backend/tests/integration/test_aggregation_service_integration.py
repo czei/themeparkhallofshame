@@ -223,7 +223,7 @@ class TestDailyAggregationMath:
             """)
             result = mysql_session.execute(ride_insert, {
                 "park_id": park_id,
-                "queue_times_id": 1000 + i,
+                "queue_times_id": 91000 + i,  # >= 90000 to distinguish from production
                 "name": f"Ride {chr(65+i)}"  # A, B, C
             })
             rides.append(result.lastrowid)
@@ -608,7 +608,7 @@ class TestTimezoneAwareAggregation:
 
         # Create park in PST
         park_pst_data = sample_park_data.copy()
-        park_pst_data['queue_times_id'] = 102
+        park_pst_data['queue_times_id'] = 9102  # >= 9000 to distinguish from production
         park_pst_data['timezone'] = 'America/Los_Angeles'
         park_pst_data['name'] = 'Disneyland'
         park_pst_id = insert_sample_park(mysql_session, park_pst_data)
@@ -625,7 +625,7 @@ class TestTimezoneAwareAggregation:
             """)
             result = mysql_session.execute(ride_insert, {
                 "park_id": park_id,
-                "queue_times_id": 2000 + park_id,
+                "queue_times_id": 92000 + park_id,  # >= 90000 to distinguish from production
                 "name": f"Test Ride {park_id}"
             })
             ride_id = result.lastrowid

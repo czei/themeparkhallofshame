@@ -11,7 +11,9 @@ from src.models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
 from src.models.orm_status_change import RideStatusChange
 from src.models.orm_stats import (
     RideDailyStats, ParkDailyStats, RideWeeklyStats, ParkWeeklyStats,
-    RideHourlyStats, ParkHourlyStats
+    RideMonthlyStats, ParkMonthlyStats,
+    RideHourlyStats, ParkHourlyStats, ParkLiveRankings, ParkLiveRankingsStaging,
+    RideLiveRankings, RideLiveRankingsStaging
 )
 from src.models.orm_weather import WeatherObservation, WeatherForecast
 from src.models.orm_aggregation import AggregationLog, AggregationType, AggregationStatus
@@ -34,8 +36,14 @@ __all__ = [
     'ParkDailyStats',
     'RideWeeklyStats',
     'ParkWeeklyStats',
+    'RideMonthlyStats',
+    'ParkMonthlyStats',
     'RideHourlyStats',
     'ParkHourlyStats',
+    'ParkLiveRankings',
+    'ParkLiveRankingsStaging',
+    'RideLiveRankings',
+    'RideLiveRankingsStaging',
     'WeatherObservation',
     'WeatherForecast',
     'AggregationLog',

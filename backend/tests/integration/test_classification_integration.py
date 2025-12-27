@@ -82,7 +82,7 @@ class TestClassificationDatabasePersistence:
         )
 
         # Act: Save classification (pass connection for transaction)
-        service.save_classification(result, conn=mysql_session)
+        service.save_classification(result, session=mysql_session)
 
         # Assert 1: rides.tier and rides.category updated
         ride_query = text("SELECT tier, category FROM rides WHERE ride_id = :ride_id")
@@ -145,7 +145,7 @@ class TestClassificationDatabasePersistence:
             cache_key=f"{park_id}:{ride_id}",
             flagged_for_review=False
         )
-        service.save_classification(result_tier_2, conn=mysql_session)
+        service.save_classification(result_tier_2, session=mysql_session)
 
         # Act 2: Update to Tier 1 (re-classification)
         result_tier_1 = ClassificationResult(
@@ -164,7 +164,7 @@ class TestClassificationDatabasePersistence:
             cache_key=f"{park_id}:{ride_id}",
             flagged_for_review=False
         )
-        service.save_classification(result_tier_1, conn=mysql_session)
+        service.save_classification(result_tier_1, session=mysql_session)
 
         # Assert 1: rides.tier and category updated to new value
         ride_query = text("SELECT tier, category FROM rides WHERE ride_id = :ride_id")
@@ -226,7 +226,7 @@ class TestClassificationDatabasePersistence:
                 cache_key=f"{park_id}:{ride_id}",
                 flagged_for_review=False
             )
-            service.save_classification(result, conn=mysql_session)
+            service.save_classification(result, session=mysql_session)
 
             # Verify consistency
             consistency_query = text("""
@@ -298,7 +298,7 @@ class TestClassificationIntegrationWithCalculations:
                 cache_key=f"{park_id}:{ride_id}",
                 flagged_for_review=False
             )
-            service.save_classification(result, conn=mysql_session)
+            service.save_classification(result, session=mysql_session)
 
         # Verify: Query tier_weight from ride_classifications (as weighted calculations do)
         weighted_query = text("""
@@ -375,7 +375,7 @@ class TestClassificationIntegrationWithCalculations:
             cache_key=f"{park_id}:{ride_id}",
             flagged_for_review=False
         )
-        service.save_classification(result, conn=mysql_session)
+        service.save_classification(result, session=mysql_session)
 
         # Verify all fields
         query = text("""

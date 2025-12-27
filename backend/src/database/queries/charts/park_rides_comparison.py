@@ -31,7 +31,7 @@ from datetime import date, timedelta
 from typing import Dict, Any, List
 
 from sqlalchemy import select, func, and_, or_, literal_column
-from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session
 
 from utils.timezone import get_pacific_day_range_utc
 
@@ -44,8 +44,8 @@ class ParkRidesComparisonQuery:
     Query handler for park-specific ride comparison time-series.
     """
 
-    def __init__(self, connection: Connection):
-        self.conn = connection
+    def __init__(self, session: Session):
+        self.session = session
 
     def get_downtime_daily(
         self,
@@ -91,7 +91,7 @@ class ParkRidesComparisonQuery:
             .order_by(func.coalesce(RideClassification.tier, 2), Ride.name)
         )
 
-        result = self.conn.execute(rides_stmt)
+        result = self.session.execute(rides_stmt)
         rides = [dict(row._mapping) for row in result]
 
         if not rides:
@@ -172,7 +172,7 @@ class ParkRidesComparisonQuery:
             .order_by(func.coalesce(RideClassification.tier, 2), Ride.name)
         )
 
-        result = self.conn.execute(rides_stmt)
+        result = self.session.execute(rides_stmt)
         rides = [dict(row._mapping) for row in result]
 
         if not rides:
@@ -263,7 +263,7 @@ class ParkRidesComparisonQuery:
             .order_by(func.coalesce(RideClassification.tier, 2), Ride.name)
         )
 
-        result = self.conn.execute(rides_stmt)
+        result = self.session.execute(rides_stmt)
         rides = [dict(row._mapping) for row in result]
 
         if not rides:
@@ -345,7 +345,7 @@ class ParkRidesComparisonQuery:
             .order_by(func.coalesce(RideClassification.tier, 2), Ride.name)
         )
 
-        result = self.conn.execute(rides_stmt)
+        result = self.session.execute(rides_stmt)
         rides = [dict(row._mapping) for row in result]
 
         if not rides:
@@ -407,7 +407,7 @@ class ParkRidesComparisonQuery:
             .order_by(RideDailyStats.stat_date)
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def _get_ride_daily_wait_times(
@@ -432,7 +432,7 @@ class ParkRidesComparisonQuery:
             .order_by(RideDailyStats.stat_date)
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def _get_ride_hourly_downtime(
@@ -498,10 +498,7 @@ class ParkRidesComparisonQuery:
     ) -> List[Dict[str, Any]]:
         """Get hourly average wait times for a specific ride from live snapshots."""
         # Calculate Pacific hour: UTC - 8 hours
-        pacific_time = func.date_sub(
-            RideStatusSnapshot.recorded_at,
-            literal_column("INTERVAL 8 HOUR")
-        )
+        pacific_time = RideStatusSnapshot.recorded_at - timedelta(hours=8)
         hour_expr = func.hour(pacific_time)
 
         stmt = (
@@ -527,5 +524,5 @@ class ParkRidesComparisonQuery:
             .order_by(literal_column("hour"))
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]

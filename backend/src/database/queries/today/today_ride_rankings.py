@@ -176,7 +176,7 @@ class TodayRideRankingsQuery(QueryClassBase):
             )
             .select_from(RideHourlyStats)
             .join(Ride, RideHourlyStats.ride_id == Ride.ride_id)
-            .join(Park, RideHourlyStats.park_id == Park.park_id)
+            .join(Park, Ride.park_id == Park.park_id)
             .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
             .outerjoin(
                 latest_snapshot_subq,

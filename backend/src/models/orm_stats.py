@@ -3,7 +3,7 @@ SQLAlchemy ORM Models: Stats Tables
 RideDailyStats, ParkDailyStats, and ParkWeeklyStats aggregated statistics.
 """
 
-from sqlalchemy import Integer, ForeignKey, Date, Numeric, DateTime, Index, UniqueConstraint, func, String, Boolean
+from sqlalchemy import Integer, ForeignKey, Date, Numeric, DateTime, Index, UniqueConstraint, func, String, Boolean, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.models.base import Base
 from datetime import date, datetime
@@ -415,17 +415,12 @@ class RideHourlyStats(Base):
     """
     __tablename__ = "ride_hourly_stats"
 
-    # Primary Key
-    id: Mapped[int] = mapped_column(primary_key=True)
+    # Primary Key (matches actual table column name)
+    hourly_stat_id: Mapped[int] = mapped_column(primary_key=True)
 
-    # Foreign Keys
+    # Foreign Keys (no park_id in table - rides already has park_id relationship)
     ride_id: Mapped[int] = mapped_column(
         ForeignKey("rides.ride_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True
-    )
-    park_id: Mapped[int] = mapped_column(
-        ForeignKey("parks.park_id", ondelete="CASCADE"),
         nullable=False,
         index=True
     )
@@ -440,23 +435,31 @@ class RideHourlyStats(Base):
 
     # Aggregated Metrics
     avg_wait_time_minutes: Mapped[Optional[Decimal]] = mapped_column(
-        Numeric(6, 2),
+        Numeric(5, 2),
         comment="Average wait time in minutes"
     )
-    operating_snapshots: Mapped[Optional[int]] = mapped_column(
+    operating_snapshots: Mapped[int] = mapped_column(
         Integer,
+        nullable=False,
+        server_default=text("0"),
         comment="Number of snapshots where ride was operating"
     )
-    down_snapshots: Mapped[Optional[int]] = mapped_column(
+    down_snapshots: Mapped[int] = mapped_column(
         Integer,
+        nullable=False,
+        server_default=text("0"),
         comment="Number of snapshots where ride was down"
     )
-    downtime_hours: Mapped[Optional[Decimal]] = mapped_column(
-        Numeric(6, 2),
+    downtime_hours: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        server_default=text("0.00"),
         comment="Total downtime hours"
     )
-    uptime_percentage: Mapped[Optional[Decimal]] = mapped_column(
+    uptime_percentage: Mapped[Decimal] = mapped_column(
         Numeric(5, 2),
+        nullable=False,
+        server_default=text("0.00"),
         comment="Percentage of time operating"
     )
 
@@ -464,10 +467,12 @@ class RideHourlyStats(Base):
     snapshot_count: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
+        server_default=text("0"),
         comment="Number of snapshots aggregated"
     )
     ride_operated: Mapped[bool] = mapped_column(
         nullable=False,
+        server_default=text("0"),
         comment="Whether ride operated during this hour"
     )
 
@@ -484,20 +489,19 @@ class RideHourlyStats(Base):
         onupdate=func.now()
     )
 
-    # Composite Indexes for Performance
+    # Composite Indexes for Performance (matching actual table)
     __table_args__ = (
-        Index('idx_ride_hourly_stats_ride_hour', 'ride_id', 'hour_start_utc'),
-        Index('idx_ride_hourly_stats_hour', 'hour_start_utc'),
-        Index('idx_ride_hourly_stats_park_hour', 'park_id', 'hour_start_utc'),
+        Index('idx_ride_hourly_ride_date', 'ride_id', 'hour_start_utc'),
+        Index('idx_ride_hourly_hour', 'hour_start_utc'),
+        Index('idx_ride_hourly_operated', 'ride_operated'),
         {'extend_existing': True}
     )
 
-    # Relationships
+    # Relationships (no direct park relationship - use ride.park instead)
     ride: Mapped["Ride"] = relationship("Ride")
-    park: Mapped["Park"] = relationship("Park")
 
     def __repr__(self) -> str:
-        return f"<RideHourlyStats(id={self.id}, ride_id={self.ride_id}, hour={self.hour_start_utc}, downtime={self.downtime_hours})>"
+        return f"<RideHourlyStats(hourly_stat_id={self.hourly_stat_id}, ride_id={self.ride_id}, hour={self.hour_start_utc}, downtime={self.downtime_hours})>"
 
 
 class RideWeeklyStats(Base):
@@ -604,6 +608,200 @@ class RideWeeklyStats(Base):
 
     def __repr__(self) -> str:
         return f"<RideWeeklyStats(stat_id={self.stat_id}, ride_id={self.ride_id}, year={self.year}, week={self.week_number}, uptime={self.uptime_percentage}%)>"
+
+
+class RideMonthlyStats(Base):
+    """
+    Monthly aggregated statistics for ride performance.
+    Calculated from ride_daily_stats and retained permanently.
+    """
+    __tablename__ = "ride_monthly_stats"
+
+    # Primary Key
+    stat_id: Mapped[int] = mapped_column(primary_key=True)
+
+    # Foreign Keys
+    ride_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("rides.ride_id", ondelete="CASCADE")
+    )
+
+    # Month Identification
+    year: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Calendar year"
+    )
+    month: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Calendar month (1-12)"
+    )
+
+    # Aggregated Metrics
+    uptime_minutes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Total minutes ride was operating during park operating hours"
+    )
+    downtime_minutes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Total minutes ride was down during park operating hours"
+    )
+    uptime_percentage: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        default=0.0,
+        comment="Percentage of time ride was operating (0.0-100.0)"
+    )
+    operating_hours_minutes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Total minutes park was open during the month"
+    )
+
+    # Wait Time Statistics
+    avg_wait_time: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(5, 2),
+        comment="Average wait time in minutes"
+    )
+    peak_wait_time: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        comment="Peak wait time during the month"
+    )
+
+    # Downtime Details
+    status_changes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Number of status changes (operating <-> down)"
+    )
+
+    # Trend Metrics
+    trend_vs_previous_month: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(6, 2),
+        comment="Percentage change in uptime vs previous month"
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now()
+    )
+
+    # Composite Indexes for Performance
+    __table_args__ = (
+        UniqueConstraint('ride_id', 'year', 'month', name='unique_ride_month'),
+        Index('idx_ride_monthly_stats_ride_month', 'ride_id', 'year', 'month'),
+        Index('idx_ride_monthly_stats_month', 'year', 'month'),
+        {'extend_existing': True}
+    )
+
+    # Relationships
+    ride: Mapped["Ride"] = relationship(
+        "Ride",
+        back_populates="monthly_stats"
+    )
+
+    def __repr__(self) -> str:
+        return f"<RideMonthlyStats(stat_id={self.stat_id}, ride_id={self.ride_id}, year={self.year}, month={self.month}, uptime={self.uptime_percentage}%)>"
+
+
+class ParkMonthlyStats(Base):
+    """
+    Monthly aggregated statistics for park performance.
+    Calculated from park_daily_stats and retained permanently.
+    """
+    __tablename__ = "park_monthly_stats"
+
+    # Primary Key
+    stat_id: Mapped[int] = mapped_column(primary_key=True)
+
+    # Foreign Keys
+    park_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("parks.park_id", ondelete="SET NULL")
+    )
+
+    # Month Identification
+    year: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Calendar year"
+    )
+    month: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Calendar month (1-12)"
+    )
+
+    # Aggregated Metrics
+    total_rides_tracked: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Number of rides tracked for this park"
+    )
+    avg_uptime_percentage: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(5, 2),
+        comment="Average uptime percentage across all rides"
+    )
+    total_downtime_hours: Mapped[Decimal] = mapped_column(
+        Numeric(8, 2),
+        nullable=False,
+        default=0.0,
+        comment="Total downtime hours across all rides"
+    )
+    rides_with_downtime: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Number of rides that experienced downtime"
+    )
+
+    # Wait Time Statistics
+    avg_wait_time: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(5, 2),
+        comment="Average wait time across all rides"
+    )
+    peak_wait_time: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        comment="Peak wait time across all rides"
+    )
+
+    # Trend Analysis
+    trend_vs_previous_month: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(6, 2),
+        comment="Percentage change in downtime vs previous month (positive = worse)"
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now()
+    )
+
+    # Composite Indexes and Constraints for Performance
+    __table_args__ = (
+        UniqueConstraint('park_id', 'year', 'month', name='unique_park_month'),
+        Index('idx_pms_park_month', 'park_id', 'year', 'month'),
+        Index('idx_pms_month', 'year', 'month'),
+        {'extend_existing': True}
+    )
+
+    # Relationships
+    park: Mapped["Park"] = relationship(
+        "Park",
+        back_populates="monthly_stats"
+    )
+
+    def __repr__(self) -> str:
+        return f"<ParkMonthlyStats(stat_id={self.stat_id}, park_id={self.park_id}, year={self.year}, month={self.month})>"
 
 
 class ParkLiveRankings(Base):
@@ -718,3 +916,92 @@ class ParkLiveRankings(Base):
 
     def __repr__(self) -> str:
         return f"<ParkLiveRankings(park_id={self.park_id}, park_name={self.park_name}, shame_score={self.shame_score})>"
+
+
+class ParkLiveRankingsStaging(Base):
+    """
+    Staging table for park live rankings - used for atomic table swap.
+    Identical structure to ParkLiveRankings.
+    """
+    __tablename__ = "park_live_rankings_staging"
+
+    park_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    queue_times_id: Mapped[Optional[int]] = mapped_column(Integer)
+    park_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    location: Mapped[Optional[str]] = mapped_column(String(255))
+    timezone: Mapped[Optional[str]] = mapped_column(String(50))
+    is_disney: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_universal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    rides_down: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_rides: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    shame_score: Mapped[Decimal] = mapped_column(Numeric(4, 1), nullable=False, default=0.0)
+    park_is_open: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    total_downtime_hours: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False, default=0.0)
+    weighted_downtime_hours: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False, default=0.0)
+    total_park_weight: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False, default=0.0)
+    calculated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    __table_args__ = ({'extend_existing': True},)
+
+
+class RideLiveRankings(Base):
+    """
+    Live ride rankings table - updated in real-time.
+    Contains current downtime and wait times for all rides.
+    """
+    __tablename__ = "ride_live_rankings"
+
+    ride_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    park_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    queue_times_id: Mapped[Optional[int]] = mapped_column(Integer)
+    ride_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    park_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    tier: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    tier_weight: Mapped[Decimal] = mapped_column(Numeric(3, 1), nullable=False, default=2.0)
+    category: Mapped[Optional[str]] = mapped_column(String(50))
+    is_disney: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    is_universal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_down: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    current_status: Mapped[Optional[str]] = mapped_column(String(50))
+    current_wait_time: Mapped[Optional[int]] = mapped_column(Integer)
+    last_status_change: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    downtime_hours: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False, default=0.0, index=True)
+    downtime_incidents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    avg_wait_time: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 1))
+    max_wait_time: Mapped[Optional[int]] = mapped_column(Integer)
+    calculated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+
+    __table_args__ = ({'extend_existing': True},)
+
+    def __repr__(self) -> str:
+        return f"<RideLiveRankings(ride_id={self.ride_id}, ride_name={self.ride_name}, is_down={self.is_down})>"
+
+
+class RideLiveRankingsStaging(Base):
+    """
+    Staging table for ride live rankings - used for atomic table swap.
+    Identical structure to RideLiveRankings.
+    """
+    __tablename__ = "ride_live_rankings_staging"
+
+    ride_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    park_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    queue_times_id: Mapped[Optional[int]] = mapped_column(Integer)
+    ride_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    park_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    tier: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    tier_weight: Mapped[Decimal] = mapped_column(Numeric(3, 1), nullable=False, default=2.0)
+    category: Mapped[Optional[str]] = mapped_column(String(50))
+    is_disney: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_universal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_down: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    current_status: Mapped[Optional[str]] = mapped_column(String(50))
+    current_wait_time: Mapped[Optional[int]] = mapped_column(Integer)
+    last_status_change: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    downtime_hours: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False, default=0.0)
+    downtime_incidents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    avg_wait_time: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 1))
+    max_wait_time: Mapped[Optional[int]] = mapped_column(Integer)
+    calculated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    __table_args__ = ({'extend_existing': True},)

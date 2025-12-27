@@ -30,7 +30,7 @@ from datetime import date, timedelta, datetime, timezone
 from typing import List, Dict, Any
 
 from sqlalchemy import select, func, and_, or_, literal_column
-from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session
 
 from database.schema import parks, rides, ride_daily_stats, ride_classifications
 from database.queries.builders import Filters
@@ -45,8 +45,8 @@ class RideWaitTimeHistoryQuery:
     Query handler for ride wait time time-series.
     """
 
-    def __init__(self, connection: Connection):
-        self.conn = connection
+    def __init__(self, session: Session):
+        self.session = session
 
     def get_daily(
         self,
@@ -180,7 +180,7 @@ class RideWaitTimeHistoryQuery:
             .limit(limit)
         )
 
-        result = self.conn.execute(top_rides_stmt)
+        result = self.session.execute(top_rides_stmt)
         top_rides = [dict(row._mapping) for row in result]
 
         if not top_rides:
@@ -216,10 +216,7 @@ class RideWaitTimeHistoryQuery:
     ) -> List[Dict[str, Any]]:
         """Get hourly average wait times for a specific ride from live snapshots."""
         # Calculate Pacific hour: UTC - 8 hours
-        pacific_time = func.date_sub(
-            RideStatusSnapshot.recorded_at,
-            literal_column("INTERVAL 8 HOUR")
-        )
+        pacific_time = RideStatusSnapshot.recorded_at - timedelta(hours=8)
         hour_expr = func.hour(pacific_time)
 
         stmt = (
@@ -246,7 +243,7 @@ class RideWaitTimeHistoryQuery:
             .order_by(literal_column("hour"))
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def get_live(
@@ -319,7 +316,7 @@ class RideWaitTimeHistoryQuery:
             .limit(limit)
         )
 
-        result = self.conn.execute(top_rides_stmt)
+        result = self.session.execute(top_rides_stmt)
         top_rides = [dict(row._mapping) for row in result]
 
         if not top_rides:
@@ -349,7 +346,7 @@ class RideWaitTimeHistoryQuery:
                 .group_by(func.date_format(RideStatusSnapshot.recorded_at, '%H:%i'))
                 .order_by(literal_column("minute_label"))
             )
-            series_result = self.conn.execute(series_stmt)
+            series_result = self.session.execute(series_stmt)
             points = {row.minute_label: float(row.avg_wait) for row in series_result}
             aligned = [points.get(label) for label in labels]
             datasets.append({
@@ -401,7 +398,7 @@ class RideWaitTimeHistoryQuery:
             .limit(limit)
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def _get_ride_daily_wait_data(
@@ -427,5 +424,5 @@ class RideWaitTimeHistoryQuery:
             .order_by(ride_daily_stats.c.stat_date)
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]

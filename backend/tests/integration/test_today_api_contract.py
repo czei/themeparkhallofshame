@@ -50,7 +50,7 @@ def today_api_test_data(mysql_session):
     conn.execute(text("DELETE FROM park_weekly_stats WHERE park_id <= 16 OR park_id >= 9100"))
     conn.execute(text("DELETE FROM park_monthly_stats WHERE park_id <= 16 OR park_id >= 9100"))
     conn.execute(text("DELETE FROM park_activity_snapshots WHERE park_id <= 16 OR park_id >= 9100"))
-    conn.execute(text("DELETE FROM ride_hourly_stats WHERE ride_id <= 200 OR ride_id >= 91000"))
+    # ride_hourly_stats table dropped in migration 003 - no longer exists
     conn.execute(text("DELETE FROM ride_daily_stats WHERE ride_id <= 200 OR ride_id >= 91000"))
     conn.execute(text("DELETE FROM ride_weekly_stats WHERE ride_id <= 200 OR ride_id >= 91000"))
     conn.execute(text("DELETE FROM ride_monthly_stats WHERE ride_id <= 200 OR ride_id >= 91000"))
@@ -293,7 +293,7 @@ def today_api_test_data(mysql_session):
     conn.execute(text("DELETE FROM park_weekly_stats WHERE park_id <= 16 OR park_id >= 9100"))
     conn.execute(text("DELETE FROM park_monthly_stats WHERE park_id <= 16 OR park_id >= 9100"))
     conn.execute(text("DELETE FROM park_activity_snapshots WHERE park_id <= 16 OR park_id >= 9100"))
-    conn.execute(text("DELETE FROM ride_hourly_stats WHERE ride_id <= 200 OR ride_id >= 91000"))
+    # ride_hourly_stats table dropped in migration 003 - no longer exists
     conn.execute(text("DELETE FROM ride_daily_stats WHERE ride_id <= 200 OR ride_id >= 91000"))
     conn.execute(text("DELETE FROM ride_weekly_stats WHERE ride_id <= 200 OR ride_id >= 91000"))
     conn.execute(text("DELETE FROM ride_monthly_stats WHERE ride_id <= 200 OR ride_id >= 91000"))

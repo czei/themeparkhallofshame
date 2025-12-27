@@ -125,7 +125,6 @@ def get_park_downtime_rankings():
 
         with get_db_connection() as conn:
             filter_disney_universal = (filter_type == 'disney-universal')
-            stats_repo = StatsRepository(conn)
 
             # Route to appropriate query based on period
             today_pacific = get_today_pacific()
@@ -170,11 +169,15 @@ def get_park_downtime_rankings():
                         limit=limit,
                         sort_by=sort_by
                     )
+
+            # Get aggregate stats using ORM (requires Session, not Connection)
             aggregate_period = PERIOD_ALIASES.get(period, period)
-            aggregate_stats = stats_repo.get_aggregate_park_stats(
-                period=aggregate_period,
-                filter_disney_universal=filter_disney_universal
-            )
+            with get_db_session() as session:
+                stats_repo = StatsRepository(session)
+                aggregate_stats = stats_repo.get_aggregate_park_stats(
+                    period=aggregate_period,
+                    filter_disney_universal=filter_disney_universal
+                )
 
             # Add external URLs to rankings
             rankings_with_urls = []

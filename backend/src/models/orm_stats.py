@@ -3,7 +3,7 @@ SQLAlchemy ORM Models: Stats Tables
 RideDailyStats, ParkDailyStats, and ParkWeeklyStats aggregated statistics.
 """
 
-from sqlalchemy import Integer, ForeignKey, Date, Numeric, DateTime, Index, UniqueConstraint, func
+from sqlalchemy import Integer, ForeignKey, Date, Numeric, DateTime, Index, UniqueConstraint, func, String, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.models.base import Base
 from datetime import date, datetime
@@ -604,3 +604,117 @@ class RideWeeklyStats(Base):
 
     def __repr__(self) -> str:
         return f"<RideWeeklyStats(stat_id={self.stat_id}, ride_id={self.ride_id}, year={self.year}, week={self.week_number}, uptime={self.uptime_percentage}%)>"
+
+
+class ParkLiveRankings(Base):
+    """
+    Live park rankings table - updated in real-time.
+    Contains current shame scores and downtime for all parks.
+    """
+    __tablename__ = "park_live_rankings"
+
+    # Primary Key
+    park_id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        comment="Park ID from parks table"
+    )
+
+    # Park Info (denormalized for performance)
+    queue_times_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        comment="Queue-Times.com park ID"
+    )
+    park_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        comment="Park name"
+    )
+    location: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        comment="Park location"
+    )
+    timezone: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        comment="Park timezone"
+    )
+    is_disney: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+        comment="Is Disney park"
+    )
+    is_universal: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Is Universal park"
+    )
+
+    # Ride Counts
+    rides_down: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        index=True,
+        comment="Number of rides currently down"
+    )
+    total_rides: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Total number of rides tracked"
+    )
+
+    # Metrics
+    shame_score: Mapped[Decimal] = mapped_column(
+        Numeric(4, 1),
+        nullable=False,
+        default=0.0,
+        index=True,
+        comment="Current shame score"
+    )
+    park_is_open: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Is park currently open"
+    )
+    total_downtime_hours: Mapped[Decimal] = mapped_column(
+        Numeric(6, 2),
+        nullable=False,
+        default=0.0,
+        comment="Total downtime hours"
+    )
+    weighted_downtime_hours: Mapped[Decimal] = mapped_column(
+        Numeric(6, 2),
+        nullable=False,
+        default=0.0,
+        comment="Tier-weighted downtime hours"
+    )
+    total_park_weight: Mapped[Decimal] = mapped_column(
+        Numeric(8, 2),
+        nullable=False,
+        default=0.0,
+        comment="Sum of tier weights for all rides"
+    )
+
+    # Timestamp
+    calculated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        index=True,
+        comment="When rankings were calculated"
+    )
+
+    # Indexes
+    __table_args__ = (
+        Index('idx_plr_shame', 'shame_score'),
+        Index('idx_plr_disney', 'is_disney'),
+        Index('idx_plr_calculated', 'calculated_at'),
+        {'extend_existing': True}
+    )
+
+    def __repr__(self) -> str:
+        return f"<ParkLiveRankings(park_id={self.park_id}, park_name={self.park_name}, shame_score={self.shame_score})>"

@@ -33,7 +33,7 @@ from sqlalchemy import func, and_, text, distinct
 
 from src.models.orm_park import Park
 from src.models.orm_ride import Ride
-from src.models.orm_stats import ParkDailyStats, ParkHourlyStats, RideDailyStats
+from src.models.orm_stats import ParkDailyStats, ParkHourlyStats, RideDailyStats, ParkLiveRankings
 from src.models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
 from src.models.orm_classification import RideClassification
 
@@ -79,18 +79,9 @@ class StatsRepository:
         Returns:
             Dictionary with aggregated statistics
         """
-        # If no park_id, return summary stats (for API compatibility)
+        # If no park_id, return summary stats across all parks
         if park_id is None:
-            # Return empty summary for now - full implementation would
-            # aggregate across all parks matching filters
-            return {
-                'period': period,
-                'filter_disney_universal': filter_disney_universal,
-                'total_parks': 0,
-                'total_downtime_hours': 0.0,
-                'avg_uptime_percentage': 0.0,
-                'summary_note': 'Summary stats not yet implemented in ORM'
-            }
+            return self._get_summary_stats(period, filter_disney_universal)
 
         park = self.session.query(Park).filter(Park.park_id == park_id).first()
         if not park:
@@ -130,6 +121,155 @@ class StatsRepository:
             'avg_uptime_percentage': float(result.avg_uptime or 0),
             'total_affected_rides': int(result.total_affected_rides or 0),
             'days_tracked': int(result.days_tracked or 0)
+        }
+
+    def _get_summary_stats(
+        self,
+        period: str,
+        filter_disney_universal: bool
+    ) -> Dict[str, Any]:
+        """
+        Get summary stats from pre-aggregated tables based on period.
+
+        Uses pure ORM queries - no raw SQL.
+
+        Each period uses a single efficient query on already-aggregated tables:
+        - LIVE: ParkLiveRankings
+        - TODAY: ParkHourlyStats (last 24 hours)
+        - YESTERDAY: ParkDailyStats (yesterday)
+        - LAST_WEEK: ParkDailyStats (last 7 days)
+        - LAST_MONTH: ParkDailyStats (last 30 days)
+        """
+        if period == 'live':
+            return self._get_live_summary_stats(filter_disney_universal)
+        elif period == 'today':
+            return self._get_today_summary_stats(filter_disney_universal)
+        elif period == 'yesterday':
+            return self._get_daily_summary_stats(1, filter_disney_universal, 'yesterday')
+        elif period == 'last_week':
+            return self._get_daily_summary_stats(7, filter_disney_universal, 'last_week')
+        elif period == 'last_month':
+            return self._get_daily_summary_stats(30, filter_disney_universal, 'last_month')
+        else:
+            # Default to live
+            return self._get_live_summary_stats(filter_disney_universal)
+
+    def _get_live_summary_stats(self, filter_disney_universal: bool) -> Dict[str, Any]:
+        """Get summary stats from ParkLiveRankings using ORM."""
+        query = self.session.query(
+            func.count(ParkLiveRankings.park_id).label('total_parks'),
+            func.coalesce(func.sum(ParkLiveRankings.total_rides), 0).label('total_rides'),
+            func.coalesce(func.sum(ParkLiveRankings.rides_down), 0).label('rides_down'),
+            func.coalesce(func.sum(ParkLiveRankings.total_downtime_hours), 0).label('total_downtime_hours'),
+            func.coalesce(
+                func.avg(100 - (ParkLiveRankings.rides_down * 100.0 /
+                         func.nullif(ParkLiveRankings.total_rides, 0))),
+                100
+            ).label('avg_uptime')
+        )
+
+        if filter_disney_universal:
+            query = query.filter(
+                (ParkLiveRankings.is_disney == True) | (ParkLiveRankings.is_universal == True)
+            )
+
+        result = query.first()
+        return self._format_summary_result(result, 'live', filter_disney_universal)
+
+    def _get_today_summary_stats(self, filter_disney_universal: bool) -> Dict[str, Any]:
+        """Get summary stats from ParkHourlyStats for last 24 hours using ORM."""
+        cutoff = datetime.utcnow() - timedelta(hours=24)
+
+        query = self.session.query(
+            func.count(distinct(ParkHourlyStats.park_id)).label('total_parks'),
+            func.coalesce(
+                func.sum(ParkHourlyStats.rides_operating + ParkHourlyStats.rides_down), 0
+            ).label('total_rides'),
+            func.coalesce(func.sum(ParkHourlyStats.rides_down), 0).label('rides_down'),
+            func.coalesce(func.sum(ParkHourlyStats.total_downtime_hours), 0).label('total_downtime_hours'),
+            func.coalesce(
+                func.avg(100 - (ParkHourlyStats.rides_down * 100.0 /
+                         func.nullif(ParkHourlyStats.rides_operating + ParkHourlyStats.rides_down, 0))),
+                100
+            ).label('avg_uptime')
+        ).filter(
+            ParkHourlyStats.hour_start_utc >= cutoff,
+            ParkHourlyStats.park_was_open == True
+        )
+
+        if filter_disney_universal:
+            query = query.join(Park, ParkHourlyStats.park_id == Park.park_id).filter(
+                (Park.is_disney == True) | (Park.is_universal == True)
+            )
+
+        result = query.first()
+        return self._format_summary_result(result, 'today', filter_disney_universal)
+
+    def _get_daily_summary_stats(
+        self,
+        days: int,
+        filter_disney_universal: bool,
+        period_name: str
+    ) -> Dict[str, Any]:
+        """Get summary stats from ParkDailyStats for specified number of days using ORM."""
+        today = date.today()
+
+        if days == 1:
+            # Yesterday only
+            date_filter = ParkDailyStats.stat_date == today - timedelta(days=1)
+        else:
+            # Last N days
+            date_filter = ParkDailyStats.stat_date >= today - timedelta(days=days)
+
+        query = self.session.query(
+            func.count(distinct(ParkDailyStats.park_id)).label('total_parks'),
+            func.coalesce(func.sum(ParkDailyStats.total_rides_tracked), 0).label('total_rides'),
+            func.coalesce(func.sum(ParkDailyStats.rides_with_downtime), 0).label('rides_down'),
+            func.coalesce(func.sum(ParkDailyStats.total_downtime_hours), 0).label('total_downtime_hours'),
+            func.coalesce(func.avg(ParkDailyStats.avg_uptime_percentage), 100).label('avg_uptime')
+        ).filter(date_filter)
+
+        if filter_disney_universal:
+            query = query.join(Park, ParkDailyStats.park_id == Park.park_id).filter(
+                (Park.is_disney == True) | (Park.is_universal == True)
+            )
+
+        result = query.first()
+        return self._format_summary_result(result, period_name, filter_disney_universal)
+
+    def _format_summary_result(
+        self,
+        result,
+        period: str,
+        filter_disney_universal: bool
+    ) -> Dict[str, Any]:
+        """Format ORM query result into standard summary stats dict."""
+        if not result or result.total_parks is None:
+            return {
+                'period': period,
+                'filter_disney_universal': filter_disney_universal,
+                'total_parks': 0,
+                'rides_operating': 0,
+                'rides_down': 0,
+                'rides_closed': 0,
+                'rides_refurbishment': 0,
+                'total_downtime_hours': 0.0,
+                'avg_uptime_percentage': 100.0
+            }
+
+        total_rides = int(result.total_rides or 0)
+        rides_down = int(result.rides_down or 0)
+
+        return {
+            'period': period,
+            'filter_disney_universal': filter_disney_universal,
+            'total_parks': int(result.total_parks or 0),
+            'rides_operating': total_rides - rides_down,
+            'rides_down': rides_down,
+            'rides_closed': 0,
+            'rides_refurbishment': 0,
+            'total_downtime_hours': float(result.total_downtime_hours or 0),
+            'avg_uptime_percentage': round(float(result.avg_uptime or 100), 1)
         }
 
     def get_hourly_stats(

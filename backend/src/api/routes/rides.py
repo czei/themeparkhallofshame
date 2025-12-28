@@ -338,8 +338,9 @@ Query Files Used:
                 )
         elif period == 'yesterday':
             # YESTERDAY: Full previous Pacific day (immutable, highly cacheable)
-            with get_db_connection() as conn:
-                query = YesterdayRideRankingsQuery(conn)
+            # Uses pre-aggregated ride_daily_stats for sub-second queries
+            with get_db_session() as session:
+                query = YesterdayRideRankingsQuery(session)
                 rankings = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
@@ -472,7 +473,7 @@ def get_ride_wait_times():
             logger.info(f"Cache HIT for ride waittimes: period={period}, filter={filter_type}")
             return jsonify(cached_result), 200
 
-        with get_db_connection() as conn:
+        with get_db_session() as session:
             filter_disney_universal = (filter_type == 'disney-universal')
 
             # Route to appropriate query based on period
@@ -485,15 +486,15 @@ def get_ride_wait_times():
             elif mode == 'today':
                 # TODAY data - cumulative from midnight Pacific to now
                 # See: database/queries/today/today_ride_wait_times.py
-                query = TodayRideWaitTimesQuery(conn)
+                query = TodayRideWaitTimesQuery(session)
                 wait_times = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
             elif mode == 'yesterday':
-                # YESTERDAY data - full previous Pacific day
+                # YESTERDAY data - full previous Pacific day (uses pre-aggregated ride_daily_stats)
                 # See: database/queries/yesterday/yesterday_ride_wait_times.py
-                query = YesterdayRideWaitTimesQuery(conn)
+                query = YesterdayRideWaitTimesQuery(session)
                 wait_times = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
@@ -511,7 +512,7 @@ def get_ride_wait_times():
             else:
                 # Historical data from aggregated stats (calendar-based periods)
                 # See: database/queries/rankings/ride_wait_time_rankings.py
-                query = RideWaitTimeRankingsQuery(conn)
+                query = RideWaitTimeRankingsQuery(session)
                 if mode == 'last_week':
                     wait_times = query.get_weekly(
                         filter_disney_universal=filter_disney_universal,

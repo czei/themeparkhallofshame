@@ -239,23 +239,3 @@ class TestSummaryStatsIntegration:
             assert 'avg_uptime_percentage' in result, f"Missing avg_uptime_percentage for {period}"
 
 
-class TestSummaryStatsAPIIntegration:
-    """Integration tests for summary stats through API endpoint."""
-
-    def test_api_returns_aggregate_stats_for_live(self, mysql_session):
-        """
-        Given: Parks with live rankings data
-        When: /api/parks/downtime?period=live is called
-        Then: Response includes aggregate_stats with summary data
-        """
-        # This test requires the Flask app - skip if not available
-        pytest.skip("Requires Flask test client - see test_api_endpoints_integration.py")
-
-    def test_api_aggregate_stats_change_by_period(self, mysql_session):
-        """
-        Given: Different data in each period's table
-        When: API is called with different period values
-        Then: aggregate_stats values differ appropriately
-        """
-        # This test requires the Flask app - skip if not available
-        pytest.skip("Requires Flask test client - see test_api_endpoints_integration.py")

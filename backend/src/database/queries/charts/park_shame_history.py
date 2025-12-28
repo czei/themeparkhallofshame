@@ -33,7 +33,7 @@ How to Modify:
 from datetime import date, timedelta
 from typing import List, Dict, Any
 
-from sqlalchemy import select, func, and_, or_, case, literal_column, desc, null
+from sqlalchemy import select, func, and_, or_, case, literal_column, desc, null, text
 from sqlalchemy.orm import Session
 
 from database.schema import (
@@ -502,7 +502,9 @@ class ParkShameHistoryQuery:
             # 2. rides_open > 0 (rides are actually operating)
             #
             # Convert UTC timestamps to Pacific time for chart labels
-            pacific_time = ParkActivitySnapshot.recorded_at - timedelta(hours=8)
+            # CRITICAL: Use MySQL DATE_SUB instead of Python timedelta - SQLAlchemy cannot
+            # translate Python timedelta subtraction on database columns to SQL properly
+            pacific_time = func.date_sub(ParkActivitySnapshot.recorded_at, text("INTERVAL 8 HOUR"))
             snapshot_stmt = (
                 select(
                     func.date_format(pacific_time, '%H:%i').label("label"),
@@ -578,7 +580,9 @@ class ParkShameHistoryQuery:
         # Include rides_closed (as rides_down) and avg_wait_time for chart display
 
         # Calculate Pacific hour: UTC - 8 hours
-        pacific_time = ParkActivitySnapshot.recorded_at - timedelta(hours=8)
+        # CRITICAL: Use MySQL DATE_SUB instead of Python timedelta - SQLAlchemy cannot
+        # translate Python timedelta subtraction on database columns to SQL properly
+        pacific_time = func.date_sub(ParkActivitySnapshot.recorded_at, text("INTERVAL 8 HOUR"))
         hour_expr = func.hour(pacific_time)
 
         stmt = (
@@ -627,7 +631,9 @@ class ParkShameHistoryQuery:
         # The chart shows actual downtime hours per hour, not shame intensity
 
         # Calculate Pacific hour: UTC - 8 hours
-        pacific_time = ParkHourlyStatsORM.hour_start_utc - timedelta(hours=8)
+        # CRITICAL: Use MySQL DATE_SUB instead of Python timedelta - SQLAlchemy cannot
+        # translate Python timedelta subtraction on database columns to SQL properly
+        pacific_time = func.date_sub(ParkHourlyStatsORM.hour_start_utc, text("INTERVAL 8 HOUR"))
         hour_expr = func.hour(pacific_time)
 
         stmt = (

@@ -376,13 +376,13 @@ Query Files Used:
                     limit=limit
                 )
         elif period == 'today':
-            # TODAY: Use pre-aggregated hourly stats (live-updating)
-            with get_db_connection() as conn:
-                query = TodayRideRankingsQuery(conn)
+            # TODAY: Use same query as LIVE (both aggregate from midnight Pacific to now)
+            # Previously used pre-aggregated hourly stats, but ride_hourly_stats table was dropped
+            with get_db_session() as session:
+                query = LiveRideRankingsQuery(session)
                 rankings = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
-                    limit=limit,
-                    sort_by=sort_by
+                    limit=limit
                 )
         elif period == 'yesterday':
             # YESTERDAY: Full previous Pacific day (immutable, highly cacheable)

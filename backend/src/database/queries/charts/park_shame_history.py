@@ -500,9 +500,12 @@ class ParkShameHistoryQuery:
             # FALLBACK HEURISTIC: Include snapshots where EITHER:
             # 1. park_appears_open = TRUE (schedule-based detection), OR
             # 2. rides_open > 0 (rides are actually operating)
+            #
+            # Convert UTC timestamps to Pacific time for chart labels
+            pacific_time = ParkActivitySnapshot.recorded_at - timedelta(hours=8)
             snapshot_stmt = (
                 select(
-                    func.date_format(ParkActivitySnapshot.recorded_at, '%H:%i').label("label"),
+                    func.date_format(pacific_time, '%H:%i').label("label"),
                     ParkActivitySnapshot.shame_score
                 )
                 .where(

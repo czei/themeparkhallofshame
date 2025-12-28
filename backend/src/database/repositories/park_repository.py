@@ -8,9 +8,9 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import select, and_, func
 
-from src.models.park import Park as ParkDataclass
-from src.models.orm_park import Park as ParkORM
-from src.utils.logger import logger, log_database_error
+from models.park import Park as ParkDataclass
+from models.orm_park import Park as ParkORM
+from utils.logger import logger, log_database_error
 
 
 class ParkRepository:

@@ -31,11 +31,11 @@ from typing import List, Dict, Any
 
 from sqlalchemy import select, func, case, and_, or_, literal
 
-from src.models import (
+from models import (
     Park, Ride, RideClassification, RideStatusSnapshot,
     ParkActivitySnapshot, RideDailyStats, ParkDailyStats
 )
-from src.utils.query_helpers import QueryClassBase
+from utils.query_helpers import QueryClassBase
 from utils.timezone import get_today_range_to_now_utc, get_today_pacific, get_yesterday_range_utc
 from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
 

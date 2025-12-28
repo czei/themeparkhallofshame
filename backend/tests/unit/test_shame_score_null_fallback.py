@@ -31,7 +31,7 @@ class TestShameScoreNullFallback:
 
         This prevents showing 0 when aggregation script fails.
         """
-        from src.database.repositories.stats_repository import StatsRepository
+        from database.repositories.stats_repository import StatsRepository
 
         mock_session = MagicMock()
 
@@ -81,7 +81,7 @@ class TestShameScoreNullFallback:
         """
         When shame_score is NULL AND there's no downtime, return 0.
         """
-        from src.database.repositories.stats_repository import StatsRepository
+        from database.repositories.stats_repository import StatsRepository
 
         mock_session = MagicMock()
 
@@ -111,7 +111,7 @@ class TestShameScoreNullFallback:
         """
         When shame_score IS stored (not NULL), use the stored value.
         """
-        from src.database.repositories.stats_repository import StatsRepository
+        from database.repositories.stats_repository import StatsRepository
 
         mock_session = MagicMock()
 
@@ -149,7 +149,7 @@ class TestWeeklyShameScoreNullFallback:
         FAILING TEST: When ALL daily shame_scores are NULL,
         calculate from ride data instead of returning 0.
         """
-        from src.database.repositories.stats_repository import StatsRepository
+        from database.repositories.stats_repository import StatsRepository
 
         mock_session = MagicMock()
 
@@ -196,7 +196,7 @@ class TestMonthlyShameScoreNullFallback:
         FAILING TEST: When ALL daily shame_scores are NULL (aggregation never ran),
         calculate from ride data.
         """
-        from src.database.repositories.stats_repository import StatsRepository
+        from database.repositories.stats_repository import StatsRepository
 
         mock_session = MagicMock()
 
@@ -243,7 +243,7 @@ class TestShameScoreCalculationFormula:
 
         Formula: shame_score = (weighted_downtime_hours / total_park_weight) * 10
         """
-        from src.utils.metrics import calculate_shame_score
+        from utils.metrics import calculate_shame_score
 
         # Example: 13 weighted hours, 6 total weight
         result = calculate_shame_score(
@@ -258,7 +258,7 @@ class TestShameScoreCalculationFormula:
         """
         When total_park_weight is 0, should return None or 0, not crash.
         """
-        from src.utils.metrics import calculate_shame_score
+        from utils.metrics import calculate_shame_score
 
         result = calculate_shame_score(
             total_weighted_downtime_hours=13.0,

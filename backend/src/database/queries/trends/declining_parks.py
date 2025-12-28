@@ -28,8 +28,8 @@ from typing import List, Dict, Any
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import Session, aliased
 
-from src.models import Park, ParkWeeklyStats
-from src.utils.query_helpers import QueryClassBase
+from models import Park, ParkWeeklyStats
+from utils.query_helpers import QueryClassBase
 
 
 DECLINE_THRESHOLD = 5.0

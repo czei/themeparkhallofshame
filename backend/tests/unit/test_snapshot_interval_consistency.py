@@ -79,7 +79,7 @@ class TestSnapshotIntervalConsistency:
 
         # Verify import exists if the constant is used
         if 'SNAPSHOT_INTERVAL_MINUTES' in content:
-            # Allow both 'from utils.metrics' and 'from src.utils.metrics' patterns
+            # Allow both 'from utils.metrics' and 'from utils.metrics' patterns
             import_pattern = r'from (?:src\.)?utils\.metrics import.*SNAPSHOT_INTERVAL_MINUTES'
             assert re.search(import_pattern, content), (
                 f"File {filepath} uses SNAPSHOT_INTERVAL_MINUTES but doesn't import from utils.metrics"

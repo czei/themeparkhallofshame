@@ -31,11 +31,11 @@ from datetime import datetime, date, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, text, distinct
 
-from src.models.orm_park import Park
-from src.models.orm_ride import Ride
-from src.models.orm_stats import ParkDailyStats, ParkHourlyStats, RideDailyStats, ParkLiveRankings
-from src.models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
-from src.models.orm_classification import RideClassification
+from models.orm_park import Park
+from models.orm_ride import Ride
+from models.orm_stats import ParkDailyStats, ParkHourlyStats, RideDailyStats, ParkLiveRankings
+from models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
+from models.orm_classification import RideClassification
 
 
 class StatsRepository:

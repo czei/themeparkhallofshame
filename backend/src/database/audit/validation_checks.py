@@ -32,7 +32,7 @@ from sqlalchemy import func, and_, or_
 from sqlalchemy.orm import Session
 
 from utils.logger import logger
-from src.models import (
+from models import (
     Park,
     Ride,
     RideDailyStats,

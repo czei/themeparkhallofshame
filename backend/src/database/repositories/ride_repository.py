@@ -9,11 +9,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, and_, or_, func, case, text
 from datetime import datetime, timedelta
 
-from src.models.ride import Ride as RideDataclass
-from src.models.orm_ride import Ride as RideORM
-from src.models.orm_park import Park as ParkORM
-from src.models.orm_snapshots import RideStatusSnapshot
-from src.utils.logger import logger, log_database_error
+from models.ride import Ride as RideDataclass
+from models.orm_ride import Ride as RideORM
+from models.orm_park import Park as ParkORM
+from models.orm_snapshots import RideStatusSnapshot
+from utils.logger import logger, log_database_error
 
 
 class RideRepository:
@@ -290,7 +290,7 @@ class RideRepository:
         Returns:
             List of dictionaries with ride performance data
         """
-        from src.models.orm_stats import RideDailyStats
+        from models.orm_stats import RideDailyStats
 
         # For now, only support daily (other periods need weekly/monthly ORM models)
         if period != "daily":

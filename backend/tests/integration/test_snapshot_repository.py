@@ -32,7 +32,7 @@ class TestRideStatusSnapshotRepository:
 
     def test_insert_snapshot(self, mysql_session):
         """Insert ride status snapshot."""
-        from src.models import Park, Ride, RideStatusSnapshot
+        from models import Park, Ride, RideStatusSnapshot
 
         # Create test park
         park = Park(
@@ -75,7 +75,7 @@ class TestRideStatusSnapshotRepository:
 
     def test_get_latest_by_ride(self, mysql_session):
         """Get most recent snapshot for a ride."""
-        from src.models import Park, Ride
+        from models import Park, Ride
         from datetime import timedelta
 
         # Create test park and ride
@@ -144,7 +144,7 @@ class TestParkActivitySnapshotRepository:
 
     def test_insert_activity(self, mysql_session):
         """Insert park activity snapshot."""
-        from src.models import Park
+        from models import Park
 
         # Create test park
         park = Park(
@@ -178,7 +178,7 @@ class TestParkActivitySnapshotRepository:
 
     def test_get_latest_by_park(self, mysql_session):
         """Get most recent activity snapshot for a park."""
-        from src.models import Park
+        from models import Park
         from datetime import timedelta
 
         # Create test park

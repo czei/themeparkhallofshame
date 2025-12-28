@@ -22,7 +22,7 @@ class TestParkTypeAwareIsDown:
         """
         For Disney parks, status='DOWN' should count as downtime.
         """
-        from src.utils.query_helpers import RideStatusExpressions
+        from utils.query_helpers import RideStatusExpressions
 
         # Create mock objects
         mock_snapshot = MagicMock()
@@ -41,7 +41,7 @@ class TestParkTypeAwareIsDown:
         For Disney parks, status='CLOSED' should NOT count as downtime.
         Disney distinguishes between DOWN (breakdown) and CLOSED (scheduled).
         """
-        from src.utils.query_helpers import RideStatusExpressions
+        from utils.query_helpers import RideStatusExpressions
 
         mock_snapshot = MagicMock()
         mock_snapshot.status = 'CLOSED'
@@ -58,7 +58,7 @@ class TestParkTypeAwareIsDown:
         """
         For Universal parks, status='DOWN' should count as downtime.
         """
-        from src.utils.query_helpers import RideStatusExpressions
+        from utils.query_helpers import RideStatusExpressions
 
         mock_snapshot = MagicMock()
         mock_snapshot.status = 'DOWN'
@@ -76,7 +76,7 @@ class TestParkTypeAwareIsDown:
         For Universal parks, status='CLOSED' should NOT count as downtime.
         Universal distinguishes between DOWN and CLOSED.
         """
-        from src.utils.query_helpers import RideStatusExpressions
+        from utils.query_helpers import RideStatusExpressions
 
         mock_snapshot = MagicMock()
         mock_snapshot.status = 'CLOSED'
@@ -93,7 +93,7 @@ class TestParkTypeAwareIsDown:
         """
         For non-Disney/Universal parks, status='DOWN' should count as downtime.
         """
-        from src.utils.query_helpers import RideStatusExpressions
+        from utils.query_helpers import RideStatusExpressions
 
         mock_snapshot = MagicMock()
         mock_snapshot.status = 'DOWN'
@@ -111,7 +111,7 @@ class TestParkTypeAwareIsDown:
         For non-Disney/Universal parks, status='CLOSED' SHOULD count as downtime.
         These parks don't distinguish between breakdowns and scheduled closures.
         """
-        from src.utils.query_helpers import RideStatusExpressions
+        from utils.query_helpers import RideStatusExpressions
 
         mock_snapshot = MagicMock()
         mock_snapshot.status = 'CLOSED'
@@ -129,7 +129,7 @@ class TestParkTypeAwareIsDown:
         A ride with status='OPERATING' should never be counted as down,
         regardless of park type.
         """
-        from src.utils.query_helpers import RideStatusExpressions
+        from utils.query_helpers import RideStatusExpressions
 
         mock_snapshot = MagicMock()
         mock_snapshot.status = 'OPERATING'
@@ -152,7 +152,7 @@ class TestRideStatusSQLGeneration:
         """
         RideStatusSQL.is_down() should generate SQL that checks park type.
         """
-        from src.utils.sql_helpers import RideStatusSQL
+        from utils.sql_helpers import RideStatusSQL
 
         sql = RideStatusSQL.is_down("rss", parks_alias="p")
 
@@ -164,7 +164,7 @@ class TestRideStatusSQLGeneration:
         """
         The SQL should have conditional logic for different park types.
         """
-        from src.utils.sql_helpers import RideStatusSQL
+        from utils.sql_helpers import RideStatusSQL
 
         sql = RideStatusSQL.is_down("rss", parks_alias="p")
 

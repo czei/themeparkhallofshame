@@ -28,9 +28,9 @@ from datetime import datetime
 from sqlalchemy import select, func, and_, or_, case, literal
 from sqlalchemy.orm import Session
 
-from src.models import Park, Ride, RideStatusSnapshot, ParkActivitySnapshot
-from src.utils.timezone import get_today_range_to_now_utc
-from src.utils.query_helpers import QueryClassBase
+from models import Park, Ride, RideStatusSnapshot, ParkActivitySnapshot
+from utils.timezone import get_today_range_to_now_utc
+from utils.query_helpers import QueryClassBase
 from utils.metrics import USE_HOURLY_TABLES
 from database.repositories.stats_repository import StatsRepository
 
@@ -255,7 +255,7 @@ class TodayParkWaitTimesQuery(QueryClassBase):
             SQLAlchemy scalar subquery that returns TRUE/FALSE
         """
         from datetime import timedelta
-        from src.utils.timezone import get_current_utc
+        from utils.timezone import get_current_utc
 
         now_utc = get_current_utc()
         lookback_minutes = 15  # Consider park open if there was activity in last 15 minutes

@@ -25,12 +25,12 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy import select, func, case, and_, or_, literal
 from sqlalchemy.orm import Session
 
-from src.models import (
+from models import (
     Park, Ride, RideClassification, RideStatusSnapshot,
     ParkActivitySnapshot
 )
-from src.utils.query_helpers import QueryClassBase
-from src.utils.metrics import SHAME_SCORE_PRECISION, SHAME_SCORE_MULTIPLIER
+from utils.query_helpers import QueryClassBase
+from utils.metrics import SHAME_SCORE_PRECISION, SHAME_SCORE_MULTIPLIER
 
 # Feature flag for 7-day hybrid denominator (allows instant rollback)
 import os
@@ -385,7 +385,7 @@ class ShameScoreCalculator(QueryClassBase):
             List of dicts with hourly breakdown data
         """
         # Import here to avoid circular dependency
-        from src.utils.timezone import get_pacific_day_range_utc
+        from utils.timezone import get_pacific_day_range_utc
 
         start_utc, end_utc = get_pacific_day_range_utc(target_date)
 

@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, case, and_, desc
 
-from src.models import RideStatusChange, Ride, Park
-from src.utils.logger import logger, log_database_error
+from models import RideStatusChange, Ride, Park
+from utils.logger import logger, log_database_error
 
 
 def _to_dict(obj) -> Dict[str, Any]:

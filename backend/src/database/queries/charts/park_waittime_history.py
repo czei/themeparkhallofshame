@@ -37,7 +37,7 @@ from utils.timezone import get_pacific_day_range_utc
 from utils.sql_helpers import timestamp_match_condition
 
 # ORM models for query conversion
-from src.models import Park, Ride, ParkActivitySnapshot, RideStatusSnapshot
+from models import Park, Ride, ParkActivitySnapshot, RideStatusSnapshot
 
 
 class ParkWaitTimeHistoryQuery:

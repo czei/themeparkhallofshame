@@ -24,6 +24,7 @@ sys.path.insert(0, str(backend_src.absolute()))
 
 from api.app import create_app
 from utils.timezone import get_last_week_date_range, get_last_month_date_range
+from models.orm_stats import RideHourlyStats
 
 # Define a fixed point in time for all tests - 8 PM Pacific (4 AM UTC next day)
 # This ensures "today" has plenty of hours (8 AM to 8 PM Pacific = 12 hours)
@@ -638,7 +639,7 @@ def comprehensive_test_data(mysql_session):
                 'park_open': True
             })
 
-        # Create ride_hourly_stats for each ride (100 total: rides 1-100)
+        # Create ride_hourly_stats for each ride (100 total: rides 1-100) using ORM
         # Each park has 10 rides: 2 Tier 1, 5 Tier 2, 3 Tier 3
         for r_id in range(1, 101):
             # Determine tier based on ride position within park (0-indexed within park)
@@ -659,27 +660,23 @@ def comprehensive_test_data(mysql_session):
                 down_snaps = 0
                 op_snaps = 6
 
-            conn.execute(text("""
-                INSERT INTO ride_hourly_stats (
-                    ride_id, hour_start_utc, avg_wait_time_minutes,
-                    operating_snapshots, down_snapshots, downtime_hours,
-                    uptime_percentage, snapshot_count, ride_operated
-                ) VALUES (
-                    :ride_id, :hour_start, :avg_wait,
-                    :op_snaps, :down_snaps, :downtime,
-                    :uptime, :snapshots, :operated
-                )
-            """), {
-                'ride_id': r_id,
-                'hour_start': hour_utc,
-                'avg_wait': 30.0 + tier * 5,
-                'op_snaps': op_snaps,
-                'down_snaps': down_snaps,
-                'downtime': ride_downtime,
-                'uptime': 100 - (down_snaps * 100.0 / 6),
-                'snapshots': 6,
-                'operated': True
-            })
+            # Calculate park_id from ride_id (rides 1-10 in park 1, 11-20 in park 2, etc.)
+            park_id_for_ride = ((r_id - 1) // 10) + 1
+
+            # Use ORM model instead of raw SQL
+            ride_hourly_stat = RideHourlyStats(
+                ride_id=r_id,
+                park_id=park_id_for_ride,
+                hour_start_utc=hour_utc,
+                avg_wait_time_minutes=30.0 + tier * 5,
+                operating_snapshots=op_snaps,
+                down_snapshots=down_snaps,
+                downtime_hours=ride_downtime,
+                uptime_percentage=100 - (down_snaps * 100.0 / 6),
+                snapshot_count=6,
+                ride_operated=True
+            )
+            conn.add(ride_hourly_stat)
 
         hour_utc = hour_utc + timedelta(hours=1)
         hours_created += 1

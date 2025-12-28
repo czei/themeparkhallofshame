@@ -35,10 +35,10 @@ from typing import List, Dict, Any
 from sqlalchemy import select, func, and_, or_, literal_column
 from sqlalchemy.orm import Session
 
-from src.models.orm_park import Park
-from src.models.orm_stats import ParkHourlyStats
-from src.utils.query_helpers import QueryClassBase
-from src.utils.timezone import get_today_pacific, get_pacific_day_range_utc
+from models.orm_park import Park
+from models.orm_stats import ParkHourlyStats
+from utils.query_helpers import QueryClassBase
+from utils.timezone import get_today_pacific, get_pacific_day_range_utc
 
 
 class TodayParkRankingsQuery(QueryClassBase):

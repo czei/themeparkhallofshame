@@ -11,8 +11,8 @@ from enum import Enum
 from dataclasses import dataclass
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from src.utils.config import MAX_RETRY_ATTEMPTS, RETRY_BACKOFF_MULTIPLIER
-from src.utils.logger import logger
+from utils.config import MAX_RETRY_ATTEMPTS, RETRY_BACKOFF_MULTIPLIER
+from utils.logger import logger
 
 
 # ThemeParks.wiki API base URL

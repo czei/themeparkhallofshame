@@ -7,13 +7,13 @@ from sqlalchemy import pool
 from alembic import context
 
 # Import ORM Base and all model modules
-from src.models.base import Base
+from models.base import Base
 # Import all ORM models to register them with Base.metadata
-from src.models import orm_park
-from src.models import orm_ride
-from src.models import orm_snapshots
-from src.models import orm_stats
-from src.models import orm_weather
+from models import orm_park
+from models import orm_ride
+from models import orm_snapshots
+from models import orm_stats
+from models import orm_weather
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

@@ -25,10 +25,10 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case, and_, or_, distinct
 
-from src.models.orm_park import Park
-from src.models.orm_ride import Ride
-from src.models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
-from src.models.orm_stats import RideDailyStats, ParkDailyStats, RideHourlyStats, ParkHourlyStats
+from models.orm_park import Park
+from models.orm_ride import Ride
+from models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
+from models.orm_stats import RideDailyStats, ParkDailyStats, RideHourlyStats, ParkHourlyStats
 from utils.timezone import get_pacific_day_range_utc
 from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
 

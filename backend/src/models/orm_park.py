@@ -5,7 +5,7 @@ Represents theme park master data.
 
 from sqlalchemy import String, Boolean, Float, DateTime, func, Enum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from src.models.base import Base
+from models.base import Base
 from datetime import datetime
 from typing import List, Optional
 
@@ -131,7 +131,7 @@ class Park(Base):
             True if park appears open at the given timestamp
         """
         from sqlalchemy.orm import Session, object_session
-        from src.models.orm_snapshots import ParkActivitySnapshot
+        from models.orm_snapshots import ParkActivitySnapshot
 
         session = session or object_session(self)
         if session is None:

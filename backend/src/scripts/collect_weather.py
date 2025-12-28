@@ -143,7 +143,7 @@ class WeatherCollector:
             List of park dictionaries with park_id, latitude, longitude
         """
         from sqlalchemy import select
-        from src.models import Park
+        from models import Park
 
         stmt = (
             select(Park.park_id, Park.latitude, Park.longitude, Park.name)

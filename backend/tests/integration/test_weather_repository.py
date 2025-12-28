@@ -24,7 +24,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import text
 
-from src.database.repositories.weather_repository import (
+from database.repositories.weather_repository import (
     WeatherObservationRepository,
     WeatherForecastRepository
 )

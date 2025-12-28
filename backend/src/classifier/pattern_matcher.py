@@ -7,7 +7,7 @@ import re
 from typing import Optional, Tuple
 from dataclasses import dataclass
 
-from src.utils.logger import logger
+from utils.logger import logger
 
 
 @dataclass

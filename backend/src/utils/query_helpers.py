@@ -17,9 +17,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql import Select
 
 # Import ORM models from the project
-from src.models.orm_ride import Ride
-from src.models.orm_park import Park
-from src.models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
+from models.orm_ride import Ride
+from models.orm_park import Park
+from models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
 
 
 class RideHourlyMetrics(NamedTuple):
@@ -34,6 +34,8 @@ class RideHourlyMetrics(NamedTuple):
     snapshot_count: int
     downtime_hours: float
     ride_operated: bool
+    operating_snapshots: int  # Number of snapshots where ride was OPERATING
+    down_snapshots: int  # Number of snapshots where ride was DOWN
 
 
 class RideStatusExpressions:
@@ -625,7 +627,9 @@ class HourlyAggregationQuery:
                     uptime_percentage=uptime_pct,
                     snapshot_count=total_count,
                     downtime_hours=downtime_hours,
-                    ride_operated=ride_operated
+                    ride_operated=ride_operated,
+                    operating_snapshots=operating_count,
+                    down_snapshots=down_count
                 ))
 
         return results

@@ -35,8 +35,8 @@ from typing import List, Dict, Any
 from sqlalchemy import select, func, and_, or_, case, literal_column
 from sqlalchemy.orm import Session, aliased
 
-from src.models import Park, Ride, RideClassification, RideStatusSnapshot, ParkActivitySnapshot
-from src.utils.query_helpers import QueryClassBase, TimeIntervalHelper
+from models import Park, Ride, RideClassification, RideStatusSnapshot, ParkActivitySnapshot
+from utils.query_helpers import QueryClassBase, TimeIntervalHelper
 from utils.timezone import get_today_pacific, get_pacific_day_range_utc
 
 

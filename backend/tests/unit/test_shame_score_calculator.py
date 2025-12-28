@@ -25,7 +25,7 @@ class TestShameScoreCalculatorInterface:
         ShameScoreCalculator should accept a db_session in constructor.
         This enables unit testing with mock sessions.
         """
-        from src.database.calculators.shame_score import ShameScoreCalculator
+        from database.calculators.shame_score import ShameScoreCalculator
 
         mock_session = MagicMock()
         calc = ShameScoreCalculator(mock_session)
@@ -37,7 +37,7 @@ class TestShameScoreCalculatorInterface:
         get_average() should return Optional[float].
         Returns None when no data exists.
         """
-        from src.database.calculators.shame_score import ShameScoreCalculator
+        from database.calculators.shame_score import ShameScoreCalculator
 
         mock_session = MagicMock()
         calc = ShameScoreCalculator(mock_session)
@@ -50,7 +50,7 @@ class TestShameScoreCalculatorInterface:
         get_instantaneous() should return Optional[float].
         Returns None when no data exists.
         """
-        from src.database.calculators.shame_score import ShameScoreCalculator
+        from database.calculators.shame_score import ShameScoreCalculator
 
         mock_session = MagicMock()
         calc = ShameScoreCalculator(mock_session)
@@ -62,7 +62,7 @@ class TestShameScoreCalculatorInterface:
         get_hourly_breakdown() should return List[Dict].
         Each dict contains: hour, shame_score, down_minutes, total_rides
         """
-        from src.database.calculators.shame_score import ShameScoreCalculator
+        from database.calculators.shame_score import ShameScoreCalculator
 
         mock_session = MagicMock()
         calc = ShameScoreCalculator(mock_session)
@@ -80,7 +80,7 @@ class TestShameScoreCalculatorEdgeCases:
 
         This distinguishes "no data" from "zero downtime".
         """
-        from src.database.calculators.shame_score import ShameScoreCalculator
+        from database.calculators.shame_score import ShameScoreCalculator
 
         mock_session = MagicMock()
         # Simulate empty result set
@@ -103,7 +103,7 @@ class TestShameScoreCalculatorEdgeCases:
         A park with zero scorable attractions should return None.
         This avoids division by zero errors.
         """
-        from src.database.calculators.shame_score import ShameScoreCalculator
+        from database.calculators.shame_score import ShameScoreCalculator
 
         mock_session = MagicMock()
         # Simulate park with total_park_weight = 0 (SQL returns NULL as avg_shame_score)
@@ -128,7 +128,7 @@ class TestShameScoreCalculatorEdgeCases:
         When park_appears_open was never TRUE for the time range,
         get_average() should return None.
         """
-        from src.database.calculators.shame_score import ShameScoreCalculator
+        from database.calculators.shame_score import ShameScoreCalculator
 
         mock_session = MagicMock()
         # Simulate no snapshots where park was open
@@ -223,7 +223,7 @@ class TestShameScoreCalculatorHourlyBreakdown:
         get_hourly_breakdown() should return data for all hours
         when the park was operating, typically 6am-11pm (hours 6-23).
         """
-        from src.database.calculators.shame_score import ShameScoreCalculator
+        from database.calculators.shame_score import ShameScoreCalculator
 
         mock_session = MagicMock()
         calc = ShameScoreCalculator(mock_session)

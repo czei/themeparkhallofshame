@@ -20,7 +20,7 @@ def _get_engine():
 
     Lazy import to avoid circular dependencies during module initialization.
     """
-    from src.database.connection import db
+    from database.connection import db
     return db.get_engine()
 
 

@@ -46,7 +46,7 @@ from database.connection import get_db_session
 from sqlalchemy import select, func, case, and_
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 
-from src.models import (
+from models import (
     Ride, RideStatusSnapshot, ParkActivitySnapshot,
     RideDailyStats, ParkDailyStats, RideStatusChange
 )

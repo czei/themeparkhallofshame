@@ -32,9 +32,9 @@ from typing import List, Dict, Any
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import Session
 
-from src.models.orm_park import Park
-from src.models.orm_stats import ParkDailyStats
-from src.utils.query_helpers import QueryClassBase
+from models.orm_park import Park
+from models.orm_stats import ParkDailyStats
+from utils.query_helpers import QueryClassBase
 from utils.timezone import get_last_week_date_range, get_last_month_date_range
 
 

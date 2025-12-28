@@ -15,12 +15,12 @@ from sqlalchemy.engine import Engine, Connection, URL
 from sqlalchemy.orm import Session
 from typing import Generator
 
-from src.utils.config import (
+from utils.config import (
     DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD,
     DB_POOL_SIZE, DB_POOL_MAX_OVERFLOW, DB_POOL_RECYCLE, DB_POOL_PRE_PING,
     config
 )
-from src.utils.logger import logger, log_database_error
+from utils.logger import logger, log_database_error
 
 
 class DatabaseConnection:
@@ -199,7 +199,7 @@ def get_db_session() -> Generator[Session, None, None]:
         ...     ride = repo.get_by_id(1)
         ...     print(ride.name)
     """
-    from src.models.base import db_session
+    from models.base import db_session
 
     # Get a real Session from the scoped_session factory
     session = db_session()
@@ -240,5 +240,5 @@ def create_db_session() -> Session:
         ... finally:
         ...     session.close()
     """
-    from src.models.base import create_session
+    from models.base import create_session
     return create_session()

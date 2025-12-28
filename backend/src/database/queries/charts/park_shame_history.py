@@ -47,13 +47,13 @@ from utils.sql_helpers import ParkStatusSQL
 from utils.metrics import USE_HOURLY_TABLES
 
 # ORM models for query conversion
-from src.models import (
+from models import (
     Park, Ride, RideClassification,
     ParkActivitySnapshot, ParkHourlyStats,
     RideDailyStats
 )
-from src.models.orm_stats import ParkHourlyStats as ParkHourlyStatsORM
-from src.models.orm_schedule import ParkSchedule
+from models.orm_stats import ParkHourlyStats as ParkHourlyStatsORM
+from models.orm_schedule import ParkSchedule
 
 
 class ParkShameHistoryQuery:
@@ -383,9 +383,10 @@ class ParkShameHistoryQuery:
 
         # Build data by hour for all metrics
         # Convert Decimal to float for JSON serialization
-        shame_by_hour = {row["hour"]: row["shame_score"] for row in hourly_data}
-        rides_down_by_hour = {row["hour"]: row.get("rides_down") for row in hourly_data}
-        avg_wait_by_hour = {row["hour"]: row.get("avg_wait_time_minutes") for row in hourly_data}
+        # Filter out rows with None hour values (can happen with raw data queries)
+        shame_by_hour = {row["hour"]: row["shame_score"] for row in hourly_data if row["hour"] is not None}
+        rides_down_by_hour = {row["hour"]: row.get("rides_down") for row in hourly_data if row["hour"] is not None}
+        avg_wait_by_hour = {row["hour"]: row.get("avg_wait_time_minutes") for row in hourly_data if row["hour"] is not None}
 
         # Get the hours that have data, in order
         hours_with_data = sorted(shame_by_hour.keys())

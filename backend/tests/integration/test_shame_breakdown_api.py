@@ -34,11 +34,11 @@ class TestShameBreakdownResponseStructure:
         - Filter by tier (tier1Rides, tier2Rides, tier3Rides)
         - Display ride names and downtime hours
         """
-        from src.models.orm_park import Park
-        from src.models.orm_ride import Ride
-        from src.models.orm_stats import ParkDailyStats, RideDailyStats
-        from src.models.orm_classification import RideClassification
-        from src.database.repositories.stats_repository import StatsRepository
+        from models.orm_park import Park
+        from models.orm_ride import Ride
+        from models.orm_stats import ParkDailyStats, RideDailyStats
+        from models.orm_classification import RideClassification
+        from database.repositories.stats_repository import StatsRepository
         from utils.timezone import get_yesterday_date_range
 
         # Create test park
@@ -119,9 +119,9 @@ class TestShameBreakdownResponseStructure:
 
         Frontend uses .toFixed() on these fields, which requires numbers.
         """
-        from src.models.orm_park import Park
-        from src.models.orm_stats import ParkDailyStats
-        from src.database.repositories.stats_repository import StatsRepository
+        from models.orm_park import Park
+        from models.orm_stats import ParkDailyStats
+        from database.repositories.stats_repository import StatsRepository
         from utils.timezone import get_yesterday_date_range
 
         # Create minimal test data
@@ -167,11 +167,11 @@ class TestShameBreakdownResponseStructure:
         """
         Verify last_week breakdown returns 'rides' array, not just stats.
         """
-        from src.models.orm_park import Park
-        from src.models.orm_ride import Ride
-        from src.models.orm_stats import ParkDailyStats, RideDailyStats
-        from src.models.orm_classification import RideClassification
-        from src.database.repositories.stats_repository import StatsRepository
+        from models.orm_park import Park
+        from models.orm_ride import Ride
+        from models.orm_stats import ParkDailyStats, RideDailyStats
+        from models.orm_classification import RideClassification
+        from database.repositories.stats_repository import StatsRepository
         from utils.timezone import get_last_week_date_range
 
         # Create test park and ride
@@ -251,11 +251,11 @@ class TestTierClassification:
         The rides.tier column is often NULL; actual tier data is in
         ride_classifications table.
         """
-        from src.models.orm_park import Park
-        from src.models.orm_ride import Ride
-        from src.models.orm_stats import ParkDailyStats, RideDailyStats
-        from src.models.orm_classification import RideClassification
-        from src.database.repositories.stats_repository import StatsRepository
+        from models.orm_park import Park
+        from models.orm_ride import Ride
+        from models.orm_stats import ParkDailyStats, RideDailyStats
+        from models.orm_classification import RideClassification
+        from database.repositories.stats_repository import StatsRepository
         from utils.timezone import get_yesterday_date_range
 
         # Create park

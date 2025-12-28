@@ -27,7 +27,7 @@ class TestAggregationScriptErrorHandling:
         Expected behavior: Exception handler should check if log_id exists
         before trying to mark aggregation as failed.
         """
-        from src.scripts.aggregate_daily import DailyAggregator
+        from scripts.aggregate_daily import DailyAggregator
 
         aggregator = DailyAggregator(target_date=date(2025, 12, 25))
 
@@ -71,7 +71,7 @@ class TestAggregationScriptErrorHandling:
         """
         Verify that when log_id IS set, the exception handler marks it as failed.
         """
-        from src.scripts.aggregate_daily import DailyAggregator
+        from scripts.aggregate_daily import DailyAggregator
 
         aggregator = DailyAggregator(target_date=date(2025, 12, 25))
 
@@ -103,7 +103,7 @@ class TestAggregationScriptCompletesSuccessfully:
 
         This prevents the "completed_at cannot be null" error.
         """
-        from src.scripts.aggregate_daily import DailyAggregator
+        from scripts.aggregate_daily import DailyAggregator
 
         aggregator = DailyAggregator(target_date=date(2025, 12, 25))
 
@@ -135,7 +135,7 @@ class TestShameScoreCalculation:
         it uses default tier_weight=2 for all rides instead of actual weights.
         """
         # This test validates the SQL in _aggregate_park includes the join
-        from src.scripts.aggregate_daily import DailyAggregator
+        from scripts.aggregate_daily import DailyAggregator
         import inspect
 
         # Get the source code of _aggregate_park
@@ -157,14 +157,14 @@ class TestShameScoreCalculation:
 
         This test ensures we don't have formula drift between calculation locations.
         """
-        from src.utils.metrics import SHAME_SCORE_MULTIPLIER
+        from utils.metrics import SHAME_SCORE_MULTIPLIER
 
         # The multiplier should be 10
         assert SHAME_SCORE_MULTIPLIER == 10, \
             "SHAME_SCORE_MULTIPLIER should be 10 for 0-10 scale"
 
         # Check that aggregate_daily uses the same multiplier
-        from src.scripts.aggregate_daily import DailyAggregator
+        from scripts.aggregate_daily import DailyAggregator
         import inspect
 
         source = inspect.getsource(DailyAggregator._aggregate_park)

@@ -21,7 +21,7 @@ from utils.metrics import (
 from processor.operating_hours_detector import OperatingHoursDetector
 from processor.status_change_detector import StatusChangeDetector
 
-from src.models import (
+from models import (
     Park, Ride, RideClassification,
     RideStatusSnapshot, ParkActivitySnapshot,
     RideDailyStats, ParkDailyStats,

@@ -34,11 +34,11 @@ from typing import List, Dict, Any
 from sqlalchemy import select, func, and_, or_, case
 from sqlalchemy.orm import Session
 
-from src.models.orm_ride import Ride
-from src.models.orm_park import Park
-from src.models.orm_stats import RideDailyStats
-from src.utils.query_helpers import QueryClassBase
-from src.utils.timezone import get_yesterday_date_range
+from models.orm_ride import Ride
+from models.orm_park import Park
+from models.orm_stats import RideDailyStats
+from utils.query_helpers import QueryClassBase
+from utils.timezone import get_yesterday_date_range
 
 
 class YesterdayRideRankingsQuery(QueryClassBase):

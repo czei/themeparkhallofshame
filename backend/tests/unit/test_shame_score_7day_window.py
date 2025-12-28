@@ -84,7 +84,7 @@ class TestShameScoreCalculatorEffectiveWeight:
         FAILING TEST: ShameScoreCalculator should have a get_effective_park_weight()
         method that returns the denominator for shame score calculations.
         """
-        from src.database.calculators.shame_score import ShameScoreCalculator
+        from database.calculators.shame_score import ShameScoreCalculator
 
         mock_db = MagicMock()
         calc = ShameScoreCalculator(mock_db)
@@ -98,7 +98,7 @@ class TestShameScoreCalculatorEffectiveWeight:
         """
         FAILING TEST: get_effective_park_weight() should accept a park_id parameter.
         """
-        from src.database.calculators.shame_score import ShameScoreCalculator
+        from database.calculators.shame_score import ShameScoreCalculator
 
         mock_db = MagicMock()
         # Set up mock to return a result
@@ -122,7 +122,7 @@ class TestShameScoreCalculatorEffectiveWeight:
 
         This is a CRITICAL fix from Zen review - division by zero protection.
         """
-        from src.database.calculators.shame_score import ShameScoreCalculator
+        from database.calculators.shame_score import ShameScoreCalculator
 
         mock_db = MagicMock()
         # Simulate empty result (no rides operated)
@@ -153,7 +153,7 @@ class TestShameScoreZeroDenominator:
         When effective_park_weight = 0 (seasonal closure, no eligible rides),
         the method should return 0.0, not raise ZeroDivisionError.
         """
-        from src.database.calculators.shame_score import ShameScoreCalculator
+        from database.calculators.shame_score import ShameScoreCalculator
 
         mock_db = MagicMock()
         calc = ShameScoreCalculator(mock_db)
@@ -173,7 +173,7 @@ class TestShameScoreZeroDenominator:
         FAILING TEST: calculate_shame_score() should correctly compute shame
         when given valid inputs.
         """
-        from src.database.calculators.shame_score import ShameScoreCalculator
+        from database.calculators.shame_score import ShameScoreCalculator
 
         mock_db = MagicMock()
         calc = ShameScoreCalculator(mock_db)
@@ -282,7 +282,7 @@ class TestEdgeCases:
 
         This is a sanity check - we can only exclude rides, not add them.
         """
-        from src.database.calculators.shame_score import ShameScoreCalculator
+        from database.calculators.shame_score import ShameScoreCalculator
 
         mock_db = MagicMock()
         calc = ShameScoreCalculator(mock_db)

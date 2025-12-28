@@ -130,6 +130,54 @@ def _status_from_uptime(uptime):
         return "CLOSED"
 
 
+def _status_from_hourly_metrics(operating_snapshots, down_snapshots, snapshot_count):
+    """
+    Compute ride status from hourly snapshot counts using predominant status.
+
+    For Disney/Universal parks that distinguish DOWN from CLOSED, this function
+    determines the hourly status by looking at which status was most common
+    during the hour, rather than just deriving it from uptime percentage.
+
+    Args:
+        operating_snapshots: Number of snapshots where ride was OPERATING (or None)
+        down_snapshots: Number of snapshots where ride was DOWN (or None)
+        snapshot_count: Total number of snapshots in the hour
+
+    Returns:
+        str: Status code - "OPERATING", "DOWN", or "CLOSED"
+
+    Logic:
+        1. Compute closed_snapshots = total - operating - down
+        2. If operating >= both down and closed: "OPERATING"
+        3. If down >= closed (tie goes to DOWN as more severe): "DOWN"
+        4. Otherwise: "CLOSED"
+    """
+    # Handle None/missing values
+    operating = operating_snapshots or 0
+    down = down_snapshots or 0
+    total = snapshot_count or 0
+
+    # No data case
+    if total == 0:
+        return "CLOSED"
+
+    # Compute closed snapshots (not explicitly stored)
+    closed = total - operating - down
+
+    # Predominant status wins
+    # OPERATING if it's the most common status
+    if operating > 0 and operating >= down and operating >= closed:
+        return "OPERATING"
+
+    # DOWN beats CLOSED when they're equal (DOWN is more concerning)
+    # DOWN also wins when down > closed
+    if down >= closed and down > 0:
+        return "DOWN"
+
+    # Otherwise CLOSED (scheduled closure or park closed)
+    return "CLOSED"
+
+
 def _validate_ride_params(ride_id, start_date, end_date):
     """
     Validate ride query parameters.
@@ -778,6 +826,8 @@ def _get_ride_timeseries(ride_id, start_date, end_date, period):
                 "wait_values": [],
                 "uptime_values": [],
                 "snapshot_count": 0,
+                "operating_snapshots": 0,
+                "down_snapshots": 0,
             })
 
             # AVG(avg_wait_time_minutes) ignores NULLs
@@ -791,6 +841,10 @@ def _get_ride_timeseries(ride_id, start_date, end_date, period):
             # SUM(snapshot_count)
             bucket["snapshot_count"] += int(m.snapshot_count or 0)
 
+            # SUM(operating_snapshots) and SUM(down_snapshots)
+            bucket["operating_snapshots"] += int(m.operating_snapshots or 0)
+            bucket["down_snapshots"] += int(m.down_snapshots or 0)
+
         timeseries = []
         for day in sorted(daily.keys()):  # SQL orders ORDER BY date ASC
             b = daily[day]
@@ -798,8 +852,12 @@ def _get_ride_timeseries(ride_id, start_date, end_date, period):
             avg_wait = (sum(b["wait_values"]) / len(b["wait_values"])) if b["wait_values"] else None
             avg_uptime = (sum(b["uptime_values"]) / len(b["uptime_values"])) if b["uptime_values"] else None
 
-            # Compute status from uptime percentage
-            status = _status_from_uptime(avg_uptime)
+            # Use predominant status from snapshot counts
+            status = _status_from_hourly_metrics(
+                b["operating_snapshots"],
+                b["down_snapshots"],
+                b["snapshot_count"]
+            )
 
             timeseries.append({
                 "date": day.strftime('%Y-%m-%d'),
@@ -814,7 +872,13 @@ def _get_ride_timeseries(ride_id, start_date, end_date, period):
     # Hourly series for today/yesterday (ORDER BY hour_start_utc ASC)
     timeseries = []
     for m in sorted(metrics, key=lambda x: x.hour_start_utc):
-        status = _status_from_uptime(m.uptime_percentage)
+        # Use predominant status from snapshot counts instead of deriving from uptime
+        # This correctly shows DOWN vs CLOSED for Disney/Universal parks
+        status = _status_from_hourly_metrics(
+            m.operating_snapshots,
+            m.down_snapshots,
+            m.snapshot_count
+        )
 
         timeseries.append({
             "hour_start_utc": m.hour_start_utc,

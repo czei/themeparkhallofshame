@@ -5,7 +5,7 @@ Represents theme park ride/attraction data.
 
 from sqlalchemy import String, Boolean, Integer, ForeignKey, DateTime, Enum, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from src.models.base import Base
+from models.base import Base
 from datetime import datetime
 from typing import List, Optional
 
@@ -124,7 +124,7 @@ class Ride(Base):
             RideStatusSnapshot instance or None if no snapshots exist
         """
         from sqlalchemy.orm import Session, object_session
-        from src.models.orm_snapshots import RideStatusSnapshot
+        from models.orm_snapshots import RideStatusSnapshot
 
         session = session or object_session(self)
         if session is None:
@@ -152,7 +152,7 @@ class Ride(Base):
             Uptime percentage (0.0 to 100.0)
         """
         from sqlalchemy.orm import Session, object_session
-        from src.models.orm_snapshots import RideStatusSnapshot
+        from models.orm_snapshots import RideStatusSnapshot
         from sqlalchemy import func, case
 
         session = session or object_session(self)

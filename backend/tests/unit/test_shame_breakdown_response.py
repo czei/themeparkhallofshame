@@ -30,7 +30,7 @@ class TestShameBreakdownResponseStructure:
         - total_park_weight: float
         - rides_affected_count: int
         """
-        from src.database.repositories.stats_repository import StatsRepository
+        from database.repositories.stats_repository import StatsRepository
 
         # Create mock session and stats
         mock_session = MagicMock()
@@ -79,7 +79,7 @@ class TestShameBreakdownResponseStructure:
         """
         Verify breakdown returns sensible defaults when no stats exist.
         """
-        from src.database.repositories.stats_repository import StatsRepository
+        from database.repositories.stats_repository import StatsRepository
 
         mock_session = MagicMock()
         mock_query = MagicMock()
@@ -114,7 +114,7 @@ class TestRidesArrayNotCount:
         If 'rides' is an integer, .filter() will throw:
             "rides.filter is not a function"
         """
-        from src.database.repositories.stats_repository import StatsRepository
+        from database.repositories.stats_repository import StatsRepository
 
         mock_session = MagicMock()
         mock_daily_stat = MagicMock()
@@ -158,7 +158,7 @@ class TestNumericFieldTypes:
         Frontend uses .toFixed() on weighted_contribution.
         If it's a string, we get: "weighted_contribution.toFixed is not a function"
         """
-        from src.database.repositories.stats_repository import StatsRepository
+        from database.repositories.stats_repository import StatsRepository
 
         mock_session = MagicMock()
 
@@ -201,7 +201,7 @@ class TestTierFromClassification:
         The rides.tier column is often NULL. The actual tier classification
         is stored in ride_classifications table.
         """
-        from src.database.repositories.stats_repository import StatsRepository
+        from database.repositories.stats_repository import StatsRepository
 
         mock_session = MagicMock()
 

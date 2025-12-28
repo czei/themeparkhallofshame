@@ -59,7 +59,7 @@ from database.repositories.aggregation_repository import AggregationLogRepositor
 from database.connection import get_db_session
 from sqlalchemy import text, select, func, distinct, and_, or_
 from sqlalchemy.dialects.mysql import insert as mysql_insert
-from src.models import (
+from models import (
     Park, Ride,
     RideStatusSnapshot, ParkActivitySnapshot,
     ParkHourlyStats,

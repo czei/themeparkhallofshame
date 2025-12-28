@@ -20,8 +20,8 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import select, and_, func
 
-from src.models.orm_weather import WeatherObservation, WeatherForecast
-from src.models.orm_park import Park
+from models.orm_weather import WeatherObservation, WeatherForecast
+from models.orm_park import Park
 
 # Configure structured logging
 logger = logging.getLogger(__name__)

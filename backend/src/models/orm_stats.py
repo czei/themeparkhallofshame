@@ -5,7 +5,7 @@ RideDailyStats, ParkDailyStats, and ParkWeeklyStats aggregated statistics.
 
 from sqlalchemy import Integer, ForeignKey, Date, Numeric, DateTime, Index, UniqueConstraint, func, String, Boolean, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from src.models.base import Base
+from models.base import Base
 from datetime import date, datetime
 from typing import Optional
 from decimal import Decimal
@@ -416,11 +416,16 @@ class RideHourlyStats(Base):
     __tablename__ = "ride_hourly_stats"
 
     # Primary Key (matches actual table column name)
-    hourly_stat_id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
 
-    # Foreign Keys (no park_id in table - rides already has park_id relationship)
+    # Foreign Keys
     ride_id: Mapped[int] = mapped_column(
         ForeignKey("rides.ride_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    park_id: Mapped[int] = mapped_column(
+        ForeignKey("parks.park_id", ondelete="CASCADE"),
         nullable=False,
         index=True
     )
@@ -497,11 +502,12 @@ class RideHourlyStats(Base):
         {'extend_existing': True}
     )
 
-    # Relationships (no direct park relationship - use ride.park instead)
+    # Relationships
     ride: Mapped["Ride"] = relationship("Ride")
+    park: Mapped["Park"] = relationship("Park")
 
     def __repr__(self) -> str:
-        return f"<RideHourlyStats(hourly_stat_id={self.hourly_stat_id}, ride_id={self.ride_id}, hour={self.hour_start_utc}, downtime={self.downtime_hours})>"
+        return f"<RideHourlyStats(id={self.id}, ride_id={self.ride_id}, park_id={self.park_id}, hour={self.hour_start_utc}, downtime={self.downtime_hours})>"
 
 
 class RideWeeklyStats(Base):

@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, update, and_, or_
 
-from src.models import DataQualityIssue, Park, Ride
-from src.utils.logger import logger, log_database_error
+from models import DataQualityIssue, Park, Ride
+from utils.logger import logger, log_database_error
 
 
 class DataQualityRepository:

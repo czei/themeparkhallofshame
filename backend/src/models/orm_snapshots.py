@@ -6,7 +6,7 @@ RideStatusSnapshot and ParkActivitySnapshot for time-series data.
 from sqlalchemy import String, Boolean, Integer, ForeignKey, DateTime, Float, Index, Enum, or_, BigInteger, Numeric, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.ext.hybrid import hybrid_method, hybrid_property
-from src.models.base import Base
+from models.base import Base
 from datetime import datetime
 from typing import Optional
 from decimal import Decimal

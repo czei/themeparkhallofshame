@@ -5,7 +5,7 @@ Represents theme park operating schedule data.
 
 from sqlalchemy import String, Date, DateTime, Integer, ForeignKey, UniqueConstraint, func, Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from src.models.base import Base
+from models.base import Base
 from datetime import datetime, date
 from typing import Optional
 

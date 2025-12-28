@@ -37,7 +37,7 @@ from database.connection import get_db_session
 from sqlalchemy import select, func, case, and_
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 
-from src.models import (
+from models import (
     Ride, RideStatusSnapshot, ParkActivitySnapshot,
     RideDailyStats, ParkDailyStats, RideStatusChange
 )
@@ -523,7 +523,7 @@ class DailyAggregator:
 
         # Aggregation query
         # Join with ride_classifications for tier weights (shame_score calculation)
-        from src.models import RideClassification
+        from models import RideClassification
         rc = RideClassification.__table__.alias('rc')
 
         # Calculate weighted downtime and effective park weight for shame_score

@@ -27,11 +27,11 @@ from datetime import timedelta
 from sqlalchemy import select, func, and_, or_, literal_column, case, desc, asc
 from sqlalchemy.orm import Session
 
-from src.models.orm_park import Park
-from src.models.orm_stats import ParkHourlyStats
-from src.models.orm_snapshots import ParkActivitySnapshot
-from src.utils.timezone import get_today_pacific, get_pacific_day_range_utc
-from src.utils.query_helpers import QueryClassBase
+from models.orm_park import Park
+from models.orm_stats import ParkHourlyStats
+from models.orm_snapshots import ParkActivitySnapshot
+from utils.timezone import get_today_pacific, get_pacific_day_range_utc
+from utils.query_helpers import QueryClassBase
 
 
 class YesterdayParkRankingsQuery(QueryClassBase):

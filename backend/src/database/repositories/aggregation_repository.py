@@ -8,8 +8,8 @@ from datetime import date, datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
-from src.models import AggregationLog, AggregationType, AggregationStatus
-from src.utils.logger import logger, log_database_error
+from models import AggregationLog, AggregationType, AggregationStatus
+from utils.logger import logger, log_database_error
 
 
 class AggregationLogRepository:

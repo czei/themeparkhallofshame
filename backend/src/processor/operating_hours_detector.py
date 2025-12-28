@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 from utils.logger import logger
-from src.models import Park, Ride, RideStatusSnapshot, ParkOperatingSession
+from models import Park, Ride, RideStatusSnapshot, ParkOperatingSession
 
 
 class OperatingHoursDetector:

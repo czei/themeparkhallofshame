@@ -18,9 +18,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, func, delete
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 
-from src.models import ParkSchedule, Park
-from src.collector.themeparks_wiki_client import get_themeparks_wiki_client
-from src.utils.logger import logger, log_database_error
+from models import ParkSchedule, Park
+from collector.themeparks_wiki_client import get_themeparks_wiki_client
+from utils.logger import logger, log_database_error
 
 
 class ScheduleRepository:

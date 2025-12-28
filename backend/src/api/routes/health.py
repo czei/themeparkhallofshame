@@ -11,6 +11,7 @@ from sqlalchemy import select, func, case, and_
 
 from database.connection import get_db_session
 from models import RideStatusSnapshot, AggregationLog
+from models.orm_aggregation import AggregationType, AggregationStatus
 from utils.logger import logger
 
 health_bp = Blueprint('health', __name__)
@@ -75,7 +76,7 @@ def health_check():
                     AggregationLog.status,
                     AggregationLog.completed_at
                 )
-                .where(AggregationLog.aggregation_type == 'daily')
+                .where(AggregationLog.aggregation_type == AggregationType.DAILY)
                 .order_by(AggregationLog.aggregation_date.desc(), AggregationLog.completed_at.desc())
                 .limit(1)
             )
@@ -99,12 +100,12 @@ def health_check():
             hourly_health_stmt = (
                 select(
                     func.count().label('total_runs'),
-                    func.sum(case((AggregationLog.status == 'success', 1), else_=0)).label('success_count'),
-                    func.sum(case((AggregationLog.status == 'error', 1), else_=0)).label('error_count'),
+                    func.sum(case((AggregationLog.status == AggregationStatus.SUCCESS, 1), else_=0)).label('success_count'),
+                    func.sum(case((AggregationLog.status == AggregationStatus.FAILED, 1), else_=0)).label('error_count'),
                     func.max(AggregationLog.aggregated_until_ts).label('last_aggregated_until'),
                     func.max(AggregationLog.completed_at).label('last_completed_at')
                 )
-                .where(AggregationLog.aggregation_type == 'hourly')
+                .where(AggregationLog.aggregation_type == AggregationType.HOURLY)
                 .where(AggregationLog.started_at >= func.now() - timedelta(hours=24))
             )
 

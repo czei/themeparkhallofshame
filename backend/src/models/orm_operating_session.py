@@ -5,7 +5,7 @@ Represents daily operating hours for theme parks.
 
 from sqlalchemy import Integer, ForeignKey, Date, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from src.models.base import Base
+from models.base import Base
 from datetime import datetime, date
 from typing import Optional
 

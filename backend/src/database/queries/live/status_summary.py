@@ -38,7 +38,7 @@ from database.schema import (
     park_activity_snapshots,
 )
 from database.queries.builders import Filters, StatusExpressions
-from src.utils.query_helpers import QueryClassBase
+from utils.query_helpers import QueryClassBase
 
 
 class StatusSummaryQuery(QueryClassBase):

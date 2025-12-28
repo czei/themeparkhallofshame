@@ -60,8 +60,8 @@ sys.path.insert(0, str(backend_src.absolute()))
 from utils.logger import logger
 from database.connection import get_db_session
 from sqlalchemy import select, func
-from src.models.orm_stats import ParkHourlyStats
-from src.models.orm_snapshots import ParkActivitySnapshot
+from models.orm_stats import ParkHourlyStats
+from models.orm_snapshots import ParkActivitySnapshot
 
 # Import the HourlyAggregator class from aggregate_hourly
 try:

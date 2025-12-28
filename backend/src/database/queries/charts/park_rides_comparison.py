@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 from utils.timezone import get_pacific_day_range_utc
 
 # ORM models for query conversion
-from src.models import Ride, Park, ParkActivitySnapshot, RideStatusSnapshot, RideClassification, RideDailyStats
+from models import Ride, Park, ParkActivitySnapshot, RideStatusSnapshot, RideClassification, RideDailyStats
 
 
 class ParkRidesComparisonQuery:
@@ -451,9 +451,9 @@ class ParkRidesComparisonQuery:
         1. Only count hours where park_appears_open = TRUE (no fallback heuristic)
         2. Only count downtime AFTER the ride operated anywhere during Pacific day
         """
-        from src.models.base import db_session
-        from src.utils.query_helpers import HourlyAggregationQuery
-        from src.utils.timezone import PACIFIC_TZ, UTC_TZ
+        from models.base import db_session
+        from utils.query_helpers import HourlyAggregationQuery
+        from utils.timezone import PACIFIC_TZ, UTC_TZ
 
         # Debug logging
         import logging

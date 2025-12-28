@@ -39,9 +39,9 @@ from dataclasses import dataclass
 from sqlalchemy import func, and_, case
 from sqlalchemy.orm import Session
 
-from src.models.orm_park import Park
-from src.models.orm_ride import Ride
-from src.models.orm_stats import ParkDailyStats, RideDailyStats
+from models.orm_park import Park
+from models.orm_ride import Ride
+from models.orm_stats import ParkDailyStats, RideDailyStats
 from utils.logger import logger
 
 

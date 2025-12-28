@@ -5,7 +5,7 @@ Tracks data quality issues from external APIs for reporting.
 
 from sqlalchemy import Integer, String, ForeignKey, DateTime, Enum, Boolean, Text, Index, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from src.models.base import Base
+from models.base import Base
 from datetime import datetime
 from typing import Optional
 import enum

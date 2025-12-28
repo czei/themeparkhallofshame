@@ -5,7 +5,7 @@ Tracks aggregation job execution status for safe cleanup operations.
 
 from sqlalchemy import Integer, Date, Enum, DateTime, Text, Index
 from sqlalchemy.orm import Mapped, mapped_column
-from src.models.base import Base
+from models.base import Base
 from datetime import date, datetime
 from typing import Optional
 import enum
@@ -48,7 +48,10 @@ class AggregationLog(Base):
         comment="Date for which aggregation was performed (local date)"
     )
     aggregation_type: Mapped[AggregationType] = mapped_column(
-        Enum(AggregationType),
+        Enum(
+            AggregationType,
+            values_callable=lambda x: [e.value for e in x]
+        ),
         nullable=False
     )
 
@@ -64,7 +67,10 @@ class AggregationLog(Base):
         comment="When aggregation job completed successfully"
     )
     status: Mapped[AggregationStatus] = mapped_column(
-        Enum(AggregationStatus),
+        Enum(
+            AggregationStatus,
+            values_callable=lambda x: [e.value for e in x]
+        ),
         nullable=False,
         default=AggregationStatus.RUNNING
     )

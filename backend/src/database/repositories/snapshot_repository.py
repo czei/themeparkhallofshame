@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import select, and_, func
 
-from src.models import RideStatusSnapshot, ParkActivitySnapshot, Ride, Park
-from src.utils.logger import logger, log_database_error
+from models import RideStatusSnapshot, ParkActivitySnapshot, Ride, Park
+from utils.logger import logger, log_database_error
 
 
 class RideStatusSnapshotRepository:

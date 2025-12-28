@@ -31,7 +31,7 @@ backend_src = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_src.absolute()))
 
 from utils.logger import logger
-from src.models import Ride, RideClassification
+from models import Ride, RideClassification
 from collector.queue_times_client import QueueTimesClient
 from collector.themeparks_wiki_client import get_themeparks_wiki_client
 from collector.status_calculator import computed_is_open, validate_wait_time

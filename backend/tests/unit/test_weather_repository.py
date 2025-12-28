@@ -24,11 +24,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.database.repositories.weather_repository import (
+from database.repositories.weather_repository import (
     WeatherObservationRepository,
     WeatherForecastRepository
 )
-from src.models.orm_weather import WeatherObservation, WeatherForecast
+from models.orm_weather import WeatherObservation, WeatherForecast
 
 
 @pytest.fixture

@@ -42,11 +42,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from utils.timezone import get_today_pacific
-from src.models.orm_park import Park
-from src.models.orm_ride import Ride
-from src.models.orm_classification import RideClassification
-from src.models.orm_stats import RideDailyStats, ParkDailyStats
-from src.models.orm_snapshots import RideStatusSnapshot
+from models.orm_park import Park
+from models.orm_ride import Ride
+from models.orm_classification import RideClassification
+from models.orm_stats import RideDailyStats, ParkDailyStats
+from models.orm_snapshots import RideStatusSnapshot
 
 
 @dataclass

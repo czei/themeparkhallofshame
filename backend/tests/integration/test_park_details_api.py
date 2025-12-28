@@ -23,9 +23,9 @@ class TestParkDetailsAPI:
         This tests that ParkRepository.get_by_id() works correctly
         when called from the API route.
         """
-        from src.database.connection import get_db_session
-        from src.database.repositories.park_repository import ParkRepository
-        from src.models.orm_park import Park
+        from database.connection import get_db_session
+        from database.repositories.park_repository import ParkRepository
+        from models.orm_park import Park
 
         with get_db_session() as session:
             # Create test park using ORM
@@ -57,8 +57,8 @@ class TestParkDetailsAPI:
 
         ORM repositories require Session, not Connection.
         """
-        from src.database.repositories.park_repository import ParkRepository
-        from src.models.orm_park import Park
+        from database.repositories.park_repository import ParkRepository
+        from models.orm_park import Park
 
         # Create test park
         park = Park(
@@ -87,10 +87,10 @@ class TestStatsRepositoryShameBreakdown:
 
     def test_get_park_weekly_shame_breakdown(self, mysql_session):
         """Test weekly shame breakdown returns correct structure."""
-        from src.database.connection import get_db_session
-        from src.database.repositories.stats_repository import StatsRepository
-        from src.models.orm_park import Park
-        from src.models.orm_stats import ParkDailyStats
+        from database.connection import get_db_session
+        from database.repositories.stats_repository import StatsRepository
+        from models.orm_park import Park
+        from models.orm_stats import ParkDailyStats
 
         with get_db_session() as session:
             # Clean up any existing test data
@@ -143,10 +143,10 @@ class TestStatsRepositoryShameBreakdown:
 
     def test_get_park_yesterday_shame_breakdown(self, mysql_session):
         """Test yesterday shame breakdown returns correct structure."""
-        from src.database.connection import get_db_session
-        from src.database.repositories.stats_repository import StatsRepository
-        from src.models.orm_park import Park
-        from src.models.orm_stats import ParkDailyStats
+        from database.connection import get_db_session
+        from database.repositories.stats_repository import StatsRepository
+        from models.orm_park import Park
+        from models.orm_stats import ParkDailyStats
 
         with get_db_session() as session:
             # Clean up any existing test data
@@ -193,10 +193,10 @@ class TestStatsRepositoryShameBreakdown:
 
     def test_get_park_monthly_shame_breakdown(self, mysql_session):
         """Test monthly shame breakdown returns correct structure."""
-        from src.database.connection import get_db_session
-        from src.database.repositories.stats_repository import StatsRepository
-        from src.models.orm_park import Park
-        from src.models.orm_stats import ParkDailyStats
+        from database.connection import get_db_session
+        from database.repositories.stats_repository import StatsRepository
+        from models.orm_park import Park
+        from models.orm_stats import ParkDailyStats
 
         with get_db_session() as session:
             # Clean up any existing test data
@@ -249,10 +249,10 @@ class TestStatsRepositoryShameBreakdown:
 
     def test_get_park_shame_breakdown_live(self, mysql_session):
         """Test live shame breakdown returns most recent snapshot."""
-        from src.database.connection import get_db_session
-        from src.database.repositories.stats_repository import StatsRepository
-        from src.models.orm_park import Park
-        from src.models.orm_snapshots import ParkActivitySnapshot
+        from database.connection import get_db_session
+        from database.repositories.stats_repository import StatsRepository
+        from models.orm_park import Park
+        from models.orm_snapshots import ParkActivitySnapshot
 
         with get_db_session() as session:
             # Create test park using ORM
@@ -293,8 +293,8 @@ class TestStatsRepositoryShameBreakdown:
 
     def test_shame_breakdown_returns_zero_for_missing_data(self, mysql_session):
         """Test shame breakdown returns zero when no data exists."""
-        from src.database.connection import get_db_session
-        from src.database.repositories.stats_repository import StatsRepository
+        from database.connection import get_db_session
+        from database.repositories.stats_repository import StatsRepository
 
         with get_db_session() as session:
             repo = StatsRepository(session)
@@ -313,10 +313,10 @@ class TestStatsRepositoryRideMethods:
 
     def test_get_excluded_rides(self, mysql_session):
         """Test get_excluded_rides returns rides not operated in 7 days."""
-        from src.database.connection import get_db_session
-        from src.database.repositories.stats_repository import StatsRepository
-        from src.models.orm_park import Park
-        from src.models.orm_ride import Ride
+        from database.connection import get_db_session
+        from database.repositories.stats_repository import StatsRepository
+        from models.orm_park import Park
+        from models.orm_ride import Ride
 
         with get_db_session() as session:
             # Create test park using ORM
@@ -357,11 +357,11 @@ class TestStatsRepositoryRideMethods:
 
     def test_get_active_rides(self, mysql_session):
         """Test get_active_rides returns rides that operated recently."""
-        from src.database.connection import get_db_session
-        from src.database.repositories.stats_repository import StatsRepository
-        from src.models.orm_park import Park
-        from src.models.orm_ride import Ride
-        from src.models.orm_snapshots import RideStatusSnapshot
+        from database.connection import get_db_session
+        from database.repositories.stats_repository import StatsRepository
+        from models.orm_park import Park
+        from models.orm_ride import Ride
+        from models.orm_snapshots import RideStatusSnapshot
 
         with get_db_session() as session:
             # Create test park using ORM
@@ -428,8 +428,8 @@ class TestStatsRepositoryMethods:
 
         This method is called by TodayParkWaitTimesQuery.
         """
-        from src.database.connection import get_db_session
-        from src.database.repositories.stats_repository import StatsRepository
+        from database.connection import get_db_session
+        from database.repositories.stats_repository import StatsRepository
 
         with get_db_session() as session:
             repo = StatsRepository(session)
@@ -449,8 +449,8 @@ class TestRideRankingsAPI:
 
         The deprecated get_ride_daily_rankings() should not be called.
         """
-        from src.database.connection import get_db_session
-        from src.database.repositories.stats_repository import StatsRepository
+        from database.connection import get_db_session
+        from database.repositories.stats_repository import StatsRepository
         from datetime import date, timedelta
 
         with get_db_session() as session:

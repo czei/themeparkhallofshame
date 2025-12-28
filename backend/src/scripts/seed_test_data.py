@@ -27,7 +27,7 @@ sys.path.insert(0, str(backend_src.absolute()))
 
 from sqlalchemy import text, delete
 from database.connection import get_db_session
-from src.models import (
+from models import (
     Park, Ride, RideStatusSnapshot,
     RideDailyStats, ParkDailyStats,
     RideWeeklyStats, ParkWeeklyStats

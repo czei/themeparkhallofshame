@@ -39,12 +39,12 @@ from typing import List, Dict, Any
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import Session
 
-from src.models.orm_park import Park
-from src.models.orm_ride import Ride
-from src.models.orm_stats import RideDailyStats
-from src.database.schema import ride_classifications
-from src.utils.timezone import get_last_week_date_range, get_last_month_date_range
-from src.utils.query_helpers import QueryClassBase
+from models.orm_park import Park
+from models.orm_ride import Ride
+from models.orm_stats import RideDailyStats
+from database.schema import ride_classifications
+from utils.timezone import get_last_week_date_range, get_last_month_date_range
+from utils.query_helpers import QueryClassBase
 
 
 class RideDowntimeRankingsQuery(QueryClassBase):

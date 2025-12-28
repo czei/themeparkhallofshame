@@ -5,7 +5,7 @@ Represents ride status change events (up/down transitions).
 
 from sqlalchemy import Boolean, Integer, ForeignKey, DateTime, BigInteger, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from src.models.base import Base
+from models.base import Base
 from datetime import datetime
 from typing import Optional
 

@@ -53,9 +53,9 @@ from typing import List, Dict, Any
 from sqlalchemy import select, func, and_, or_, case, literal_column
 from sqlalchemy.orm import Session, aliased
 
-from src.models import Park, Ride, RideClassification, ParkDailyStats, RideDailyStats
-from src.utils.timezone import get_last_week_date_range, get_last_month_date_range
-from src.utils.query_helpers import QueryClassBase
+from models import Park, Ride, RideClassification, ParkDailyStats, RideDailyStats
+from utils.timezone import get_last_week_date_range, get_last_month_date_range
+from utils.query_helpers import QueryClassBase
 
 
 # =============================================================================

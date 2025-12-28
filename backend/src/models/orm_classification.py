@@ -5,7 +5,7 @@ Represents ride tier classification data for shame score weighting.
 
 from sqlalchemy import String, Integer, ForeignKey, DateTime, Enum, Numeric, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from src.models.base import Base
+from models.base import Base
 from datetime import datetime
 from typing import Optional
 from decimal import Decimal

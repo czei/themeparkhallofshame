@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy import select, insert, func
 from sqlalchemy.orm import Session
 
-from src.models import Park, Ride, RideStatusSnapshot, RideStatusChange
+from models import Park, Ride, RideStatusSnapshot, RideStatusChange
 from utils.logger import logger
 
 

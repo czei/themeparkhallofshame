@@ -793,7 +793,7 @@ def test_live_wait_times_sorted_correctly(mysql_session, comprehensive_api_test_
     This tests the raw snapshot data and ORM models are working correctly.
     """
     from sqlalchemy import select, func
-    from src.models import Ride, RideStatusSnapshot
+    from models import Ride, RideStatusSnapshot
 
     # Query rides with their latest wait times, sorted by wait time descending
     # This is a simplified version testing the core data is correct

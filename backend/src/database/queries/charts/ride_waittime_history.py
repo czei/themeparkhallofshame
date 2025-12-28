@@ -37,7 +37,7 @@ from database.queries.builders import Filters
 from utils.timezone import get_pacific_day_range_utc
 
 # ORM models for query conversion
-from src.models import Park, Ride, ParkActivitySnapshot, RideStatusSnapshot, RideClassification
+from models import Park, Ride, ParkActivitySnapshot, RideStatusSnapshot, RideClassification
 
 
 class RideWaitTimeHistoryQuery:

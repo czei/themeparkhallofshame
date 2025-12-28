@@ -5,7 +5,7 @@ WeatherObservation and WeatherForecast for weather data integration.
 
 from sqlalchemy import Integer, ForeignKey, DateTime, Numeric, SmallInteger, Index, BigInteger, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from src.models.base import Base
+from models.base import Base
 from datetime import datetime
 from typing import Optional
 from decimal import Decimal

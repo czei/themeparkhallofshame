@@ -18,7 +18,7 @@ backend_src = Path(__file__).parent.parent.parent / 'src'
 sys.path.insert(0, str(backend_src.absolute()))
 
 from database.repositories.ride_repository import RideRepository
-from src.models.ride import Ride
+from models.ride import Ride
 
 
 # ============================================================================

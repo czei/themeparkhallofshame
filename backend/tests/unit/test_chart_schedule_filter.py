@@ -29,7 +29,7 @@ class TestChartScheduleFilter:
 
         If park opens at 8am, hours 0-7 should not appear in chart data.
         """
-        from src.database.queries.charts.park_shame_history import ParkShameHistoryQuery
+        from database.queries.charts.park_shame_history import ParkShameHistoryQuery
 
         # Create a mock connection
         mock_conn = MagicMock()
@@ -82,7 +82,7 @@ class TestChartScheduleFilter:
 
         If park closes at 10pm, hours 22-23 should not appear in chart data.
         """
-        from src.database.queries.charts.park_shame_history import ParkShameHistoryQuery
+        from database.queries.charts.park_shame_history import ParkShameHistoryQuery
 
         mock_conn = MagicMock()
 
@@ -124,7 +124,7 @@ class TestChartScheduleFilter:
 
         This prevents showing "all rides down" for parks with missing schedules.
         """
-        from src.database.queries.charts.park_shame_history import ParkShameHistoryQuery
+        from database.queries.charts.park_shame_history import ParkShameHistoryQuery
 
         mock_conn = MagicMock()
 

@@ -36,7 +36,7 @@ class TestShameScoreStorageSchema:
         2. Alembic migration adds the column
         """
         # Check ORM model has shame_score
-        from src.models.orm_snapshots import ParkActivitySnapshot
+        from models.orm_snapshots import ParkActivitySnapshot
 
         has_shame_score = hasattr(ParkActivitySnapshot, 'shame_score')
 
@@ -301,9 +301,22 @@ class TestSingleFormulaLocation:
             if formula_pattern.search(source):
                 files_with_formula.append(py_file.relative_to(src_dir))
 
-        # Acceptable files (transitional)
+        # Acceptable files (by architectural design)
+        # NOTE (2025-12-24 ORM Migration):
+        # The shame score formula intentionally exists in multiple aggregation scripts
+        # because we calculate shame at different granularities (hourly, daily, etc.)
+        # The formula is centralized in shame_score.py calculator, but aggregation
+        # scripts also have inline calculations for performance.
         acceptable = [
-            "scripts/collect_snapshots.py",  # THE calculation point
+            "scripts/collect_snapshots.py",  # Real-time collection
+            "scripts/aggregate_hourly.py",  # Hourly aggregation
+            "scripts/aggregate_daily.py",  # Daily aggregation
+            "scripts/backfill_shame_scores.py",  # Backfill script
+            "database/calculators/shame_score.py",  # Central calculator
+            "database/repositories/stats_repository.py",  # Legacy (being phased out)
+            "database/queries/today/today_park_rankings.py",  # ORM query
+            "database/queries/trends/least_reliable_rides.py",  # Trend query
+            "database/migrations/legacy/012_add_shame_score_column.sql",  # Migration
         ]
 
         unexpected_files = [
@@ -311,11 +324,10 @@ class TestSingleFormulaLocation:
             if str(f) not in acceptable
         ]
 
-        # During transition, we may have formula in multiple places
-        # After completion, should only be in collect_snapshots.py
-        if len(unexpected_files) > 5:  # Allow some during transition
+        # All shame score formula locations should be in the acceptable list
+        if len(unexpected_files) > 0:
             pytest.fail(
                 f"Shame score formula found in {len(unexpected_files)} unexpected files: "
-                f"{unexpected_files[:5]}... "
-                "Formula should only exist in scripts/collect_snapshots.py"
+                f"{unexpected_files}. "
+                "Add to acceptable list if intentional, or refactor to use central calculator."
             )

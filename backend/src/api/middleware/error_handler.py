@@ -6,7 +6,7 @@ Standardized error responses for all API endpoints.
 from flask import jsonify, Flask
 from werkzeug.exceptions import HTTPException
 
-from src.utils.logger import logger
+from utils.logger import logger
 
 
 def register_error_handlers(app: Flask):

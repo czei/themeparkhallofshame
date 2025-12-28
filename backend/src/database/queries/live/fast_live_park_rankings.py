@@ -24,8 +24,8 @@ from typing import List, Dict, Any
 from sqlalchemy import Table, MetaData, Column, Integer, String, Float, Boolean, DateTime, select, func, case, and_, or_
 from sqlalchemy.orm import Session
 
-from src.models.orm_park import Park
-from src.utils.query_helpers import QueryClassBase
+from models.orm_park import Park
+from utils.query_helpers import QueryClassBase
 
 
 # Define table for park_live_rankings cache

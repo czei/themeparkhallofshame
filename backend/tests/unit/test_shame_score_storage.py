@@ -311,7 +311,9 @@ class TestSingleFormulaLocation:
             "scripts/collect_snapshots.py",  # Real-time collection
             "scripts/aggregate_hourly.py",  # Hourly aggregation
             "scripts/aggregate_daily.py",  # Daily aggregation
-            "scripts/backfill_shame_scores.py",  # Backfill script
+            "scripts/backfill_shame_scores.py",  # Backfill script (ride-level)
+            "scripts/backfill_park_shame_scores.py",  # Backfill script (park-level)
+            "scripts/recompute_daily_stats.py",  # Recompute stats script
             "database/calculators/shame_score.py",  # Central calculator
             "database/repositories/stats_repository.py",  # Legacy (being phased out)
             "database/queries/today/today_park_rankings.py",  # ORM query

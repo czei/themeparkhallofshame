@@ -627,8 +627,9 @@ class ParkShameHistoryQuery:
         Returns same format as _query_raw_snapshots for seamless switching.
         """
         # Query park_hourly_stats table for the time range
-        # CRITICAL: Return total_downtime_hours for chart display (not shame_score)
-        # The chart shows actual downtime hours per hour, not shame intensity
+        # CRITICAL FIX (2025-12-28): Use actual shame_score column (0-10 scale)
+        # Previously used total_downtime_hours which caused chart/rankings mismatch.
+        # Rankings shows 8.4 but chart was averaging ~2.3 (hours, not score!)
 
         # Calculate Pacific hour: UTC - 8 hours
         # CRITICAL: Use MySQL DATE_SUB instead of Python timedelta - SQLAlchemy cannot
@@ -639,7 +640,7 @@ class ParkShameHistoryQuery:
         stmt = (
             select(
                 hour_expr.label("hour"),
-                func.round(ParkHourlyStatsORM.total_downtime_hours, 1).label("shame_score"),  # USING DOWNTIME HOURS
+                ParkHourlyStatsORM.shame_score,  # Actual shame score (0-10 scale)
                 ParkHourlyStatsORM.rides_down,
                 ParkHourlyStatsORM.avg_wait_time_minutes
             )

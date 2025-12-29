@@ -671,13 +671,17 @@ class SnapshotCollector:
             # Get effective park weight (rides that operated in last 7 days)
             seven_days_ago = datetime.utcnow() - timedelta(days=7)
 
+            # CRITICAL: Include ALL categories (rides, shows, meets, experiences)
+            # Their tier_weights naturally handle importance weighting:
+            # - ATTRACTION avg 1.89 (highest impact)
+            # - SHOW avg 1.71, EXPERIENCE avg 1.19, MEET_AND_GREET avg 1.00 (lower impact)
+            # This matches aggregate_daily.py and aggregate_hourly.py (no category filter)
             effective_weight_stmt = (
                 select(func.coalesce(func.sum(func.coalesce(RideClassification.tier_weight, 2)), 0))
                 .select_from(Ride)
                 .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
                 .where(Ride.park_id == park_id)
                 .where(Ride.is_active == True)
-                .where(Ride.category == 'ATTRACTION')
                 .where(Ride.last_operated_at >= seven_days_ago)
             )
             effective_weight = session.execute(effective_weight_stmt).scalar() or 0
@@ -690,13 +694,13 @@ class SnapshotCollector:
             if not down_ride_ids:
                 return 0.0
 
+            # Include ALL categories for down weight (matches effective_weight calculation)
             down_weight_stmt = (
                 select(func.coalesce(func.sum(func.coalesce(RideClassification.tier_weight, 2)), 0))
                 .select_from(Ride)
                 .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
                 .where(Ride.ride_id.in_(down_ride_ids))
                 .where(Ride.is_active == True)
-                .where(Ride.category == 'ATTRACTION')
             )
             down_weight = session.execute(down_weight_stmt).scalar() or 0
 

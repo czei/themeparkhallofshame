@@ -959,14 +959,15 @@ class StatsRepository:
 
         start_date, end_date, _ = get_last_week_date_range()
 
-        # Get daily stats for the week
+        # Get daily stats for the week (only operating days for consistency with Rankings)
         daily_stats = (
             self.session.query(ParkDailyStats)
             .filter(
                 and_(
                     ParkDailyStats.park_id == park_id,
                     ParkDailyStats.stat_date >= start_date,
-                    ParkDailyStats.stat_date <= end_date
+                    ParkDailyStats.stat_date <= end_date,
+                    ParkDailyStats.operating_hours_minutes > 0  # Only count operating days
                 )
             )
             .all()
@@ -985,15 +986,21 @@ class StatsRepository:
         total_park_weight = sum(float(r.get('tier_weight', 2)) for r in rides) if rides else 0
 
         # Calculate shame_score: prefer stored values, fallback to ride data
-        # Round to 1 decimal for consistency with rankings API
+        # Use MySQL-style rounding (ROUND_HALF_UP) for consistency with Rankings API
+        from decimal import Decimal, ROUND_HALF_UP
+        def mysql_round(value, decimals=1):
+            """Round using MySQL ROUND() semantics (half up, not banker's rounding)."""
+            d = Decimal(str(value))
+            return float(d.quantize(Decimal(10) ** -decimals, rounding=ROUND_HALF_UP))
+
         valid_shame_scores = [float(s.shame_score) for s in daily_stats if s.shame_score is not None]
         if valid_shame_scores:
             # Use average of valid stored values
-            shame_score = round(sum(valid_shame_scores) / len(valid_shame_scores), 1)
+            shame_score = mysql_round(sum(valid_shame_scores) / len(valid_shame_scores), 1)
         elif rides and total_park_weight > 0:
             # Fallback: calculate from ride data when all aggregations failed
             calculated = calculate_shame_score(weighted_downtime_hours, total_park_weight)
-            shame_score = round(float(calculated), 1) if calculated is not None else 0.0
+            shame_score = mysql_round(float(calculated), 1) if calculated is not None else 0.0
         else:
             shame_score = 0.0
 
@@ -1027,14 +1034,15 @@ class StatsRepository:
 
         start_date, end_date, _ = get_last_month_date_range()
 
-        # Get daily stats for the month
+        # Get daily stats for the month (only operating days for consistency with Rankings)
         daily_stats = (
             self.session.query(ParkDailyStats)
             .filter(
                 and_(
                     ParkDailyStats.park_id == park_id,
                     ParkDailyStats.stat_date >= start_date,
-                    ParkDailyStats.stat_date <= end_date
+                    ParkDailyStats.stat_date <= end_date,
+                    ParkDailyStats.operating_hours_minutes > 0  # Only count operating days
                 )
             )
             .all()
@@ -1053,15 +1061,21 @@ class StatsRepository:
         total_park_weight = sum(float(r.get('tier_weight', 2)) for r in rides) if rides else 0
 
         # Calculate shame_score: prefer stored values, fallback to ride data
-        # Round to 1 decimal for consistency with rankings API
+        # Use MySQL-style rounding (ROUND_HALF_UP) for consistency with Rankings API
+        from decimal import Decimal, ROUND_HALF_UP
+        def mysql_round(value, decimals=1):
+            """Round using MySQL ROUND() semantics (half up, not banker's rounding)."""
+            d = Decimal(str(value))
+            return float(d.quantize(Decimal(10) ** -decimals, rounding=ROUND_HALF_UP))
+
         valid_shame_scores = [float(s.shame_score) for s in daily_stats if s.shame_score is not None]
         if valid_shame_scores:
             # Use average of valid stored values
-            shame_score = round(sum(valid_shame_scores) / len(valid_shame_scores), 1)
+            shame_score = mysql_round(sum(valid_shame_scores) / len(valid_shame_scores), 1)
         elif rides and total_park_weight > 0:
             # Fallback: calculate from ride data when all aggregations failed
             calculated = calculate_shame_score(weighted_downtime_hours, total_park_weight)
-            shame_score = round(float(calculated), 1) if calculated is not None else 0.0
+            shame_score = mysql_round(float(calculated), 1) if calculated is not None else 0.0
         else:
             shame_score = 0.0
 

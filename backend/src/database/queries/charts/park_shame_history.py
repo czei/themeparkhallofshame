@@ -407,6 +407,9 @@ class ParkShameHistoryQuery:
         ]
 
         # Calculate average FROM the chart data points (ensures average badge matches chart)
+        # NOTE: If hourly shame is consistently X all day, the daily average SHOULD be X.
+        # A 10x discrepancy between AVG(hourly) and daily indicates a DATA BUG in the
+        # hourly aggregation (different effective_park_weight values), not a formula issue.
         non_null_data = [v for v in aligned_data if v is not None]
         avg_score = round(sum(non_null_data) / len(non_null_data), 1) if non_null_data else 0.0
 

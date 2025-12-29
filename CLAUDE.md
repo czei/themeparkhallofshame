@@ -255,6 +255,39 @@ Other parks (Dollywood, Busch Gardens, etc.) only report `CLOSED` for all non-op
 - Use `RideStatusSQL.is_down(table_alias, parks_alias="p")` with the parks_alias parameter
 - The helper automatically applies park-type-aware logic
 
+### Rule 4: Shame Score is a RATE, Not Cumulative (CRITICAL)
+
+**The shame score is a 0-10 RATE indicating "% of ride capacity down", NOT a cumulative value.**
+
+```
+                           Σ(weighted_downtime_hours)
+DAILY shame_score = ──────────────────────────────────────── × 10
+                    effective_park_weight × operating_hours
+```
+
+**Components:**
+- `weighted_downtime_hours` = SUM(ride_downtime_hours × tier_weight) for all rides
+- `effective_park_weight` = SUM(tier_weight) for rides that operated (uptime > 0)
+- `operating_hours` = AVG(ride operating_hours_minutes) / 60
+
+**Tier Weights:**
+- Tier 1 (flagship): 3
+- Tier 2 (standard): 2
+- Tier 3 (minor): 1
+- Default: 2
+
+**Key Invariant:**
+> If hourly shame = 1.0 for all hours, daily shame should ≈ 1.0
+
+**Why this matters:**
+- The `operating_hours` in the denominator normalizes the score to a rate
+- Without time normalization, daily shame would be ~10x hourly shame (WRONG)
+- AVG(hourly_shame) should approximately equal daily_shame
+
+**Implementation:**
+- Daily aggregation: `scripts/aggregate_daily.py` (shame_score_expr)
+- The formula was corrected on 2025-12-29 to include `operating_hours` in denominator
+
 ### Single Source of Truth
 
 **ALL** ride status logic lives in `src/utils/sql_helpers.py`:

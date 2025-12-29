@@ -527,9 +527,16 @@ class DailyAggregator:
         rc = RideClassification.__table__.alias('rc')
 
         # Calculate weighted downtime and effective park weight for shame_score
-        # shame_score = (weighted_downtime / effective_park_weight) * 10
+        #
+        # CORRECTED FORMULA (2025-12-29):
+        # shame_score = (weighted_downtime / (effective_park_weight × operating_hours)) × 10
+        #
+        # This is a RATE (% of capacity down), NOT cumulative. As operating hours increase,
+        # the denominator grows, keeping shame_score in 0-10 range.
+        #
         # - weighted_downtime = SUM(downtime_hours * tier_weight)
         # - effective_park_weight = SUM(tier_weight) for rides that operated (had any uptime)
+        # - operating_hours = AVG(operating_hours_minutes) / 60 across rides
         #
         # CRITICAL: Wrap in COALESCE to prevent NULL from leaking through.
         # NULL shame_score forces APIs to calculate on-the-fly with divergent logic.
@@ -553,6 +560,12 @@ class DailyAggregator:
             0
         )
 
+        # Average operating hours across all rides (in hours)
+        avg_operating_hours_raw = func.coalesce(
+            func.avg(rds.c.operating_hours_minutes) / 60.0,
+            1.0  # Default to 1 hour to avoid division by zero
+        )
+
         # Labeled expressions for SELECT
         weighted_downtime_hours_expr = weighted_downtime_raw.label('weighted_downtime_hours')
         effective_park_weight_expr = effective_park_weight_raw.label('effective_park_weight')
@@ -560,11 +573,18 @@ class DailyAggregator:
         # shame_score: COALESCE ensures 0 is stored, never NULL
         # This is the SINGLE SOURCE OF TRUTH - APIs must read this, not recalculate
         # Rounded to 1 decimal place for consistency with rankings display
+        #
+        # Formula: (weighted_downtime / (effective_park_weight × operating_hours)) × 10
+        # This ensures shame_score is a RATE that stays in 0-10 range regardless of
+        # how long the park operated. If hourly shame averages 1.0, daily should be ~1.0.
         shame_score_expr = func.coalesce(
             case(
-                (effective_park_weight_raw > 0,
+                (and_(effective_park_weight_raw > 0, avg_operating_hours_raw > 0),
                  func.least(
-                     func.round((weighted_downtime_raw / effective_park_weight_raw) * 10, 1),
+                     func.round(
+                         (weighted_downtime_raw / (effective_park_weight_raw * avg_operating_hours_raw)) * 10,
+                         1
+                     ),
                      10.0  # Cap at 10
                  )),
                 else_=0

@@ -235,12 +235,17 @@ This document outlines our **hybrid testing strategy** that provides both determ
 **Example**:
 ```python
 def test_shame_score_calculation(mock_db_connection):
-    """Test shame score formula without database."""
+    """Test shame score formula without database.
+
+    FORMULA: shame = (weighted_downtime / (effective_weight × operating_hours)) × 10
+    This is a RATE (0-10 scale), not cumulative.
+    """
     calculator = ShameScoreCalculator(mock_db_connection)
 
     # Pure logic test - no DB needed
-    score = calculator.calculate(downtime_hours=10, tier=1)
-    assert score == 100  # 10 hours * tier 1 weight (10)
+    # weighted_downtime=10, effective_weight=50, operating_hours=10
+    score = calculator.calculate(weighted_downtime=10, effective_weight=50, operating_hours=10)
+    assert score == 0.2  # (10 / (50 × 10)) × 10 = 0.2
 ```
 
 **When to write unit tests**:

@@ -114,9 +114,36 @@ downtime_hours = (down_snapshots × 5 minutes) ÷ 60
 weighted_downtime = downtime_hours × tier_weight
 ```
 
-### Shame Score
+### Shame Score (CRITICAL: Updated 2025-12-29)
+
+**The shame score is a RATE (0-10 scale), NOT a cumulative value.**
+
 ```
-shame_score = Σ(weighted_downtime) ÷ Σ(tier_weight)
+                     Σ(weighted_downtime_hours)
+shame_score = ──────────────────────────────────────── × 10
+              effective_park_weight × operating_hours
+```
+
+Where:
+- `weighted_downtime_hours` = SUM(ride_downtime_hours × tier_weight) for all rides
+- `effective_park_weight` = SUM(tier_weight) for rides that operated
+- `operating_hours` = Average hours rides were tracked (park open duration)
+
+**Why this matters:**
+- If a park has shame_score = 1.0 for each hour, the DAILY shame should also be ~1.0
+- The `operating_hours` in the denominator normalizes the score to a rate
+- Without time normalization, daily shame would be ~10x hourly shame (WRONG)
+
+**Example:**
+```
+Park: Disney California Adventure (Dec 27, 2025)
+- weighted_downtime_hours = 39.33
+- effective_park_weight = 47
+- operating_hours = 14
+
+shame_score = (39.33 / (47 × 14)) × 10
+            = (39.33 / 658) × 10
+            = 0.6
 ```
 
 ### Tier Weights

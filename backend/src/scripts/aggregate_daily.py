@@ -530,20 +530,46 @@ class DailyAggregator:
         # shame_score = (weighted_downtime / effective_park_weight) * 10
         # - weighted_downtime = SUM(downtime_hours * tier_weight)
         # - effective_park_weight = SUM(tier_weight) for rides that operated (had any uptime)
-        weighted_downtime = func.sum(
-            (rds.c.downtime_minutes / 60.0) * func.coalesce(rc.c.tier_weight, 2)
+        #
+        # CRITICAL: Wrap in COALESCE to prevent NULL from leaking through.
+        # NULL shame_score forces APIs to calculate on-the-fly with divergent logic.
+
+        # Raw expressions (without labels) for use in calculations
+        weighted_downtime_raw = func.coalesce(
+            func.sum(
+                (rds.c.downtime_minutes / 60.0) * func.coalesce(rc.c.tier_weight, 2)
+            ),
+            0
         )
-        effective_park_weight = func.sum(
+
+        effective_park_weight_raw = func.coalesce(
+            func.sum(
+                case(
+                    # Only count rides that operated (uptime_percentage > 0 or had any snapshots)
+                    (rds.c.uptime_percentage > 0, func.coalesce(rc.c.tier_weight, 2)),
+                    else_=0
+                )
+            ),
+            0
+        )
+
+        # Labeled expressions for SELECT
+        weighted_downtime_hours_expr = weighted_downtime_raw.label('weighted_downtime_hours')
+        effective_park_weight_expr = effective_park_weight_raw.label('effective_park_weight')
+
+        # shame_score: COALESCE ensures 0 is stored, never NULL
+        # This is the SINGLE SOURCE OF TRUTH - APIs must read this, not recalculate
+        # Rounded to 1 decimal place for consistency with rankings display
+        shame_score_expr = func.coalesce(
             case(
-                # Only count rides that operated (uptime_percentage > 0 or had any snapshots)
-                (rds.c.uptime_percentage > 0, func.coalesce(rc.c.tier_weight, 2)),
+                (effective_park_weight_raw > 0,
+                 func.least(
+                     func.round((weighted_downtime_raw / effective_park_weight_raw) * 10, 1),
+                     10.0  # Cap at 10
+                 )),
                 else_=0
-            )
-        )
-        shame_score_expr = case(
-            (effective_park_weight > 0,
-             func.round((weighted_downtime / effective_park_weight) * 10, 2)),
-            else_=0
+            ),
+            0
         ).label('shame_score')
 
         agg_query = (
@@ -563,6 +589,8 @@ class DailyAggregator:
                 func.coalesce(func.round(func.avg(rds.c.avg_wait_time), 2), 0).label('avg_wait_time'),
                 func.coalesce(func.max(rds.c.peak_wait_time), 0).label('peak_wait_time'),
                 func.coalesce(func.avg(rds.c.operating_hours_minutes), 0).label('operating_hours_minutes'),
+                weighted_downtime_hours_expr,
+                effective_park_weight_expr,
                 shame_score_expr
             )
             .select_from(rds)
@@ -582,17 +610,21 @@ class DailyAggregator:
             return
 
         # Insert or update using MySQL INSERT ... ON DUPLICATE KEY UPDATE
+        # CRITICAL: shame_score, weighted_downtime_hours, effective_park_weight are the
+        # SINGLE SOURCE OF TRUTH. APIs must read these values, not recalculate.
         stmt = mysql_insert(ParkDailyStats).values(
             park_id=park_id,
             stat_date=self.target_date,
             total_rides_tracked=int(result.total_rides),
             avg_uptime_percentage=float(result.avg_uptime),
             total_downtime_hours=float(result.total_downtime_hours),
+            weighted_downtime_hours=float(result.weighted_downtime_hours),
+            effective_park_weight=float(result.effective_park_weight),
             rides_with_downtime=int(result.rides_with_downtime),
             avg_wait_time=float(result.avg_wait_time),
             peak_wait_time=int(result.peak_wait_time),
             operating_hours_minutes=int(result.operating_hours_minutes),
-            shame_score=float(result.shame_score or 0),
+            shame_score=float(result.shame_score),  # Never NULL due to COALESCE
             created_at=datetime.now()
         )
 
@@ -600,6 +632,8 @@ class DailyAggregator:
             total_rides_tracked=stmt.inserted.total_rides_tracked,
             avg_uptime_percentage=stmt.inserted.avg_uptime_percentage,
             total_downtime_hours=stmt.inserted.total_downtime_hours,
+            weighted_downtime_hours=stmt.inserted.weighted_downtime_hours,
+            effective_park_weight=stmt.inserted.effective_park_weight,
             rides_with_downtime=stmt.inserted.rides_with_downtime,
             avg_wait_time=stmt.inserted.avg_wait_time,
             peak_wait_time=stmt.inserted.peak_wait_time,

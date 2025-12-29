@@ -7,9 +7,20 @@ UI Location: Parks tab → Downtime Rankings (today)
 
 Returns parks ranked by AVERAGE shame score from midnight Pacific to now.
 
+CRITICAL FIX (2025-12-28):
+==========================
+This query now filters on park_was_open=True to only include hours when the park
+was operating. This ensures Rankings AVG matches Details AVG (both exclude closed
+hours where shame_score=0).
+
+Previously, Rankings included ALL hourly records including closed hours, which
+diluted the average. Example: Silver Dollar City had 19 hourly records (10 closed
+with shame=0, 9 operating with various scores). Rankings showed 42.2/19=2.2 while
+Details showed 42.2/9=4.7.
+
 SHAME SCORE CALCULATION:
 - LIVE: Instantaneous shame = (sum of weights of down rides) / total_park_weight × 10
-- TODAY: (SUM(weighted_downtime_hours) / AVG(effective_park_weight)) × 10
+- TODAY: AVG(hourly shame_score) where park_was_open=True
 
 SINGLE SOURCE OF TRUTH: Uses same formula as detail popup (stats_repository.py).
 This ensures shame score in rankings table EXACTLY matches detail popup.
@@ -121,6 +132,9 @@ class TodayParkRankingsQuery(QueryClassBase):
             .where(ParkHourlyStats.hour_start_utc >= start_utc)
             .where(ParkHourlyStats.hour_start_utc < end_utc)
             .where(Park.is_active == True)
+            # CRITICAL: Only include hours when park was open
+            # This ensures Rankings AVG matches Details AVG (both exclude closed hours)
+            .where(ParkHourlyStats.park_was_open == True)
         )
 
         # Apply Disney/Universal filter if requested

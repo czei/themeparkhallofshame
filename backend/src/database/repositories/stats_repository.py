@@ -33,7 +33,7 @@ from sqlalchemy import func, and_, text, distinct
 
 from models.orm_park import Park
 from models.orm_ride import Ride
-from models.orm_stats import ParkDailyStats, ParkHourlyStats, RideDailyStats, ParkLiveRankings
+from models.orm_stats import ParkDailyStats, ParkHourlyStats, RideDailyStats, RideHourlyStats, ParkLiveRankings
 from models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
 from models.orm_classification import RideClassification
 
@@ -646,7 +646,7 @@ class StatsRepository:
             park_id: Park ID
 
         Returns:
-            Dictionary with shame score and breakdown metrics
+            Dictionary with shame score, breakdown metrics, and rides array
         """
         from utils.timezone import get_today_range_to_now_utc
 
@@ -667,19 +667,91 @@ class StatsRepository:
         )
 
         if not hourly_stats:
-            return {'shame_score': 0, 'total_downtime_hours': 0, 'weighted_downtime_hours': 0}
+            return {'shame_score': 0, 'total_downtime_hours': 0, 'weighted_downtime_hours': 0, 'rides': []}
 
         # Calculate averages
         total_shame = sum(float(h.shame_score or 0) for h in hourly_stats)
         total_downtime = sum(float(h.total_downtime_hours or 0) for h in hourly_stats)
         weighted_downtime = sum(float(h.weighted_downtime_hours or 0) for h in hourly_stats)
 
+        # Get ride-level downtime data for today
+        rides = self._get_rides_with_downtime_for_today(park_id, start_utc, end_utc)
+
         return {
-            'shame_score': round(total_shame / len(hourly_stats), 2) if hourly_stats else 0,
+            'shame_score': round(total_shame / len(hourly_stats), 1) if hourly_stats else 0,
             'total_downtime_hours': round(total_downtime, 2),
             'weighted_downtime_hours': round(weighted_downtime, 2),
-            'hours_tracked': len(hourly_stats)
+            'hours_tracked': len(hourly_stats),
+            'rides': rides,
+            'rides_affected_count': len(rides)
         }
+
+    def _get_rides_with_downtime_for_today(
+        self,
+        park_id: int,
+        start_utc: datetime,
+        end_utc: datetime
+    ) -> List[Dict[str, Any]]:
+        """
+        Get rides with downtime for today using RideHourlyStats.
+
+        Args:
+            park_id: Park ID
+            start_utc: Start of today (Pacific midnight) in UTC
+            end_utc: Current time in UTC
+
+        Returns:
+            List of ride dictionaries with downtime details, sorted by weighted contribution desc
+        """
+        # Tier weights for calculating weighted contribution
+        # Maps stored tier_weight (1,2,3) to actual multipliers (2,5,10)
+        TIER_WEIGHT_MAP = {1: 2, 2: 5, 3: 10}
+
+        # Query ride hourly stats aggregated for today, joined with ride info
+        results = (
+            self.session.query(
+                RideHourlyStats.ride_id,
+                Ride.name.label('ride_name'),
+                RideClassification.tier,
+                RideClassification.tier_weight,
+                func.sum(RideHourlyStats.downtime_hours).label('total_downtime_hours')
+            )
+            .join(Ride, RideHourlyStats.ride_id == Ride.ride_id)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .filter(
+                and_(
+                    RideHourlyStats.park_id == park_id,
+                    RideHourlyStats.hour_start_utc >= start_utc,
+                    RideHourlyStats.hour_start_utc < end_utc,
+                    RideHourlyStats.downtime_hours > 0
+                )
+            )
+            .group_by(RideHourlyStats.ride_id, Ride.name, RideClassification.tier, RideClassification.tier_weight)
+            .all()
+        )
+
+        rides = []
+        for r in results:
+            tier = r.tier or 3  # Default to tier 3 if unclassified
+            stored_weight = r.tier_weight or 1  # Default stored weight
+            # Convert stored weight (1,2,3) to actual multiplier (2,5,10)
+            tier_weight = TIER_WEIGHT_MAP.get(stored_weight, 2)
+            downtime_hours = float(r.total_downtime_hours or 0)
+            weighted_contribution = downtime_hours * tier_weight
+
+            rides.append({
+                'ride_id': r.ride_id,
+                'ride_name': r.ride_name,
+                'tier': tier,
+                'tier_weight': tier_weight,
+                'downtime_hours': round(downtime_hours, 2),
+                'weighted_contribution': round(weighted_contribution, 2),
+                'status': 'DOWN'
+            })
+
+        # Sort by weighted contribution (descending)
+        rides.sort(key=lambda x: x['weighted_contribution'], reverse=True)
+        return rides
 
     def _get_rides_with_downtime_for_date(
         self,
@@ -915,14 +987,15 @@ class StatsRepository:
         total_park_weight = sum(float(r.get('tier_weight', 2)) for r in rides) if rides else 0
 
         # Calculate shame_score: prefer stored values, fallback to ride data
+        # Round to 1 decimal for consistency with rankings API
         valid_shame_scores = [float(s.shame_score) for s in daily_stats if s.shame_score is not None]
         if valid_shame_scores:
             # Use average of valid stored values
-            shame_score = round(sum(valid_shame_scores) / len(valid_shame_scores), 2)
+            shame_score = round(sum(valid_shame_scores) / len(valid_shame_scores), 1)
         elif rides and total_park_weight > 0:
             # Fallback: calculate from ride data when all aggregations failed
             calculated = calculate_shame_score(weighted_downtime_hours, total_park_weight)
-            shame_score = float(calculated) if calculated is not None else 0.0
+            shame_score = round(float(calculated), 1) if calculated is not None else 0.0
         else:
             shame_score = 0.0
 
@@ -982,14 +1055,15 @@ class StatsRepository:
         total_park_weight = sum(float(r.get('tier_weight', 2)) for r in rides) if rides else 0
 
         # Calculate shame_score: prefer stored values, fallback to ride data
+        # Round to 1 decimal for consistency with rankings API
         valid_shame_scores = [float(s.shame_score) for s in daily_stats if s.shame_score is not None]
         if valid_shame_scores:
             # Use average of valid stored values
-            shame_score = round(sum(valid_shame_scores) / len(valid_shame_scores), 2)
+            shame_score = round(sum(valid_shame_scores) / len(valid_shame_scores), 1)
         elif rides and total_park_weight > 0:
             # Fallback: calculate from ride data when all aggregations failed
             calculated = calculate_shame_score(weighted_downtime_hours, total_park_weight)
-            shame_score = float(calculated) if calculated is not None else 0.0
+            shame_score = round(float(calculated), 1) if calculated is not None else 0.0
         else:
             shame_score = 0.0
 

@@ -889,6 +889,15 @@ class StatsRepository:
         """
         Get shame breakdown for yesterday using daily stats.
 
+        CRITICAL FIX (2025-12-28):
+        ==========================
+        Now reads shame_score, weighted_downtime_hours, and effective_park_weight
+        DIRECTLY from park_daily_stats - no on-the-fly calculations.
+
+        This ensures Details popup shows EXACTLY the same shame_score as Rankings.
+        Previously, this method calculated total_park_weight from only rides WITH
+        downtime, which systematically inflated the shame_score (e.g., 13.7 vs 8.7).
+
         Args:
             park_id: Park ID
 
@@ -896,7 +905,6 @@ class StatsRepository:
             Dictionary with shame score and breakdown metrics
         """
         from utils.timezone import get_yesterday_date_range
-        from utils.metrics import calculate_shame_score
 
         start_date, end_date, _ = get_yesterday_date_range()
 
@@ -916,38 +924,23 @@ class StatsRepository:
             return {'shame_score': 0, 'total_downtime_hours': 0, 'rides': [],
                     'weighted_downtime_hours': 0, 'total_park_weight': 0, 'rides_affected_count': 0}
 
-        # Get detailed ride-level downtime data for frontend
+        # Get detailed ride-level downtime data for frontend display
         rides = self._get_rides_with_downtime_for_date(park_id, start_date)
 
-        # Calculate weighted downtime and total park weight from rides data
-        weighted_downtime_hours = sum(
-            float(r.get('downtime_hours', 0)) * float(r.get('tier_weight', 2))
-            for r in rides
-        )
-
-        # Calculate total_park_weight from rides with tier info
-        # Use sum of tier weights for rides we have data for
-        total_park_weight = sum(float(r.get('tier_weight', 2)) for r in rides) if rides else 0
-
-        # Determine shame_score: use stored value if available, otherwise calculate fallback
-        if daily_stat.shame_score is not None:
-            shame_score = float(daily_stat.shame_score)
-        elif rides and total_park_weight > 0:
-            # Fallback: calculate from ride data when aggregation failed
-            # Uses same formula as metrics.py: (weighted_downtime / total_weight) * 10
-            calculated = calculate_shame_score(weighted_downtime_hours, total_park_weight)
-            shame_score = float(calculated) if calculated is not None else 0.0
-        else:
-            shame_score = 0.0
+        # CRITICAL: Read pre-computed values from park_daily_stats
+        # DO NOT recalculate - this is the single source of truth
+        shame_score = float(daily_stat.shame_score or 0)
+        weighted_downtime_hours = float(daily_stat.weighted_downtime_hours or 0)
+        total_park_weight = float(daily_stat.effective_park_weight or 0)
 
         return {
-            'shame_score': shame_score,
+            'shame_score': round(shame_score, 1),  # Round to 1 decimal for consistency
             'total_downtime_hours': float(daily_stat.total_downtime_hours or 0),
             'avg_uptime_percentage': float(daily_stat.avg_uptime_percentage or 0),
-            'rides_with_downtime': daily_stat.rides_with_downtime or 0,  # Keep original count for backwards compatibility
+            'rides_with_downtime': daily_stat.rides_with_downtime or 0,
             'rides': rides,  # Array of rides with downtime details for frontend
             'weighted_downtime_hours': round(weighted_downtime_hours, 2),
-            'total_park_weight': total_park_weight,
+            'total_park_weight': round(total_park_weight, 2),
             'rides_affected_count': len(rides)
         }
 

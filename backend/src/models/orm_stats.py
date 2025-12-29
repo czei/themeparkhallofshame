@@ -170,6 +170,18 @@ class ParkDailyStats(Base):
         index=True,
         comment="Total downtime hours across all rides"
     )
+    weighted_downtime_hours: Mapped[Decimal] = mapped_column(
+        Numeric(8, 2),
+        nullable=False,
+        default=0.0,
+        comment="Tier-weighted downtime hours for shame score calculation"
+    )
+    effective_park_weight: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        default=0.0,
+        comment="Sum of tier weights for rides that operated"
+    )
     rides_with_downtime: Mapped[int] = mapped_column(
         Integer,
         nullable=False,

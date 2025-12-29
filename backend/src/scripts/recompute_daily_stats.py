@@ -48,7 +48,7 @@ from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 from models import (
     Ride, RideStatusSnapshot, ParkActivitySnapshot,
-    RideDailyStats, ParkDailyStats, RideStatusChange
+    RideDailyStats, ParkDailyStats, RideStatusChange, RideClassification
 )
 
 
@@ -461,12 +461,16 @@ class DailyStatsRecomputer:
         """
         Recompute statistics for a single park by rolling up ride stats.
 
+        CRITICAL FIX: Now includes weighted_downtime_hours, effective_park_weight,
+        and shame_score calculations using COALESCE to prevent NULLs.
+
         Returns True if data was computed, False if skipped.
         """
         park_id = park.park_id
 
         rds = RideDailyStats.__table__.alias('rds')
         r = Ride.__table__.alias('r')
+        rc = RideClassification.__table__.alias('rc')
 
         # Check if we have any ride stats for this park on this date
         check_query = (
@@ -485,12 +489,54 @@ class DailyStatsRecomputer:
         if not ride_count:
             return False
 
+        # Raw expressions for weighted calculations (without labels)
+        # CRITICAL: Use COALESCE to ensure 0 instead of NULL
+        weighted_downtime_raw = func.coalesce(
+            func.sum(
+                (rds.c.downtime_minutes / 60.0) * func.coalesce(rc.c.tier_weight, 2)
+            ),
+            0
+        )
+
+        # effective_park_weight: sum of tier_weight for rides that operated (uptime > 0)
+        effective_park_weight_raw = func.coalesce(
+            func.sum(
+                case(
+                    (rds.c.uptime_percentage > 0, func.coalesce(rc.c.tier_weight, 2)),
+                    else_=0
+                )
+            ),
+            0
+        )
+
         # Aggregation query
         agg_query = (
             select(
                 func.count().label('total_rides'),
                 func.coalesce(func.round(func.avg(rds.c.uptime_percentage), 2), 0).label('avg_uptime'),
                 func.coalesce(func.round(func.sum(rds.c.downtime_minutes) / 60.0, 2), 0).label('total_downtime_hours'),
+                # Weighted downtime: sum of (downtime_hours * tier_weight)
+                func.coalesce(
+                    func.round(weighted_downtime_raw, 2),
+                    0
+                ).label('weighted_downtime_hours'),
+                # Effective park weight: sum of tier_weight for rides that operated
+                func.coalesce(
+                    func.round(effective_park_weight_raw, 2),
+                    0
+                ).label('effective_park_weight'),
+                # Shame score: (weighted_downtime / effective_weight) * 10, capped at 10
+                func.coalesce(
+                    case(
+                        (effective_park_weight_raw > 0,
+                         func.least(
+                             func.round((weighted_downtime_raw / effective_park_weight_raw) * 10, 1),
+                             10.0  # Cap at 10
+                         )),
+                        else_=0
+                    ),
+                    0
+                ).label('shame_score'),
                 func.coalesce(
                     func.sum(
                         case(
@@ -506,6 +552,7 @@ class DailyStatsRecomputer:
             )
             .select_from(rds)
             .join(r, rds.c.ride_id == r.c.ride_id)
+            .outerjoin(rc, r.c.ride_id == rc.c.ride_id)  # LEFT JOIN for tier_weight
             .where(
                 and_(
                     r.c.park_id == park_id,
@@ -520,16 +567,25 @@ class DailyStatsRecomputer:
             return False
 
         if self.dry_run:
-            logger.debug(f"  Would upsert park {park.name}: avg_uptime={result.avg_uptime}%, downtime={result.total_downtime_hours}h")
+            logger.debug(
+                f"  Would upsert park {park.name}: avg_uptime={result.avg_uptime}%, "
+                f"downtime={result.total_downtime_hours}h, "
+                f"weighted={result.weighted_downtime_hours}h, "
+                f"weight={result.effective_park_weight}, "
+                f"shame={result.shame_score}"
+            )
             return True
 
-        # UPSERT (idempotent)
+        # UPSERT (idempotent) - now includes weighted_downtime_hours, effective_park_weight, shame_score
         stmt = mysql_insert(ParkDailyStats).values(
             park_id=park_id,
             stat_date=target_date,
             total_rides_tracked=int(result.total_rides),
             avg_uptime_percentage=float(result.avg_uptime),
             total_downtime_hours=float(result.total_downtime_hours),
+            weighted_downtime_hours=float(result.weighted_downtime_hours),
+            effective_park_weight=float(result.effective_park_weight),
+            shame_score=float(result.shame_score),  # NEVER NULL due to COALESCE
             rides_with_downtime=int(result.rides_with_downtime),
             avg_wait_time=float(result.avg_wait_time),
             peak_wait_time=int(result.peak_wait_time),
@@ -541,6 +597,9 @@ class DailyStatsRecomputer:
             total_rides_tracked=stmt.inserted.total_rides_tracked,
             avg_uptime_percentage=stmt.inserted.avg_uptime_percentage,
             total_downtime_hours=stmt.inserted.total_downtime_hours,
+            weighted_downtime_hours=stmt.inserted.weighted_downtime_hours,
+            effective_park_weight=stmt.inserted.effective_park_weight,
+            shame_score=stmt.inserted.shame_score,
             rides_with_downtime=stmt.inserted.rides_with_downtime,
             avg_wait_time=stmt.inserted.avg_wait_time,
             peak_wait_time=stmt.inserted.peak_wait_time,

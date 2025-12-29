@@ -675,7 +675,12 @@ class StatsRepository:
         weighted_downtime = sum(float(h.weighted_downtime_hours or 0) for h in hourly_stats)
 
         # Get ride-level downtime data for today
-        rides = self._get_rides_with_downtime_for_today(park_id, start_utc, end_utc)
+        # Note: ride_hourly_stats may not exist in all deployments
+        try:
+            rides = self._get_rides_with_downtime_for_today(park_id, start_utc, end_utc)
+        except Exception:
+            # Table doesn't exist or other error - return empty rides array
+            rides = []
 
         return {
             'shame_score': round(total_shame / len(hourly_stats), 1) if hourly_stats else 0,

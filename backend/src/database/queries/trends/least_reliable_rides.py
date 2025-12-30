@@ -161,7 +161,7 @@ class LeastReliableRidesQuery(QueryClassBase):
             .where(Ride.ride_id.in_(select(rides_operated_subq.c.ride_id)))
             .group_by(Ride.ride_id, Ride.name, Park.park_id, Park.name)
             .having(func.sum(downtime_case) > 0)
-            .order_by(literal('downtime_hours').desc())
+            .order_by(func.sum(downtime_case).desc())
             .limit(limit)
         )
 
@@ -205,7 +205,7 @@ class LeastReliableRidesQuery(QueryClassBase):
 
         stmt = (
             stmt.group_by(Ride.ride_id, Ride.name, Park.park_id, Park.name)
-            .order_by(literal('downtime_hours').desc())
+            .order_by(func.sum(RideDailyStats.downtime_minutes).desc())
             .limit(limit)
         )
 
@@ -383,7 +383,7 @@ class LeastReliableRidesQuery(QueryClassBase):
             .having(
                 func.avg(snapshot_shame_subq.c.weighted_down / func.nullif(snapshot_shame_subq.c.total_park_weight, 0) * 10) >= min_avg_shame
             )
-            .order_by(literal('avg_shame_score').desc())
+            .order_by(func.avg(snapshot_shame_subq.c.weighted_down / func.nullif(snapshot_shame_subq.c.total_park_weight, 0) * 10).desc())
             .limit(limit)
         )
 
@@ -423,7 +423,7 @@ class LeastReliableRidesQuery(QueryClassBase):
 
         stmt = (
             stmt.group_by(Park.park_id, Park.name, Park.city, Park.state_province)
-            .order_by(literal('avg_shame_score').desc())
+            .order_by(func.avg(ParkDailyStats.shame_score).desc())
             .limit(limit)
         )
 

@@ -289,7 +289,8 @@ class LiveRideRankingsQuery(QueryClassBase):
         stmt = stmt.having(func.sum(downtime_case) > 0)
 
         # Order by downtime hours descending
-        stmt = stmt.order_by(literal('downtime_hours').desc())
+        # Note: Must use the actual expression, not literal() which creates a string constant
+        stmt = stmt.order_by(func.sum(downtime_case).desc())
 
         # Apply limit
         stmt = stmt.limit(limit)

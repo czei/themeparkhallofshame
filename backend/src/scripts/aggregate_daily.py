@@ -48,15 +48,17 @@ class DailyAggregator:
     Aggregates daily statistics from raw snapshot data.
     """
 
-    def __init__(self, target_date: Optional[date] = None):
+    def __init__(self, target_date: Optional[date] = None, force: bool = False):
         """
         Initialize the aggregator.
 
         Args:
             target_date: Date to aggregate (default: yesterday)
+            force: If True, re-aggregate even if already completed
         """
         # Use Pacific Time for US parks - aggregates "yesterday" in Pacific timezone
         self.target_date = target_date or (get_today_pacific() - timedelta(days=1))
+        self.force = force
 
         # Calculate UTC range for the Pacific date
         # Pacific day 2025-12-17 = UTC 2025-12-17 08:00 to 2025-12-18 08:00 (PST)
@@ -85,10 +87,13 @@ class DailyAggregator:
                 ride_repo = RideRepository(session)
 
                 # Check if aggregation already completed for this date
-                if self._check_already_aggregated(aggregation_repo):
+                if not self.force and self._check_already_aggregated(aggregation_repo):
                     logger.warning(f"Daily aggregation already completed for {self.target_date}")
                     logger.info("Use --force to re-aggregate")
                     return
+
+                if self.force:
+                    logger.info(f"Force mode: re-aggregating {self.target_date}")
 
                 # Start aggregation log
                 log_id = self._start_aggregation_log(aggregation_repo)
@@ -725,6 +730,11 @@ def main():
         type=str,
         help='Date to aggregate (YYYY-MM-DD format, default: yesterday)'
     )
+    parser.add_argument(
+        '--force',
+        action='store_true',
+        help='Force re-aggregation even if already completed'
+    )
 
     args = parser.parse_args()
 
@@ -736,7 +746,7 @@ def main():
             logger.error(f"Invalid date format: {args.date}. Use YYYY-MM-DD")
             sys.exit(1)
 
-    aggregator = DailyAggregator(target_date=target_date)
+    aggregator = DailyAggregator(target_date=target_date, force=args.force)
     aggregator.run()
 
 

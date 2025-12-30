@@ -20,6 +20,7 @@ from sqlalchemy.sql import Select
 from models.orm_ride import Ride
 from models.orm_park import Park
 from models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
+from models.orm_stats import RideHourlyStats
 
 
 class RideHourlyMetrics(NamedTuple):
@@ -483,18 +484,12 @@ class HourlyAggregationQuery:
         """
         Get hourly metrics for a ride within a UTC time range.
 
-        CRITICAL BUSINESS RULES (from CLAUDE.md):
-        1. Only count snapshots when park_appears_open = TRUE
-        2. Disney/Universal: Only status='DOWN' counts as downtime (not CLOSED)
-        3. Other parks: Both DOWN and CLOSED count as downtime
-        4. Ride must have operated while park was open to count toward metrics
+        READS FROM PRE-AGGREGATED ride_hourly_stats TABLE.
 
-        Computes metrics for each hour from ride_status_snapshots:
-        - avg_wait_time_minutes: Average wait time (NULL if no wait data)
-        - uptime_percentage: Percentage of snapshots where ride was operating
-        - snapshot_count: Total snapshots in the hour (while park was open)
-        - downtime_hours: Fractional hours of downtime (1.0 = full hour down)
-        - ride_operated: Whether ride operated at any point while park was open
+        This table is populated by the hourly aggregation job and contains
+        metrics already filtered by park_appears_open and business rules.
+        Raw snapshots (ride_status_snapshots) are purged after aggregation,
+        so historical queries MUST use this pre-aggregated table.
 
         Args:
             session: SQLAlchemy session
@@ -505,132 +500,31 @@ class HourlyAggregationQuery:
         Returns:
             List of RideHourlyMetrics, one per hour with data
         """
-        from sqlalchemy import literal_column, case
-
-        # First, get the park info to know if it's Disney/Universal
-        ride_info = session.execute(
-            select(Ride.park_id, Park.is_disney, Park.is_universal)
-            .join(Park, Ride.park_id == Park.park_id)
-            .where(Ride.ride_id == ride_id)
-        ).first()
-
-        if not ride_info:
-            return []
-
-        park_id = ride_info.park_id
-        is_disney = ride_info.is_disney
-        is_universal = ride_info.is_universal
-
-        # Determine if ride operated while park was open
-        # CRITICAL: Must join with ParkActivitySnapshot to check park_appears_open
-        ride_operated_subquery = (
-            select(func.count(RideStatusSnapshot.snapshot_id))
-            .select_from(RideStatusSnapshot)
-            .join(
-                ParkActivitySnapshot,
-                and_(
-                    ParkActivitySnapshot.park_id == park_id,
-                    func.date_format(ParkActivitySnapshot.recorded_at, '%Y-%m-%d %H:%i')
-                    == func.date_format(RideStatusSnapshot.recorded_at, '%Y-%m-%d %H:%i')
-                )
-            )
-            .where(RideStatusSnapshot.ride_id == ride_id)
-            .where(RideStatusSnapshot.recorded_at >= start_utc)
-            .where(RideStatusSnapshot.recorded_at < end_utc)
-            .where(ParkActivitySnapshot.park_appears_open == True)  # CRITICAL: Park must be open
-            .where(RideStatusExpressions.is_operating_expr())
-        )
-        ride_operated_count = session.execute(ride_operated_subquery).scalar() or 0
-        ride_operated = ride_operated_count > 0
-
-        # Single query with GROUP BY hour
-        hour_start_expr = func.date_format(
-            RideStatusSnapshot.recorded_at,
-            literal_column("'%Y-%m-%d %H:00:00'")
-        ).label('hour_start')
-
-        # Operating = status='OPERATING' OR computed_is_open=TRUE
-        is_operating_case = case(
-            (RideStatusExpressions.is_operating_expr(), 1),
-            else_=0
-        )
-
-        # Down count: Use park-type-aware logic
-        # Disney/Universal: Only DOWN counts
-        # Other parks: DOWN, CLOSED, or computed_is_open=FALSE
-        if is_disney or is_universal:
-            is_down_case = case(
-                (RideStatusSnapshot.status == 'DOWN', 1),
-                else_=0
-            )
-        else:
-            is_down_case = case(
-                (or_(
-                    RideStatusSnapshot.status == 'DOWN',
-                    RideStatusSnapshot.status == 'CLOSED',
-                    and_(
-                        RideStatusSnapshot.status == None,
-                        RideStatusSnapshot.computed_is_open == False
-                    )
-                ), 1),
-                else_=0
-            )
-
-        # CRITICAL: Join with ParkActivitySnapshot to filter by park_appears_open
+        # Query pre-aggregated hourly stats
+        # This data already has park_appears_open filtering applied during aggregation
         hourly_query = (
-            select(
-                hour_start_expr,
-                func.count(RideStatusSnapshot.snapshot_id).label('total_count'),
-                func.avg(RideStatusSnapshot.wait_time).label('avg_wait'),
-                func.sum(is_operating_case).label('operating_count'),
-                func.sum(is_down_case).label('down_count')
-            )
-            .select_from(RideStatusSnapshot)
-            .join(
-                ParkActivitySnapshot,
-                and_(
-                    ParkActivitySnapshot.park_id == park_id,
-                    func.date_format(ParkActivitySnapshot.recorded_at, '%Y-%m-%d %H:%i')
-                    == func.date_format(RideStatusSnapshot.recorded_at, '%Y-%m-%d %H:%i')
-                )
-            )
-            .where(RideStatusSnapshot.ride_id == ride_id)
-            .where(RideStatusSnapshot.recorded_at >= start_utc)
-            .where(RideStatusSnapshot.recorded_at < end_utc)
-            .where(ParkActivitySnapshot.park_appears_open == True)  # CRITICAL: Only count when park is open
-            .group_by(hour_start_expr)
-            .order_by(hour_start_expr)
+            select(RideHourlyStats)
+            .where(RideHourlyStats.ride_id == ride_id)
+            .where(RideHourlyStats.hour_start_utc >= start_utc)
+            .where(RideHourlyStats.hour_start_utc < end_utc)
+            .order_by(RideHourlyStats.hour_start_utc)
         )
 
-        rows = session.execute(hourly_query).all()
+        rows = session.execute(hourly_query).scalars().all()
 
         results = []
         for row in rows:
-            total_count = int(row.total_count or 0)
-            if total_count > 0:
-                operating_count = int(row.operating_count or 0)
-                down_count = int(row.down_count or 0)
-                avg_wait = float(row.avg_wait) if row.avg_wait is not None else None
-
-                # Calculate uptime percentage (operating / total while park open)
-                uptime_pct = (operating_count / total_count) * 100.0
-
-                # Calculate downtime hours using park-type-aware down_count
-                downtime_hours = (down_count / total_count)
-
-                # Parse hour_start string back to datetime
-                hour_start_dt = datetime.strptime(row.hour_start, '%Y-%m-%d %H:%M:%S')
-
-                results.append(RideHourlyMetrics(
-                    hour_start_utc=hour_start_dt,
-                    avg_wait_time_minutes=avg_wait,
-                    uptime_percentage=uptime_pct,
-                    snapshot_count=total_count,
-                    downtime_hours=downtime_hours,
-                    ride_operated=ride_operated,
-                    operating_snapshots=operating_count,
-                    down_snapshots=down_count
-                ))
+            # Convert ORM model to RideHourlyMetrics namedtuple
+            results.append(RideHourlyMetrics(
+                hour_start_utc=row.hour_start_utc,
+                avg_wait_time_minutes=float(row.avg_wait_time_minutes) if row.avg_wait_time_minutes is not None else None,
+                uptime_percentage=float(row.uptime_percentage) if row.uptime_percentage is not None else 0.0,
+                snapshot_count=int(row.snapshot_count) if row.snapshot_count is not None else 0,
+                downtime_hours=float(row.downtime_hours) if row.downtime_hours is not None else 0.0,
+                ride_operated=bool(row.ride_operated),
+                operating_snapshots=int(row.operating_snapshots) if row.operating_snapshots is not None else 0,
+                down_snapshots=int(row.down_snapshots) if row.down_snapshots is not None else 0
+            ))
 
         return results
 

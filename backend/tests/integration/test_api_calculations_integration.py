@@ -335,16 +335,23 @@ def comprehensive_api_test_data(mysql_session):
 
     # === CREATE PARK DAILY STATS (aggregated) ===
     # Per park: 2*180 + 5*60 + 3*30 = 360 + 300 + 90 = 750 minutes = 12.5 hours
+    # Weighted: 2*180*3 + 5*60*2 + 3*30*1 = 1080 + 600 + 90 = 1770 minutes = 29.5 hours
+    # Effective park weight: 2*3 + 5*2 + 3*1 = 6 + 10 + 3 = 19
     for park_id in range(1, 11):
         conn.execute(text("""
             INSERT INTO park_daily_stats (
-                park_id, stat_date, total_downtime_hours, rides_with_downtime,
+                park_id, stat_date, total_downtime_hours, weighted_downtime_hours,
+                effective_park_weight, shame_score, rides_with_downtime,
                 avg_uptime_percentage, operating_hours_minutes
-            ) VALUES (:park_id, :stat_date, :downtime_hours, :rides_down, :avg_uptime, :operating_minutes)
+            ) VALUES (:park_id, :stat_date, :downtime_hours, :weighted_downtime,
+                      :effective_weight, :shame, :rides_down, :avg_uptime, :operating_minutes)
         """), {
             'park_id': park_id,
             'stat_date': today,
             'downtime_hours': 750 / 60.0,  # 12.5 hours
+            'weighted_downtime': 1770 / 60.0,  # 29.5 hours
+            'effective_weight': 19.0,
+            'shame': round((1770 / 60.0) / (19.0 * 15) * 10, 1),  # ~1.0
             'rides_down': 10,
             'avg_uptime': 77.78,
             'operating_minutes': 900
@@ -353,13 +360,18 @@ def comprehensive_api_test_data(mysql_session):
         # Yesterday: 20% less = 600 min = 10 hours
         conn.execute(text("""
             INSERT INTO park_daily_stats (
-                park_id, stat_date, total_downtime_hours, rides_with_downtime,
+                park_id, stat_date, total_downtime_hours, weighted_downtime_hours,
+                effective_park_weight, shame_score, rides_with_downtime,
                 avg_uptime_percentage, operating_hours_minutes
-            ) VALUES (:park_id, :stat_date, :downtime_hours, :rides_down, :avg_uptime, :operating_minutes)
+            ) VALUES (:park_id, :stat_date, :downtime_hours, :weighted_downtime,
+                      :effective_weight, :shame, :rides_down, :avg_uptime, :operating_minutes)
         """), {
             'park_id': park_id,
             'stat_date': yesterday,
             'downtime_hours': 600 / 60.0,  # 10 hours
+            'weighted_downtime': 1416 / 60.0,  # 23.6 hours (20% less weighted)
+            'effective_weight': 19.0,
+            'shame': round((1416 / 60.0) / (19.0 * 15) * 10, 1),  # ~0.8
             'rides_down': 10,
             'avg_uptime': 80.0,
             'operating_minutes': 900
@@ -368,13 +380,18 @@ def comprehensive_api_test_data(mysql_session):
         for idx, days_back in enumerate(range(2, 7)):
             conn.execute(text("""
                 INSERT INTO park_daily_stats (
-                    park_id, stat_date, total_downtime_hours, rides_with_downtime,
+                    park_id, stat_date, total_downtime_hours, weighted_downtime_hours,
+                    effective_park_weight, shame_score, rides_with_downtime,
                     avg_uptime_percentage, operating_hours_minutes
-                ) VALUES (:park_id, :stat_date, :downtime_hours, :rides_down, :avg_uptime, :operating_minutes)
+                ) VALUES (:park_id, :stat_date, :downtime_hours, :weighted_downtime,
+                          :effective_weight, :shame, :rides_down, :avg_uptime, :operating_minutes)
             """), {
                 'park_id': park_id,
                 'stat_date': today - timedelta(days=days_back),
                 'downtime_hours': park_weekly_minutes[idx] / 60.0,
+                'weighted_downtime': park_weekly_minutes[idx] * 2.36 / 60.0,  # Approx weighted ratio
+                'effective_weight': 19.0,
+                'shame': 1.0,  # Constant for testing
                 'rides_down': 10,
                 'avg_uptime': 75.0,
                 'operating_minutes': 900

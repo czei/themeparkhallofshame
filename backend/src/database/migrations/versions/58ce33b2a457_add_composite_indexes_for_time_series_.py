@@ -1,13 +1,12 @@
 """add_composite_indexes_for_time_series_queries
 
 Revision ID: 58ce33b2a457
-Revises: 003_drop_hourly_stats
+Revises: 23dd8d23fe76
 Create Date: 2025-12-22 13:36:44.221249
 
 T013: Add composite indexes for time-series query optimization.
 
-These indexes optimize the ORM hourly aggregation queries that replace
-the deprecated ride_hourly_stats table. The indexes are designed for:
+These indexes optimize time-range queries on snapshots. The indexes are designed for:
 - Time-range queries on snapshots (recorded_at)
 - Entity-specific queries with time ordering (ride_id + recorded_at, park_id + recorded_at)
 
@@ -23,7 +22,7 @@ from sqlalchemy import inspect
 
 # revision identifiers, used by Alembic.
 revision: str = '58ce33b2a457'
-down_revision: Union[str, Sequence[str], None] = '003_drop_hourly_stats'
+down_revision: Union[str, Sequence[str], None] = '23dd8d23fe76'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

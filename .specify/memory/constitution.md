@@ -1,25 +1,27 @@
 <!--
-Version: 1.1.0 → 1.2.0
-Modified Principles: None
-Added Sections:
-  - XI. Cost Management & LLM Delegation (new principle addressing expensive Claude Code credits and delegation to cheaper Zen/PAL models)
+Version: 1.2.0 → 1.3.0
+Modified Principles:
+  - II. Real-Time with Historical Context → II. Data Retention & Historical Context
+    OLD: "Real-time data has a 24-hour retention window, after which it MUST be aggregated...and then deleted."
+    NEW: "Raw snapshots MAY be retained permanently when explicitly required for analytics features. When permanent retention is enabled, table partitioning MUST be implemented."
+Added Sections: None
 Removed Sections: None
 Templates Updated:
-  ⏳ To be determined if delegation guidelines require template changes
-Follow-up TODOs:
-  - Review spec/plan/tasks templates to determine if Principle XI requires explicit delegation guidance
+  ✅ plan-template.md - No changes needed (Constitution Check is dynamic)
+  ✅ spec-template.md - No changes needed (no data retention references)
+  ✅ tasks-template.md - No changes needed (task structure unchanged)
+Follow-up TODOs: None
 Rationale:
-  - Claude Code credits are expensive and continually depleted
-  - Added explicit Cost Management principle to establish Claude as manager/orchestrator who delegates to cheaper specialized models
-  - Zen/PAL MCP tools (GPT-4o, Gemini, etc.) provide expert analysis at lower cost
-  - Preserves Claude credits for high-level coordination, user communication, and quality control
-  - Delegation to specialized models maintains quality while reducing costs
-Previous Version (1.0.0 → 1.1.0):
-  - Elevated TDD from best practice to constitutional principle based on project requirement (882 tests in suite)
-  - Added explicit DRY principle after Zen Consensus identified duplicated logic across 20+ files as root cause of "fix one, break another" regression cycles
-  - Added Architecture Stability principle to prevent future architectural drift based on ORM migration decision
-  - Added Production Integrity principle after repeated incidents of attempting bug fixes directly on production server without local testing
-  - Added Mandatory AI Review principle to catch architectural problems, security vulnerabilities, and code smells early via systematic expert analysis
+  - Feature 004 (Theme Park Data Warehouse) requires permanent raw snapshot retention for:
+    - Multi-year historical analysis and seasonal pattern detection
+    - ML features planned in 005/006 that need granular data
+    - Year-over-year comparisons requiring raw timestamps
+  - Storage is economical (~$0.02/GB/month, ~108 GB for 10 years)
+  - Monthly RANGE partitioning maintains query performance at scale
+  - Amendment enables analytics-focused features while preserving aggregation requirement
+Previous Amendments:
+  1.1.0 → 1.2.0: Added Cost Management & LLM Delegation (Principle XI)
+  1.0.0 → 1.1.0: Added TDD, DRY, Architecture Stability, Production Integrity, Mandatory AI Review (Principles VI-X)
 -->
 
 # Theme Park Hall of Shame Constitution
@@ -31,15 +33,24 @@ All data collection, processing, and display MUST prioritize accuracy over compl
 
 **Rationale:** Users rely on this data to understand park performance. Inaccurate data undermines the entire project's credibility.
 
-### II. Real-Time with Historical Context
-The system MUST maintain both real-time status (current conditions) and historical summaries (trends over time). Real-time data has a 24-hour retention window, after which it MUST be aggregated into permanent daily/weekly/monthly/yearly summaries and then deleted.
+### II. Data Retention & Historical Context
+The system MUST maintain both real-time status (current conditions) and historical summaries (trends over time). Real-time data is aggregated into permanent daily/weekly/monthly/yearly summaries. Raw snapshots MAY be retained permanently when explicitly required for analytics features. When permanent retention is enabled, table partitioning MUST be implemented to maintain query performance.
 
-**Rationale:** Storage efficiency while preserving historical insights. Raw data older than 24 hours provides minimal additional value compared to calculated summaries.
+**Rationale:** Historical data enables multi-year trend analysis, seasonal pattern detection, and predictive modeling. Permanent retention of raw snapshots preserves granularity needed for ML features and correlations that aggregates cannot support. Monthly partitioning ensures query performance remains acceptable as data grows.
+
+**When Permanent Retention Applies:**
+- Features explicitly requiring multi-year raw data analysis (e.g., 004-themeparks-data-collection)
+- ML/predictive features requiring granular historical context (e.g., 005, 006)
+- Year-over-year comparisons at sub-daily granularity
+
+**When 24-Hour Retention Applies:**
+- Standard operational features not requiring historical raw data
+- Features where aggregated summaries provide sufficient context
 
 ### III. API Source Attribution
-Every page displaying data MUST prominently attribute Queue-Times.com as the data source with a visible, clickable link to https://queue-times.com. This is both a legal requirement and an ethical obligation.
+Every page displaying data MUST prominently attribute the data source with a visible, clickable link. This is both a legal requirement and an ethical obligation.
 
-**Rationale:** Respect for the free API provider that makes this project possible. Required by Queue-Times.com terms of service.
+**Rationale:** Respect for the API providers that make this project possible. Required by terms of service.
 
 ### IV. Performance Over Features
 Database queries MUST complete in under 100ms for current status, 200ms for historical data. Collection cycles MUST complete within 5 minutes. If a feature cannot meet these performance targets, it MUST be redesigned or rejected.
@@ -138,9 +149,15 @@ Claude Code usage is expensive and credits are continually depleted. Claude (Son
 - Business logic MUST NOT be duplicated across files—see Principle VII
 
 ### Data Retention Compliance
-- Raw data older than 24 hours MUST be deleted after aggregation
-- Daily aggregation MUST run before cleanup to prevent data loss
+- Daily aggregation MUST run to ensure summary tables are populated
 - Summary tables are permanent and MUST NOT be automatically deleted
+- When permanent retention is enabled (per Principle II):
+  - Raw snapshots are retained indefinitely
+  - Table MUST be partitioned (monthly RANGE recommended)
+  - Storage monitoring MUST be implemented with capacity alerts
+- When 24-hour retention applies:
+  - Raw data older than 24 hours MUST be deleted after aggregation
+  - Daily aggregation MUST run before cleanup to prevent data loss
 
 ## Development Workflow
 
@@ -216,4 +233,4 @@ This constitution establishes the non-negotiable principles for the Theme Park H
 - Violations of Principles VI-VII-IX-X-XI (TDD, DRY, Production Integrity, AI Review, Cost Management) are grounds for immediate PR rejection or deployment rollback
 - PRs missing Zen review report or ignoring recommendations without justification will be rejected
 
-**Version**: 1.2.0 | **Ratified**: 2025-11-22 | **Last Amended**: 2025-12-21
+**Version**: 1.3.0 | **Ratified**: 2025-11-22 | **Last Amended**: 2025-12-31

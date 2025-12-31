@@ -1,13 +1,16 @@
 """
 Theme Park Downtime Tracker - Aggregation Service
 Calculates daily/weekly/monthly/yearly statistics from raw snapshots with timezone awareness.
+
+Converted to SQLAlchemy 2.0 ORM (Phase 20).
 """
 
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Optional
 from zoneinfo import ZoneInfo
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy import select, func, case, and_, or_
+from sqlalchemy.orm import Session
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 from utils.logger import logger
 from utils.metrics import (
@@ -17,6 +20,15 @@ from utils.metrics import (
 )
 from processor.operating_hours_detector import OperatingHoursDetector
 from processor.status_change_detector import StatusChangeDetector
+
+from models import (
+    Park, Ride, RideClassification,
+    RideStatusSnapshot, ParkActivitySnapshot,
+    RideDailyStats, ParkDailyStats,
+    RideWeeklyStats, ParkWeeklyStats,
+    RideMonthlyStats, ParkMonthlyStats,
+    AggregationLog, AggregationType, AggregationStatus
+)
 
 
 class AggregationService:
@@ -32,16 +44,16 @@ class AggregationService:
     - Status change calculation
     """
 
-    def __init__(self, connection: Connection):
+    def __init__(self, session: Session):
         """
         Initialize aggregation service.
 
         Args:
-            connection: SQLAlchemy connection object
+            session: SQLAlchemy session object
         """
-        self.conn = connection
-        self.hours_detector = OperatingHoursDetector(connection)
-        self.change_detector = StatusChangeDetector(connection)
+        self.session = session
+        self.hours_detector = OperatingHoursDetector(session)
+        self.change_detector = StatusChangeDetector(session)
 
     def aggregate_daily(
         self,
@@ -61,7 +73,7 @@ class AggregationService:
         logger.info(f"Starting daily aggregation for {aggregation_date} (timezone: {park_timezone or 'all'})")
 
         # Start aggregation log
-        log_id = self._create_aggregation_log(aggregation_date, 'daily')
+        log_id = self._create_aggregation_log(aggregation_date, AggregationType.DAILY)
 
         try:
             # Get distinct timezones to aggregate
@@ -87,7 +99,7 @@ class AggregationService:
             # Update aggregation log with success
             self._complete_aggregation_log(
                 log_id=log_id,
-                status='success',
+                status=AggregationStatus.SUCCESS,
                 aggregated_until_ts=aggregated_until_ts,
                 parks_processed=parks_processed,
                 rides_processed=rides_processed
@@ -107,7 +119,7 @@ class AggregationService:
             # Update aggregation log with failure
             self._complete_aggregation_log(
                 log_id=log_id,
-                status='failed',
+                status=AggregationStatus.FAILED,
                 error_message=str(e)
             )
 
@@ -219,16 +231,15 @@ class AggregationService:
         logger.info(f"Aggregating {aggregation_date} for timezone {timezone}")
 
         # Get parks in this timezone
-        parks_query = text("""
-            SELECT park_id, name
-            FROM parks
-            WHERE timezone = :timezone
-                AND is_active = TRUE
-            ORDER BY park_id
-        """)
+        stmt = (
+            select(Park.park_id, Park.name)
+            .where(Park.timezone == timezone)
+            .where(Park.is_active == True)
+            .order_by(Park.park_id)
+        )
 
-        result = self.conn.execute(parks_query, {"timezone": timezone})
-        parks = [dict(row._mapping) for row in result]
+        result = self.session.execute(stmt)
+        parks = [{"park_id": row.park_id, "name": row.name} for row in result]
 
         parks_count = 0
         rides_count = 0
@@ -287,28 +298,31 @@ class AggregationService:
         utc_end = operating_session['session_end_utc']
 
         # Calculate park-wide statistics
-        stats_query = text("""
-            SELECT
-                COUNT(DISTINCT r.ride_id) AS total_rides_tracked,
-                COUNT(DISTINCT CASE WHEN rss.computed_is_open = FALSE THEN r.ride_id END) AS rides_with_downtime,
-                SUM(CASE WHEN rss.computed_is_open = TRUE THEN 1 ELSE 0 END) AS total_uptime_snapshots,
-                SUM(CASE WHEN rss.computed_is_open = FALSE THEN 1 ELSE 0 END) AS total_downtime_snapshots,
-                COUNT(rss.snapshot_id) AS total_snapshots
-            FROM rides r
-            LEFT JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-                AND rss.recorded_at >= :utc_start
-                AND rss.recorded_at <= :utc_end
-            WHERE r.park_id = :park_id
-                AND r.is_active = TRUE
-        """)
+        stmt = (
+            select(
+                func.count(func.distinct(Ride.ride_id)).label('total_rides_tracked'),
+                func.count(func.distinct(
+                    case((RideStatusSnapshot.computed_is_open == False, Ride.ride_id))
+                )).label('rides_with_downtime'),
+                func.sum(case((RideStatusSnapshot.computed_is_open == True, 1), else_=0)).label('total_uptime_snapshots'),
+                func.sum(case((RideStatusSnapshot.computed_is_open == False, 1), else_=0)).label('total_downtime_snapshots'),
+                func.count(RideStatusSnapshot.snapshot_id).label('total_snapshots')
+            )
+            .select_from(Ride)
+            .outerjoin(
+                RideStatusSnapshot,
+                and_(
+                    Ride.ride_id == RideStatusSnapshot.ride_id,
+                    RideStatusSnapshot.recorded_at >= utc_start,
+                    RideStatusSnapshot.recorded_at <= utc_end
+                )
+            )
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+        )
 
-        result = self.conn.execute(stats_query, {
-            "park_id": park_id,
-            "utc_start": utc_start,
-            "utc_end": utc_end
-        })
-
-        row = result.fetchone()
+        result = self.session.execute(stmt)
+        row = result.one()
 
         # Calculate downtime hours and uptime percentage
         total_snapshots = row.total_snapshots or 0
@@ -334,35 +348,28 @@ class AggregationService:
             operating_minutes=operating_minutes
         )
 
-        # Insert/update park daily stats
-        upsert_query = text("""
-            INSERT INTO park_daily_stats (
-                park_id, stat_date, total_downtime_hours, avg_uptime_percentage,
-                shame_score, rides_with_downtime, total_rides_tracked, operating_hours_minutes
-            )
-            VALUES (
-                :park_id, :stat_date, :total_downtime_hours, :avg_uptime_percentage,
-                :shame_score, :rides_with_downtime, :total_rides_tracked, :operating_hours_minutes
-            )
-            ON DUPLICATE KEY UPDATE
-                total_downtime_hours = VALUES(total_downtime_hours),
-                avg_uptime_percentage = VALUES(avg_uptime_percentage),
-                shame_score = VALUES(shame_score),
-                rides_with_downtime = VALUES(rides_with_downtime),
-                total_rides_tracked = VALUES(total_rides_tracked),
-                operating_hours_minutes = VALUES(operating_hours_minutes)
-        """)
+        # Insert/update park daily stats using MySQL upsert
+        stmt = mysql_insert(ParkDailyStats).values(
+            park_id=park_id,
+            stat_date=stat_date,
+            total_downtime_hours=round(total_downtime_hours, 2),
+            avg_uptime_percentage=round(avg_uptime_percentage, 2),
+            shame_score=round(shame_score, 3) if shame_score else None,
+            rides_with_downtime=row.rides_with_downtime or 0,
+            total_rides_tracked=row.total_rides_tracked or 0,
+            operating_hours_minutes=int(operating_minutes)
+        )
 
-        self.conn.execute(upsert_query, {
-            "park_id": park_id,
-            "stat_date": stat_date,
-            "total_downtime_hours": round(total_downtime_hours, 2),
-            "avg_uptime_percentage": round(avg_uptime_percentage, 2),
-            "shame_score": round(shame_score, 3) if shame_score else None,
-            "rides_with_downtime": row.rides_with_downtime or 0,
-            "total_rides_tracked": row.total_rides_tracked or 0,
-            "operating_hours_minutes": int(operating_minutes)
-        })
+        stmt = stmt.on_duplicate_key_update(
+            total_downtime_hours=stmt.inserted.total_downtime_hours,
+            avg_uptime_percentage=stmt.inserted.avg_uptime_percentage,
+            shame_score=stmt.inserted.shame_score,
+            rides_with_downtime=stmt.inserted.rides_with_downtime,
+            total_rides_tracked=stmt.inserted.total_rides_tracked,
+            operating_hours_minutes=stmt.inserted.operating_hours_minutes
+        )
+
+        self.session.execute(stmt)
 
         logger.debug(f"Aggregated park {park_id} daily stats for {stat_date}")
 
@@ -396,48 +403,31 @@ class AggregationService:
 
         operating_hours = operating_minutes / 60.0
 
-        # Calculate weighted downtime and total park weight in a single query
-        shame_query = text("""
-            SELECT
-                SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight,
-                SUM(
-                    COALESCE(rc.tier_weight, 2) *
-                    (SUM(CASE WHEN rss.computed_is_open = FALSE THEN 1 ELSE 0 END) /
-                     NULLIF(COUNT(rss.snapshot_id), 0))
-                ) AS weighted_downtime_ratio
-            FROM rides r
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            LEFT JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-                AND rss.recorded_at >= :utc_start
-                AND rss.recorded_at <= :utc_end
-            WHERE r.park_id = :park_id
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-        """)
+        # Calculate per-ride downtime and aggregate weighted downtime
+        stmt = (
+            select(
+                Ride.ride_id,
+                func.coalesce(RideClassification.tier_weight, DEFAULT_TIER_WEIGHT).label('tier_weight'),
+                func.count(RideStatusSnapshot.snapshot_id).label('total_snapshots'),
+                func.sum(case((RideStatusSnapshot.computed_is_open == False, 1), else_=0)).label('downtime_snapshots')
+            )
+            .select_from(Ride)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .outerjoin(
+                RideStatusSnapshot,
+                and_(
+                    Ride.ride_id == RideStatusSnapshot.ride_id,
+                    RideStatusSnapshot.recorded_at >= utc_start,
+                    RideStatusSnapshot.recorded_at <= utc_end
+                )
+            )
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+            .group_by(Ride.ride_id, RideClassification.tier_weight)
+        )
 
-        # More accurate approach: calculate per-ride then aggregate
-        ride_query = text("""
-            SELECT
-                r.ride_id,
-                COALESCE(rc.tier_weight, 2) AS tier_weight,
-                COUNT(rss.snapshot_id) AS total_snapshots,
-                SUM(CASE WHEN rss.computed_is_open = FALSE THEN 1 ELSE 0 END) AS downtime_snapshots
-            FROM rides r
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            LEFT JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-                AND rss.recorded_at >= :utc_start
-                AND rss.recorded_at <= :utc_end
-            WHERE r.park_id = :park_id
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-            GROUP BY r.ride_id, rc.tier_weight
-        """)
-
-        result = self.conn.execute(ride_query, {
-            "park_id": park_id,
-            "utc_start": utc_start,
-            "utc_end": utc_end
-        })
+        result = self.session.execute(stmt)
 
         total_park_weight = 0.0
         total_weighted_downtime_hours = 0.0
@@ -490,14 +480,13 @@ class AggregationService:
         operating_minutes = operating_session['operating_minutes']
 
         # Get all active rides for this park
-        rides_query = text("""
-            SELECT ride_id
-            FROM rides
-            WHERE park_id = :park_id
-                AND is_active = TRUE
-        """)
+        stmt = (
+            select(Ride.ride_id)
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+        )
 
-        result = self.conn.execute(rides_query, {"park_id": park_id})
+        result = self.session.execute(stmt)
         ride_ids = [row.ride_id for row in result]
 
         for ride_id in ride_ids:
@@ -522,57 +511,56 @@ class AggregationService:
     ):
         """Calculate and save daily statistics for a single ride."""
         # Get ride snapshots for the day
-        snapshots_query = text("""
-            SELECT
-                COUNT(*) AS total_snapshots,
-                SUM(CASE WHEN computed_is_open = TRUE THEN 1 ELSE 0 END) AS uptime_snapshots,
-                SUM(CASE WHEN computed_is_open = FALSE THEN 1 ELSE 0 END) AS downtime_snapshots,
-                AVG(CASE WHEN wait_time > 0 THEN wait_time ELSE NULL END) AS avg_wait_time,
-                MIN(CASE WHEN wait_time > 0 THEN wait_time ELSE NULL END) AS min_wait_time,
-                MAX(wait_time) AS max_wait_time
-            FROM ride_status_snapshots
-            WHERE ride_id = :ride_id
-                AND recorded_at >= :utc_start
-                AND recorded_at <= :utc_end
-        """)
+        stmt = (
+            select(
+                func.count().label('total_snapshots'),
+                func.sum(case((RideStatusSnapshot.computed_is_open == True, 1), else_=0)).label('uptime_snapshots'),
+                func.sum(case((RideStatusSnapshot.computed_is_open == False, 1), else_=0)).label('downtime_snapshots'),
+                func.avg(case((RideStatusSnapshot.wait_time > 0, RideStatusSnapshot.wait_time))).label('avg_wait_time'),
+                func.min(case((RideStatusSnapshot.wait_time > 0, RideStatusSnapshot.wait_time))).label('min_wait_time'),
+                func.max(RideStatusSnapshot.wait_time).label('max_wait_time')
+            )
+            .where(RideStatusSnapshot.ride_id == ride_id)
+            .where(RideStatusSnapshot.recorded_at >= utc_start)
+            .where(RideStatusSnapshot.recorded_at <= utc_end)
+        )
 
-        result = self.conn.execute(snapshots_query, {
-            "ride_id": ride_id,
-            "utc_start": utc_start,
-            "utc_end": utc_end
-        })
-
-        row = result.fetchone()
+        result = self.session.execute(stmt)
+        row = result.one()
         total_snapshots = row.total_snapshots or 0
 
         # Always create a record, even with zero snapshots (data consistency)
         if total_snapshots == 0:
             # No snapshots for this ride - create record with zeros
-            zero_stats_query = text("""
-                INSERT INTO ride_daily_stats (
-                    ride_id, stat_date, uptime_minutes, downtime_minutes, uptime_percentage,
-                    operating_hours_minutes, avg_wait_time, min_wait_time, max_wait_time, peak_wait_time,
-                    status_changes, longest_downtime_minutes
-                )
-                VALUES (
-                    :ride_id, :stat_date, 0, 0, 0.0, 0, NULL, NULL, NULL, NULL, 0, NULL
-                )
-                ON DUPLICATE KEY UPDATE
-                    uptime_minutes = 0,
-                    downtime_minutes = 0,
-                    uptime_percentage = 0.0,
-                    operating_hours_minutes = 0,
-                    avg_wait_time = NULL,
-                    min_wait_time = NULL,
-                    max_wait_time = NULL,
-                    peak_wait_time = NULL,
-                    status_changes = 0,
-                    longest_downtime_minutes = NULL
-            """)
-            self.conn.execute(zero_stats_query, {
-                "ride_id": ride_id,
-                "stat_date": stat_date
-            })
+            zero_stmt = mysql_insert(RideDailyStats).values(
+                ride_id=ride_id,
+                stat_date=stat_date,
+                uptime_minutes=0,
+                downtime_minutes=0,
+                uptime_percentage=0.0,
+                operating_hours_minutes=0,
+                avg_wait_time=None,
+                min_wait_time=None,
+                max_wait_time=None,
+                peak_wait_time=None,
+                status_changes=0,
+                longest_downtime_minutes=None
+            )
+
+            zero_stmt = zero_stmt.on_duplicate_key_update(
+                uptime_minutes=zero_stmt.inserted.uptime_minutes,
+                downtime_minutes=zero_stmt.inserted.downtime_minutes,
+                uptime_percentage=zero_stmt.inserted.uptime_percentage,
+                operating_hours_minutes=zero_stmt.inserted.operating_hours_minutes,
+                avg_wait_time=zero_stmt.inserted.avg_wait_time,
+                min_wait_time=zero_stmt.inserted.min_wait_time,
+                max_wait_time=zero_stmt.inserted.max_wait_time,
+                peak_wait_time=zero_stmt.inserted.peak_wait_time,
+                status_changes=zero_stmt.inserted.status_changes,
+                longest_downtime_minutes=zero_stmt.inserted.longest_downtime_minutes
+            )
+
+            self.session.execute(zero_stmt)
             logger.debug(f"Created zero-snapshot record for ride {ride_id} on {stat_date}")
             return
 
@@ -595,50 +583,41 @@ class AggregationService:
             default=None
         )
 
-        # Insert/update ride daily stats
-        upsert_query = text("""
-            INSERT INTO ride_daily_stats (
-                ride_id, stat_date, uptime_minutes, downtime_minutes, uptime_percentage,
-                operating_hours_minutes, avg_wait_time, min_wait_time, max_wait_time, peak_wait_time,
-                status_changes, longest_downtime_minutes
-            )
-            VALUES (
-                :ride_id, :stat_date, :uptime_minutes, :downtime_minutes, :uptime_percentage,
-                :operating_hours_minutes, :avg_wait_time, :min_wait_time, :max_wait_time, :peak_wait_time,
-                :status_changes, :longest_downtime_minutes
-            )
-            ON DUPLICATE KEY UPDATE
-                uptime_minutes = VALUES(uptime_minutes),
-                downtime_minutes = VALUES(downtime_minutes),
-                uptime_percentage = VALUES(uptime_percentage),
-                operating_hours_minutes = VALUES(operating_hours_minutes),
-                avg_wait_time = VALUES(avg_wait_time),
-                min_wait_time = VALUES(min_wait_time),
-                max_wait_time = VALUES(max_wait_time),
-                peak_wait_time = VALUES(peak_wait_time),
-                status_changes = VALUES(status_changes),
-                longest_downtime_minutes = VALUES(longest_downtime_minutes)
-        """)
-
         # Handle NULL wait times safely
         avg_wait = None
         if row.avg_wait_time is not None:
             avg_wait = round(float(row.avg_wait_time), 2)
 
-        self.conn.execute(upsert_query, {
-            "ride_id": ride_id,
-            "stat_date": stat_date,
-            "uptime_minutes": int(uptime_minutes),
-            "downtime_minutes": int(downtime_minutes),
-            "uptime_percentage": round(uptime_percentage, 2),
-            "operating_hours_minutes": int(operating_minutes),
-            "avg_wait_time": avg_wait,
-            "min_wait_time": row.min_wait_time,
-            "max_wait_time": row.max_wait_time,
-            "peak_wait_time": row.max_wait_time,
-            "status_changes": status_changes,
-            "longest_downtime_minutes": longest_downtime
-        })
+        # Insert/update ride daily stats
+        upsert_stmt = mysql_insert(RideDailyStats).values(
+            ride_id=ride_id,
+            stat_date=stat_date,
+            uptime_minutes=int(uptime_minutes),
+            downtime_minutes=int(downtime_minutes),
+            uptime_percentage=round(uptime_percentage, 2),
+            operating_hours_minutes=int(operating_minutes),
+            avg_wait_time=avg_wait,
+            min_wait_time=row.min_wait_time,
+            max_wait_time=row.max_wait_time,
+            peak_wait_time=row.max_wait_time,
+            status_changes=status_changes,
+            longest_downtime_minutes=longest_downtime
+        )
+
+        upsert_stmt = upsert_stmt.on_duplicate_key_update(
+            uptime_minutes=upsert_stmt.inserted.uptime_minutes,
+            downtime_minutes=upsert_stmt.inserted.downtime_minutes,
+            uptime_percentage=upsert_stmt.inserted.uptime_percentage,
+            operating_hours_minutes=upsert_stmt.inserted.operating_hours_minutes,
+            avg_wait_time=upsert_stmt.inserted.avg_wait_time,
+            min_wait_time=upsert_stmt.inserted.min_wait_time,
+            max_wait_time=upsert_stmt.inserted.max_wait_time,
+            peak_wait_time=upsert_stmt.inserted.peak_wait_time,
+            status_changes=upsert_stmt.inserted.status_changes,
+            longest_downtime_minutes=upsert_stmt.inserted.longest_downtime_minutes
+        )
+
+        self.session.execute(upsert_stmt)
 
     def _aggregate_rides_weekly_stats(
         self,
@@ -661,18 +640,15 @@ class AggregationService:
         week_end_date = week_start_date + timedelta(days=6)
 
         # Get all rides that have daily stats in this week
-        rides_query = text("""
-            SELECT DISTINCT ride_id
-            FROM ride_daily_stats
-            WHERE stat_date >= :week_start
-                AND stat_date <= :week_end
-            ORDER BY ride_id
-        """)
+        stmt = (
+            select(RideDailyStats.ride_id)
+            .distinct()
+            .where(RideDailyStats.stat_date >= week_start_date)
+            .where(RideDailyStats.stat_date <= week_end_date)
+            .order_by(RideDailyStats.ride_id)
+        )
 
-        result = self.conn.execute(rides_query, {
-            "week_start": week_start_date,
-            "week_end": week_end_date
-        })
+        result = self.session.execute(stmt)
         ride_ids = [row.ride_id for row in result]
 
         # Aggregate each ride
@@ -707,27 +683,23 @@ class AggregationService:
             week_end_date: Sunday of the ISO week
         """
         # Sum daily stats for the week
-        weekly_query = text("""
-            SELECT
-                SUM(uptime_minutes) AS uptime_minutes,
-                SUM(downtime_minutes) AS downtime_minutes,
-                SUM(operating_hours_minutes) AS operating_hours_minutes,
-                SUM(status_changes) AS status_changes,
-                MAX(peak_wait_time) AS peak_wait_time,
-                SUM(avg_wait_time * operating_hours_minutes) AS weighted_wait_sum,
-                SUM(operating_hours_minutes) AS total_operating_minutes
-            FROM ride_daily_stats
-            WHERE ride_id = :ride_id
-                AND stat_date >= :week_start
-                AND stat_date <= :week_end
-        """)
+        stmt = (
+            select(
+                func.sum(RideDailyStats.uptime_minutes).label('uptime_minutes'),
+                func.sum(RideDailyStats.downtime_minutes).label('downtime_minutes'),
+                func.sum(RideDailyStats.operating_hours_minutes).label('operating_hours_minutes'),
+                func.sum(RideDailyStats.status_changes).label('status_changes'),
+                func.max(RideDailyStats.peak_wait_time).label('peak_wait_time'),
+                func.sum(RideDailyStats.avg_wait_time * RideDailyStats.operating_hours_minutes).label('weighted_wait_sum'),
+                func.sum(RideDailyStats.operating_hours_minutes).label('total_operating_minutes')
+            )
+            .where(RideDailyStats.ride_id == ride_id)
+            .where(RideDailyStats.stat_date >= week_start_date)
+            .where(RideDailyStats.stat_date <= week_end_date)
+        )
 
-        result = self.conn.execute(weekly_query, {
-            "ride_id": ride_id,
-            "week_start": week_start_date,
-            "week_end": week_end_date
-        })
-        row = result.fetchone()
+        result = self.session.execute(stmt)
+        row = result.one()
 
         if not row or row.uptime_minutes is None:
             logger.debug(f"No daily stats found for ride {ride_id} in week {year}-W{week_number:02d}")
@@ -753,45 +725,34 @@ class AggregationService:
         )
 
         # Insert/update ride weekly stats
-        upsert_query = text("""
-            INSERT INTO ride_weekly_stats (
-                ride_id, year, week_number, week_start_date,
-                uptime_minutes, downtime_minutes, uptime_percentage,
-                operating_hours_minutes, avg_wait_time, peak_wait_time,
-                status_changes, trend_vs_previous_week
-            )
-            VALUES (
-                :ride_id, :year, :week_number, :week_start_date,
-                :uptime_minutes, :downtime_minutes, :uptime_percentage,
-                :operating_hours_minutes, :avg_wait_time, :peak_wait_time,
-                :status_changes, :trend_vs_previous_week
-            )
-            ON DUPLICATE KEY UPDATE
-                week_start_date = VALUES(week_start_date),
-                uptime_minutes = VALUES(uptime_minutes),
-                downtime_minutes = VALUES(downtime_minutes),
-                uptime_percentage = VALUES(uptime_percentage),
-                operating_hours_minutes = VALUES(operating_hours_minutes),
-                avg_wait_time = VALUES(avg_wait_time),
-                peak_wait_time = VALUES(peak_wait_time),
-                status_changes = VALUES(status_changes),
-                trend_vs_previous_week = VALUES(trend_vs_previous_week)
-        """)
+        upsert_stmt = mysql_insert(RideWeeklyStats).values(
+            ride_id=ride_id,
+            year=year,
+            week_number=week_number,
+            week_start_date=week_start_date,
+            uptime_minutes=row.uptime_minutes,
+            downtime_minutes=row.downtime_minutes,
+            uptime_percentage=round(uptime_percentage, 2),
+            operating_hours_minutes=row.operating_hours_minutes,
+            avg_wait_time=avg_wait_time,
+            peak_wait_time=row.peak_wait_time,
+            status_changes=row.status_changes,
+            trend_vs_previous_week=trend_vs_previous_week
+        )
 
-        self.conn.execute(upsert_query, {
-            "ride_id": ride_id,
-            "year": year,
-            "week_number": week_number,
-            "week_start_date": week_start_date,
-            "uptime_minutes": row.uptime_minutes,
-            "downtime_minutes": row.downtime_minutes,
-            "uptime_percentage": round(uptime_percentage, 2),
-            "operating_hours_minutes": row.operating_hours_minutes,
-            "avg_wait_time": avg_wait_time,
-            "peak_wait_time": row.peak_wait_time,
-            "status_changes": row.status_changes,
-            "trend_vs_previous_week": trend_vs_previous_week
-        })
+        upsert_stmt = upsert_stmt.on_duplicate_key_update(
+            week_start_date=upsert_stmt.inserted.week_start_date,
+            uptime_minutes=upsert_stmt.inserted.uptime_minutes,
+            downtime_minutes=upsert_stmt.inserted.downtime_minutes,
+            uptime_percentage=upsert_stmt.inserted.uptime_percentage,
+            operating_hours_minutes=upsert_stmt.inserted.operating_hours_minutes,
+            avg_wait_time=upsert_stmt.inserted.avg_wait_time,
+            peak_wait_time=upsert_stmt.inserted.peak_wait_time,
+            status_changes=upsert_stmt.inserted.status_changes,
+            trend_vs_previous_week=upsert_stmt.inserted.trend_vs_previous_week
+        )
+
+        self.session.execute(upsert_stmt)
 
         logger.debug(f"Aggregated weekly stats for ride {ride_id}, week {year}-W{week_number:02d}")
 
@@ -826,20 +787,15 @@ class AggregationService:
             previous_week = current_week - 1
 
         # Query previous week's downtime
-        previous_query = text("""
-            SELECT downtime_minutes
-            FROM ride_weekly_stats
-            WHERE ride_id = :ride_id
-                AND year = :year
-                AND week_number = :week_number
-        """)
+        stmt = (
+            select(RideWeeklyStats.downtime_minutes)
+            .where(RideWeeklyStats.ride_id == ride_id)
+            .where(RideWeeklyStats.year == previous_year)
+            .where(RideWeeklyStats.week_number == previous_week)
+        )
 
-        result = self.conn.execute(previous_query, {
-            "ride_id": ride_id,
-            "year": previous_year,
-            "week_number": previous_week
-        })
-        previous_row = result.fetchone()
+        result = self.session.execute(stmt)
+        previous_row = result.first()
 
         if not previous_row or previous_row.downtime_minutes is None or previous_row.downtime_minutes == 0:
             return None
@@ -867,19 +823,16 @@ class AggregationService:
             Number of parks processed
         """
         # Get all parks that have ride weekly stats
-        parks_query = text("""
-            SELECT DISTINCT r.park_id
-            FROM ride_weekly_stats rws
-            INNER JOIN rides r ON rws.ride_id = r.ride_id
-            WHERE rws.year = :year
-                AND rws.week_number = :week_number
-            ORDER BY r.park_id
-        """)
+        stmt = (
+            select(Ride.park_id)
+            .distinct()
+            .join(RideWeeklyStats, Ride.ride_id == RideWeeklyStats.ride_id)
+            .where(RideWeeklyStats.year == year)
+            .where(RideWeeklyStats.week_number == week_number)
+            .order_by(Ride.park_id)
+        )
 
-        result = self.conn.execute(parks_query, {
-            "year": year,
-            "week_number": week_number
-        })
+        result = self.session.execute(stmt)
         park_ids = [row.park_id for row in result]
 
         # Aggregate each park
@@ -911,29 +864,26 @@ class AggregationService:
             week_start_date: Monday of the ISO week
         """
         # Aggregate ride weekly stats for this park
-        park_query = text("""
-            SELECT
-                COUNT(DISTINCT rws.ride_id) AS total_rides_tracked,
-                AVG(rws.uptime_percentage) AS avg_uptime_percentage,
-                SUM(rws.downtime_minutes) / 60.0 AS total_downtime_hours,
-                SUM(CASE WHEN rws.downtime_minutes > 0 THEN 1 ELSE 0 END) AS rides_with_downtime,
-                SUM(rws.avg_wait_time * rws.operating_hours_minutes) AS weighted_wait_sum,
-                SUM(rws.operating_hours_minutes) AS total_operating_minutes,
-                MAX(rws.peak_wait_time) AS peak_wait_time
-            FROM ride_weekly_stats rws
-            INNER JOIN rides r ON rws.ride_id = r.ride_id
-            WHERE r.park_id = :park_id
-                AND rws.year = :year
-                AND rws.week_number = :week_number
-                AND r.is_active = TRUE
-        """)
+        stmt = (
+            select(
+                func.count(func.distinct(RideWeeklyStats.ride_id)).label('total_rides_tracked'),
+                func.avg(RideWeeklyStats.uptime_percentage).label('avg_uptime_percentage'),
+                (func.sum(RideWeeklyStats.downtime_minutes) / 60.0).label('total_downtime_hours'),
+                func.sum(case((RideWeeklyStats.downtime_minutes > 0, 1), else_=0)).label('rides_with_downtime'),
+                func.sum(RideWeeklyStats.avg_wait_time * RideWeeklyStats.operating_hours_minutes).label('weighted_wait_sum'),
+                func.sum(RideWeeklyStats.operating_hours_minutes).label('total_operating_minutes'),
+                func.max(RideWeeklyStats.peak_wait_time).label('peak_wait_time')
+            )
+            .select_from(RideWeeklyStats)
+            .join(Ride, RideWeeklyStats.ride_id == Ride.ride_id)
+            .where(Ride.park_id == park_id)
+            .where(RideWeeklyStats.year == year)
+            .where(RideWeeklyStats.week_number == week_number)
+            .where(Ride.is_active == True)
+        )
 
-        result = self.conn.execute(park_query, {
-            "park_id": park_id,
-            "year": year,
-            "week_number": week_number
-        })
-        row = result.fetchone()
+        result = self.session.execute(stmt)
+        row = result.one()
 
         if not row or row.total_rides_tracked == 0:
             logger.debug(f"No ride weekly stats found for park {park_id} in week {year}-W{week_number:02d}")
@@ -953,43 +903,32 @@ class AggregationService:
         )
 
         # Insert/update park weekly stats
-        upsert_query = text("""
-            INSERT INTO park_weekly_stats (
-                park_id, year, week_number, week_start_date,
-                total_rides_tracked, avg_uptime_percentage, total_downtime_hours,
-                rides_with_downtime, avg_wait_time, peak_wait_time,
-                trend_vs_previous_week
-            )
-            VALUES (
-                :park_id, :year, :week_number, :week_start_date,
-                :total_rides_tracked, :avg_uptime_percentage, :total_downtime_hours,
-                :rides_with_downtime, :avg_wait_time, :peak_wait_time,
-                :trend_vs_previous_week
-            )
-            ON DUPLICATE KEY UPDATE
-                week_start_date = VALUES(week_start_date),
-                total_rides_tracked = VALUES(total_rides_tracked),
-                avg_uptime_percentage = VALUES(avg_uptime_percentage),
-                total_downtime_hours = VALUES(total_downtime_hours),
-                rides_with_downtime = VALUES(rides_with_downtime),
-                avg_wait_time = VALUES(avg_wait_time),
-                peak_wait_time = VALUES(peak_wait_time),
-                trend_vs_previous_week = VALUES(trend_vs_previous_week)
-        """)
+        upsert_stmt = mysql_insert(ParkWeeklyStats).values(
+            park_id=park_id,
+            year=year,
+            week_number=week_number,
+            week_start_date=week_start_date,
+            total_rides_tracked=row.total_rides_tracked,
+            avg_uptime_percentage=round(float(row.avg_uptime_percentage), 2) if row.avg_uptime_percentage else None,
+            total_downtime_hours=round(float(row.total_downtime_hours), 2),
+            rides_with_downtime=row.rides_with_downtime,
+            avg_wait_time=avg_wait_time,
+            peak_wait_time=row.peak_wait_time,
+            trend_vs_previous_week=trend_vs_previous_week
+        )
 
-        self.conn.execute(upsert_query, {
-            "park_id": park_id,
-            "year": year,
-            "week_number": week_number,
-            "week_start_date": week_start_date,
-            "total_rides_tracked": row.total_rides_tracked,
-            "avg_uptime_percentage": round(float(row.avg_uptime_percentage), 2) if row.avg_uptime_percentage else None,
-            "total_downtime_hours": round(float(row.total_downtime_hours), 2),
-            "rides_with_downtime": row.rides_with_downtime,
-            "avg_wait_time": avg_wait_time,
-            "peak_wait_time": row.peak_wait_time,
-            "trend_vs_previous_week": trend_vs_previous_week
-        })
+        upsert_stmt = upsert_stmt.on_duplicate_key_update(
+            week_start_date=upsert_stmt.inserted.week_start_date,
+            total_rides_tracked=upsert_stmt.inserted.total_rides_tracked,
+            avg_uptime_percentage=upsert_stmt.inserted.avg_uptime_percentage,
+            total_downtime_hours=upsert_stmt.inserted.total_downtime_hours,
+            rides_with_downtime=upsert_stmt.inserted.rides_with_downtime,
+            avg_wait_time=upsert_stmt.inserted.avg_wait_time,
+            peak_wait_time=upsert_stmt.inserted.peak_wait_time,
+            trend_vs_previous_week=upsert_stmt.inserted.trend_vs_previous_week
+        )
+
+        self.session.execute(upsert_stmt)
 
         logger.debug(f"Aggregated weekly stats for park {park_id}, week {year}-W{week_number:02d}")
 
@@ -1022,20 +961,15 @@ class AggregationService:
             previous_week = current_week - 1
 
         # Query previous week's downtime
-        previous_query = text("""
-            SELECT total_downtime_hours
-            FROM park_weekly_stats
-            WHERE park_id = :park_id
-                AND year = :year
-                AND week_number = :week_number
-        """)
+        stmt = (
+            select(ParkWeeklyStats.total_downtime_hours)
+            .where(ParkWeeklyStats.park_id == park_id)
+            .where(ParkWeeklyStats.year == previous_year)
+            .where(ParkWeeklyStats.week_number == previous_week)
+        )
 
-        result = self.conn.execute(previous_query, {
-            "park_id": park_id,
-            "year": previous_year,
-            "week_number": previous_week
-        })
-        previous_row = result.fetchone()
+        result = self.session.execute(stmt)
+        previous_row = result.first()
 
         if not previous_row or previous_row.total_downtime_hours is None or float(previous_row.total_downtime_hours) == 0:
             return None
@@ -1067,18 +1001,15 @@ class AggregationService:
         last_day = date(year, month, last_day_num)
 
         # Get all rides that have daily stats in this month
-        rides_query = text("""
-            SELECT DISTINCT ride_id
-            FROM ride_daily_stats
-            WHERE stat_date >= :month_start
-                AND stat_date <= :month_end
-            ORDER BY ride_id
-        """)
+        stmt = (
+            select(RideDailyStats.ride_id)
+            .distinct()
+            .where(RideDailyStats.stat_date >= first_day)
+            .where(RideDailyStats.stat_date <= last_day)
+            .order_by(RideDailyStats.ride_id)
+        )
 
-        result = self.conn.execute(rides_query, {
-            "month_start": first_day,
-            "month_end": last_day
-        })
+        result = self.session.execute(stmt)
         ride_ids = [row.ride_id for row in result]
 
         # Aggregate each ride
@@ -1113,30 +1044,26 @@ class AggregationService:
             month_end: Last day of the month
         """
         # Sum daily stats for the month
-        monthly_query = text("""
-            SELECT
-                SUM(uptime_minutes) AS uptime_minutes,
-                SUM(downtime_minutes) AS downtime_minutes,
-                SUM(operating_hours_minutes) AS operating_hours_minutes,
-                SUM(status_changes) AS status_changes,
-                MAX(peak_wait_time) AS peak_wait_time,
-                SUM(avg_wait_time * operating_hours_minutes) AS weighted_wait_sum,
-                SUM(operating_hours_minutes) AS total_operating_minutes
-            FROM ride_daily_stats
-            WHERE ride_id = :ride_id
-                AND stat_date >= :month_start
-                AND stat_date <= :month_end
-        """)
+        stmt = (
+            select(
+                func.sum(RideDailyStats.uptime_minutes).label('uptime_minutes'),
+                func.sum(RideDailyStats.downtime_minutes).label('downtime_minutes'),
+                func.sum(RideDailyStats.operating_hours_minutes).label('operating_hours_minutes'),
+                func.sum(RideDailyStats.status_changes).label('status_changes'),
+                func.max(RideDailyStats.peak_wait_time).label('peak_wait_time'),
+                func.sum(RideDailyStats.avg_wait_time * RideDailyStats.operating_hours_minutes).label('weighted_wait_sum'),
+                func.sum(RideDailyStats.operating_hours_minutes).label('total_operating_minutes')
+            )
+            .where(RideDailyStats.ride_id == ride_id)
+            .where(RideDailyStats.stat_date >= month_start)
+            .where(RideDailyStats.stat_date <= month_end)
+        )
 
-        result = self.conn.execute(monthly_query, {
-            "ride_id": ride_id,
-            "month_start": month_start,
-            "month_end": month_end
-        })
-        row = result.fetchone()
+        result = self.session.execute(stmt)
+        row = result.one()
 
         if not row or row.uptime_minutes is None:
-            logger.debug(f"No daily stats found for ride {ride_id} in {year}-{month:02d}")
+            logger.debug(f"No daily stats found for ride {ride_id} in month {year}-{month:02d}")
             return
 
         # Calculate uptime percentage
@@ -1159,45 +1086,34 @@ class AggregationService:
         )
 
         # Insert/update ride monthly stats
-        upsert_query = text("""
-            INSERT INTO ride_monthly_stats (
-                ride_id, year, month,
-                uptime_minutes, downtime_minutes, uptime_percentage,
-                operating_hours_minutes, avg_wait_time, peak_wait_time,
-                status_changes, trend_vs_previous_month
-            )
-            VALUES (
-                :ride_id, :year, :month,
-                :uptime_minutes, :downtime_minutes, :uptime_percentage,
-                :operating_hours_minutes, :avg_wait_time, :peak_wait_time,
-                :status_changes, :trend_vs_previous_month
-            )
-            ON DUPLICATE KEY UPDATE
-                uptime_minutes = VALUES(uptime_minutes),
-                downtime_minutes = VALUES(downtime_minutes),
-                uptime_percentage = VALUES(uptime_percentage),
-                operating_hours_minutes = VALUES(operating_hours_minutes),
-                avg_wait_time = VALUES(avg_wait_time),
-                peak_wait_time = VALUES(peak_wait_time),
-                status_changes = VALUES(status_changes),
-                trend_vs_previous_month = VALUES(trend_vs_previous_month)
-        """)
+        upsert_stmt = mysql_insert(RideMonthlyStats).values(
+            ride_id=ride_id,
+            year=year,
+            month=month,
+            uptime_minutes=row.uptime_minutes,
+            downtime_minutes=row.downtime_minutes,
+            uptime_percentage=round(uptime_percentage, 2),
+            operating_hours_minutes=row.operating_hours_minutes,
+            avg_wait_time=avg_wait_time,
+            peak_wait_time=row.peak_wait_time,
+            status_changes=row.status_changes,
+            trend_vs_previous_month=trend_vs_previous_month
+        )
 
-        self.conn.execute(upsert_query, {
-            "ride_id": ride_id,
-            "year": year,
-            "month": month,
-            "uptime_minutes": row.uptime_minutes,
-            "downtime_minutes": row.downtime_minutes,
-            "uptime_percentage": round(uptime_percentage, 2),
-            "operating_hours_minutes": row.operating_hours_minutes,
-            "avg_wait_time": avg_wait_time,
-            "peak_wait_time": row.peak_wait_time,
-            "status_changes": row.status_changes,
-            "trend_vs_previous_month": trend_vs_previous_month
-        })
+        upsert_stmt = upsert_stmt.on_duplicate_key_update(
+            uptime_minutes=upsert_stmt.inserted.uptime_minutes,
+            downtime_minutes=upsert_stmt.inserted.downtime_minutes,
+            uptime_percentage=upsert_stmt.inserted.uptime_percentage,
+            operating_hours_minutes=upsert_stmt.inserted.operating_hours_minutes,
+            avg_wait_time=upsert_stmt.inserted.avg_wait_time,
+            peak_wait_time=upsert_stmt.inserted.peak_wait_time,
+            status_changes=upsert_stmt.inserted.status_changes,
+            trend_vs_previous_month=upsert_stmt.inserted.trend_vs_previous_month
+        )
 
-        logger.debug(f"Aggregated monthly stats for ride {ride_id}, {year}-{month:02d}")
+        self.session.execute(upsert_stmt)
+
+        logger.debug(f"Aggregated monthly stats for ride {ride_id}, month {year}-{month:02d}")
 
     def _calculate_monthly_trend(
         self,
@@ -1218,8 +1134,7 @@ class AggregationService:
         Returns:
             Percentage change (e.g., 20.75 for +20.75%) or None if no previous data
         """
-        # Calculate previous month
-        # Handle year boundary (month 1 -> previous year month 12)
+        # Calculate previous month (handle year boundary)
         if current_month == 1:
             previous_year = current_year - 1
             previous_month = 12
@@ -1228,20 +1143,15 @@ class AggregationService:
             previous_month = current_month - 1
 
         # Query previous month's downtime
-        previous_query = text("""
-            SELECT downtime_minutes
-            FROM ride_monthly_stats
-            WHERE ride_id = :ride_id
-                AND year = :year
-                AND month = :month
-        """)
+        stmt = (
+            select(RideMonthlyStats.downtime_minutes)
+            .where(RideMonthlyStats.ride_id == ride_id)
+            .where(RideMonthlyStats.year == previous_year)
+            .where(RideMonthlyStats.month == previous_month)
+        )
 
-        result = self.conn.execute(previous_query, {
-            "ride_id": ride_id,
-            "year": previous_year,
-            "month": previous_month
-        })
-        previous_row = result.fetchone()
+        result = self.session.execute(stmt)
+        previous_row = result.first()
 
         if not previous_row or previous_row.downtime_minutes is None or previous_row.downtime_minutes == 0:
             return None
@@ -1267,19 +1177,16 @@ class AggregationService:
             Number of parks processed
         """
         # Get all parks that have ride monthly stats
-        parks_query = text("""
-            SELECT DISTINCT r.park_id
-            FROM ride_monthly_stats rms
-            INNER JOIN rides r ON rms.ride_id = r.ride_id
-            WHERE rms.year = :year
-                AND rms.month = :month
-            ORDER BY r.park_id
-        """)
+        stmt = (
+            select(Ride.park_id)
+            .distinct()
+            .join(RideMonthlyStats, Ride.ride_id == RideMonthlyStats.ride_id)
+            .where(RideMonthlyStats.year == year)
+            .where(RideMonthlyStats.month == month)
+            .order_by(Ride.park_id)
+        )
 
-        result = self.conn.execute(parks_query, {
-            "year": year,
-            "month": month
-        })
+        result = self.session.execute(stmt)
         park_ids = [row.park_id for row in result]
 
         # Aggregate each park
@@ -1308,32 +1215,29 @@ class AggregationService:
             month: Month number (1-12)
         """
         # Aggregate ride monthly stats for this park
-        park_query = text("""
-            SELECT
-                COUNT(DISTINCT rms.ride_id) AS total_rides_tracked,
-                AVG(rms.uptime_percentage) AS avg_uptime_percentage,
-                SUM(rms.downtime_minutes) / 60.0 AS total_downtime_hours,
-                SUM(CASE WHEN rms.downtime_minutes > 0 THEN 1 ELSE 0 END) AS rides_with_downtime,
-                SUM(rms.avg_wait_time * rms.operating_hours_minutes) AS weighted_wait_sum,
-                SUM(rms.operating_hours_minutes) AS total_operating_minutes,
-                MAX(rms.peak_wait_time) AS peak_wait_time
-            FROM ride_monthly_stats rms
-            INNER JOIN rides r ON rms.ride_id = r.ride_id
-            WHERE r.park_id = :park_id
-                AND rms.year = :year
-                AND rms.month = :month
-                AND r.is_active = TRUE
-        """)
+        stmt = (
+            select(
+                func.count(func.distinct(RideMonthlyStats.ride_id)).label('total_rides_tracked'),
+                func.avg(RideMonthlyStats.uptime_percentage).label('avg_uptime_percentage'),
+                (func.sum(RideMonthlyStats.downtime_minutes) / 60.0).label('total_downtime_hours'),
+                func.sum(case((RideMonthlyStats.downtime_minutes > 0, 1), else_=0)).label('rides_with_downtime'),
+                func.sum(RideMonthlyStats.avg_wait_time * RideMonthlyStats.operating_hours_minutes).label('weighted_wait_sum'),
+                func.sum(RideMonthlyStats.operating_hours_minutes).label('total_operating_minutes'),
+                func.max(RideMonthlyStats.peak_wait_time).label('peak_wait_time')
+            )
+            .select_from(RideMonthlyStats)
+            .join(Ride, RideMonthlyStats.ride_id == Ride.ride_id)
+            .where(Ride.park_id == park_id)
+            .where(RideMonthlyStats.year == year)
+            .where(RideMonthlyStats.month == month)
+            .where(Ride.is_active == True)
+        )
 
-        result = self.conn.execute(park_query, {
-            "park_id": park_id,
-            "year": year,
-            "month": month
-        })
-        row = result.fetchone()
+        result = self.session.execute(stmt)
+        row = result.one()
 
         if not row or row.total_rides_tracked == 0:
-            logger.debug(f"No ride monthly stats found for park {park_id} in {year}-{month:02d}")
+            logger.debug(f"No ride monthly stats found for park {park_id} in month {year}-{month:02d}")
             return
 
         # Calculate weighted average wait time
@@ -1350,43 +1254,32 @@ class AggregationService:
         )
 
         # Insert/update park monthly stats
-        upsert_query = text("""
-            INSERT INTO park_monthly_stats (
-                park_id, year, month,
-                total_rides_tracked, avg_uptime_percentage, total_downtime_hours,
-                rides_with_downtime, avg_wait_time, peak_wait_time,
-                trend_vs_previous_month
-            )
-            VALUES (
-                :park_id, :year, :month,
-                :total_rides_tracked, :avg_uptime_percentage, :total_downtime_hours,
-                :rides_with_downtime, :avg_wait_time, :peak_wait_time,
-                :trend_vs_previous_month
-            )
-            ON DUPLICATE KEY UPDATE
-                total_rides_tracked = VALUES(total_rides_tracked),
-                avg_uptime_percentage = VALUES(avg_uptime_percentage),
-                total_downtime_hours = VALUES(total_downtime_hours),
-                rides_with_downtime = VALUES(rides_with_downtime),
-                avg_wait_time = VALUES(avg_wait_time),
-                peak_wait_time = VALUES(peak_wait_time),
-                trend_vs_previous_month = VALUES(trend_vs_previous_month)
-        """)
+        upsert_stmt = mysql_insert(ParkMonthlyStats).values(
+            park_id=park_id,
+            year=year,
+            month=month,
+            total_rides_tracked=row.total_rides_tracked,
+            avg_uptime_percentage=round(float(row.avg_uptime_percentage), 2) if row.avg_uptime_percentage else None,
+            total_downtime_hours=round(float(row.total_downtime_hours), 2),
+            rides_with_downtime=row.rides_with_downtime,
+            avg_wait_time=avg_wait_time,
+            peak_wait_time=row.peak_wait_time,
+            trend_vs_previous_month=trend_vs_previous_month
+        )
 
-        self.conn.execute(upsert_query, {
-            "park_id": park_id,
-            "year": year,
-            "month": month,
-            "total_rides_tracked": row.total_rides_tracked,
-            "avg_uptime_percentage": round(float(row.avg_uptime_percentage), 2) if row.avg_uptime_percentage else None,
-            "total_downtime_hours": round(float(row.total_downtime_hours), 2),
-            "rides_with_downtime": row.rides_with_downtime,
-            "avg_wait_time": avg_wait_time,
-            "peak_wait_time": row.peak_wait_time,
-            "trend_vs_previous_month": trend_vs_previous_month
-        })
+        upsert_stmt = upsert_stmt.on_duplicate_key_update(
+            total_rides_tracked=upsert_stmt.inserted.total_rides_tracked,
+            avg_uptime_percentage=upsert_stmt.inserted.avg_uptime_percentage,
+            total_downtime_hours=upsert_stmt.inserted.total_downtime_hours,
+            rides_with_downtime=upsert_stmt.inserted.rides_with_downtime,
+            avg_wait_time=upsert_stmt.inserted.avg_wait_time,
+            peak_wait_time=upsert_stmt.inserted.peak_wait_time,
+            trend_vs_previous_month=upsert_stmt.inserted.trend_vs_previous_month
+        )
 
-        logger.debug(f"Aggregated monthly stats for park {park_id}, {year}-{month:02d}")
+        self.session.execute(upsert_stmt)
+
+        logger.debug(f"Aggregated monthly stats for park {park_id}, month {year}-{month:02d}")
 
     def _calculate_park_monthly_trend(
         self,
@@ -1407,7 +1300,7 @@ class AggregationService:
         Returns:
             Percentage change or None if no previous data
         """
-        # Calculate previous month
+        # Calculate previous month (handle year boundary)
         if current_month == 1:
             previous_year = current_year - 1
             previous_month = 12
@@ -1416,45 +1309,40 @@ class AggregationService:
             previous_month = current_month - 1
 
         # Query previous month's downtime
-        previous_query = text("""
-            SELECT total_downtime_hours
-            FROM park_monthly_stats
-            WHERE park_id = :park_id
-                AND year = :year
-                AND month = :month
-        """)
+        stmt = (
+            select(ParkMonthlyStats.total_downtime_hours)
+            .where(ParkMonthlyStats.park_id == park_id)
+            .where(ParkMonthlyStats.year == previous_year)
+            .where(ParkMonthlyStats.month == previous_month)
+        )
 
-        result = self.conn.execute(previous_query, {
-            "park_id": park_id,
-            "year": previous_year,
-            "month": previous_month
-        })
-        previous_row = result.fetchone()
+        result = self.session.execute(stmt)
+        previous_row = result.first()
 
-        if not previous_row or previous_row.total_downtime_hours is None or float(previous_row.total_downtime_hours) == 0:
+        if not previous_row or previous_row.total_downtime_hours is None or previous_row.total_downtime_hours == 0:
             return None
 
-        # Calculate percentage change
-        previous_downtime = float(previous_row.total_downtime_hours)
-        trend = ((float(current_downtime_hours) - previous_downtime) / previous_downtime) * 100.0
+        # Calculate percentage change: ((current - previous) / previous) * 100
+        prev_downtime = float(previous_row.total_downtime_hours)
+        trend = ((float(current_downtime_hours) - prev_downtime) / prev_downtime) * 100.0
         return round(trend, 2)
 
     def _get_distinct_timezones(self) -> List[str]:
         """Get list of distinct timezones from active parks."""
-        query = text("""
-            SELECT DISTINCT timezone
-            FROM parks
-            WHERE is_active = TRUE
-            ORDER BY timezone
-        """)
+        stmt = (
+            select(Park.timezone)
+            .distinct()
+            .where(Park.is_active == True)
+            .order_by(Park.timezone)
+        )
 
-        result = self.conn.execute(query)
+        result = self.session.execute(stmt)
         return [row.timezone for row in result]
 
     def _create_aggregation_log(
         self,
         aggregation_date: date,
-        aggregation_type: str
+        aggregation_type: AggregationType
     ) -> int:
         """
         Create or restart aggregation log entry.
@@ -1462,40 +1350,37 @@ class AggregationService:
         Returns:
             log_id
         """
-        query = text("""
-            INSERT INTO aggregation_log (
-                aggregation_date, aggregation_type, status, started_at
-            )
-            VALUES (
-                :aggregation_date, :aggregation_type, 'running', NOW()
-            )
-            ON DUPLICATE KEY UPDATE
-                status = 'running',
-                started_at = NOW(),
-                completed_at = NULL,
-                error_message = NULL,
-                parks_processed = 0,
-                rides_processed = 0
-        """)
+        # Use MySQL upsert for aggregation log
+        stmt = mysql_insert(AggregationLog).values(
+            aggregation_date=aggregation_date,
+            aggregation_type=aggregation_type,
+            status=AggregationStatus.RUNNING,
+            started_at=func.now(),
+            parks_processed=0,
+            rides_processed=0
+        )
 
-        result = self.conn.execute(query, {
-            "aggregation_date": aggregation_date,
-            "aggregation_type": aggregation_type
-        })
+        stmt = stmt.on_duplicate_key_update(
+            status=AggregationStatus.RUNNING,
+            started_at=func.now(),
+            completed_at=None,
+            error_message=None,
+            parks_processed=0,
+            rides_processed=0
+        )
+
+        result = self.session.execute(stmt)
 
         # For ON DUPLICATE KEY UPDATE, lastrowid may not be the actual ID
         # We need to query for it
         if result.lastrowid == 0:
             # Update case - query for the log_id
-            select_query = text("""
-                SELECT log_id FROM aggregation_log
-                WHERE aggregation_date = :aggregation_date
-                AND aggregation_type = :aggregation_type
-            """)
-            log_id = self.conn.execute(select_query, {
-                "aggregation_date": aggregation_date,
-                "aggregation_type": aggregation_type
-            }).scalar()
+            select_stmt = (
+                select(AggregationLog.log_id)
+                .where(AggregationLog.aggregation_date == aggregation_date)
+                .where(AggregationLog.aggregation_type == aggregation_type)
+            )
+            log_id = self.session.execute(select_stmt).scalar()
             return log_id
         else:
             return result.lastrowid
@@ -1503,56 +1388,67 @@ class AggregationService:
     def _complete_aggregation_log(
         self,
         log_id: int,
-        status: str,
+        status: AggregationStatus,
         aggregated_until_ts: Optional[datetime] = None,
         parks_processed: int = 0,
         rides_processed: int = 0,
         error_message: Optional[str] = None
     ):
         """Update aggregation log with completion status."""
-        query = text("""
-            UPDATE aggregation_log
-            SET status = :status,
-                completed_at = NOW(),
-                aggregated_until_ts = :aggregated_until_ts,
-                parks_processed = :parks_processed,
-                rides_processed = :rides_processed,
-                error_message = :error_message
-            WHERE log_id = :log_id
-        """)
+        from sqlalchemy import update
 
-        self.conn.execute(query, {
-            "log_id": log_id,
-            "status": status,
-            "aggregated_until_ts": aggregated_until_ts,
-            "parks_processed": parks_processed,
-            "rides_processed": rides_processed,
-            "error_message": error_message
-        })
+        stmt = (
+            update(AggregationLog)
+            .where(AggregationLog.log_id == log_id)
+            .values(
+                status=status,
+                completed_at=func.now(),
+                aggregated_until_ts=aggregated_until_ts,
+                parks_processed=parks_processed,
+                rides_processed=rides_processed,
+                error_message=error_message
+            )
+        )
+
+        self.session.execute(stmt)
 
     def get_last_successful_aggregation(
         self,
-        aggregation_type: str = 'daily'
+        aggregation_type: AggregationType = AggregationType.DAILY
     ) -> Optional[Dict[str, Any]]:
         """
         Get most recent successful aggregation.
 
         Args:
-            aggregation_type: 'daily', 'weekly', 'monthly', or 'yearly'
+            aggregation_type: AggregationType enum value
 
         Returns:
             Dictionary with aggregation log data or None
         """
-        query = text("""
-            SELECT *
-            FROM aggregation_log
-            WHERE aggregation_type = :aggregation_type
-                AND status = 'success'
-            ORDER BY aggregated_until_ts DESC
-            LIMIT 1
-        """)
+        stmt = (
+            select(AggregationLog)
+            .where(AggregationLog.aggregation_type == aggregation_type)
+            .where(AggregationLog.status == AggregationStatus.SUCCESS)
+            .order_by(AggregationLog.aggregated_until_ts.desc())
+            .limit(1)
+        )
 
-        result = self.conn.execute(query, {"aggregation_type": aggregation_type})
-        row = result.fetchone()
+        result = self.session.execute(stmt)
+        row = result.first()
 
-        return dict(row._mapping) if row else None
+        if not row:
+            return None
+
+        log = row[0]
+        return {
+            "log_id": log.log_id,
+            "aggregation_date": log.aggregation_date,
+            "aggregation_type": log.aggregation_type.value,
+            "status": log.status.value,
+            "started_at": log.started_at,
+            "completed_at": log.completed_at,
+            "aggregated_until_ts": log.aggregated_until_ts,
+            "parks_processed": log.parks_processed,
+            "rides_processed": log.rides_processed,
+            "error_message": log.error_message
+        }

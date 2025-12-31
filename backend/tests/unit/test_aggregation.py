@@ -23,12 +23,13 @@ class TestAggregationServiceInit:
     """Test AggregationService initialization."""
 
     def test_init_with_connection(self):
-        """Service should initialize with database connection."""
-        mock_conn = Mock()
+        """Service should initialize with database session."""
+        mock_session = Mock()
 
-        service = AggregationService(mock_conn)
+        service = AggregationService(mock_session)
 
-        assert service.conn == mock_conn
+        # ORM version uses session instead of conn
+        assert service.session == mock_session
         assert service.hours_detector is not None
         assert service.change_detector is not None
 

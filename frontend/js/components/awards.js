@@ -326,7 +326,7 @@ class Awards {
         const lastUpdateEl = document.getElementById('last-update-time');
         if (lastUpdateEl) {
             const now = new Date();
-            lastUpdateEl.textContent = now.toLocaleTimeString() + ' PST';
+            lastUpdateEl.textContent = now.toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles' }) + ' PST';
         }
     }
 

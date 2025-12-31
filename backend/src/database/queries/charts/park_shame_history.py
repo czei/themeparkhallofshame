@@ -33,8 +33,8 @@ How to Modify:
 from datetime import date, timedelta
 from typing import List, Dict, Any
 
-from sqlalchemy import select, func, and_, text
-from sqlalchemy.engine import Connection
+from sqlalchemy import select, func, and_, or_, case, literal_column, desc, null, text
+from sqlalchemy.orm import Session
 
 from database.schema import (
     parks,
@@ -46,6 +46,15 @@ from utils.timezone import get_pacific_day_range_utc, get_today_range_to_now_utc
 from utils.sql_helpers import ParkStatusSQL
 from utils.metrics import USE_HOURLY_TABLES
 
+# ORM models for query conversion
+from models import (
+    Park, Ride, RideClassification,
+    ParkActivitySnapshot, ParkHourlyStats,
+    RideDailyStats
+)
+from models.orm_stats import ParkHourlyStats as ParkHourlyStatsORM
+from models.orm_schedule import ParkSchedule
+
 
 class ParkShameHistoryQuery:
     """
@@ -56,18 +65,121 @@ class ParkShameHistoryQuery:
     - Slow path: GROUP BY HOUR on raw park_activity_snapshots (rollback)
     """
 
-    def __init__(self, connection: Connection, use_hourly_tables: bool = None):
+    def __init__(self, session: Session, use_hourly_tables: bool = None):
         """
         Initialize query handler.
 
         Args:
-            connection: Database connection
+            session: SQLAlchemy Session
             use_hourly_tables: If True, use park_hourly_stats (fast path).
                              If False, use GROUP BY HOUR on raw snapshots (rollback).
                              If None, uses global USE_HOURLY_TABLES flag (default).
         """
-        self.conn = connection
+        self.session = session
         self.use_hourly_tables = use_hourly_tables if use_hourly_tables is not None else USE_HOURLY_TABLES
+
+    def _get_schedule_for_date(self, park_id: int, target_date: date) -> Dict[str, Any]:
+        """
+        Get park operating schedule for a specific date.
+
+        This is the SINGLE SOURCE OF TRUTH for determining when a park is open.
+        Chart data should only include hours within this schedule.
+
+        Args:
+            park_id: The park ID
+            target_date: The date to get schedule for
+
+        Returns:
+            Dict with 'opening_time' and 'closing_time' as datetime objects,
+            or None if no schedule exists.
+        """
+        stmt = (
+            select(
+                ParkSchedule.opening_time,
+                ParkSchedule.closing_time
+            )
+            .where(
+                and_(
+                    ParkSchedule.park_id == park_id,
+                    ParkSchedule.schedule_date == target_date,
+                    ParkSchedule.schedule_type == 'OPERATING',
+                    ParkSchedule.opening_time.isnot(None),
+                    ParkSchedule.closing_time.isnot(None)
+                )
+            )
+            .order_by(ParkSchedule.opening_time)
+            .limit(1)
+        )
+
+        result = self.session.execute(stmt)
+        row = result.fetchone()
+
+        if row:
+            return {
+                'opening_time': row.opening_time,
+                'closing_time': row.closing_time
+            }
+        return None
+
+    def _filter_by_schedule(
+        self,
+        hourly_data: List[Dict[str, Any]],
+        schedule: Dict[str, Any],
+        target_date: date
+    ) -> List[Dict[str, Any]]:
+        """
+        Filter hourly data to only include hours within park schedule.
+
+        Args:
+            hourly_data: List of hourly data dicts with 'hour' key (Pacific hour 0-23)
+            schedule: Dict with 'opening_time' and 'closing_time' (UTC datetimes)
+            target_date: The date being queried
+
+        Returns:
+            Filtered list containing only hours within operating schedule.
+        """
+        if not schedule:
+            return []
+
+        opening_utc = schedule['opening_time']
+        closing_utc = schedule['closing_time']
+
+        # Convert UTC times to Pacific hours
+        # Pacific is UTC-8 (ignoring DST for simplicity)
+        opening_pacific_hour = (opening_utc.hour - 8) % 24
+
+        # Calculate closing hour in Pacific time
+        # Handle next-day closings (e.g., 6am UTC = 10pm Pacific previous day)
+        closing_pacific_hour = (closing_utc.hour - 8) % 24
+
+        # If closing is in next UTC day but still same Pacific day, adjust
+        # Example: 6am UTC on Dec 26 = 10pm Pacific on Dec 25
+        if closing_utc.date() > target_date:
+            # The closing hour (in Pacific) is before midnight
+            # e.g., 22:00 Pacific (10pm) for a 6am UTC closing
+            # We need to include hours up to but not including closing_pacific_hour
+            # For most parks (close before midnight), this is straightforward
+            if closing_pacific_hour == 0:
+                # Park closes at midnight Pacific (8am UTC next day)
+                closing_pacific_hour = 24
+            # Otherwise closing_pacific_hour is already correct (e.g., 22 for 10pm close)
+
+        # Filter data to only include hours within schedule
+        filtered = []
+        for row in hourly_data:
+            hour = row.get('hour')
+            if hour is None:
+                continue
+
+            # Check if this hour is within operating hours
+            if opening_pacific_hour <= hour < closing_pacific_hour:
+                filtered.append(row)
+            # Handle overnight parks (opening after closing time numerically, e.g., 22:00-02:00)
+            elif opening_pacific_hour > closing_pacific_hour:
+                if hour >= opening_pacific_hour or hour < closing_pacific_hour:
+                    filtered.append(row)
+
+        return filtered
 
     def get_daily(
         self,
@@ -148,9 +260,6 @@ class ParkShameHistoryQuery:
         # Get UTC time range for the target date in Pacific timezone
         start_utc, end_utc = get_pacific_day_range_utc(target_date)
 
-        # Build filter clause
-        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-
         # Get top parks with highest shame scores for the target date
         # Uses park_activity_snapshots (THE SINGLE SOURCE OF TRUTH) with stored shame_scores
         #
@@ -159,31 +268,45 @@ class ParkShameHistoryQuery:
         # 2. rides_open > 0 (rides are actually operating)
         #
         # This makes charts robust against schedule data issues for historical dates.
-        top_parks_query = text(f"""
-            SELECT
-                p.park_id,
-                p.name AS park_name,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-                AVG(pas.shame_score) AS avg_shame_score
-            FROM parks p
-            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-            WHERE pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
-                AND p.is_active = TRUE
-                AND (pas.park_appears_open = TRUE OR pas.rides_open > 0)
-                AND pas.shame_score IS NOT NULL
-                AND pas.shame_score > 0
-                {disney_filter}
-            GROUP BY p.park_id, p.name, p.city, p.state_province
-            HAVING COUNT(*) > 0
-            ORDER BY avg_shame_score DESC
-            LIMIT :limit
-        """)
+        top_parks_stmt = (
+            select(
+                Park.park_id,
+                Park.name.label("park_name"),
+                func.concat(Park.city, ', ', Park.state_province).label("location"),
+                func.avg(ParkActivitySnapshot.shame_score).label("avg_shame_score")
+            )
+            .select_from(Park)
+            .join(ParkActivitySnapshot, Park.park_id == ParkActivitySnapshot.park_id)
+            .where(
+                and_(
+                    ParkActivitySnapshot.recorded_at >= start_utc,
+                    ParkActivitySnapshot.recorded_at < end_utc,
+                    Park.is_active == True,
+                    or_(
+                        ParkActivitySnapshot.park_appears_open == True,
+                        ParkActivitySnapshot.rides_open > 0
+                    ),
+                    ParkActivitySnapshot.shame_score.isnot(None),
+                    ParkActivitySnapshot.shame_score > 0
+                )
+            )
+        )
 
-        result = self.conn.execute(top_parks_query, {
-            "start_utc": start_utc,
-            "end_utc": end_utc,
-            "limit": limit
-        })
+        # Apply Disney/Universal filter if requested
+        if filter_disney_universal:
+            top_parks_stmt = top_parks_stmt.where(
+                or_(Park.is_disney == True, Park.is_universal == True)
+            )
+
+        top_parks_stmt = (
+            top_parks_stmt
+            .group_by(Park.park_id, Park.name, Park.city, Park.state_province)
+            .having(func.count() > 0)
+            .order_by(func.avg(ParkActivitySnapshot.shame_score).desc())
+            .limit(limit)
+        )
+
+        result = self.session.execute(top_parks_stmt)
         top_parks = [dict(row._mapping) for row in result]
 
         if not top_parks:
@@ -241,17 +364,29 @@ class ParkShameHistoryQuery:
         else:
             start_utc, end_utc = get_pacific_day_range_utc(target_date)
 
+        # Get park schedule for the target date (SINGLE SOURCE OF TRUTH)
+        # This ensures we only show hours when the park was officially open
+        schedule = self._get_schedule_for_date(park_id, target_date)
+
         # Choose query method based on use_hourly_tables parameter
         if self.use_hourly_tables:
             hourly_data = self._query_hourly_tables(park_id, start_utc, end_utc, target_date)
         else:
             hourly_data = self._query_raw_snapshots(park_id, start_utc, end_utc, target_date)
 
+        # Filter hourly data by schedule (removes hours outside official operating times)
+        # This is critical for fixing the "23 rides down at 3am" bug where park_was_open
+        # or park_appears_open was incorrectly set due to fallback heuristics
+        if schedule and not is_today:
+            # Only filter historical data - TODAY data may not have complete schedule yet
+            hourly_data = self._filter_by_schedule(hourly_data, schedule, target_date)
+
         # Build data by hour for all metrics
         # Convert Decimal to float for JSON serialization
-        shame_by_hour = {row["hour"]: row["shame_score"] for row in hourly_data}
-        rides_down_by_hour = {row["hour"]: row.get("rides_down") for row in hourly_data}
-        avg_wait_by_hour = {row["hour"]: row.get("avg_wait_time_minutes") for row in hourly_data}
+        # Filter out rows with None hour values (can happen with raw data queries)
+        shame_by_hour = {row["hour"]: row["shame_score"] for row in hourly_data if row["hour"] is not None}
+        rides_down_by_hour = {row["hour"]: row.get("rides_down") for row in hourly_data if row["hour"] is not None}
+        avg_wait_by_hour = {row["hour"]: row.get("avg_wait_time_minutes") for row in hourly_data if row["hour"] is not None}
 
         # Get the hours that have data, in order
         hours_with_data = sorted(shame_by_hour.keys())
@@ -272,6 +407,9 @@ class ParkShameHistoryQuery:
         ]
 
         # Calculate average FROM the chart data points (ensures average badge matches chart)
+        # NOTE: If hourly shame is consistently X all day, the daily average SHOULD be X.
+        # A 10x discrepancy between AVG(hourly) and daily indicates a DATA BUG in the
+        # hourly aggregation (different effective_park_weight values), not a formula issue.
         non_null_data = [v for v in aligned_data if v is not None]
         avg_score = round(sum(non_null_data) / len(non_null_data), 1) if non_null_data else 0.0
 
@@ -309,34 +447,45 @@ class ParkShameHistoryQuery:
         now_utc = datetime.now(timezone.utc)
         start_utc = now_utc - timedelta(minutes=minutes)
 
-        # Build filter clause
-        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-
         # Get top parks by recent downtime (last 60 minutes)
         # FALLBACK HEURISTIC: Include snapshots where EITHER:
         # 1. park_appears_open = TRUE (schedule-based detection), OR
         # 2. rides_open > 0 (rides are actually operating)
-        top_parks_query = text(f"""
-            SELECT
-                p.park_id,
-                p.name AS park_name
-            FROM parks p
-            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-            WHERE pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
-                AND p.is_active = TRUE
-                AND (pas.park_appears_open = TRUE OR pas.rides_open > 0)
-                AND pas.shame_score > 0
-                {disney_filter}
-            GROUP BY p.park_id, p.name
-            ORDER BY AVG(pas.shame_score) DESC
-            LIMIT :limit
-        """)
+        top_parks_stmt = (
+            select(
+                Park.park_id,
+                Park.name.label("park_name")
+            )
+            .select_from(Park)
+            .join(ParkActivitySnapshot, Park.park_id == ParkActivitySnapshot.park_id)
+            .where(
+                and_(
+                    ParkActivitySnapshot.recorded_at >= start_utc,
+                    ParkActivitySnapshot.recorded_at < now_utc,
+                    Park.is_active == True,
+                    or_(
+                        ParkActivitySnapshot.park_appears_open == True,
+                        ParkActivitySnapshot.rides_open > 0
+                    ),
+                    ParkActivitySnapshot.shame_score > 0
+                )
+            )
+        )
 
-        result = self.conn.execute(top_parks_query, {
-            "start_utc": start_utc,
-            "end_utc": now_utc,
-            "limit": limit
-        })
+        # Apply Disney/Universal filter if requested
+        if filter_disney_universal:
+            top_parks_stmt = top_parks_stmt.where(
+                or_(Park.is_disney == True, Park.is_universal == True)
+            )
+
+        top_parks_stmt = (
+            top_parks_stmt
+            .group_by(Park.park_id, Park.name)
+            .order_by(func.avg(ParkActivitySnapshot.shame_score).desc())
+            .limit(limit)
+        )
+
+        result = self.session.execute(top_parks_stmt)
         top_parks = [dict(row._mapping) for row in result]
 
         if not top_parks:
@@ -354,22 +503,31 @@ class ParkShameHistoryQuery:
             # FALLBACK HEURISTIC: Include snapshots where EITHER:
             # 1. park_appears_open = TRUE (schedule-based detection), OR
             # 2. rides_open > 0 (rides are actually operating)
-            snapshot_query = text("""
-                SELECT
-                    DATE_FORMAT(pas.recorded_at, '%H:%i') AS label,
-                    pas.shame_score
-                FROM park_activity_snapshots pas
-                WHERE pas.park_id = :park_id
-                    AND pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
-                    AND (pas.park_appears_open = TRUE OR pas.rides_open > 0)
-                ORDER BY pas.recorded_at
-            """)
+            #
+            # Convert UTC timestamps to Pacific time for chart labels
+            # CRITICAL: Use MySQL DATE_SUB instead of Python timedelta - SQLAlchemy cannot
+            # translate Python timedelta subtraction on database columns to SQL properly
+            pacific_time = func.date_sub(ParkActivitySnapshot.recorded_at, text("INTERVAL 8 HOUR"))
+            snapshot_stmt = (
+                select(
+                    func.date_format(pacific_time, '%H:%i').label("label"),
+                    ParkActivitySnapshot.shame_score
+                )
+                .where(
+                    and_(
+                        ParkActivitySnapshot.park_id == park["park_id"],
+                        ParkActivitySnapshot.recorded_at >= start_utc,
+                        ParkActivitySnapshot.recorded_at < now_utc,
+                        or_(
+                            ParkActivitySnapshot.park_appears_open == True,
+                            ParkActivitySnapshot.rides_open > 0
+                        )
+                    )
+                )
+                .order_by(ParkActivitySnapshot.recorded_at)
+            )
 
-            snapshot_result = self.conn.execute(snapshot_query, {
-                "park_id": park["park_id"],
-                "start_utc": start_utc,
-                "end_utc": now_utc
-            })
+            snapshot_result = self.session.execute(snapshot_stmt)
             park_data = [dict(row._mapping) for row in snapshot_result]
 
             # Use the first park's labels as the shared labels
@@ -395,12 +553,27 @@ class ParkShameHistoryQuery:
     ) -> List[Dict[str, Any]]:
         """Get hourly shame scores from raw park_activity_snapshots.
 
+        DEPRECATED: This fallback path returns SHAME SCORES (0-10 scale),
+        while the fast path (_query_hourly_tables) returns DOWNTIME HOURS.
+        This creates inconsistent chart behavior!
+
+        CRITICAL: Set USE_HOURLY_TABLES=true in environment to use the fast path
+        which returns actual downtime hours and matches the Problem Rides table.
+
         Slow path: Uses GROUP BY HOUR on raw snapshots (rollback path).
         READs stored shame_score from park_activity_snapshots.
-        THE SINGLE SOURCE OF TRUTH - calculated during data collection.
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            "Using deprecated _query_raw_snapshots path for park %s. "
+            "Chart will show SHAME SCORES (0-10) instead of DOWNTIME HOURS. "
+            "Set USE_HOURLY_TABLES=true for consistent behavior.",
+            park_id
+        )
+
         # READ stored shame_score from park_activity_snapshots
-        # THE SINGLE SOURCE OF TRUTH - calculated during data collection
+        # WARNING: Returns shame_score (0-10 scale), NOT downtime hours!
         #
         # FALLBACK HEURISTIC: Include snapshots where EITHER:
         # 1. park_appears_open = TRUE (schedule-based detection), OR
@@ -408,27 +581,40 @@ class ParkShameHistoryQuery:
         #
         # This makes charts robust against schedule data issues.
         # Include rides_closed (as rides_down) and avg_wait_time for chart display
-        query = text("""
-            SELECT
-                HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR)) AS hour,
-                ROUND(AVG(pas.shame_score), 1) AS shame_score,
-                ROUND(AVG(pas.rides_closed), 0) AS rides_down,
-                ROUND(AVG(pas.avg_wait_time), 1) AS avg_wait_time_minutes
-            FROM park_activity_snapshots pas
-            WHERE pas.park_id = :park_id
-                AND pas.recorded_at >= :start_utc AND pas.recorded_at < :end_utc
-                AND (pas.park_appears_open = TRUE OR pas.rides_open > 0)
-                AND pas.shame_score IS NOT NULL
-            GROUP BY HOUR(DATE_SUB(pas.recorded_at, INTERVAL 8 HOUR))
-            HAVING COUNT(*) > 0  -- Only show hours with data
-            ORDER BY hour
-        """)
 
-        result = self.conn.execute(query, {
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
+        # Calculate Pacific hour: UTC - 8 hours
+        # CRITICAL: Use MySQL DATE_SUB instead of Python timedelta - SQLAlchemy cannot
+        # translate Python timedelta subtraction on database columns to SQL properly
+        pacific_time = func.date_sub(ParkActivitySnapshot.recorded_at, text("INTERVAL 8 HOUR"))
+        hour_expr = func.hour(pacific_time)
+
+        stmt = (
+            select(
+                hour_expr.label("hour"),
+                func.round(func.avg(ParkActivitySnapshot.shame_score), 1).label("shame_score"),
+                func.round(func.avg(ParkActivitySnapshot.rides_closed), 0).label("rides_down"),
+                func.round(func.avg(ParkActivitySnapshot.avg_wait_time), 1).label("avg_wait_time_minutes")
+            )
+            .where(
+                and_(
+                    ParkActivitySnapshot.park_id == park_id,
+                    ParkActivitySnapshot.recorded_at >= start_utc,
+                    ParkActivitySnapshot.recorded_at < end_utc,
+                    # CRITICAL: Only include data when park is officially open
+                    # The rides_open > 0 fallback was including closed hours where
+                    # a few rides show as "open" due to maintenance/test cycles.
+                    # For Disney parks, this was causing 23 rides to show as "down"
+                    # during closed hours, which is incorrect.
+                    ParkActivitySnapshot.park_appears_open == True,
+                    ParkActivitySnapshot.shame_score.isnot(None)
+                )
+            )
+            .group_by(hour_expr)
+            .having(func.count() > 0)  # Only show hours with data
+            .order_by(literal_column("hour"))
+        )
+
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def _query_hourly_tables(
@@ -444,27 +630,36 @@ class ParkShameHistoryQuery:
         Returns same format as _query_raw_snapshots for seamless switching.
         """
         # Query park_hourly_stats table for the time range
-        # Include rides_down and avg_wait_time_minutes for chart display
-        query = text("""
-            SELECT
-                HOUR(DATE_SUB(phs.hour_start_utc, INTERVAL 8 HOUR)) AS hour,
-                phs.shame_score,
-                phs.rides_down,
-                phs.avg_wait_time_minutes
-            FROM park_hourly_stats phs
-            WHERE phs.park_id = :park_id
-                AND phs.hour_start_utc >= :start_utc
-                AND phs.hour_start_utc < :end_utc
-                AND phs.park_was_open = TRUE
-                AND phs.shame_score IS NOT NULL
-            ORDER BY phs.hour_start_utc
-        """)
+        # CRITICAL FIX (2025-12-28): Use actual shame_score column (0-10 scale)
+        # Previously used total_downtime_hours which caused chart/rankings mismatch.
+        # Rankings shows 8.4 but chart was averaging ~2.3 (hours, not score!)
 
-        result = self.conn.execute(query, {
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
+        # Calculate Pacific hour: UTC - 8 hours
+        # CRITICAL: Use MySQL DATE_SUB instead of Python timedelta - SQLAlchemy cannot
+        # translate Python timedelta subtraction on database columns to SQL properly
+        pacific_time = func.date_sub(ParkHourlyStatsORM.hour_start_utc, text("INTERVAL 8 HOUR"))
+        hour_expr = func.hour(pacific_time)
+
+        stmt = (
+            select(
+                hour_expr.label("hour"),
+                ParkHourlyStatsORM.shame_score,  # Actual shame score (0-10 scale)
+                ParkHourlyStatsORM.rides_down,
+                ParkHourlyStatsORM.avg_wait_time_minutes
+            )
+            .where(
+                and_(
+                    ParkHourlyStatsORM.park_id == park_id,
+                    ParkHourlyStatsORM.hour_start_utc >= start_utc,
+                    ParkHourlyStatsORM.hour_start_utc < end_utc,
+                    ParkHourlyStatsORM.park_was_open == True,
+                    ParkHourlyStatsORM.total_downtime_hours.isnot(None)
+                )
+            )
+            .order_by(ParkHourlyStatsORM.hour_start_utc)
+        )
+
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def get_single_park_daily(
@@ -490,49 +685,75 @@ class ParkShameHistoryQuery:
         # Calculate shame score per day from ride_daily_stats
         # shame_score = weighted_downtime_hours / park_weight
         # weighted_downtime = SUM(downtime_minutes * tier_weight) / 60
-        query = text("""
-            WITH park_weights AS (
-                SELECT
-                    r.park_id,
-                    SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
-                FROM rides r
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE r.park_id = :park_id
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                GROUP BY r.park_id
-            ),
-            daily_weighted_downtime AS (
-                SELECT
-                    rds.stat_date,
-                    ROUND(SUM(rds.downtime_minutes / 60.0 * COALESCE(rc.tier_weight, 2)), 2) AS weighted_downtime_hours,
-                    ROUND(SUM(rds.downtime_minutes / 60.0), 2) AS total_downtime_hours,
-                    COUNT(DISTINCT CASE WHEN rds.downtime_minutes > 0 THEN rds.ride_id END) AS rides_with_downtime
-                FROM ride_daily_stats rds
-                JOIN rides r ON rds.ride_id = r.ride_id
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE r.park_id = :park_id
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                    AND rds.stat_date >= :start_date
-                    AND rds.stat_date <= :end_date
-                GROUP BY rds.stat_date
-            )
-            SELECT
-                dwd.stat_date,
-                ROUND(dwd.weighted_downtime_hours / pw.total_park_weight, 1) AS shame_score,
-                dwd.total_downtime_hours AS downtime_hours,
-                dwd.rides_with_downtime AS rides_down
-            FROM daily_weighted_downtime dwd
-            CROSS JOIN park_weights pw
-            ORDER BY dwd.stat_date
-        """)
 
-        result = self.conn.execute(query, {
-            "park_id": park_id,
-            "start_date": start_date,
-            "end_date": end_date
-        })
+        # CTE 1: park_weights - total tier weight for the park
+        park_weights_cte = (
+            select(
+                Ride.park_id,
+                func.sum(func.coalesce(RideClassification.tier_weight, 2)).label("total_park_weight")
+            )
+            .select_from(Ride)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .where(
+                and_(
+                    Ride.park_id == park_id,
+                    Ride.is_active == True,
+                    Ride.category == 'ATTRACTION'
+                )
+            )
+            .group_by(Ride.park_id)
+        ).cte("park_weights")
+
+        # CTE 2: daily_weighted_downtime - daily stats with weighted downtime
+        daily_weighted_cte = (
+            select(
+                RideDailyStats.stat_date,
+                func.round(
+                    func.sum(RideDailyStats.downtime_minutes / 60.0 * func.coalesce(RideClassification.tier_weight, 2)),
+                    2
+                ).label("weighted_downtime_hours"),
+                func.round(func.sum(RideDailyStats.downtime_minutes / 60.0), 2).label("total_downtime_hours"),
+                func.count(
+                    func.distinct(
+                        case(
+                            (RideDailyStats.downtime_minutes > 0, RideDailyStats.ride_id),
+                            else_=null()
+                        )
+                    )
+                ).label("rides_with_downtime")
+            )
+            .select_from(RideDailyStats)
+            .join(Ride, RideDailyStats.ride_id == Ride.ride_id)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .where(
+                and_(
+                    Ride.park_id == park_id,
+                    Ride.is_active == True,
+                    Ride.category == 'ATTRACTION',
+                    RideDailyStats.stat_date >= start_date,
+                    RideDailyStats.stat_date <= end_date
+                )
+            )
+            .group_by(RideDailyStats.stat_date)
+        ).cte("daily_weighted_downtime")
+
+        # Main query: join CTEs and calculate shame score
+        stmt = (
+            select(
+                daily_weighted_cte.c.stat_date,
+                func.round(
+                    daily_weighted_cte.c.weighted_downtime_hours / park_weights_cte.c.total_park_weight,
+                    1
+                ).label("shame_score"),
+                daily_weighted_cte.c.total_downtime_hours.label("downtime_hours"),
+                daily_weighted_cte.c.rides_with_downtime.label("rides_down")
+            )
+            .select_from(daily_weighted_cte)
+            .join(park_weights_cte, literal_column("1") == literal_column("1"))  # CROSS JOIN
+            .order_by(daily_weighted_cte.c.stat_date)
+        )
+
+        result = self.session.execute(stmt)
         rows = [dict(row._mapping) for row in result]
 
         # Build labels and data arrays
@@ -598,7 +819,7 @@ class ParkShameHistoryQuery:
             .limit(limit)
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def _get_park_daily_data(
@@ -630,5 +851,5 @@ class ParkShameHistoryQuery:
             .order_by(park_daily_stats.c.stat_date)
         )
 
-        result = self.conn.execute(stmt)
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]

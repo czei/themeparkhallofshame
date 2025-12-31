@@ -7,12 +7,23 @@ UI Location: Parks tab → Downtime Rankings (today)
 
 Returns parks ranked by AVERAGE shame score from midnight Pacific to now.
 
+CRITICAL FIX (2025-12-28):
+==========================
+This query now filters on park_was_open=True to only include hours when the park
+was operating. This ensures Rankings AVG matches Details AVG (both exclude closed
+hours where shame_score=0).
+
+Previously, Rankings included ALL hourly records including closed hours, which
+diluted the average. Example: Silver Dollar City had 19 hourly records (10 closed
+with shame=0, 9 operating with various scores). Rankings showed 42.2/19=2.2 while
+Details showed 42.2/9=4.7.
+
 SHAME SCORE CALCULATION:
 - LIVE: Instantaneous shame = (sum of weights of down rides) / total_park_weight × 10
-- TODAY: Average of instantaneous shame scores across today's hourly stats
+- TODAY: AVG(hourly shame_score) where park_was_open=True
 
-This makes TODAY comparable to LIVE - both on the same 0-100 scale representing
-"percentage of weighted capacity that was down".
+SINGLE SOURCE OF TRUTH: Uses same formula as detail popup (stats_repository.py).
+This ensures shame score in rankings table EXACTLY matches detail popup.
 
 Performance Optimization (2025-12):
 ====================================
@@ -31,25 +42,23 @@ Single Source of Truth:
 """
 
 from typing import List, Dict, Any
-from datetime import datetime
 
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy import select, func, and_, or_, literal_column
+from sqlalchemy.orm import Session
 
+from models.orm_park import Park
+from models.orm_stats import ParkHourlyStats
+from utils.query_helpers import QueryClassBase
 from utils.timezone import get_today_pacific, get_pacific_day_range_utc
-from utils.sql_helpers import RideFilterSQL
 
 
-class TodayParkRankingsQuery:
+class TodayParkRankingsQuery(QueryClassBase):
     """
     Query handler for today's park rankings using AVERAGE shame score.
 
     Uses ONLY pre-aggregated tables for instant performance (<50ms).
     No raw snapshot queries, no DATE_FORMAT joins.
     """
-
-    def __init__(self, connection: Connection):
-        self.conn = connection
 
     def get_rankings(
         self,
@@ -75,64 +84,83 @@ class TodayParkRankingsQuery:
         today = get_today_pacific()
         start_utc, end_utc = get_pacific_day_range_utc(today)
 
-        # Build filter clause
-        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
+        # Build base query with aggregations
+        # Shame score: Use pre-computed hourly shame_score (average across hours)
+        # park_hourly_stats already contains shame_score = (weighted_downtime_hours / effective_park_weight) * 10
+        shame_score_expr = func.avg(ParkHourlyStats.shame_score)
 
-        # Determine sort column
-        sort_column = "shame_score" if sort_by == "shame_score" else "total_downtime_hours"
+        stmt = (
+            select(
+                Park.park_id,
+                Park.queue_times_id,
+                Park.name.label('park_name'),
+                (func.concat(Park.city, ', ', Park.state_province)).label('location'),
 
-        # Simple, fast query using only pre-aggregated tables
-        # NO raw snapshot queries, NO DATE_FORMAT joins
-        query = text(f"""
-            SELECT
-                p.park_id,
-                p.queue_times_id,
-                p.name AS park_name,
-                CONCAT(p.city, ', ', p.state_province) AS location,
+                # Shame score: average of hourly pre-computed shame scores (0-10 scale)
+                # This ensures shame score stays in the 0-10 range
+                func.round(shame_score_expr, 1).label('shame_score'),
 
-                -- Shame score: average of hourly shame scores
-                -- (Hourly scores are corrected by aggregate_hourly.py to exclude non-operating rides)
-                ROUND(AVG(phs.shame_score), 1) AS shame_score,
+                # Total downtime hours: sum across today
+                func.round(func.sum(ParkHourlyStats.total_downtime_hours), 2).label('total_downtime_hours'),
 
-                -- Total downtime hours: sum across today
-                ROUND(SUM(phs.total_downtime_hours), 2) AS total_downtime_hours,
+                # Weighted downtime hours: sum across today
+                func.round(func.sum(ParkHourlyStats.weighted_downtime_hours), 2).label('weighted_downtime_hours'),
 
-                -- Weighted downtime hours: sum across today
-                ROUND(SUM(phs.weighted_downtime_hours), 2) AS weighted_downtime_hours,
+                # Rides operating/down totals derived from today's aggregates
+                func.round(func.sum(ParkHourlyStats.rides_operating), 0).label('rides_operating'),
+                func.round(func.sum(ParkHourlyStats.rides_down), 0).label('rides_down'),
 
-                -- Rides operating/down totals derived from today's aggregates
-                ROUND(SUM(phs.rides_operating), 0) AS rides_operating,
-                ROUND(SUM(phs.rides_down), 0) AS rides_down,
+                # Effective park weight + snapshots for contract parity
+                func.round(func.avg(ParkHourlyStats.effective_park_weight), 1).label('effective_park_weight'),
+                func.sum(ParkHourlyStats.snapshot_count).label('snapshot_count'),
 
-                -- Effective park weight + snapshots for contract parity
-                ROUND(AVG(phs.effective_park_weight), 1) AS effective_park_weight,
-                SUM(phs.snapshot_count) AS snapshot_count,
+                # Park open flag derived from hourly aggregates
+                func.max(ParkHourlyStats.park_was_open).label('park_is_open'),
 
-                -- Park open flag derived from hourly aggregates
-                MAX(phs.park_was_open) AS park_is_open,
-
-                -- Uptime percentage: calculated from hourly aggregates
-                ROUND(
-                    100.0 * SUM(phs.rides_operating) /
-                    NULLIF(SUM(phs.rides_operating) + SUM(phs.rides_down), 0),
+                # Uptime percentage: calculated from hourly aggregates
+                func.round(
+                    100.0 * func.sum(ParkHourlyStats.rides_operating) /
+                    func.nullif(
+                        func.sum(ParkHourlyStats.rides_operating) + func.sum(ParkHourlyStats.rides_down),
+                        0
+                    ),
                     1
-                ) AS uptime_percentage
+                ).label('uptime_percentage')
+            )
+            .select_from(ParkHourlyStats)
+            .join(Park, ParkHourlyStats.park_id == Park.park_id)
+            .where(ParkHourlyStats.hour_start_utc >= start_utc)
+            .where(ParkHourlyStats.hour_start_utc < end_utc)
+            .where(Park.is_active == True)
+            # CRITICAL: Only include hours when park was open
+            # This ensures Rankings AVG matches Details AVG (both exclude closed hours)
+            .where(ParkHourlyStats.park_was_open == True)
+        )
 
-            FROM park_hourly_stats phs
-            INNER JOIN parks p ON phs.park_id = p.park_id
-            WHERE phs.hour_start_utc >= :start_utc
-              AND phs.hour_start_utc < :end_utc
-              AND p.is_active = TRUE
-              {filter_clause}
-            GROUP BY p.park_id, p.queue_times_id, p.name, p.city, p.state_province
-            HAVING AVG(phs.shame_score) > 0
-            ORDER BY {sort_column} DESC
-            LIMIT :limit
-        """)
+        # Apply Disney/Universal filter if requested
+        if filter_disney_universal:
+            stmt = stmt.where(or_(Park.is_disney == True, Park.is_universal == True))
 
-        result = self.conn.execute(query, {
-            "start_utc": start_utc,
-            "end_utc": end_utc,
-            "limit": limit
-        })
-        return [dict(row._mapping) for row in result]
+        # Group by park
+        stmt = stmt.group_by(
+            Park.park_id,
+            Park.queue_times_id,
+            Park.name,
+            Park.city,
+            Park.state_province
+        )
+
+        # Having clause: only parks with shame_score > 0
+        stmt = stmt.having(shame_score_expr > 0)
+
+        # Order by selected column
+        if sort_by == "shame_score":
+            stmt = stmt.order_by(literal_column('shame_score').desc())
+        else:
+            stmt = stmt.order_by(literal_column('total_downtime_hours').desc())
+
+        # Limit results
+        stmt = stmt.limit(limit)
+
+        # Execute and return
+        return self.execute_and_fetchall(stmt)

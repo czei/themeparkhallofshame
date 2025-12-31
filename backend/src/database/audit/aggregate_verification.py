@@ -6,7 +6,7 @@ Verifies that aggregate table values match raw snapshot calculations.
 This catches bugs like timezone issues or incorrect interval multipliers.
 
 Usage:
-    verifier = AggregateVerifier(conn)
+    verifier = AggregateVerifier(session)
     summary = verifier.audit_date(date(2025, 12, 17))
 
     if not summary.overall_passed:
@@ -19,12 +19,16 @@ Verification Process:
 """
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import List, Dict, Any, Optional
 
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session
+from sqlalchemy import func, case, and_, or_, distinct
 
+from models.orm_park import Park
+from models.orm_ride import Ride
+from models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
+from models.orm_stats import RideDailyStats, ParkDailyStats, RideHourlyStats, ParkHourlyStats
 from utils.timezone import get_pacific_day_range_utc
 from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
 
@@ -148,8 +152,8 @@ class AggregateVerifier:
         }
     }
 
-    def __init__(self, conn: Connection):
-        self.conn = conn
+    def __init__(self, session: Session):
+        self.session = session
         self.snapshot_interval = SNAPSHOT_INTERVAL_MINUTES
 
     def audit_date(self, target_date: date) -> AuditSummary:
@@ -206,109 +210,192 @@ class AggregateVerifier:
         day_start_utc, day_end_utc = get_pacific_day_range_utc(target_date)
         tolerances = self.TOLERANCES['ride_daily']
 
-        # Query that recalculates from raw snapshots with correct timezone
-        sql = text("""
-            WITH rides_operated_today AS (
-                -- Rides that operated at least once during the Pacific day
-                SELECT DISTINCT rss.ride_id
-                FROM ride_status_snapshots rss
-                JOIN rides r ON rss.ride_id = r.ride_id
-                JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND DATE_FORMAT(pas.recorded_at, '%Y-%m-%d %H:%i') = DATE_FORMAT(rss.recorded_at, '%Y-%m-%d %H:%i')
-                WHERE rss.recorded_at >= :day_start_utc
-                  AND rss.recorded_at < :day_end_utc
-                  AND pas.park_appears_open = TRUE
-                  AND (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = TRUE))
-            ),
-            raw_calculation AS (
-                SELECT
-                    r.ride_id,
-                    r.name AS ride_name,
-                    p.name AS park_name,
-
-                    -- Uptime minutes (when ride was open and park was open)
-                    COALESCE(SUM(CASE
-                        WHEN pas.park_appears_open = 1 AND rss.computed_is_open = TRUE
-                        THEN :snapshot_interval
-                        ELSE 0
-                    END), 0) AS calc_uptime_minutes,
-
-                    -- Downtime minutes (using same logic as aggregate_daily.py)
-                    CASE
-                        WHEN r.ride_id IN (SELECT ride_id FROM rides_operated_today)
-                        THEN COALESCE(SUM(CASE
-                            WHEN pas.park_appears_open = 1 AND (
-                                (rss.status IS NOT NULL AND rss.status = 'DOWN') OR
-                                (rss.status IS NULL AND NOT rss.computed_is_open)
-                            )
-                            THEN :snapshot_interval
-                            ELSE 0
-                        END), 0)
-                        ELSE 0
-                    END AS calc_downtime_minutes,
-
-                    -- Operating hours minutes (park open time)
-                    COALESCE(SUM(CASE
-                        WHEN pas.park_appears_open = 1
-                        THEN :snapshot_interval
-                        ELSE 0
-                    END), 0) AS calc_operating_hours_minutes
-
-                FROM ride_status_snapshots rss
-                JOIN rides r ON rss.ride_id = r.ride_id
-                JOIN parks p ON r.park_id = p.park_id
-                JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
-                WHERE rss.recorded_at >= :day_start_utc
-                  AND rss.recorded_at < :day_end_utc
-                  AND r.is_active = TRUE
-                  AND r.category = 'ATTRACTION'
-                GROUP BY r.ride_id, r.name, p.name
+        # CTE: Rides that operated at least once during the Pacific day
+        rides_operated_today = (
+            self.session.query(distinct(RideStatusSnapshot.ride_id).label('ride_id'))
+            .join(Ride, RideStatusSnapshot.ride_id == Ride.ride_id)
+            .join(
+                ParkActivitySnapshot,
+                and_(
+                    Ride.park_id == ParkActivitySnapshot.park_id,
+                    func.date_format(ParkActivitySnapshot.recorded_at, '%Y-%m-%d %H:%i') ==
+                    func.date_format(RideStatusSnapshot.recorded_at, '%Y-%m-%d %H:%i')
+                )
             )
-            SELECT
-                rc.ride_id,
-                rc.ride_name,
-                rc.park_name,
+            .filter(
+                and_(
+                    RideStatusSnapshot.recorded_at >= day_start_utc,
+                    RideStatusSnapshot.recorded_at < day_end_utc,
+                    ParkActivitySnapshot.park_appears_open.is_(True),
+                    or_(
+                        RideStatusSnapshot.status == 'OPERATING',
+                        and_(
+                            RideStatusSnapshot.status.is_(None),
+                            RideStatusSnapshot.computed_is_open.is_(True)
+                        )
+                    )
+                )
+            )
+            .subquery()
+        )
 
-                -- Stored values
-                COALESCE(rds.uptime_minutes, 0) AS stored_uptime_minutes,
-                COALESCE(rds.downtime_minutes, 0) AS stored_downtime_minutes,
-                COALESCE(rds.operating_hours_minutes, 0) AS stored_operating_hours_minutes,
+        # Calculate expected values from raw snapshots
+        raw_calc = (
+            self.session.query(
+                Ride.ride_id,
+                Ride.name.label('ride_name'),
+                Park.name.label('park_name'),
 
-                -- Calculated values
-                rc.calc_uptime_minutes,
-                rc.calc_downtime_minutes,
-                rc.calc_operating_hours_minutes,
+                # Uptime minutes (when ride was open and park was open)
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                and_(
+                                    ParkActivitySnapshot.park_appears_open == 1,
+                                    RideStatusSnapshot.computed_is_open.is_(True)
+                                ),
+                                self.snapshot_interval
+                            ),
+                            else_=0
+                        )
+                    ),
+                    0
+                ).label('calc_uptime_minutes'),
 
-                -- Deltas
-                ABS(COALESCE(rds.uptime_minutes, 0) - rc.calc_uptime_minutes) AS uptime_delta,
-                ABS(COALESCE(rds.downtime_minutes, 0) - rc.calc_downtime_minutes) AS downtime_delta,
-                ABS(COALESCE(rds.operating_hours_minutes, 0) - rc.calc_operating_hours_minutes) AS operating_hours_delta,
+                # Downtime minutes (using same logic as aggregate_daily.py)
+                case(
+                    (
+                        Ride.ride_id.in_(self.session.query(rides_operated_today.c.ride_id)),
+                        func.coalesce(
+                            func.sum(
+                                case(
+                                    (
+                                        and_(
+                                            ParkActivitySnapshot.park_appears_open == 1,
+                                            or_(
+                                                and_(
+                                                    RideStatusSnapshot.status.isnot(None),
+                                                    RideStatusSnapshot.status == 'DOWN'
+                                                ),
+                                                and_(
+                                                    RideStatusSnapshot.status.is_(None),
+                                                    RideStatusSnapshot.computed_is_open.is_(False)
+                                                )
+                                            )
+                                        ),
+                                        self.snapshot_interval
+                                    ),
+                                    else_=0
+                                )
+                            ),
+                            0
+                        )
+                    ),
+                    else_=0
+                ).label('calc_downtime_minutes'),
 
-                -- Is aggregate missing?
-                CASE WHEN rds.ride_id IS NULL THEN 1 ELSE 0 END AS missing_from_aggregate
+                # Operating hours minutes (park open time)
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (ParkActivitySnapshot.park_appears_open == 1, self.snapshot_interval),
+                            else_=0
+                        )
+                    ),
+                    0
+                ).label('calc_operating_hours_minutes')
+            )
+            .select_from(RideStatusSnapshot)
+            .join(Ride, RideStatusSnapshot.ride_id == Ride.ride_id)
+            .join(Park, Ride.park_id == Park.park_id)
+            .join(
+                ParkActivitySnapshot,
+                and_(
+                    Ride.park_id == ParkActivitySnapshot.park_id,
+                    ParkActivitySnapshot.recorded_at == RideStatusSnapshot.recorded_at
+                )
+            )
+            .filter(
+                and_(
+                    RideStatusSnapshot.recorded_at >= day_start_utc,
+                    RideStatusSnapshot.recorded_at < day_end_utc,
+                    Ride.is_active.is_(True),
+                    Ride.category == 'ATTRACTION'
+                )
+            )
+            .group_by(Ride.ride_id, Ride.name, Park.name)
+            .subquery()
+        )
 
-            FROM raw_calculation rc
-            LEFT JOIN ride_daily_stats rds
-                ON rc.ride_id = rds.ride_id
-                AND rds.stat_date = :stat_date
-            WHERE rc.calc_uptime_minutes > 0 OR rc.calc_downtime_minutes > 0
-            ORDER BY
-                CASE WHEN rds.ride_id IS NULL THEN 1 ELSE 0 END DESC,
-                GREATEST(
-                    ABS(COALESCE(rds.uptime_minutes, 0) - rc.calc_uptime_minutes),
-                    ABS(COALESCE(rds.downtime_minutes, 0) - rc.calc_downtime_minutes)
-                ) DESC
-        """)
+        # Join with stored values and calculate deltas
+        results = (
+            self.session.query(
+                raw_calc.c.ride_id,
+                raw_calc.c.ride_name,
+                raw_calc.c.park_name,
 
-        result = self.conn.execute(sql, {
-            'day_start_utc': day_start_utc,
-            'day_end_utc': day_end_utc,
-            'stat_date': target_date,
-            'snapshot_interval': self.snapshot_interval
-        })
+                # Stored values
+                func.coalesce(RideDailyStats.uptime_minutes, 0).label('stored_uptime_minutes'),
+                func.coalesce(RideDailyStats.downtime_minutes, 0).label('stored_downtime_minutes'),
+                func.coalesce(RideDailyStats.operating_hours_minutes, 0).label('stored_operating_hours_minutes'),
 
-        rows = [dict(row._mapping) for row in result]
+                # Calculated values
+                raw_calc.c.calc_uptime_minutes,
+                raw_calc.c.calc_downtime_minutes,
+                raw_calc.c.calc_operating_hours_minutes,
+
+                # Deltas
+                func.abs(func.coalesce(RideDailyStats.uptime_minutes, 0) - raw_calc.c.calc_uptime_minutes).label('uptime_delta'),
+                func.abs(func.coalesce(RideDailyStats.downtime_minutes, 0) - raw_calc.c.calc_downtime_minutes).label('downtime_delta'),
+                func.abs(func.coalesce(RideDailyStats.operating_hours_minutes, 0) - raw_calc.c.calc_operating_hours_minutes).label('operating_hours_delta'),
+
+                # Is aggregate missing?
+                case((RideDailyStats.ride_id.is_(None), 1), else_=0).label('missing_from_aggregate')
+            )
+            .select_from(raw_calc)
+            .outerjoin(
+                RideDailyStats,
+                and_(
+                    raw_calc.c.ride_id == RideDailyStats.ride_id,
+                    RideDailyStats.stat_date == target_date
+                )
+            )
+            .filter(
+                or_(
+                    raw_calc.c.calc_uptime_minutes > 0,
+                    raw_calc.c.calc_downtime_minutes > 0
+                )
+            )
+            .order_by(
+                case((RideDailyStats.ride_id.is_(None), 1), else_=0).desc(),
+                func.greatest(
+                    func.abs(func.coalesce(RideDailyStats.uptime_minutes, 0) - raw_calc.c.calc_uptime_minutes),
+                    func.abs(func.coalesce(RideDailyStats.downtime_minutes, 0) - raw_calc.c.calc_downtime_minutes)
+                ).desc()
+            )
+            .all()
+        )
+
+        # Convert to list of dicts for analysis
+        rows = [
+            {
+                'ride_id': row.ride_id,
+                'ride_name': row.ride_name,
+                'park_name': row.park_name,
+                'stored_uptime_minutes': row.stored_uptime_minutes,
+                'stored_downtime_minutes': row.stored_downtime_minutes,
+                'stored_operating_hours_minutes': row.stored_operating_hours_minutes,
+                'calc_uptime_minutes': row.calc_uptime_minutes,
+                'calc_downtime_minutes': row.calc_downtime_minutes,
+                'calc_operating_hours_minutes': row.calc_operating_hours_minutes,
+                'uptime_delta': row.uptime_delta,
+                'downtime_delta': row.downtime_delta,
+                'operating_hours_delta': row.operating_hours_delta,
+                'missing_from_aggregate': row.missing_from_aggregate
+            }
+            for row in results
+        ]
 
         # Analyze results
         total_checked = len(rows)
@@ -383,58 +470,89 @@ class AggregateVerifier:
         """
         tolerances = self.TOLERANCES['park_daily']
 
-        # Query that calculates park stats from ride_daily_stats
-        sql = text("""
-            WITH park_raw_calc AS (
-                SELECT
-                    p.park_id,
-                    p.name AS park_name,
-                    COUNT(DISTINCT rds.ride_id) AS calc_total_rides,
-                    ROUND(SUM(rds.downtime_minutes) / 60.0, 2) AS calc_total_downtime_hours,
-                    SUM(CASE WHEN rds.downtime_minutes > 0 THEN 1 ELSE 0 END) AS calc_rides_with_downtime,
-                    ROUND(AVG(rds.uptime_percentage), 2) AS calc_avg_uptime
-                FROM parks p
-                JOIN ride_daily_stats rds ON p.park_id = (
-                    SELECT r.park_id FROM rides r WHERE r.ride_id = rds.ride_id
-                )
-                WHERE rds.stat_date = :stat_date
-                  AND p.is_active = TRUE
-                GROUP BY p.park_id, p.name
+        # Calculate park stats from ride_daily_stats
+        park_raw_calc = (
+            self.session.query(
+                Park.park_id,
+                Park.name.label('park_name'),
+                func.count(distinct(RideDailyStats.ride_id)).label('calc_total_rides'),
+                func.round(func.sum(RideDailyStats.downtime_minutes) / 60.0, 2).label('calc_total_downtime_hours'),
+                func.sum(case((RideDailyStats.downtime_minutes > 0, 1), else_=0)).label('calc_rides_with_downtime'),
+                func.round(func.avg(RideDailyStats.uptime_percentage), 2).label('calc_avg_uptime')
             )
-            SELECT
-                prc.park_id,
-                prc.park_name,
+            .select_from(Park)
+            .join(
+                RideDailyStats,
+                Park.park_id == self.session.query(Ride.park_id).filter(Ride.ride_id == RideDailyStats.ride_id).scalar_subquery()
+            )
+            .filter(
+                and_(
+                    RideDailyStats.stat_date == target_date,
+                    Park.is_active.is_(True)
+                )
+            )
+            .group_by(Park.park_id, Park.name)
+            .subquery()
+        )
 
-                -- Stored values
-                COALESCE(pds.total_rides_tracked, 0) AS stored_total_rides,
-                COALESCE(pds.total_downtime_hours, 0) AS stored_total_downtime_hours,
-                COALESCE(pds.rides_with_downtime, 0) AS stored_rides_with_downtime,
-                COALESCE(pds.shame_score, 0) AS stored_shame_score,
+        # Join with stored values and calculate deltas
+        results = (
+            self.session.query(
+                park_raw_calc.c.park_id,
+                park_raw_calc.c.park_name,
 
-                -- Calculated values
-                prc.calc_total_rides,
-                prc.calc_total_downtime_hours,
-                prc.calc_rides_with_downtime,
+                # Stored values
+                func.coalesce(ParkDailyStats.total_rides_tracked, 0).label('stored_total_rides'),
+                func.coalesce(ParkDailyStats.total_downtime_hours, 0).label('stored_total_downtime_hours'),
+                func.coalesce(ParkDailyStats.rides_with_downtime, 0).label('stored_rides_with_downtime'),
+                func.coalesce(ParkDailyStats.shame_score, 0).label('stored_shame_score'),
 
-                -- Deltas
-                ABS(COALESCE(pds.total_downtime_hours, 0) - prc.calc_total_downtime_hours) AS downtime_hours_delta,
-                ABS(COALESCE(pds.rides_with_downtime, 0) - prc.calc_rides_with_downtime) AS rides_with_downtime_delta,
+                # Calculated values
+                park_raw_calc.c.calc_total_rides,
+                park_raw_calc.c.calc_total_downtime_hours,
+                park_raw_calc.c.calc_rides_with_downtime,
 
-                -- Is aggregate missing?
-                CASE WHEN pds.park_id IS NULL THEN 1 ELSE 0 END AS missing_from_aggregate
+                # Deltas
+                func.abs(func.coalesce(ParkDailyStats.total_downtime_hours, 0) - park_raw_calc.c.calc_total_downtime_hours).label('downtime_hours_delta'),
+                func.abs(func.coalesce(ParkDailyStats.rides_with_downtime, 0) - park_raw_calc.c.calc_rides_with_downtime).label('rides_with_downtime_delta'),
 
-            FROM park_raw_calc prc
-            LEFT JOIN park_daily_stats pds
-                ON prc.park_id = pds.park_id
-                AND pds.stat_date = :stat_date
-            WHERE prc.calc_total_rides > 0
-            ORDER BY
-                CASE WHEN pds.park_id IS NULL THEN 1 ELSE 0 END DESC,
-                ABS(COALESCE(pds.total_downtime_hours, 0) - prc.calc_total_downtime_hours) DESC
-        """)
+                # Is aggregate missing?
+                case((ParkDailyStats.park_id.is_(None), 1), else_=0).label('missing_from_aggregate')
+            )
+            .select_from(park_raw_calc)
+            .outerjoin(
+                ParkDailyStats,
+                and_(
+                    park_raw_calc.c.park_id == ParkDailyStats.park_id,
+                    ParkDailyStats.stat_date == target_date
+                )
+            )
+            .filter(park_raw_calc.c.calc_total_rides > 0)
+            .order_by(
+                case((ParkDailyStats.park_id.is_(None), 1), else_=0).desc(),
+                func.abs(func.coalesce(ParkDailyStats.total_downtime_hours, 0) - park_raw_calc.c.calc_total_downtime_hours).desc()
+            )
+            .all()
+        )
 
-        result = self.conn.execute(sql, {'stat_date': target_date})
-        rows = [dict(row._mapping) for row in result]
+        # Convert to list of dicts
+        rows = [
+            {
+                'park_id': row.park_id,
+                'park_name': row.park_name,
+                'stored_total_rides': row.stored_total_rides,
+                'stored_total_downtime_hours': float(row.stored_total_downtime_hours),
+                'stored_rides_with_downtime': row.stored_rides_with_downtime,
+                'stored_shame_score': float(row.stored_shame_score),
+                'calc_total_rides': row.calc_total_rides,
+                'calc_total_downtime_hours': float(row.calc_total_downtime_hours),
+                'calc_rides_with_downtime': row.calc_rides_with_downtime,
+                'downtime_hours_delta': float(row.downtime_hours_delta),
+                'rides_with_downtime_delta': row.rides_with_downtime_delta,
+                'missing_from_aggregate': row.missing_from_aggregate
+            }
+            for row in results
+        ]
 
         # Analyze results
         total_checked = len(rows)
@@ -609,89 +727,120 @@ class AggregateVerifier:
         day_start_utc, day_end_utc = get_pacific_day_range_utc(target_date)
 
         # Find Disney/Universal rides that had DOWN status during the day
-        # and check if they're marked as ride_operated in hourly stats
-        sql = text("""
-            WITH disney_down_rides AS (
-                -- All Disney/Universal rides with DOWN status during this day
-                SELECT DISTINCT
-                    rss.ride_id,
-                    r.name AS ride_name,
-                    p.park_id,
-                    p.name AS park_name,
-                    DATE_FORMAT(rss.recorded_at, '%%Y-%%m-%%d %%H:00:00') AS hour_start
-                FROM ride_status_snapshots rss
-                JOIN rides r ON rss.ride_id = r.ride_id
-                JOIN parks p ON r.park_id = p.park_id
-                JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
-                WHERE rss.recorded_at >= :day_start
-                  AND rss.recorded_at < :day_end
-                  AND rss.status = 'DOWN'
-                  AND pas.park_appears_open = TRUE
-                  AND (p.is_disney = TRUE OR p.is_universal = TRUE)
-            ),
-            hourly_ride_status AS (
-                -- Check ride_hourly_stats for these ride/hour combos
-                SELECT
-                    ddr.ride_id,
-                    ddr.ride_name,
-                    ddr.park_name,
-                    ddr.hour_start,
-                    rhs.ride_operated,
-                    rhs.downtime_hours,
-                    rhs.down_snapshots
-                FROM disney_down_rides ddr
-                LEFT JOIN ride_hourly_stats rhs
-                    ON ddr.ride_id = rhs.ride_id
-                    AND rhs.hour_start_utc = ddr.hour_start
+        disney_down_rides = (
+            self.session.query(
+                distinct(RideStatusSnapshot.ride_id).label('ride_id'),
+                Ride.name.label('ride_name'),
+                Park.park_id,
+                Park.name.label('park_name'),
+                func.date_format(RideStatusSnapshot.recorded_at, '%Y-%m-%d %H:00:00').label('hour_start')
             )
-            SELECT
-                ride_id,
-                ride_name,
-                park_name,
-                hour_start,
-                COALESCE(ride_operated, 0) AS ride_operated,
-                COALESCE(downtime_hours, 0) AS stored_downtime_hours,
-                COALESCE(down_snapshots, 0) AS stored_down_snapshots,
-                CASE
-                    WHEN ride_operated = 0 OR ride_operated IS NULL THEN 'excluded'
-                    WHEN downtime_hours = 0 OR downtime_hours IS NULL THEN 'zero_downtime'
-                    ELSE 'ok'
-                END AS status
-            FROM hourly_ride_status
-            WHERE ride_operated = 0 OR ride_operated IS NULL
-               OR downtime_hours = 0 OR downtime_hours IS NULL
-            ORDER BY park_name, ride_name, hour_start
-        """)
+            .join(Ride, RideStatusSnapshot.ride_id == Ride.ride_id)
+            .join(Park, Ride.park_id == Park.park_id)
+            .join(
+                ParkActivitySnapshot,
+                and_(
+                    Park.park_id == ParkActivitySnapshot.park_id,
+                    ParkActivitySnapshot.recorded_at == RideStatusSnapshot.recorded_at
+                )
+            )
+            .filter(
+                and_(
+                    RideStatusSnapshot.recorded_at >= day_start_utc,
+                    RideStatusSnapshot.recorded_at < day_end_utc,
+                    RideStatusSnapshot.status == 'DOWN',
+                    ParkActivitySnapshot.park_appears_open.is_(True),
+                    or_(Park.is_disney.is_(True), Park.is_universal.is_(True))
+                )
+            )
+            .subquery()
+        )
 
-        result = self.conn.execute(sql, {
-            'day_start': day_start_utc,
-            'day_end': day_end_utc
-        })
-        rows = [dict(row._mapping) for row in result]
+        # Check hourly ride status
+        hourly_results = (
+            self.session.query(
+                disney_down_rides.c.ride_id,
+                disney_down_rides.c.ride_name,
+                disney_down_rides.c.park_name,
+                disney_down_rides.c.hour_start,
+                func.coalesce(RideHourlyStats.ride_operated, 0).label('ride_operated'),
+                func.coalesce(RideHourlyStats.downtime_hours, 0).label('stored_downtime_hours'),
+                func.coalesce(RideHourlyStats.down_snapshots, 0).label('stored_down_snapshots'),
+                case(
+                    (
+                        or_(
+                            RideHourlyStats.ride_operated == 0,
+                            RideHourlyStats.ride_operated.is_(None)
+                        ),
+                        'excluded'
+                    ),
+                    (
+                        or_(
+                            RideHourlyStats.downtime_hours == 0,
+                            RideHourlyStats.downtime_hours.is_(None)
+                        ),
+                        'zero_downtime'
+                    ),
+                    else_='ok'
+                ).label('status')
+            )
+            .select_from(disney_down_rides)
+            .outerjoin(
+                RideHourlyStats,
+                and_(
+                    disney_down_rides.c.ride_id == RideHourlyStats.ride_id,
+                    RideHourlyStats.hour_start_utc == disney_down_rides.c.hour_start
+                )
+            )
+            .filter(
+                or_(
+                    RideHourlyStats.ride_operated == 0,
+                    RideHourlyStats.ride_operated.is_(None),
+                    RideHourlyStats.downtime_hours == 0,
+                    RideHourlyStats.downtime_hours.is_(None)
+                )
+            )
+            .order_by(disney_down_rides.c.park_name, disney_down_rides.c.ride_name, disney_down_rides.c.hour_start)
+            .all()
+        )
 
-        # Count parks and rides checked
-        parks_count_sql = text("""
-            SELECT COUNT(DISTINCT p.park_id) as cnt
-            FROM parks p
-            WHERE p.is_disney = TRUE OR p.is_universal = TRUE
-        """)
-        parks_checked = self.conn.execute(parks_count_sql).scalar() or 0
+        # Convert to list of dicts
+        rows = [
+            {
+                'ride_id': row.ride_id,
+                'ride_name': row.ride_name,
+                'park_name': row.park_name,
+                'hour_start': row.hour_start,
+                'ride_operated': row.ride_operated,
+                'stored_downtime_hours': float(row.stored_downtime_hours),
+                'stored_down_snapshots': row.stored_down_snapshots,
+                'status': row.status
+            }
+            for row in hourly_results
+        ]
 
-        rides_count_sql = text("""
-            SELECT COUNT(DISTINCT rss.ride_id) as cnt
-            FROM ride_status_snapshots rss
-            JOIN rides r ON rss.ride_id = r.ride_id
-            JOIN parks p ON r.park_id = p.park_id
-            WHERE rss.recorded_at >= :day_start
-              AND rss.recorded_at < :day_end
-              AND rss.status = 'DOWN'
-              AND (p.is_disney = TRUE OR p.is_universal = TRUE)
-        """)
-        rides_with_down = self.conn.execute(rides_count_sql, {
-            'day_start': day_start_utc,
-            'day_end': day_end_utc
-        }).scalar() or 0
+        # Count parks checked
+        parks_checked = (
+            self.session.query(func.count(distinct(Park.park_id)))
+            .filter(or_(Park.is_disney.is_(True), Park.is_universal.is_(True)))
+            .scalar() or 0
+        )
+
+        # Count rides with DOWN status
+        rides_with_down = (
+            self.session.query(func.count(distinct(RideStatusSnapshot.ride_id)))
+            .join(Ride, RideStatusSnapshot.ride_id == Ride.ride_id)
+            .join(Park, Ride.park_id == Park.park_id)
+            .filter(
+                and_(
+                    RideStatusSnapshot.recorded_at >= day_start_utc,
+                    RideStatusSnapshot.recorded_at < day_end_utc,
+                    RideStatusSnapshot.status == 'DOWN',
+                    or_(Park.is_disney.is_(True), Park.is_universal.is_(True))
+                )
+            )
+            .scalar() or 0
+        )
 
         # Build result
         check_result = DisneyDownCheckResult(
@@ -731,34 +880,41 @@ class AggregateVerifier:
         """
         day_start_utc, day_end_utc = get_pacific_day_range_utc(target_date)
 
-        # Calculate average time between consecutive snapshots
-        sql = text("""
-            WITH snapshot_times AS (
-                SELECT
-                    recorded_at,
-                    LAG(recorded_at) OVER (ORDER BY recorded_at) AS prev_time
-                FROM (
-                    SELECT DISTINCT recorded_at
-                    FROM ride_status_snapshots
-                    WHERE recorded_at >= :day_start
-                      AND recorded_at < :day_end
-                ) distinct_times
+        # Get distinct snapshot times
+        distinct_times = (
+            self.session.query(distinct(RideStatusSnapshot.recorded_at).label('recorded_at'))
+            .filter(
+                and_(
+                    RideStatusSnapshot.recorded_at >= day_start_utc,
+                    RideStatusSnapshot.recorded_at < day_end_utc
+                )
             )
-            SELECT
-                AVG(TIMESTAMPDIFF(SECOND, prev_time, recorded_at)) / 60.0 AS avg_interval_minutes,
-                MIN(TIMESTAMPDIFF(SECOND, prev_time, recorded_at)) / 60.0 AS min_interval_minutes,
-                MAX(TIMESTAMPDIFF(SECOND, prev_time, recorded_at)) / 60.0 AS max_interval_minutes,
-                COUNT(*) AS sample_count
-            FROM snapshot_times
-            WHERE prev_time IS NOT NULL
-        """)
+            .subquery()
+        )
 
-        result = self.conn.execute(sql, {
-            'day_start': day_start_utc,
-            'day_end': day_end_utc
-        }).fetchone()
+        # Calculate time between consecutive snapshots
+        snapshot_times = (
+            self.session.query(
+                distinct_times.c.recorded_at,
+                func.lag(distinct_times.c.recorded_at).over(order_by=distinct_times.c.recorded_at).label('prev_time')
+            )
+            .subquery()
+        )
 
-        if not result or result[0] is None:
+        # Calculate average interval
+        result = (
+            self.session.query(
+                (func.avg(func.timestampdiff('SECOND', snapshot_times.c.prev_time, snapshot_times.c.recorded_at)) / 60.0).label('avg_interval_minutes'),
+                (func.min(func.timestampdiff('SECOND', snapshot_times.c.prev_time, snapshot_times.c.recorded_at)) / 60.0).label('min_interval_minutes'),
+                (func.max(func.timestampdiff('SECOND', snapshot_times.c.prev_time, snapshot_times.c.recorded_at)) / 60.0).label('max_interval_minutes'),
+                func.count().label('sample_count')
+            )
+            .select_from(snapshot_times)
+            .filter(snapshot_times.c.prev_time.isnot(None))
+            .first()
+        )
+
+        if not result or result.avg_interval_minutes is None:
             return IntervalConsistencyResult(
                 expected_interval=self.snapshot_interval,
                 calculated_interval=0.0,
@@ -766,7 +922,7 @@ class AggregateVerifier:
                 message="No snapshot data to verify interval"
             )
 
-        avg_interval = float(result[0])
+        avg_interval = float(result.avg_interval_minutes)
         expected = self.snapshot_interval
 
         # Allow 20% tolerance for timing drift
@@ -804,95 +960,155 @@ class AggregateVerifier:
         Returns:
             AggregateAuditResult with verification results
         """
-        hour_end_utc = hour_start_utc.replace(minute=0, second=0, microsecond=0)
-        from datetime import timedelta
         hour_end_utc = hour_start_utc + timedelta(hours=1)
         tolerances = self.TOLERANCES['ride_hourly']
         interval = self.snapshot_interval
 
-        # Calculate from raw snapshots and compare to stored
-        sql = text(f"""
-            WITH raw_calc AS (
-                SELECT
-                    rss.ride_id,
-                    r.name AS ride_name,
-                    p.name AS park_name,
-                    p.is_disney,
-                    p.is_universal,
-                    COUNT(*) AS total_snapshots,
-                    SUM(CASE
-                        WHEN pas.park_appears_open = TRUE AND (
-                            rss.status = 'DOWN'
-                            OR (rss.status = 'CLOSED'
-                                AND p.is_disney = FALSE
-                                AND p.is_universal = FALSE)
+        # Calculate from raw snapshots
+        raw_calc = (
+            self.session.query(
+                RideStatusSnapshot.ride_id,
+                Ride.name.label('ride_name'),
+                Park.name.label('park_name'),
+                Park.is_disney,
+                Park.is_universal,
+                func.count().label('total_snapshots'),
+
+                func.sum(
+                    case(
+                        (
+                            and_(
+                                ParkActivitySnapshot.park_appears_open.is_(True),
+                                or_(
+                                    RideStatusSnapshot.status == 'DOWN',
+                                    and_(
+                                        RideStatusSnapshot.status == 'CLOSED',
+                                        Park.is_disney.is_(False),
+                                        Park.is_universal.is_(False)
+                                    )
+                                )
+                            ),
+                            1
+                        ),
+                        else_=0
+                    )
+                ).label('down_count'),
+
+                func.sum(
+                    case(
+                        (
+                            or_(
+                                RideStatusSnapshot.status == 'OPERATING',
+                                RideStatusSnapshot.computed_is_open.is_(True)
+                            ),
+                            1
+                        ),
+                        else_=0
+                    )
+                ).label('operating_count'),
+
+                # Expected downtime hours
+                func.round(
+                    func.sum(
+                        case(
+                            (
+                                and_(
+                                    ParkActivitySnapshot.park_appears_open.is_(True),
+                                    or_(
+                                        RideStatusSnapshot.status == 'DOWN',
+                                        and_(
+                                            RideStatusSnapshot.status == 'CLOSED',
+                                            Park.is_disney.is_(False),
+                                            Park.is_universal.is_(False)
+                                        )
+                                    )
+                                ),
+                                interval / 60.0
+                            ),
+                            else_=0
                         )
-                        THEN 1 ELSE 0
-                    END) AS down_count,
-                    SUM(CASE
-                        WHEN rss.status = 'OPERATING'
-                            OR rss.computed_is_open = TRUE
-                        THEN 1 ELSE 0
-                    END) AS operating_count,
-                    -- Expected downtime hours
-                    ROUND(SUM(CASE
-                        WHEN pas.park_appears_open = TRUE AND (
-                            rss.status = 'DOWN'
-                            OR (rss.status = 'CLOSED'
-                                AND p.is_disney = FALSE
-                                AND p.is_universal = FALSE)
-                        )
-                        THEN {interval} / 60.0 ELSE 0
-                    END), 2) AS calc_downtime_hours
-                FROM ride_status_snapshots rss
-                JOIN rides r ON rss.ride_id = r.ride_id
-                JOIN parks p ON r.park_id = p.park_id
-                JOIN park_activity_snapshots pas
-                    ON p.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
-                WHERE rss.recorded_at >= :hour_start
-                  AND rss.recorded_at < :hour_end
-                GROUP BY rss.ride_id, r.name, p.name, p.is_disney, p.is_universal
-                HAVING down_count > 0 OR operating_count > 0
+                    ),
+                    2
+                ).label('calc_downtime_hours')
             )
-            SELECT
-                rc.ride_id,
-                rc.ride_name,
-                rc.park_name,
-                rc.down_count AS calc_down_snapshots,
-                rc.calc_downtime_hours,
+            .join(Ride, RideStatusSnapshot.ride_id == Ride.ride_id)
+            .join(Park, Ride.park_id == Park.park_id)
+            .join(
+                ParkActivitySnapshot,
+                and_(
+                    Park.park_id == ParkActivitySnapshot.park_id,
+                    ParkActivitySnapshot.recorded_at == RideStatusSnapshot.recorded_at
+                )
+            )
+            .filter(
+                and_(
+                    RideStatusSnapshot.recorded_at >= hour_start_utc,
+                    RideStatusSnapshot.recorded_at < hour_end_utc
+                )
+            )
+            .group_by(RideStatusSnapshot.ride_id, Ride.name, Park.name, Park.is_disney, Park.is_universal)
+            .having(or_(func.sum(case((and_(ParkActivitySnapshot.park_appears_open.is_(True), or_(RideStatusSnapshot.status == 'DOWN', and_(RideStatusSnapshot.status == 'CLOSED', Park.is_disney.is_(False), Park.is_universal.is_(False)))), 1), else_=0)) > 0, func.sum(case((or_(RideStatusSnapshot.status == 'OPERATING', RideStatusSnapshot.computed_is_open.is_(True)), 1), else_=0)) > 0))
+            .subquery()
+        )
 
-                COALESCE(rhs.down_snapshots, 0) AS stored_down_snapshots,
-                COALESCE(rhs.downtime_hours, 0) AS stored_downtime_hours,
-                COALESCE(rhs.ride_operated, 0) AS ride_operated,
+        # Join with stored values
+        results = (
+            self.session.query(
+                raw_calc.c.ride_id,
+                raw_calc.c.ride_name,
+                raw_calc.c.park_name,
+                raw_calc.c.down_count.label('calc_down_snapshots'),
+                raw_calc.c.calc_downtime_hours,
 
-                ABS(COALESCE(rhs.downtime_hours, 0) - rc.calc_downtime_hours) AS downtime_delta,
-                CASE WHEN rhs.ride_id IS NULL THEN 1 ELSE 0 END AS missing_from_aggregate
+                func.coalesce(RideHourlyStats.down_snapshots, 0).label('stored_down_snapshots'),
+                func.coalesce(RideHourlyStats.downtime_hours, 0).label('stored_downtime_hours'),
+                func.coalesce(RideHourlyStats.ride_operated, 0).label('ride_operated'),
 
-            FROM raw_calc rc
-            LEFT JOIN ride_hourly_stats rhs
-                ON rc.ride_id = rhs.ride_id
-                AND rhs.hour_start_utc = :hour_start
-            WHERE ABS(COALESCE(rhs.downtime_hours, 0) - rc.calc_downtime_hours) > :tolerance
-               OR rhs.ride_id IS NULL
-            ORDER BY ABS(COALESCE(rhs.downtime_hours, 0) - rc.calc_downtime_hours) DESC
-            LIMIT 20
-        """)
+                func.abs(func.coalesce(RideHourlyStats.downtime_hours, 0) - raw_calc.c.calc_downtime_hours).label('downtime_delta'),
+                case((RideHourlyStats.ride_id.is_(None), 1), else_=0).label('missing_from_aggregate')
+            )
+            .select_from(raw_calc)
+            .outerjoin(
+                RideHourlyStats,
+                and_(
+                    raw_calc.c.ride_id == RideHourlyStats.ride_id,
+                    RideHourlyStats.hour_start_utc == hour_start_utc
+                )
+            )
+            .filter(
+                or_(
+                    func.abs(func.coalesce(RideHourlyStats.downtime_hours, 0) - raw_calc.c.calc_downtime_hours) > tolerances['downtime_hours'],
+                    RideHourlyStats.ride_id.is_(None)
+                )
+            )
+            .order_by(func.abs(func.coalesce(RideHourlyStats.downtime_hours, 0) - raw_calc.c.calc_downtime_hours).desc())
+            .limit(20)
+            .all()
+        )
 
-        result = self.conn.execute(sql, {
-            'hour_start': hour_start_utc,
-            'hour_end': hour_end_utc,
-            'tolerance': tolerances['downtime_hours']
-        })
-        mismatches = [dict(row._mapping) for row in result]
+        # Convert to list of dicts
+        mismatches = [
+            {
+                'ride_id': row.ride_id,
+                'ride_name': row.ride_name,
+                'park_name': row.park_name,
+                'calc_down_snapshots': row.calc_down_snapshots,
+                'calc_downtime_hours': float(row.calc_downtime_hours),
+                'stored_down_snapshots': row.stored_down_snapshots,
+                'stored_downtime_hours': float(row.stored_downtime_hours),
+                'ride_operated': row.ride_operated,
+                'downtime_delta': float(row.downtime_delta),
+                'missing_from_aggregate': row.missing_from_aggregate
+            }
+            for row in results
+        ]
 
         # Count total records checked
-        count_sql = text("""
-            SELECT COUNT(DISTINCT ride_id)
-            FROM ride_hourly_stats
-            WHERE hour_start_utc = :hour_start
-        """)
-        total_checked = self.conn.execute(count_sql, {'hour_start': hour_start_utc}).scalar() or 0
+        total_checked = (
+            self.session.query(func.count(distinct(RideHourlyStats.ride_id)))
+            .filter(RideHourlyStats.hour_start_utc == hour_start_utc)
+            .scalar() or 0
+        )
 
         missing_count = sum(1 for m in mismatches if m['missing_from_aggregate'])
         match_count = total_checked - len(mismatches)
@@ -944,56 +1160,82 @@ class AggregateVerifier:
         """
         tolerances = self.TOLERANCES['park_hourly']
 
-        # Calculate from ride_hourly_stats and compare to stored park_hourly_stats
-        sql = text("""
-            WITH ride_sums AS (
-                SELECT
-                    r.park_id,
-                    p.name AS park_name,
-                    SUM(rhs.downtime_hours) AS calc_total_downtime_hours,
-                    SUM(CASE WHEN rhs.downtime_hours > 0 THEN 1 ELSE 0 END) AS calc_rides_down
-                FROM ride_hourly_stats rhs
-                JOIN rides r ON rhs.ride_id = r.ride_id
-                JOIN parks p ON r.park_id = p.park_id
-                WHERE rhs.hour_start_utc = :hour_start
-                  AND rhs.ride_operated = 1
-                GROUP BY r.park_id, p.name
+        # Calculate from ride_hourly_stats
+        ride_sums = (
+            self.session.query(
+                Ride.park_id,
+                Park.name.label('park_name'),
+                func.sum(RideHourlyStats.downtime_hours).label('calc_total_downtime_hours'),
+                func.sum(case((RideHourlyStats.downtime_hours > 0, 1), else_=0)).label('calc_rides_down')
             )
-            SELECT
-                rs.park_id,
-                rs.park_name,
-                rs.calc_total_downtime_hours,
-                rs.calc_rides_down,
+            .select_from(RideHourlyStats)
+            .join(Ride, RideHourlyStats.ride_id == Ride.ride_id)
+            .join(Park, Ride.park_id == Park.park_id)
+            .filter(
+                and_(
+                    RideHourlyStats.hour_start_utc == hour_start_utc,
+                    RideHourlyStats.ride_operated == 1
+                )
+            )
+            .group_by(Ride.park_id, Park.name)
+            .subquery()
+        )
 
-                COALESCE(phs.total_downtime_hours, 0) AS stored_total_downtime_hours,
-                COALESCE(phs.rides_down, 0) AS stored_rides_down,
-                COALESCE(phs.shame_score, 0) AS stored_shame_score,
+        # Join with stored values
+        results = (
+            self.session.query(
+                ride_sums.c.park_id,
+                ride_sums.c.park_name,
+                ride_sums.c.calc_total_downtime_hours,
+                ride_sums.c.calc_rides_down,
 
-                ABS(COALESCE(phs.total_downtime_hours, 0) - rs.calc_total_downtime_hours) AS downtime_delta,
-                CASE WHEN phs.park_id IS NULL THEN 1 ELSE 0 END AS missing_from_aggregate
+                func.coalesce(ParkHourlyStats.total_downtime_hours, 0).label('stored_total_downtime_hours'),
+                func.coalesce(ParkHourlyStats.rides_down, 0).label('stored_rides_down'),
+                func.coalesce(ParkHourlyStats.shame_score, 0).label('stored_shame_score'),
 
-            FROM ride_sums rs
-            LEFT JOIN park_hourly_stats phs
-                ON rs.park_id = phs.park_id
-                AND phs.hour_start_utc = :hour_start
-            WHERE ABS(COALESCE(phs.total_downtime_hours, 0) - rs.calc_total_downtime_hours) > :tolerance
-               OR phs.park_id IS NULL
-            ORDER BY ABS(COALESCE(phs.total_downtime_hours, 0) - rs.calc_total_downtime_hours) DESC
-        """)
+                func.abs(func.coalesce(ParkHourlyStats.total_downtime_hours, 0) - ride_sums.c.calc_total_downtime_hours).label('downtime_delta'),
+                case((ParkHourlyStats.park_id.is_(None), 1), else_=0).label('missing_from_aggregate')
+            )
+            .select_from(ride_sums)
+            .outerjoin(
+                ParkHourlyStats,
+                and_(
+                    ride_sums.c.park_id == ParkHourlyStats.park_id,
+                    ParkHourlyStats.hour_start_utc == hour_start_utc
+                )
+            )
+            .filter(
+                or_(
+                    func.abs(func.coalesce(ParkHourlyStats.total_downtime_hours, 0) - ride_sums.c.calc_total_downtime_hours) > tolerances['total_downtime_hours'],
+                    ParkHourlyStats.park_id.is_(None)
+                )
+            )
+            .order_by(func.abs(func.coalesce(ParkHourlyStats.total_downtime_hours, 0) - ride_sums.c.calc_total_downtime_hours).desc())
+            .all()
+        )
 
-        result = self.conn.execute(sql, {
-            'hour_start': hour_start_utc,
-            'tolerance': tolerances['total_downtime_hours']
-        })
-        mismatches = [dict(row._mapping) for row in result]
+        # Convert to list of dicts
+        mismatches = [
+            {
+                'park_id': row.park_id,
+                'park_name': row.park_name,
+                'calc_total_downtime_hours': float(row.calc_total_downtime_hours),
+                'calc_rides_down': row.calc_rides_down,
+                'stored_total_downtime_hours': float(row.stored_total_downtime_hours),
+                'stored_rides_down': row.stored_rides_down,
+                'stored_shame_score': float(row.stored_shame_score),
+                'downtime_delta': float(row.downtime_delta),
+                'missing_from_aggregate': row.missing_from_aggregate
+            }
+            for row in results
+        ]
 
         # Count total records checked
-        count_sql = text("""
-            SELECT COUNT(DISTINCT park_id)
-            FROM park_hourly_stats
-            WHERE hour_start_utc = :hour_start
-        """)
-        total_checked = self.conn.execute(count_sql, {'hour_start': hour_start_utc}).scalar() or 0
+        total_checked = (
+            self.session.query(func.count(distinct(ParkHourlyStats.park_id)))
+            .filter(ParkHourlyStats.hour_start_utc == hour_start_utc)
+            .scalar() or 0
+        )
 
         missing_count = sum(1 for m in mismatches if m['missing_from_aggregate'])
         match_count = total_checked - len(mismatches)
@@ -1049,21 +1291,20 @@ class AggregateVerifier:
         day_start_utc, day_end_utc = get_pacific_day_range_utc(target_date)
 
         # Get all hours that have data
-        hours_sql = text("""
-            SELECT DISTINCT hour_start_utc
-            FROM park_hourly_stats
-            WHERE hour_start_utc >= :day_start
-              AND hour_start_utc < :day_end
-            ORDER BY hour_start_utc
-        """)
-        result = self.conn.execute(hours_sql, {
-            'day_start': day_start_utc,
-            'day_end': day_end_utc
-        })
-        hours = [row[0] for row in result]
+        hours = (
+            self.session.query(distinct(ParkHourlyStats.hour_start_utc))
+            .filter(
+                and_(
+                    ParkHourlyStats.hour_start_utc >= day_start_utc,
+                    ParkHourlyStats.hour_start_utc < day_end_utc
+                )
+            )
+            .order_by(ParkHourlyStats.hour_start_utc)
+            .all()
+        )
 
         # Verify each hour
-        for hour in hours:
+        for (hour,) in hours:
             ride_result = self.verify_ride_hourly_stats(hour)
             summary.ride_hourly_results.append(ride_result)
             if not ride_result.passed:

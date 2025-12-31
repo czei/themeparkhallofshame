@@ -223,6 +223,66 @@
 
 ---
 
+## Part 2.5: Shame Score Formula (CRITICAL)
+
+### The Authoritative Formula
+
+**Shame score is a RATE (0-10 scale), NOT a cumulative value.**
+
+```
+                           Σ(weighted_downtime_hours)
+DAILY shame_score = ──────────────────────────────────────── × 10
+                    effective_park_weight × operating_hours
+```
+
+### Components
+
+| Component | Definition | Example |
+|-----------|------------|---------|
+| `weighted_downtime_hours` | SUM(ride_downtime_hours × tier_weight) for all rides | 39.33 |
+| `effective_park_weight` | SUM(tier_weight) for rides that operated (had uptime > 0) | 47 |
+| `operating_hours` | AVG(ride operating_hours_minutes) / 60 | 14 |
+
+### Tier Weights
+
+| Tier | Description | Weight |
+|------|-------------|--------|
+| 1 | Flagship rides (Space Mountain, Incredicoaster, etc.) | 3 |
+| 2 | Major attractions (standard) | 2 |
+| 3 | Minor attractions | 1 |
+| Default | Unclassified rides | 2 |
+
+### Why Time Normalization Matters
+
+**WRONG (old formula, missing operating_hours):**
+```python
+shame = (weighted_downtime / effective_park_weight) × 10
+# Result: DCA = 8.4 (cumulative, grows with park hours)
+```
+
+**CORRECT (with time normalization):**
+```python
+shame = (weighted_downtime / (effective_park_weight × operating_hours)) × 10
+# Result: DCA = 0.6 (rate, stays in 0-10 range)
+```
+
+### Key Invariant
+
+> **If hourly shame = 1.0 for all hours, daily shame should ≈ 1.0**
+
+The time-normalized formula ensures that:
+- Rankings compare parks fairly regardless of operating hours
+- AVG(hourly_shame) ≈ daily_shame (as expected by users)
+- The 0-10 scale has consistent meaning across time periods
+
+### Implementation Locations
+
+- **Daily aggregation**: `scripts/aggregate_daily.py` (lines 580-593)
+- **Hourly aggregation**: DEPRECATED (`scripts/aggregate_hourly.py`)
+- **Calculator**: `database/calculators/shame_score.py`
+
+---
+
 ## Part 3: Key Business Logic Decisions
 
 ### During Ride Aggregation (Step 5b)

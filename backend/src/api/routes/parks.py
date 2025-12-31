@@ -11,7 +11,7 @@ GET /parks/downtime?period=today      → database/queries/today/today_park_rank
 GET /parks/downtime?period=yesterday  → StatsRepository.get_park_daily_rankings(stat_date=yesterday)
 GET /parks/downtime?period=last_week  → database/queries/rankings/park_downtime_rankings.py
 GET /parks/downtime?period=last_month → database/queries/rankings/park_downtime_rankings.py
-GET /parks/waittimes?period=live      → StatsRepository.get_park_live_wait_time_rankings()
+GET /parks/waittimes?period=live      → database/queries/live/live_park_wait_times.py (instantaneous via snapshots)
 GET /parks/waittimes?period=today     → database/queries/today/today_park_wait_times.py (cumulative)
 GET /parks/waittimes?period=yesterday → database/queries/yesterday/yesterday_park_wait_times.py (full prev day)
 GET /parks/waittimes?period=last_week   → database/queries/rankings/park_wait_time_rankings.py
@@ -23,7 +23,7 @@ from flask import Blueprint, request, jsonify
 from datetime import timedelta
 from decimal import Decimal
 
-from database.connection import get_db_connection
+from database.connection import get_db_connection, get_db_session
 from database.repositories.park_repository import ParkRepository
 from database.repositories.stats_repository import StatsRepository
 from utils.cache import get_query_cache, generate_cache_key
@@ -35,6 +35,7 @@ from database.queries.today import TodayParkWaitTimesQuery, TodayParkRankingsQue
 from database.queries.yesterday import YesterdayParkWaitTimesQuery, YesterdayParkRankingsQuery
 from database.queries.charts import ParkShameHistoryQuery, ParkRidesComparisonQuery
 from database.queries.live.fast_live_park_rankings import FastLiveParkRankingsQuery
+from database.queries.live.live_park_wait_times import LiveParkWaitTimesQuery
 from database.calculators.shame_score import ShameScoreCalculator
 
 from utils.logger import logger
@@ -87,6 +88,10 @@ def get_park_downtime_rankings():
             "error": "Invalid period. Must be one of: live, today, yesterday, 7days, 30days, last_week, last_month"
         }), 400
 
+    # Normalize legacy period names to standard names (keep original for response)
+    original_period = period
+    period = PERIOD_ALIASES.get(period, period)
+
     # Validate filter
     if filter_type not in ['disney-universal', 'all-parks']:
         return jsonify({
@@ -120,7 +125,6 @@ def get_park_downtime_rankings():
 
         with get_db_connection() as conn:
             filter_disney_universal = (filter_type == 'disney-universal')
-            stats_repo = StatsRepository(conn)
 
             # Route to appropriate query based on period
             today_pacific = get_today_pacific()
@@ -149,22 +153,6 @@ def get_park_downtime_rankings():
                     limit=limit,
                     sort_by=sort_by
                 )
-            elif period == '7days':
-                rankings = stats_repo.get_park_weekly_rankings(
-                    year=today_pacific.year,
-                    week_number=today_pacific.isocalendar()[1],
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit,
-                    weighted=weighted
-                )
-            elif period == '30days':
-                rankings = stats_repo.get_park_monthly_rankings(
-                    year=today_pacific.year,
-                    month=today_pacific.month,
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit,
-                    weighted=weighted
-                )
             else:
                 # Historical data from aggregated stats (calendar-based periods)
                 # See: database/queries/rankings/park_downtime_rankings.py
@@ -181,11 +169,15 @@ def get_park_downtime_rankings():
                         limit=limit,
                         sort_by=sort_by
                     )
+
+            # Get aggregate stats using ORM (requires Session, not Connection)
             aggregate_period = PERIOD_ALIASES.get(period, period)
-            aggregate_stats = stats_repo.get_aggregate_park_stats(
-                period=aggregate_period,
-                filter_disney_universal=filter_disney_universal
-            )
+            with get_db_session() as session:
+                stats_repo = StatsRepository(session)
+                aggregate_stats = stats_repo.get_aggregate_park_stats(
+                    period=aggregate_period,
+                    filter_disney_universal=filter_disney_universal
+                )
 
             # Add external URLs to rankings
             rankings_with_urls = []
@@ -214,7 +206,7 @@ def get_park_downtime_rankings():
             # Build response
             response = {
                 "success": True,
-                "period": period,
+                "period": original_period,
                 "filter": filter_type,
                 "weighted": weighted,
                 "sort_by": sort_by,
@@ -301,76 +293,86 @@ def get_park_wait_times():
             logger.info(f"Cache HIT for park waittimes: period={period}, filter={filter_type}")
             return jsonify(cached_result), 200
 
-        with get_db_connection() as conn:
-            filter_disney_universal = (filter_type == 'disney-universal')
+        # Note: Mixed session/connection usage during ORM migration
+        # - TODAY period uses Session (TodayParkWaitTimesQuery converted to ORM)
+        # - Other periods still use Connection (not yet converted)
+        filter_disney_universal = (filter_type == 'disney-universal')
 
-            # Route to appropriate query based on period
-            if period == 'live':
-                # LIVE data - instantaneous current wait times
-                stats_repo = StatsRepository(conn)
-                wait_times = stats_repo.get_park_live_wait_time_rankings(
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
-            elif period == 'today':
+        if period == 'today':
+            # ORM-based query - uses Session
+            with get_db_session() as session:
                 # TODAY data - cumulative from midnight Pacific to now
                 # See: database/queries/today/today_park_wait_times.py
-                query = TodayParkWaitTimesQuery(conn)
+                query = TodayParkWaitTimesQuery(session)
                 wait_times = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
-            elif period == 'yesterday':
-                # YESTERDAY data - full previous Pacific day
-                # See: database/queries/yesterday/yesterday_park_wait_times.py
-                query = YesterdayParkWaitTimesQuery(conn)
+        elif period == 'live':
+            # ORM-based query - uses Session
+            with get_db_session() as session:
+                # LIVE data - instantaneous current wait times from latest snapshots
+                # See: database/queries/live/live_park_wait_times.py
+                query = LiveParkWaitTimesQuery(session)
                 wait_times = query.get_rankings(
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
-            else:
-                # Historical data from aggregated stats (calendar-based periods)
-                # See: database/queries/rankings/park_wait_time_rankings.py
-                query = ParkWaitTimeRankingsQuery(conn)
-                if period == 'last_week':
-                    wait_times = query.get_weekly(
+        else:
+            # Legacy queries - still use Connection
+            with get_db_connection() as conn:
+                # Route to appropriate query based on period
+                if period == 'yesterday':
+                    # YESTERDAY data - full previous Pacific day
+                    # See: database/queries/yesterday/yesterday_park_wait_times.py
+                    query = YesterdayParkWaitTimesQuery(conn)
+                    wait_times = query.get_rankings(
                         filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
-                else:  # last_month
-                    wait_times = query.get_monthly(
-                        filter_disney_universal=filter_disney_universal,
-                        limit=limit
-                    )
+                else:
+                    # Historical data from aggregated stats (calendar-based periods)
+                    # See: database/queries/rankings/park_wait_time_rankings.py
+                    query = ParkWaitTimeRankingsQuery(conn)
+                    if period == 'last_week':
+                        wait_times = query.get_weekly(
+                            filter_disney_universal=filter_disney_universal,
+                            limit=limit
+                        )
+                    else:  # last_month
+                        wait_times = query.get_monthly(
+                            filter_disney_universal=filter_disney_universal,
+                            limit=limit
+                        )
 
-            # Add external URLs and rank to wait times
-            wait_times_with_urls = []
-            for rank_idx, park in enumerate(wait_times, start=1):
-                park_dict = dict(park) if hasattr(park, '_mapping') else dict(park)
-                park_dict['rank'] = rank_idx
-                if 'queue_times_id' in park_dict:
-                    park_dict['queue_times_url'] = f"https://queue-times.com/parks/{park_dict['queue_times_id']}"
-                wait_times_with_urls.append(park_dict)
+        # Add external URLs and rank to wait times (applies to all periods)
+        wait_times_with_urls = []
+        for rank_idx, park in enumerate(wait_times, start=1):
+            park_dict = dict(park) if hasattr(park, '_mapping') else dict(park)
+            park_dict['rank'] = rank_idx
+            if 'queue_times_id' in park_dict:
+                park_dict['queue_times_url'] = f"https://queue-times.com/parks/{park_dict['queue_times_id']}"
+            wait_times_with_urls.append(park_dict)
 
-            # Build response
-            response = {
-                "success": True,
-                "period": period,
-                "filter": filter_type,
-                "data": wait_times_with_urls,
-                "attribution": {
-                    "data_source": "ThemeParks.wiki",
-                    "url": "https://themeparks.wiki"
-                }
+        # Build response
+        response = {
+            "success": True,
+            "period": period,
+            "filter": filter_type,
+            "data": wait_times_with_urls,
+            "attribution": {
+                "data_source": "ThemeParks.wiki",
+                "url": "https://themeparks.wiki"
             }
+        }
 
-            logger.info(f"Park wait times requested: period={period}, filter={filter_type}, results={len(wait_times_with_urls)}")
+        logger.info(f"Park wait times requested: period={period}, filter={filter_type}, results={len(wait_times_with_urls)}")
 
-            # Cache the result (5-minute TTL)
-            cache.set(cache_key, response)
-            logger.info(f"Cache STORE for park waittimes: period={period}, filter={filter_type}")
+        # Cache the result (5-minute TTL)
+        cache.set(cache_key, response)
+        logger.info(f"Cache STORE for park waittimes: period={period}, filter={filter_type}")
 
-            return jsonify(response), 200
+        return jsonify(response), 200
 
     except Exception as e:
         logger.error(f"Error fetching park wait times: {e}", exc_info=True)
@@ -470,9 +472,9 @@ def get_park_details(park_id: int):
         period = 'live'
 
     try:
-        with get_db_connection() as conn:
-            park_repo = ParkRepository(conn)
-            stats_repo = StatsRepository(conn)
+        with get_db_session() as session:
+            park_repo = ParkRepository(session)
+            stats_repo = StatsRepository(session)
 
             # Get park basic info
             park = park_repo.get_by_id(park_id)
@@ -498,14 +500,19 @@ def get_park_details(park_id: int):
             # Each period returns data appropriate for that time range
             if period == 'today':
                 shame_breakdown = stats_repo.get_park_today_shame_breakdown(park_id)
+                shame_breakdown['breakdown_type'] = 'today'
             elif period == 'yesterday':
                 shame_breakdown = stats_repo.get_park_yesterday_shame_breakdown(park_id)
+                shame_breakdown['breakdown_type'] = 'yesterday'
             elif period == 'last_week':
                 shame_breakdown = stats_repo.get_park_weekly_shame_breakdown(park_id)
+                shame_breakdown['breakdown_type'] = 'last_week'
             elif period == 'last_month':
                 shame_breakdown = stats_repo.get_park_monthly_shame_breakdown(park_id)
+                shame_breakdown['breakdown_type'] = 'last_month'
             else:  # live
                 shame_breakdown = stats_repo.get_park_shame_breakdown(park_id)
+                shame_breakdown['breakdown_type'] = 'live'
 
             # Get chart data for all periods
             # - LIVE: 5-minute granularity for last 60 minutes (recent snapshots)
@@ -514,52 +521,10 @@ def get_park_details(park_id: int):
             chart_data = None
             if period == 'live':
                 # LIVE: Get recent 60 minutes of stored shame_score data at 5-minute granularity
-                # Use the pre-calculated shame_score from park_activity_snapshots (calculated with 7-day hybrid logic)
-                from datetime import datetime, timedelta, timezone
-                from sqlalchemy import text
-
-                now_utc = datetime.now(timezone.utc)
-                start_utc = now_utc - timedelta(minutes=60)
-
-                query = text("""
-                    SELECT
-                        DATE_FORMAT(DATE_SUB(recorded_at, INTERVAL 8 HOUR), '%H:%i') AS time_label,
-                        shame_score
-                    FROM park_activity_snapshots
-                    WHERE park_id = :park_id
-                        AND recorded_at >= :start_utc
-                        AND recorded_at < :end_utc
-                    ORDER BY recorded_at
-                """)
-
-                result = conn.execute(query, {
-                    "park_id": park_id,
-                    "start_utc": start_utc,
-                    "end_utc": now_utc
-                })
-
-                rows = [dict(row._mapping) for row in result]
-
-                # Build chart data
-                labels = [row['time_label'] for row in rows]
-                data = [float(row['shame_score']) if row['shame_score'] is not None else None for row in rows]
-
-                chart_data = {
-                    "labels": labels,
-                    "data": data,
-                    "granularity": "minutes"
-                }
-
-                # For LIVE, set 'current' to the last non-null value from the chart data
-                # This ensures the badge matches the rightmost point on the chart
-                last_value = None
-                for val in reversed(data):
-                    if val is not None:
-                        last_value = val
-                        break
-                chart_data['current'] = float(last_value) if last_value is not None else 0.0
+                # Uses ORM via StatsRepository.get_live_shame_chart_data()
+                chart_data = stats_repo.get_live_shame_chart_data(park_id, minutes=60)
             elif period in ('today', 'yesterday'):
-                chart_query = ParkShameHistoryQuery(conn)
+                chart_query = ParkShameHistoryQuery(session)
                 today = get_today_pacific()
                 if period == 'today':
                     chart_data = chart_query.get_single_park_hourly(park_id, today, is_today=True)
@@ -568,15 +533,18 @@ def get_park_details(park_id: int):
                     yesterday = today - timedelta(days=1)
                     chart_data = chart_query.get_single_park_hourly(park_id, yesterday, is_today=False)
 
-                # Override chart average with breakdown's shame_score for consistency
-                # The hourly chart query uses different filtering logic which can show 0
-                # when rides haven't "operated" yet, but the breakdown correctly counts downtime
+                # Add shame_score to chart data for badge display
+                # CRITICAL: chart_data['average'] = average of downtime hour bars
+                #          chart_data['shame_score'] = overall shame score (0-10 scale)
+                # These are DIFFERENT metrics with different semantics!
                 if chart_data and shame_breakdown:
-                    chart_data['average'] = shame_breakdown.get('shame_score', chart_data.get('average', 0))
+                    # Keep chart average as-is (average of downtime hours)
+                    # Add separate shame_score field for the shame score badge
+                    chart_data['shame_score'] = shame_breakdown.get('shame_score', 0)
             elif period in ('last_week', 'last_month'):
                 # WEEKLY/MONTHLY: Daily averages for the period
                 from utils.timezone import get_last_week_date_range, get_last_month_date_range
-                chart_query = ParkShameHistoryQuery(conn)
+                chart_query = ParkShameHistoryQuery(session)
 
                 if period == 'last_week':
                     start_date, end_date, _ = get_last_week_date_range()
@@ -585,9 +553,11 @@ def get_park_details(park_id: int):
 
                 chart_data = chart_query.get_single_park_daily(park_id, start_date, end_date)
 
-                # Override chart average with breakdown's shame_score for consistency
+                # Add shame_score to chart data for badge display
+                # CRITICAL: For daily charts, chart_data['average'] already contains shame scores
+                #          (calculated per day), so we add the overall shame_score separately
                 if chart_data and shame_breakdown:
-                    chart_data['average'] = shame_breakdown.get('shame_score', chart_data.get('average', 0))
+                    chart_data['shame_score'] = shame_breakdown.get('shame_score', chart_data.get('average', 0))
 
             # Get excluded rides count for display in modal
             excluded_rides = stats_repo.get_excluded_rides(park_id)
@@ -683,8 +653,8 @@ def get_park_rides_comparison_chart(park_id: int):
         }), 400
 
     try:
-        with get_db_connection() as conn:
-            query = ParkRidesComparisonQuery(conn)
+        with get_db_session() as session:
+            query = ParkRidesComparisonQuery(session)
 
             if period == 'today':
                 target_date = get_today_pacific()

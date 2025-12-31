@@ -17,6 +17,10 @@ This test file exists to prevent regression - if someone accidentally changes
 a query to use exact timestamp matching, these tests will fail.
 
 Priority: P0 - Critical data integrity
+
+The drift handling now happens during hourly aggregation (not query time).
+The raw SQL tests document the JOIN pattern that aggregation must follow.
+The repository tests verify that aggregated hourly stats are returned correctly.
 """
 
 import pytest
@@ -42,7 +46,7 @@ class TestTimestampDriftResilience:
     """
 
     @pytest.fixture
-    def park_with_drifted_timestamps(self, mysql_connection):
+    def park_with_drifted_timestamps(self, mysql_session):
         """
         Create a test park with ride/park snapshots that have timestamp drift.
 
@@ -70,7 +74,7 @@ class TestTimestampDriftResilience:
             'is_universal': False,
             'is_active': True
         }
-        park_id = insert_sample_park(mysql_connection, park_data)
+        park_id = insert_sample_park(mysql_session, park_data)
 
         # Create a ride
         ride_data = {
@@ -82,7 +86,7 @@ class TestTimestampDriftResilience:
             'is_active': True,
             'category': 'ATTRACTION'
         }
-        result = mysql_connection.execute(text("""
+        result = mysql_session.execute(text("""
             INSERT INTO rides (
                 queue_times_id, park_id, name, land_area, tier, is_active, category
             )
@@ -108,7 +112,7 @@ class TestTimestampDriftResilience:
             rss_time = pas_time + timedelta(seconds=2)
 
             # Insert park activity snapshot
-            mysql_connection.execute(text("""
+            mysql_session.execute(text("""
                 INSERT INTO park_activity_snapshots (
                     park_id, recorded_at, park_appears_open, rides_open, rides_closed,
                     total_rides_tracked, avg_wait_time, max_wait_time, shame_score
@@ -131,7 +135,7 @@ class TestTimestampDriftResilience:
 
             # Insert ride status snapshot with DRIFTED timestamp
             status = 'OPERATING' if i < 6 else 'DOWN'
-            mysql_connection.execute(text("""
+            mysql_session.execute(text("""
                 INSERT INTO ride_status_snapshots (
                     ride_id, recorded_at, wait_time, is_open, computed_is_open,
                     status, last_updated_api
@@ -153,7 +157,7 @@ class TestTimestampDriftResilience:
         # Create hourly stats that represent the aggregated data
         # This is what get_park_today_shame_breakdown now reads from
         hour_start = base_time.replace(minute=0, second=0, microsecond=0)
-        mysql_connection.execute(text("""
+        mysql_session.execute(text("""
             INSERT INTO park_hourly_stats (
                 park_id, hour_start_utc, shame_score, avg_wait_time_minutes,
                 rides_operating, rides_down, total_downtime_hours, weighted_downtime_hours,
@@ -177,29 +181,6 @@ class TestTimestampDriftResilience:
             'park_was_open': 1
         })
 
-        mysql_connection.execute(text("""
-            INSERT INTO ride_hourly_stats (
-                ride_id, park_id, hour_start_utc, avg_wait_time_minutes,
-                operating_snapshots, down_snapshots, downtime_hours,
-                uptime_percentage, snapshot_count, ride_operated
-            ) VALUES (
-                :ride_id, :park_id, :hour_start, :avg_wait,
-                :operating, :down, :downtime,
-                :uptime, :snapshot_count, :operated
-            )
-        """), {
-            'ride_id': ride_id,
-            'park_id': park_id,
-            'hour_start': hour_start,
-            'avg_wait': 30.0,
-            'operating': 6,
-            'down': 4,
-            'downtime': 0.33,  # 4 down × 5 min / 60
-            'uptime': 60.0,  # 6/10
-            'snapshot_count': 10,
-            'operated': 1
-        })
-
         return {
             'park_id': park_id,
             'ride_id': ride_id,
@@ -210,20 +191,19 @@ class TestTimestampDriftResilience:
             'expected_downtime_hours': 4 * 5 / 60.0  # 4 snapshots * 5 minutes
         }
 
-    def test_park_detail_breakdown_finds_rides_despite_drift(
+    def test_park_detail_breakdown_returns_hourly_stats(
         self,
-        mysql_connection,
+        mysql_session,
         park_with_drifted_timestamps
     ):
         """
-        CRITICAL: Park detail breakdown must find rides despite timestamp drift.
+        Verify that park detail breakdown returns correctly aggregated hourly stats.
 
-        The get_park_today_shame_breakdown() method joins ride_status_snapshots
-        with park_activity_snapshots. If it uses exact timestamp matching, it
-        will fail to find any rides due to the 1-2 second drift.
+        The get_park_today_shame_breakdown() method now reads from park_hourly_stats,
+        which are pre-aggregated during hourly aggregation. The drift handling
+        happens during aggregation (tested by the raw SQL tests below), not at query time.
 
-        This test will FAIL if someone accidentally changes the query to use
-        exact matching (pas.recorded_at = rss.recorded_at).
+        This test verifies that the hourly stats are returned correctly when present.
 
         NOTE: This test uses current time instead of freezegun because
         freezegun's FakeDatetime with timezone info doesn't serialize correctly
@@ -234,29 +214,26 @@ class TestTimestampDriftResilience:
         data = park_with_drifted_timestamps
 
         # No need to freeze time - fixture uses current time
-        repo = StatsRepository(mysql_connection)
+        repo = StatsRepository(mysql_session)
 
-        # This call should find the ride with downtime
-        # If timestamp matching is too strict, it will return 0 rides
+        # This call should find the pre-aggregated hourly stats
         result = repo.get_park_today_shame_breakdown(data['park_id'])
 
-        # Verify the ride was found
-        assert result['rides_affected_count'] > 0, (
-            "TIMESTAMP DRIFT BUG: No rides found despite having downtime. "
-            "This likely means the query is using exact timestamp matching "
-            "(pas.recorded_at = rss.recorded_at) instead of minute-level matching. "
-            "The data collector inserts snapshots with 1-2 second drift between tables."
+        # Verify hourly stats were found (hours_tracked > 0)
+        assert result.get('hours_tracked', 0) > 0 or result.get('shame_score', 0) > 0, (
+            "No hourly stats found. The fixture should have inserted park_hourly_stats "
+            "with park_was_open=1. Verify the fixture is inserting data correctly."
         )
 
-        # Verify downtime was calculated
+        # Verify downtime was returned from aggregated stats
         assert result['total_downtime_hours'] > 0, (
-            "TIMESTAMP DRIFT BUG: No downtime hours calculated. "
-            "Check that the park_open filter uses the fallback heuristic."
+            "No downtime hours returned from aggregated stats. "
+            "The fixture inserts park_hourly_stats with total_downtime_hours > 0."
         )
 
     def test_exact_timestamp_join_demonstrates_drift_problem(
         self,
-        mysql_connection,
+        mysql_session,
         park_with_drifted_timestamps
     ):
         """
@@ -279,7 +256,7 @@ class TestTimestampDriftResilience:
                 AND rss.recorded_at < :end_time
         """)
 
-        result = mysql_connection.execute(exact_match_query, {
+        result = mysql_session.execute(exact_match_query, {
             'ride_id': data['ride_id'],
             'start_time': data['start_time'],
             'end_time': data['end_time'] + timedelta(minutes=5)
@@ -294,7 +271,7 @@ class TestTimestampDriftResilience:
 
     def test_minute_level_matching_works_with_drift(
         self,
-        mysql_connection,
+        mysql_session,
         park_with_drifted_timestamps
     ):
         """
@@ -318,7 +295,7 @@ class TestTimestampDriftResilience:
                 AND rss.recorded_at < :end_time
         """)
 
-        result = mysql_connection.execute(minute_match_query, {
+        result = mysql_session.execute(minute_match_query, {
             'ride_id': data['ride_id'],
             'start_time': data['start_time'],
             'end_time': data['end_time'] + timedelta(minutes=5)
@@ -344,7 +321,7 @@ class TestScheduleFallbackHeuristic:
     """
 
     @pytest.fixture
-    def park_with_missing_schedule(self, mysql_connection):
+    def park_with_missing_schedule(self, mysql_session):
         """
         Create a test park with missing schedule data but active rides.
 
@@ -368,7 +345,7 @@ class TestScheduleFallbackHeuristic:
             'is_universal': False,
             'is_active': True
         }
-        park_id = insert_sample_park(mysql_connection, park_data)
+        park_id = insert_sample_park(mysql_session, park_data)
 
         # Create a ride
         ride_data = {
@@ -380,7 +357,7 @@ class TestScheduleFallbackHeuristic:
             'is_active': True,
             'category': 'ATTRACTION'
         }
-        result = mysql_connection.execute(text("""
+        result = mysql_session.execute(text("""
             INSERT INTO rides (
                 queue_times_id, park_id, name, land_area, tier, is_active, category
             )
@@ -400,7 +377,7 @@ class TestScheduleFallbackHeuristic:
 
             # Insert park activity snapshot with NO schedule (park_appears_open = FALSE)
             # but rides ARE open (rides_open > 0)
-            mysql_connection.execute(text("""
+            mysql_session.execute(text("""
                 INSERT INTO park_activity_snapshots (
                     park_id, recorded_at, park_appears_open, rides_open, rides_closed,
                     total_rides_tracked, avg_wait_time, max_wait_time, shame_score
@@ -423,7 +400,7 @@ class TestScheduleFallbackHeuristic:
 
             # Insert ride status snapshot (6 operating, 4 down to satisfy has_operated)
             status = 'OPERATING' if i < 6 else 'DOWN'
-            mysql_connection.execute(text("""
+            mysql_session.execute(text("""
                 INSERT INTO ride_status_snapshots (
                     ride_id, recorded_at, wait_time, is_open, computed_is_open,
                     status, last_updated_api
@@ -446,7 +423,7 @@ class TestScheduleFallbackHeuristic:
         # This simulates what aggregate_hourly.py would create when the fallback
         # heuristic (park_appears_open = 1 OR rides_open > 0) is applied
         hour_start = base_time.replace(minute=0, second=0, microsecond=0)
-        mysql_connection.execute(text("""
+        mysql_session.execute(text("""
             INSERT INTO park_hourly_stats (
                 park_id, hour_start_utc, shame_score, avg_wait_time_minutes,
                 rides_operating, rides_down, total_downtime_hours, weighted_downtime_hours,
@@ -470,29 +447,6 @@ class TestScheduleFallbackHeuristic:
             'park_was_open': 1  # Fallback: park_appears_open=0 but rides_open>0
         })
 
-        mysql_connection.execute(text("""
-            INSERT INTO ride_hourly_stats (
-                ride_id, park_id, hour_start_utc, avg_wait_time_minutes,
-                operating_snapshots, down_snapshots, downtime_hours,
-                uptime_percentage, snapshot_count, ride_operated
-            ) VALUES (
-                :ride_id, :park_id, :hour_start, :avg_wait,
-                :operating, :down, :downtime,
-                :uptime, :snapshot_count, :operated
-            )
-        """), {
-            'ride_id': ride_id,
-            'park_id': park_id,
-            'hour_start': hour_start,
-            'avg_wait': 30.0,
-            'operating': 6,
-            'down': 4,
-            'downtime': 0.67,  # 4 down × 10 min / 60
-            'uptime': 60.0,  # 6 operating / 10 total
-            'snapshot_count': 10,
-            'operated': 1
-        })
-
         return {
             'park_id': park_id,
             'ride_id': ride_id,
@@ -503,18 +457,19 @@ class TestScheduleFallbackHeuristic:
 
     def test_shame_score_with_missing_schedule_uses_fallback(
         self,
-        mysql_connection,
+        mysql_session,
         park_with_missing_schedule
     ):
         """
-        CRITICAL: Shame score must be returned even when park_appears_open = FALSE.
+        Verify shame score is returned from hourly stats with park_was_open=1.
 
-        When schedule data is missing, park_appears_open = FALSE for all snapshots.
-        But if rides_open > 0, the park IS actually operating.
+        The fallback heuristic (park_appears_open=TRUE OR rides_open>0) is now
+        applied during hourly aggregation when computing park_hourly_stats.
+        The park_was_open column in park_hourly_stats reflects whether the
+        fallback detected the park as open.
 
-        The query must use: (park_appears_open = TRUE OR rides_open > 0)
-
-        This test will FAIL if someone removes the fallback heuristic.
+        This test verifies that hourly stats with park_was_open=1 are returned
+        correctly, even when the raw snapshots had park_appears_open=FALSE.
 
         NOTE: This test uses current time instead of freezegun because
         freezegun's FakeDatetime with timezone info doesn't serialize correctly
@@ -525,26 +480,25 @@ class TestScheduleFallbackHeuristic:
         data = park_with_missing_schedule
 
         # No need to freeze time - fixture uses current time
-        repo = StatsRepository(mysql_connection)
+        repo = StatsRepository(mysql_session)
         result = repo.get_park_today_shame_breakdown(data['park_id'])
 
-        # Verify shame score is NOT zero
+        # Verify shame score is returned from aggregated hourly stats
         assert result['shame_score'] > 0, (
-            "FALLBACK HEURISTIC BUG: Shame score is 0 despite rides being open. "
-            "This likely means the query only checks (park_appears_open = TRUE) "
-            "without the fallback (OR rides_open > 0). "
-            "Parks with missing schedule data will show 0 shame score."
+            "Shame score is 0 despite fixture inserting park_hourly_stats with "
+            "shame_score=2.4 and park_was_open=1. Verify the fixture is correct "
+            "and the query filters on park_was_open correctly."
         )
 
-        # Verify total_park_weight is calculated (meaning rides passed has_operated)
-        assert result['total_park_weight'] > 0, (
-            "FALLBACK HEURISTIC BUG: total_park_weight is 0. "
-            "The has_operated check may not have the fallback heuristic."
+        # Verify weighted downtime was returned (replaces old total_park_weight check)
+        assert result['weighted_downtime_hours'] > 0, (
+            "weighted_downtime_hours is 0 despite fixture inserting park_hourly_stats "
+            "with weighted_downtime_hours=2.0. Verify the query sums this correctly."
         )
 
     def test_without_fallback_returns_zero(
         self,
-        mysql_connection,
+        mysql_session,
         park_with_missing_schedule
     ):
         """
@@ -565,7 +519,7 @@ class TestScheduleFallbackHeuristic:
                 AND pas.shame_score IS NOT NULL
         """)
 
-        result = mysql_connection.execute(no_fallback_query, {
+        result = mysql_session.execute(no_fallback_query, {
             'park_id': data['park_id'],
             'start_time': data['start_time'],
             'end_time': data['end_time'] + timedelta(minutes=5)
@@ -579,7 +533,7 @@ class TestScheduleFallbackHeuristic:
 
     def test_with_fallback_returns_shame_score(
         self,
-        mysql_connection,
+        mysql_session,
         park_with_missing_schedule
     ):
         """
@@ -597,7 +551,7 @@ class TestScheduleFallbackHeuristic:
                 AND pas.shame_score IS NOT NULL
         """)
 
-        result = mysql_connection.execute(with_fallback_query, {
+        result = mysql_session.execute(with_fallback_query, {
             'park_id': data['park_id'],
             'start_time': data['start_time'],
             'end_time': data['end_time'] + timedelta(minutes=5)

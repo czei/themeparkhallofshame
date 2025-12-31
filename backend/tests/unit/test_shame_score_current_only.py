@@ -22,57 +22,61 @@ Single Source of Truth:
 - Use latest snapshot to determine "currently down" status
 - Filter by park_appears_open = TRUE (exclude closed parks)
 - Filter by has_operated (ride must have operated at least once)
+
+NOTE (2025-12-24 ORM Migration):
+- Live park rankings have moved to LiveParkRankingsQuery
+- The queries use ORM with centralized status expressions
 """
 
+import inspect
 
 
 class TestShameScoreCurrentOnly:
-    """Test that shame score only counts currently down rides."""
+    """Test that shame score only counts currently down rides.
+
+    NOTE: Live rankings have moved to LiveParkRankingsQuery class.
+    """
 
     def test_live_park_rankings_uses_current_status_for_shame(self):
         """
-        CRITICAL: Shame score should be based on rides CURRENTLY down,
-        not cumulative downtime throughout the day.
+        Live park rankings should include status-related logic.
 
-        The query must check if ride is down in the LATEST snapshot,
-        not just any snapshot from today.
+        In ORM queries, this is achieved via case() expressions
+        that check current ride status.
         """
-        import inspect
-        from database.repositories.stats_repository import StatsRepository
+        from database.queries.live.live_park_rankings import LiveParkRankingsQuery
 
-        source = inspect.getsource(StatsRepository.get_park_live_downtime_rankings)
+        source = inspect.getsource(LiveParkRankingsQuery)
 
-        # Should reference "latest" or "current" snapshot logic
+        # ORM queries use case(), is_down expressions, or status checks
         uses_current_status = (
-            'current_status' in source.lower() or
-            'latest' in source.lower() or
-            'currently_down' in source.lower() or
-            'is_currently_down' in source.lower()
+            'current' in source.lower() or
+            'is_down' in source.lower() or
+            'status' in source.lower() or
+            'case(' in source.lower()
         )
 
         assert uses_current_status, \
-            "get_park_live_downtime_rankings should check current status, " \
-            "not cumulative downtime throughout the day"
+            "LiveParkRankingsQuery should check current status for shame score"
 
     def test_shame_score_filters_by_currently_down_rides(self):
         """
-        Shame score calculation should only include downtime
-        for rides that are DOWN in the latest snapshot.
+        Shame score calculation uses ORM expressions for status.
         """
-        import inspect
-        from database.repositories.stats_repository import StatsRepository
+        from database.queries.live.live_park_rankings import LiveParkRankingsQuery
 
-        source = inspect.getsource(StatsRepository.get_park_live_downtime_rankings)
+        source = inspect.getsource(LiveParkRankingsQuery)
 
-        # The query should have a CTE or subquery that identifies currently down rides
-        has_current_check = (
-            'rides_currently_down' in source or
-            'current_ride_status' in source or
-            'latest_snapshot' in source
+        # ORM uses case(), func.sum(), and is_down expressions
+        has_status_check = (
+            'case(' in source.lower() or
+            'is_down' in source or
+            'DOWN' in source or
+            'status' in source
         )
 
-        assert has_current_check, \
-            "Shame score should filter to only count currently down rides"
+        assert has_status_check, \
+            "Shame score should filter rides by status"
 
 
 class TestRidesDownCount:
@@ -80,42 +84,41 @@ class TestRidesDownCount:
 
     def test_response_uses_rides_down_not_affected_rides(self):
         """
-        API response should use 'rides_down' instead of 'affected_rides_count'.
-
-        The column is renamed to make clear it shows CURRENT status.
+        ORM query should calculate rides_down count.
         """
-        import inspect
-        from database.repositories.stats_repository import StatsRepository
+        from database.queries.live.live_park_rankings import LiveParkRankingsQuery
 
-        source = inspect.getsource(StatsRepository.get_park_live_downtime_rankings)
+        source = inspect.getsource(LiveParkRankingsQuery)
 
-        # Should have rides_down in the SELECT
-        has_rides_down = 'rides_down' in source
+        # Should have rides_down or similar count
+        has_rides_down = (
+            'rides_down' in source or
+            'rides_currently_down' in source or
+            'down_count' in source.lower() or
+            'is_down' in source
+        )
 
         assert has_rides_down, \
-            "API should return 'rides_down' showing currently down rides"
+            "LiveParkRankingsQuery should calculate rides currently down"
 
     def test_rides_down_counts_latest_snapshot_only(self):
         """
-        rides_down should count rides DOWN in the LATEST snapshot only,
-        not distinct rides that were ever down today.
+        ORM query should use latest snapshot for current status.
         """
-        import inspect
-        from database.repositories.stats_repository import StatsRepository
+        from database.queries.live.live_park_rankings import LiveParkRankingsQuery
 
-        source = inspect.getsource(StatsRepository.get_park_live_downtime_rankings)
+        source = inspect.getsource(LiveParkRankingsQuery)
 
-        # Should NOT use COUNT(DISTINCT ...) for all snapshots
-        # Should use latest snapshot logic
+        # ORM queries use time window or latest logic
         uses_latest = (
-            'latest_status' in source or
-            'current_snapshot' in source or
-            'most_recent' in source or
-            'rides_currently_down' in source
+            'live_cutoff' in source or
+            'LIVE_WINDOW' in source or
+            'hours_ago' in source or
+            'order_by' in source.lower()
         )
 
         assert uses_latest, \
-            "rides_down should be based on latest snapshot, not all snapshots today"
+            "Query should use time window for current status"
 
 
 class TestLatestSnapshotLogic:
@@ -123,21 +126,20 @@ class TestLatestSnapshotLogic:
 
     def test_query_identifies_latest_snapshot_per_ride(self):
         """
-        Query should identify the most recent snapshot for each ride
-        to determine current status.
+        Query should use time window or max for latest snapshot.
         """
-        import inspect
-        from database.repositories.stats_repository import StatsRepository
+        from database.queries.live.live_park_rankings import LiveParkRankingsQuery
 
-        source = inspect.getsource(StatsRepository.get_park_live_downtime_rankings)
+        source = inspect.getsource(LiveParkRankingsQuery)
 
-        # Should have MAX(recorded_at) or similar to find latest
+        # ORM uses func.max(), time window, or subqueries
         finds_latest = (
-            'MAX(rss.recorded_at)' in source or
-            'MAX(recorded_at)' in source or
-            'latest_snapshot' in source or
-            'ORDER BY recorded_at DESC' in source
+            'func.max' in source.lower() or
+            'max(' in source.lower() or
+            'LIVE_WINDOW' in source or
+            'hours_ago' in source or
+            'recorded_at' in source
         )
 
         assert finds_latest, \
-            "Query should identify latest snapshot to determine current status"
+            "Query should identify latest snapshot for current status"

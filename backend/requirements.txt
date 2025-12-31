@@ -7,6 +7,7 @@ Flask-CORS>=4.0.0
 
 # Database
 SQLAlchemy>=2.0.0
+Alembic>=1.13.0
 mysqlclient>=2.2.0
 
 # API Client & Retry Logic
@@ -25,6 +26,9 @@ python-json-logger>=2.0.7
 
 # Data Validation
 pydantic>=2.5.0
+
+# Timezone handling
+pytz>=2024.1
 
 # Production WSGI Server
 gunicorn>=21.0.0

@@ -13,7 +13,7 @@ Key Formula:
         (sum of tier_weights for down rides at T) / total_park_weight * 10
 
 Architecture:
-    This calculator generates SQL for all shame score calculations,
+    This calculator generates ORM queries for all shame score calculations,
     ensuring consistent filtering and formulas across all queries.
 
     The calculator accepts a db_session via dependency injection,
@@ -22,9 +22,14 @@ Architecture:
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy import select, func, case, and_, or_, literal
+from sqlalchemy.orm import Session
 
+from models import (
+    Park, Ride, RideClassification, RideStatusSnapshot,
+    ParkActivitySnapshot
+)
+from utils.query_helpers import QueryClassBase
 from utils.metrics import SHAME_SCORE_PRECISION, SHAME_SCORE_MULTIPLIER
 
 # Feature flag for 7-day hybrid denominator (allows instant rollback)
@@ -32,23 +37,31 @@ import os
 USE_7_DAY_HYBRID_DENOMINATOR = os.getenv('USE_7_DAY_HYBRID_DENOMINATOR', 'true').lower() == 'true'
 
 
-class ShameScoreCalculator:
+class ShameScoreCalculator(QueryClassBase):
     """
-    Single source of truth for shame score SQL generation.
+    Single source of truth for shame score ORM query generation.
 
     Usage:
-        calc = ShameScoreCalculator(db_connection)
+        calc = ShameScoreCalculator(db_session)
         score = calc.get_average(park_id=1, start=start_dt, end=end_dt)
     """
 
-    def __init__(self, db: Connection):
+    def __init__(self, session: Session):
         """
-        Initialize the calculator with a database connection.
+        Initialize the calculator with a database session.
 
         Args:
-            db: SQLAlchemy Connection or Session for executing queries
+            session: SQLAlchemy Session for executing queries
         """
-        self.db = db
+        super().__init__(session)
+
+    @property
+    def db(self) -> Session:
+        """
+        Backward compatibility property for tests.
+        Returns the session stored by QueryClassBase.
+        """
+        return self.session
 
     def get_effective_park_weight(self, park_id: int, as_of: datetime = None) -> float:
         """
@@ -70,20 +83,21 @@ class ShameScoreCalculator:
         if not USE_7_DAY_HYBRID_DENOMINATOR:
             return self.get_park_weight(park_id)  # Rollback path
 
-        # Note: Query uses UTC_TIMESTAMP() for timezone consistency (Zen review fix)
-        # The as_of parameter is for testing; production uses UTC_TIMESTAMP()
-        query = text("""
-            SELECT SUM(COALESCE(rc.tier_weight, 2)) AS effective_weight
-            FROM rides r
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE r.park_id = :park_id
-              AND r.is_active = TRUE
-              AND r.category = 'ATTRACTION'
-              AND r.last_operated_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY
-        """)
+        # Calculate cutoff time for 7-day window
+        # Note: Uses current UTC time for production; as_of parameter is for testing
+        cutoff_time = (as_of or datetime.now(timezone.utc)) - timedelta(days=7)
 
-        result = self.db.execute(query, {"park_id": park_id})
-        weight = result.scalar()
+        stmt = (
+            select(func.sum(func.coalesce(RideClassification.tier_weight, 2)))
+            .select_from(Ride)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+            .where(Ride.last_operated_at >= cutoff_time)
+        )
+
+        weight = self.execute_scalar(stmt)
 
         # Return 0.0 for NULL (no eligible rides) - CRITICAL for division by zero protection
         return float(weight) if weight is not None else 0.0
@@ -103,17 +117,16 @@ class ShameScoreCalculator:
         Returns:
             Total tier weight of all active attractions
         """
-        query = text("""
-            SELECT SUM(COALESCE(rc.tier_weight, 2)) AS total_weight
-            FROM rides r
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE r.park_id = :park_id
-              AND r.is_active = TRUE
-              AND r.category = 'ATTRACTION'
-        """)
+        stmt = (
+            select(func.sum(func.coalesce(RideClassification.tier_weight, 2)))
+            .select_from(Ride)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+        )
 
-        result = self.db.execute(query, {"park_id": park_id})
-        weight = result.scalar()
+        weight = self.execute_scalar(stmt)
 
         return float(weight) if weight is not None else 0.0
 
@@ -159,67 +172,65 @@ class ShameScoreCalculator:
         Returns:
             Shame score (0-10 scale) or None if no data
         """
-        query = text("""
-            WITH rides_with_status AS (
-                -- Get ride statuses at this timestamp
-                SELECT
-                    r.ride_id,
-                    COALESCE(rc.tier_weight, 2) AS tier_weight,
-                    rss.status,
-                    rss.computed_is_open,
-                    p.is_disney,
-                    p.is_universal
-                FROM rides r
-                INNER JOIN parks p ON r.park_id = p.park_id
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                LEFT JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-                    AND rss.recorded_at = :timestamp
-                WHERE r.park_id = :park_id
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-            ),
-            park_weight AS (
-                SELECT SUM(tier_weight) AS total_weight
-                FROM rides_with_status
-            ),
-            down_weight AS (
-                SELECT SUM(tier_weight) AS total_down_weight
-                FROM rides_with_status
-                WHERE (
-                    -- Disney/Universal: only DOWN counts
-                    ((is_disney = TRUE OR is_universal = TRUE) AND status = 'DOWN')
-                    OR
-                    -- Other parks: DOWN or CLOSED counts
-                    ((is_disney = FALSE AND is_universal = FALSE) AND
-                        (status = 'DOWN' OR status = 'CLOSED' OR
-                         (status IS NULL AND computed_is_open = 0)))
-                )
+        # Park-type aware downtime logic
+        parks_with_down_status = or_(Park.is_disney == True, Park.is_universal == True)
+        is_down_expr = case(
+            (parks_with_down_status, RideStatusSnapshot.status == 'DOWN'),
+            else_=or_(
+                RideStatusSnapshot.status.in_(['DOWN', 'CLOSED']),
+                and_(RideStatusSnapshot.status.is_(None), RideStatusSnapshot.computed_is_open == False)
             )
-            SELECT
-                pw.total_weight,
-                COALESCE(dw.total_down_weight, 0) AS total_down_weight,
-                CASE
-                    WHEN pw.total_weight IS NULL OR pw.total_weight = 0 THEN NULL
-                    ELSE ROUND(
-                        (COALESCE(dw.total_down_weight, 0) / pw.total_weight) * :multiplier,
-                        :precision
+        )
+
+        # Subquery: Get total park weight
+        park_weight_subq = (
+            select(func.sum(func.coalesce(RideClassification.tier_weight, 2)).label('total_weight'))
+            .select_from(Ride)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+            .subquery()
+        )
+
+        # Subquery: Get total down weight at this timestamp
+        down_weight_subq = (
+            select(func.sum(func.coalesce(RideClassification.tier_weight, 2)).label('total_down_weight'))
+            .select_from(RideStatusSnapshot)
+            .join(Ride, RideStatusSnapshot.ride_id == Ride.ride_id)
+            .join(Park, Ride.park_id == Park.park_id)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+            .where(RideStatusSnapshot.recorded_at == timestamp)
+            .where(is_down_expr)
+            .subquery()
+        )
+
+        # Main query
+        stmt = (
+            select(
+                park_weight_subq.c.total_weight,
+                func.coalesce(down_weight_subq.c.total_down_weight, 0).label('total_down_weight'),
+                case(
+                    (or_(park_weight_subq.c.total_weight.is_(None), park_weight_subq.c.total_weight == 0), None),
+                    else_=func.round(
+                        (func.coalesce(down_weight_subq.c.total_down_weight, 0) / park_weight_subq.c.total_weight) * SHAME_SCORE_MULTIPLIER,
+                        SHAME_SCORE_PRECISION
                     )
-                END AS shame_score
-            FROM park_weight pw, down_weight dw
-        """)
+                ).label('shame_score')
+            )
+            .select_from(park_weight_subq)
+            .outerjoin(down_weight_subq, literal(True))
+        )
 
-        result = self.db.execute(query, {
-            "park_id": park_id,
-            "timestamp": timestamp,
-            "multiplier": SHAME_SCORE_MULTIPLIER,
-            "precision": SHAME_SCORE_PRECISION
-        })
-        row = result.fetchone()
+        result = self.execute_and_fetchone(stmt)
 
-        if row is None:
+        if result is None:
             return None
 
-        return row.shame_score
+        return result.get('shame_score')
 
     def get_average(
         self,
@@ -245,100 +256,109 @@ class ShameScoreCalculator:
         Returns:
             Average shame score (0-10 scale) or None if no data
         """
-        query = text("""
-            WITH rides_that_operated AS (
-                -- Only include rides that had at least one OPERATING snapshot
-                SELECT DISTINCT r.ride_id
-                FROM rides r
-                INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-                INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
-                WHERE r.park_id = :park_id
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                    AND rss.recorded_at >= :start AND rss.recorded_at < :end
-                    AND pas.park_appears_open = TRUE
-                    AND (rss.status = 'OPERATING'
-                         OR (rss.status IS NULL AND rss.computed_is_open = 1))
-            ),
-            park_weights AS (
-                -- Calculate total weight using only rides that operated
-                SELECT
-                    r.park_id,
-                    SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
-                FROM rides r
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE r.park_id = :park_id
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                    AND r.ride_id IN (SELECT ride_id FROM rides_that_operated)
-                GROUP BY r.park_id
-            ),
-            per_snapshot_shame AS (
-                -- Calculate instantaneous shame for each snapshot
-                SELECT
-                    rss.recorded_at,
-                    SUM(CASE
-                        WHEN (
-                            -- Disney/Universal: only DOWN counts
-                            ((p.is_disney = TRUE OR p.is_universal = TRUE)
-                                AND rss.status = 'DOWN')
-                            OR
-                            -- Other parks: DOWN or CLOSED counts
-                            ((p.is_disney = FALSE AND p.is_universal = FALSE)
-                                AND (rss.status = 'DOWN' OR rss.status = 'CLOSED'
-                                     OR (rss.status IS NULL AND rss.computed_is_open = 0)))
-                        )
-                        THEN COALESCE(rc.tier_weight, 2)
-                        ELSE 0
-                    END) AS down_weight
-                FROM rides r
-                INNER JOIN parks p ON r.park_id = p.park_id
-                INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-                INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE r.park_id = :park_id
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                    AND rss.recorded_at >= :start AND rss.recorded_at < :end
-                    AND pas.park_appears_open = TRUE
-                    AND r.ride_id IN (SELECT ride_id FROM rides_that_operated)
-                GROUP BY rss.recorded_at
+        # Subquery: Rides that operated during the period
+        rides_operated_subq = (
+            select(Ride.ride_id)
+            .join(RideStatusSnapshot, Ride.ride_id == RideStatusSnapshot.ride_id)
+            .join(ParkActivitySnapshot,
+                  and_(
+                      Ride.park_id == ParkActivitySnapshot.park_id,
+                      RideStatusSnapshot.recorded_at == ParkActivitySnapshot.recorded_at
+                  ))
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+            .where(RideStatusSnapshot.recorded_at >= start)
+            .where(RideStatusSnapshot.recorded_at < end)
+            .where(ParkActivitySnapshot.park_appears_open == True)
+            .where(or_(
+                RideStatusSnapshot.status == 'OPERATING',
+                and_(RideStatusSnapshot.status.is_(None), RideStatusSnapshot.computed_is_open == True)
+            ))
+            .distinct()
+            .subquery()
+        )
+
+        # Subquery: Calculate total park weight (only rides that operated)
+        park_weights_subq = (
+            select(func.sum(func.coalesce(RideClassification.tier_weight, 2)).label('total_park_weight'))
+            .select_from(Ride)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+            .where(Ride.ride_id.in_(select(rides_operated_subq.c.ride_id)))
+            .subquery()
+        )
+
+        # Park-type aware downtime logic
+        parks_with_down_status = or_(Park.is_disney == True, Park.is_universal == True)
+        is_down_expr = case(
+            (parks_with_down_status, RideStatusSnapshot.status == 'DOWN'),
+            else_=or_(
+                RideStatusSnapshot.status.in_(['DOWN', 'CLOSED']),
+                and_(RideStatusSnapshot.status.is_(None), RideStatusSnapshot.computed_is_open == False)
             )
-            SELECT
-                pw.total_park_weight,
-                COUNT(pss.recorded_at) AS total_snapshots,
-                CASE
-                    WHEN pw.total_park_weight IS NULL OR pw.total_park_weight = 0 THEN NULL
-                    WHEN COUNT(pss.recorded_at) = 0 THEN NULL
-                    ELSE ROUND(
-                        AVG(pss.down_weight / pw.total_park_weight) * :multiplier,
-                        :precision
+        )
+
+        # Subquery: Per-snapshot shame scores
+        per_snapshot_shame_subq = (
+            select(
+                RideStatusSnapshot.recorded_at,
+                func.sum(
+                    case(
+                        (is_down_expr, func.coalesce(RideClassification.tier_weight, 2)),
+                        else_=0
                     )
-                END AS avg_shame_score
-            FROM park_weights pw
-            CROSS JOIN per_snapshot_shame pss
-            GROUP BY pw.total_park_weight
-        """)
+                ).label('down_weight')
+            )
+            .select_from(RideStatusSnapshot)
+            .join(Ride, RideStatusSnapshot.ride_id == Ride.ride_id)
+            .join(Park, Ride.park_id == Park.park_id)
+            .join(ParkActivitySnapshot,
+                  and_(
+                      Ride.park_id == ParkActivitySnapshot.park_id,
+                      RideStatusSnapshot.recorded_at == ParkActivitySnapshot.recorded_at
+                  ))
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+            .where(RideStatusSnapshot.recorded_at >= start)
+            .where(RideStatusSnapshot.recorded_at < end)
+            .where(ParkActivitySnapshot.park_appears_open == True)
+            .where(Ride.ride_id.in_(select(rides_operated_subq.c.ride_id)))
+            .group_by(RideStatusSnapshot.recorded_at)
+            .subquery()
+        )
 
-        result = self.db.execute(query, {
-            "park_id": park_id,
-            "start": start,
-            "end": end,
-            "multiplier": SHAME_SCORE_MULTIPLIER,
-            "precision": SHAME_SCORE_PRECISION
-        })
-        row = result.fetchone()
+        # Main query: Average the per-snapshot shame scores
+        stmt = (
+            select(
+                park_weights_subq.c.total_park_weight,
+                func.count(per_snapshot_shame_subq.c.recorded_at).label('total_snapshots'),
+                case(
+                    (or_(
+                        park_weights_subq.c.total_park_weight.is_(None),
+                        park_weights_subq.c.total_park_weight == 0
+                    ), None),
+                    (func.count(per_snapshot_shame_subq.c.recorded_at) == 0, None),
+                    else_=func.round(
+                        func.avg(per_snapshot_shame_subq.c.down_weight / park_weights_subq.c.total_park_weight) * SHAME_SCORE_MULTIPLIER,
+                        SHAME_SCORE_PRECISION
+                    )
+                ).label('avg_shame_score')
+            )
+            .select_from(park_weights_subq)
+            .outerjoin(per_snapshot_shame_subq, literal(True))
+        )
 
-        if row is None:
+        result = self.execute_and_fetchone(stmt)
+
+        if result is None:
             return None
 
-        # Handle both attribute and dict-like access
-        try:
-            return row.avg_shame_score
-        except AttributeError:
-            return row.get('avg_shame_score')
+        return result.get('avg_shame_score')
 
     def get_hourly_breakdown(
         self,
@@ -369,104 +389,121 @@ class ShameScoreCalculator:
 
         start_utc, end_utc = get_pacific_day_range_utc(target_date)
 
-        query = text("""
-            WITH rides_that_operated AS (
-                -- Rides that operated at any point today
-                SELECT DISTINCT r.ride_id
-                FROM rides r
-                INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-                INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
-                WHERE r.park_id = :park_id
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                    AND rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                    AND pas.park_appears_open = TRUE
-                    AND (rss.status = 'OPERATING'
-                         OR (rss.status IS NULL AND rss.computed_is_open = 1))
-            ),
-            park_weight AS (
-                -- Total park weight (using only rides that operated)
-                SELECT SUM(COALESCE(rc.tier_weight, 2)) AS total_weight
-                FROM rides r
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE r.park_id = :park_id
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                    AND r.ride_id IN (SELECT ride_id FROM rides_that_operated)
-            ),
-            hourly_data AS (
-                SELECT
-                    HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) AS hour,
-                    COUNT(DISTINCT CASE
-                        WHEN r.ride_id IN (SELECT ride_id FROM rides_that_operated)
-                        THEN r.ride_id
-                    END) AS total_rides,
-                    SUM(CASE
-                        WHEN r.ride_id IN (SELECT ride_id FROM rides_that_operated)
-                            AND (
-                                ((p.is_disney = TRUE OR p.is_universal = TRUE)
-                                    AND rss.status = 'DOWN')
-                                OR
-                                ((p.is_disney = FALSE AND p.is_universal = FALSE)
-                                    AND (rss.status = 'DOWN' OR rss.status = 'CLOSED'
-                                         OR (rss.status IS NULL AND rss.computed_is_open = 0)))
-                            )
-                        THEN 5  -- 5-minute intervals
-                        ELSE 0
-                    END) AS down_minutes,
-                    SUM(CASE
-                        WHEN r.ride_id IN (SELECT ride_id FROM rides_that_operated)
-                            AND (
-                                ((p.is_disney = TRUE OR p.is_universal = TRUE)
-                                    AND rss.status = 'DOWN')
-                                OR
-                                ((p.is_disney = FALSE AND p.is_universal = FALSE)
-                                    AND (rss.status = 'DOWN' OR rss.status = 'CLOSED'
-                                         OR (rss.status IS NULL AND rss.computed_is_open = 0)))
-                            )
-                        THEN COALESCE(rc.tier_weight, 2)
-                        ELSE 0
-                    END) AS down_weight_sum
-                FROM rides r
-                INNER JOIN parks p ON r.park_id = p.park_id
-                INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-                INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE r.park_id = :park_id
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                    AND rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                    AND pas.park_appears_open = TRUE
-                GROUP BY HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR))
-                HAVING total_rides > 0
+        # Subquery: Rides that operated at any point today
+        rides_operated_subq = (
+            select(Ride.ride_id)
+            .join(RideStatusSnapshot, Ride.ride_id == RideStatusSnapshot.ride_id)
+            .join(ParkActivitySnapshot,
+                  and_(
+                      Ride.park_id == ParkActivitySnapshot.park_id,
+                      RideStatusSnapshot.recorded_at == ParkActivitySnapshot.recorded_at
+                  ))
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+            .where(RideStatusSnapshot.recorded_at >= start_utc)
+            .where(RideStatusSnapshot.recorded_at < end_utc)
+            .where(ParkActivitySnapshot.park_appears_open == True)
+            .where(or_(
+                RideStatusSnapshot.status == 'OPERATING',
+                and_(RideStatusSnapshot.status.is_(None), RideStatusSnapshot.computed_is_open == True)
+            ))
+            .distinct()
+            .subquery()
+        )
+
+        # Subquery: Total park weight (using only rides that operated)
+        park_weight_subq = (
+            select(func.sum(func.coalesce(RideClassification.tier_weight, 2)).label('total_weight'))
+            .select_from(Ride)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+            .where(Ride.ride_id.in_(select(rides_operated_subq.c.ride_id)))
+            .subquery()
+        )
+
+        # Park-type aware downtime logic
+        parks_with_down_status = or_(Park.is_disney == True, Park.is_universal == True)
+        is_down_expr = case(
+            (parks_with_down_status, RideStatusSnapshot.status == 'DOWN'),
+            else_=or_(
+                RideStatusSnapshot.status.in_(['DOWN', 'CLOSED']),
+                and_(RideStatusSnapshot.status.is_(None), RideStatusSnapshot.computed_is_open == False)
             )
-            SELECT
-                hd.hour,
-                hd.total_rides,
-                hd.down_minutes,
-                CASE
-                    WHEN pw.total_weight IS NULL OR pw.total_weight = 0 THEN NULL
-                    ELSE ROUND(
-                        (hd.down_weight_sum / (hd.total_rides * 12)) / pw.total_weight * :multiplier,
-                        :precision
+        )
+
+        # Pacific hour calculation: subtract 8 hours from UTC
+        pacific_hour_expr = func.hour(
+            func.date_sub(RideStatusSnapshot.recorded_at, literal(8).op('HOUR'))
+        )
+
+        # Check if ride operated
+        ride_operated_case = case(
+            (Ride.ride_id.in_(select(rides_operated_subq.c.ride_id)), True),
+            else_=False
+        )
+
+        # Downtime and weight calculations
+        downtime_minutes_case = case(
+            (and_(ride_operated_case, is_down_expr), 5),  # 5-minute intervals
+            else_=0
+        )
+
+        down_weight_case = case(
+            (and_(ride_operated_case, is_down_expr), func.coalesce(RideClassification.tier_weight, 2)),
+            else_=0
+        )
+
+        # Subquery: Hourly aggregated data
+        hourly_data_subq = (
+            select(
+                pacific_hour_expr.label('hour'),
+                func.count(func.distinct(case((ride_operated_case, Ride.ride_id)))).label('total_rides'),
+                func.sum(downtime_minutes_case).label('down_minutes'),
+                func.sum(down_weight_case).label('down_weight_sum')
+            )
+            .select_from(RideStatusSnapshot)
+            .join(Ride, RideStatusSnapshot.ride_id == Ride.ride_id)
+            .join(Park, Ride.park_id == Park.park_id)
+            .join(ParkActivitySnapshot,
+                  and_(
+                      Ride.park_id == ParkActivitySnapshot.park_id,
+                      RideStatusSnapshot.recorded_at == ParkActivitySnapshot.recorded_at
+                  ))
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+            .where(RideStatusSnapshot.recorded_at >= start_utc)
+            .where(RideStatusSnapshot.recorded_at < end_utc)
+            .where(ParkActivitySnapshot.park_appears_open == True)
+            .group_by(pacific_hour_expr)
+            .having(func.count(func.distinct(case((ride_operated_case, Ride.ride_id)))) > 0)
+            .subquery()
+        )
+
+        # Main query
+        stmt = (
+            select(
+                hourly_data_subq.c.hour,
+                hourly_data_subq.c.total_rides,
+                hourly_data_subq.c.down_minutes,
+                case(
+                    (or_(park_weight_subq.c.total_weight.is_(None), park_weight_subq.c.total_weight == 0), None),
+                    else_=func.round(
+                        (hourly_data_subq.c.down_weight_sum / (hourly_data_subq.c.total_rides * 12)) / park_weight_subq.c.total_weight * SHAME_SCORE_MULTIPLIER,
+                        SHAME_SCORE_PRECISION
                     )
-                END AS shame_score
-            FROM hourly_data hd
-            CROSS JOIN park_weight pw
-            ORDER BY hd.hour
-        """)
+                ).label('shame_score')
+            )
+            .select_from(hourly_data_subq)
+            .outerjoin(park_weight_subq, literal(True))
+            .order_by(hourly_data_subq.c.hour)
+        )
 
-        result = self.db.execute(query, {
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc,
-            "multiplier": SHAME_SCORE_MULTIPLIER,
-            "precision": SHAME_SCORE_PRECISION
-        })
-
-        return [dict(row._mapping) for row in result]
+        return self.execute_and_fetchall(stmt)
 
     def get_recent_snapshots(
         self,
@@ -496,92 +533,117 @@ class ShameScoreCalculator:
                 - granularity: "minutes" to distinguish from hourly charts
         """
         # Calculate time range: now back to (now - minutes)
-        # Note: datetime, timedelta, timezone are imported at module level
         now_utc = datetime.now(timezone.utc)
         start_utc = now_utc - timedelta(minutes=minutes)
 
-        query = text("""
-            WITH rides_that_operated AS (
-                -- Rides that operated at any point in this window
-                SELECT DISTINCT r.ride_id
-                FROM rides r
-                INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-                INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
-                WHERE r.park_id = :park_id
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                    AND rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                    AND pas.park_appears_open = TRUE
-                    AND (rss.status = 'OPERATING'
-                         OR (rss.status IS NULL AND rss.computed_is_open = 1))
-            ),
-            park_weight AS (
-                -- Total park weight (using only rides that operated)
-                SELECT SUM(COALESCE(rc.tier_weight, 2)) AS total_weight
-                FROM rides r
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE r.park_id = :park_id
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                    AND r.ride_id IN (SELECT ride_id FROM rides_that_operated)
-            ),
-            snapshot_data AS (
-                -- Get instantaneous shame for each 5-minute snapshot
-                SELECT
-                    rss.recorded_at,
-                    DATE_FORMAT(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR), '%H:%i') AS time_label,
-                    SUM(CASE
-                        WHEN r.ride_id IN (SELECT ride_id FROM rides_that_operated)
-                            AND (
-                                ((p.is_disney = TRUE OR p.is_universal = TRUE)
-                                    AND rss.status = 'DOWN')
-                                OR
-                                ((p.is_disney = FALSE AND p.is_universal = FALSE)
-                                    AND (rss.status = 'DOWN' OR rss.status = 'CLOSED'
-                                         OR (rss.status IS NULL AND rss.computed_is_open = 0)))
-                            )
-                        THEN COALESCE(rc.tier_weight, 2)
-                        ELSE 0
-                    END) AS down_weight
-                FROM rides r
-                INNER JOIN parks p ON r.park_id = p.park_id
-                INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-                INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE r.park_id = :park_id
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                    AND rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                    AND pas.park_appears_open = TRUE
-                GROUP BY rss.recorded_at
-                ORDER BY rss.recorded_at
+        # Subquery: Rides that operated in this window
+        rides_operated_subq = (
+            select(Ride.ride_id)
+            .join(RideStatusSnapshot, Ride.ride_id == RideStatusSnapshot.ride_id)
+            .join(ParkActivitySnapshot,
+                  and_(
+                      Ride.park_id == ParkActivitySnapshot.park_id,
+                      RideStatusSnapshot.recorded_at == ParkActivitySnapshot.recorded_at
+                  ))
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+            .where(RideStatusSnapshot.recorded_at >= start_utc)
+            .where(RideStatusSnapshot.recorded_at < now_utc)
+            .where(ParkActivitySnapshot.park_appears_open == True)
+            .where(or_(
+                RideStatusSnapshot.status == 'OPERATING',
+                and_(RideStatusSnapshot.status.is_(None), RideStatusSnapshot.computed_is_open == True)
+            ))
+            .distinct()
+            .subquery()
+        )
+
+        # Subquery: Total park weight (using only rides that operated)
+        park_weight_subq = (
+            select(func.sum(func.coalesce(RideClassification.tier_weight, 2)).label('total_weight'))
+            .select_from(Ride)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+            .where(Ride.ride_id.in_(select(rides_operated_subq.c.ride_id)))
+            .subquery()
+        )
+
+        # Park-type aware downtime logic
+        parks_with_down_status = or_(Park.is_disney == True, Park.is_universal == True)
+        is_down_expr = case(
+            (parks_with_down_status, RideStatusSnapshot.status == 'DOWN'),
+            else_=or_(
+                RideStatusSnapshot.status.in_(['DOWN', 'CLOSED']),
+                and_(RideStatusSnapshot.status.is_(None), RideStatusSnapshot.computed_is_open == False)
             )
-            SELECT
-                sd.recorded_at,
-                sd.time_label,
-                CASE
-                    WHEN pw.total_weight IS NULL OR pw.total_weight = 0 THEN NULL
-                    ELSE ROUND(
-                        (sd.down_weight / pw.total_weight) * :multiplier,
-                        :precision
+        )
+
+        # Check if ride operated
+        ride_operated_case = case(
+            (Ride.ride_id.in_(select(rides_operated_subq.c.ride_id)), True),
+            else_=False
+        )
+
+        # Time label formatting (Pacific time)
+        time_label_expr = func.date_format(
+            func.date_sub(RideStatusSnapshot.recorded_at, literal(8).op('HOUR')),
+            '%H:%i'
+        )
+
+        # Subquery: Get instantaneous shame for each 5-minute snapshot
+        snapshot_data_subq = (
+            select(
+                RideStatusSnapshot.recorded_at,
+                time_label_expr.label('time_label'),
+                func.sum(
+                    case(
+                        (and_(ride_operated_case, is_down_expr), func.coalesce(RideClassification.tier_weight, 2)),
+                        else_=0
                     )
-                END AS shame_score
-            FROM snapshot_data sd
-            CROSS JOIN park_weight pw
-            ORDER BY sd.recorded_at
-        """)
+                ).label('down_weight')
+            )
+            .select_from(RideStatusSnapshot)
+            .join(Ride, RideStatusSnapshot.ride_id == Ride.ride_id)
+            .join(Park, Ride.park_id == Park.park_id)
+            .join(ParkActivitySnapshot,
+                  and_(
+                      Ride.park_id == ParkActivitySnapshot.park_id,
+                      RideStatusSnapshot.recorded_at == ParkActivitySnapshot.recorded_at
+                  ))
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .where(Ride.park_id == park_id)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+            .where(RideStatusSnapshot.recorded_at >= start_utc)
+            .where(RideStatusSnapshot.recorded_at < now_utc)
+            .where(ParkActivitySnapshot.park_appears_open == True)
+            .group_by(RideStatusSnapshot.recorded_at, time_label_expr)
+            .order_by(RideStatusSnapshot.recorded_at)
+            .subquery()
+        )
 
-        result = self.db.execute(query, {
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": now_utc,
-            "multiplier": SHAME_SCORE_MULTIPLIER,
-            "precision": SHAME_SCORE_PRECISION
-        })
+        # Main query
+        stmt = (
+            select(
+                snapshot_data_subq.c.recorded_at,
+                snapshot_data_subq.c.time_label,
+                case(
+                    (or_(park_weight_subq.c.total_weight.is_(None), park_weight_subq.c.total_weight == 0), None),
+                    else_=func.round(
+                        (snapshot_data_subq.c.down_weight / park_weight_subq.c.total_weight) * SHAME_SCORE_MULTIPLIER,
+                        SHAME_SCORE_PRECISION
+                    )
+                ).label('shame_score')
+            )
+            .select_from(snapshot_data_subq)
+            .outerjoin(park_weight_subq, literal(True))
+            .order_by(snapshot_data_subq.c.recorded_at)
+        )
 
-        rows = [dict(row._mapping) for row in result]
+        rows = self.execute_and_fetchall(stmt)
 
         # Build labels and data arrays
         labels = []

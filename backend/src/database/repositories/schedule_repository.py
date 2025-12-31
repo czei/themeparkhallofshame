@@ -14,15 +14,13 @@ from datetime import datetime, date, timedelta
 from dateutil import parser as date_parser
 import pytz
 
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session
+from sqlalchemy import select, func, delete
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 
-try:
-    from ...collector.themeparks_wiki_client import get_themeparks_wiki_client
-    from ...utils.logger import logger, log_database_error
-except ImportError:
-    from collector.themeparks_wiki_client import get_themeparks_wiki_client
-    from utils.logger import logger, log_database_error
+from models import ParkSchedule, Park
+from collector.themeparks_wiki_client import get_themeparks_wiki_client
+from utils.logger import logger, log_database_error
 
 
 class ScheduleRepository:
@@ -35,14 +33,14 @@ class ScheduleRepository:
     - Get schedule for a specific date
     """
 
-    def __init__(self, connection: Connection):
+    def __init__(self, session: Session):
         """
-        Initialize repository with database connection.
+        Initialize repository with database session.
 
         Args:
-            connection: SQLAlchemy connection object
+            session: SQLAlchemy Session object
         """
-        self.conn = connection
+        self.session = session
 
     def fetch_and_store_schedule(self, park_id: int, themeparks_wiki_id: str) -> int:
         """
@@ -132,32 +130,25 @@ class ScheduleRepository:
         if schedule_type not in valid_types:
             schedule_type = "OPERATING"
 
-        # Upsert query - update if exists, insert if not
-        query = text("""
-            INSERT INTO park_schedules (
-                park_id, schedule_date, opening_time, closing_time,
-                schedule_type, fetched_at
-            )
-            VALUES (
-                :park_id, :schedule_date, :opening_time, :closing_time,
-                :schedule_type, NOW()
-            )
-            ON DUPLICATE KEY UPDATE
-                opening_time = VALUES(opening_time),
-                closing_time = VALUES(closing_time),
-                schedule_type = VALUES(schedule_type),
-                fetched_at = NOW(),
-                updated_at = NOW()
-        """)
+        # Upsert using MySQL dialect - update if exists, insert if not
+        stmt = mysql_insert(ParkSchedule).values(
+            park_id=park_id,
+            schedule_date=schedule_date,
+            opening_time=opening_time_utc,
+            closing_time=closing_time_utc,
+            schedule_type=schedule_type,
+            fetched_at=func.now()
+        )
+        stmt = stmt.on_duplicate_key_update(
+            opening_time=stmt.inserted.opening_time,
+            closing_time=stmt.inserted.closing_time,
+            schedule_type=stmt.inserted.schedule_type,
+            fetched_at=func.now(),
+            updated_at=func.now()
+        )
 
         try:
-            self.conn.execute(query, {
-                "park_id": park_id,
-                "schedule_date": schedule_date,
-                "opening_time": opening_time_utc,
-                "closing_time": closing_time_utc,
-                "schedule_type": schedule_type
-            })
+            self.session.execute(stmt)
             return True
         except Exception as e:
             log_database_error(e, f"Failed to upsert schedule for park {park_id}")
@@ -208,29 +199,22 @@ class ScheduleRepository:
         # Note: We need to check if current UTC time falls within any schedule entry
         today = now_utc.date()
 
-        query = text("""
-            SELECT
-                schedule_id,
-                opening_time,
-                closing_time,
-                schedule_type
-            FROM park_schedules
-            WHERE park_id = :park_id
-                AND schedule_date = :schedule_date
-                AND schedule_type = 'OPERATING'
-                AND opening_time IS NOT NULL
-                AND closing_time IS NOT NULL
-            ORDER BY opening_time
-        """)
+        stmt = (
+            select(ParkSchedule)
+            .where(ParkSchedule.park_id == park_id)
+            .where(ParkSchedule.schedule_date == today)
+            .where(ParkSchedule.schedule_type == 'OPERATING')
+            .where(ParkSchedule.opening_time.is_not(None))
+            .where(ParkSchedule.closing_time.is_not(None))
+            .order_by(ParkSchedule.opening_time)
+        )
 
-        result = self.conn.execute(query, {
-            "park_id": park_id,
-            "schedule_date": today
-        })
+        result = self.session.execute(stmt)
+        schedules = result.scalars().all()
 
-        for row in result:
-            opening = row.opening_time
-            closing = row.closing_time
+        for schedule in schedules:
+            opening = schedule.opening_time
+            closing = schedule.closing_time
 
             # Check if current time is within operating hours
             if opening <= now_utc <= closing:
@@ -238,14 +222,22 @@ class ScheduleRepository:
 
         # Also check yesterday's schedule (for parks open past midnight)
         yesterday = today - timedelta(days=1)
-        result = self.conn.execute(query, {
-            "park_id": park_id,
-            "schedule_date": yesterday
-        })
+        stmt = (
+            select(ParkSchedule)
+            .where(ParkSchedule.park_id == park_id)
+            .where(ParkSchedule.schedule_date == yesterday)
+            .where(ParkSchedule.schedule_type == 'OPERATING')
+            .where(ParkSchedule.opening_time.is_not(None))
+            .where(ParkSchedule.closing_time.is_not(None))
+            .order_by(ParkSchedule.opening_time)
+        )
 
-        for row in result:
-            opening = row.opening_time
-            closing = row.closing_time
+        result = self.session.execute(stmt)
+        schedules = result.scalars().all()
+
+        for schedule in schedules:
+            opening = schedule.opening_time
+            closing = schedule.closing_time
 
             # Parks open past midnight will have closing_time > opening_time by ~24+ hours
             if opening <= now_utc <= closing:
@@ -268,33 +260,30 @@ class ScheduleRepository:
         Returns:
             Dictionary with schedule data or None if not found
         """
-        query = text("""
-            SELECT
-                schedule_id,
-                park_id,
-                schedule_date,
-                opening_time,
-                closing_time,
-                schedule_type,
-                fetched_at
-            FROM park_schedules
-            WHERE park_id = :park_id
-                AND schedule_date = :schedule_date
-                AND schedule_type = 'OPERATING'
-            ORDER BY opening_time
-            LIMIT 1
-        """)
+        stmt = (
+            select(ParkSchedule)
+            .where(ParkSchedule.park_id == park_id)
+            .where(ParkSchedule.schedule_date == schedule_date)
+            .where(ParkSchedule.schedule_type == 'OPERATING')
+            .order_by(ParkSchedule.opening_time)
+            .limit(1)
+        )
 
-        result = self.conn.execute(query, {
-            "park_id": park_id,
-            "schedule_date": schedule_date
-        })
-        row = result.fetchone()
+        result = self.session.execute(stmt)
+        schedule = result.scalar_one_or_none()
 
-        if row is None:
+        if schedule is None:
             return None
 
-        return dict(row._mapping)
+        return {
+            'schedule_id': schedule.schedule_id,
+            'park_id': schedule.park_id,
+            'schedule_date': schedule.schedule_date,
+            'opening_time': schedule.opening_time,
+            'closing_time': schedule.closing_time,
+            'schedule_type': schedule.schedule_type,
+            'fetched_at': schedule.fetched_at
+        }
 
     def has_recent_schedule(self, park_id: int, max_age_hours: int = 24) -> bool:
         """
@@ -307,20 +296,19 @@ class ScheduleRepository:
         Returns:
             True if we have schedule data fetched within the time limit
         """
-        query = text("""
-            SELECT COUNT(*) as count
-            FROM park_schedules
-            WHERE park_id = :park_id
-                AND fetched_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-        """)
+        cutoff_time = datetime.utcnow() - timedelta(hours=max_age_hours)
 
-        result = self.conn.execute(query, {
-            "park_id": park_id,
-            "hours": max_age_hours
-        })
-        row = result.fetchone()
+        stmt = (
+            select(func.count())
+            .select_from(ParkSchedule)
+            .where(ParkSchedule.park_id == park_id)
+            .where(ParkSchedule.fetched_at >= cutoff_time)
+        )
 
-        return row.count > 0 if row else False
+        result = self.session.execute(stmt)
+        count = result.scalar()
+
+        return count > 0 if count else False
 
     def get_parks_needing_schedule_refresh(
         self,
@@ -335,26 +323,37 @@ class ScheduleRepository:
         Returns:
             List of parks with park_id and themeparks_wiki_id
         """
-        # Use subquery to work around MariaDB limitation with column aliases
-        query = text("""
-            SELECT * FROM (
-                SELECT
-                    p.park_id,
-                    p.themeparks_wiki_id,
-                    p.name,
-                    MAX(ps.fetched_at) as last_fetched
-                FROM parks p
-                LEFT JOIN park_schedules ps ON p.park_id = ps.park_id
-                WHERE p.is_active = TRUE
-                    AND p.themeparks_wiki_id IS NOT NULL
-                GROUP BY p.park_id, p.themeparks_wiki_id, p.name
-            ) subq
-            WHERE last_fetched IS NULL
-                OR last_fetched < DATE_SUB(NOW(), INTERVAL :hours HOUR)
-            ORDER BY last_fetched IS NULL DESC, last_fetched ASC
-        """)
+        cutoff_time = datetime.utcnow() - timedelta(hours=max_age_hours)
 
-        result = self.conn.execute(query, {"hours": max_age_hours})
+        # Build subquery for max fetched_at per park
+        subq = (
+            select(
+                Park.park_id,
+                Park.themeparks_wiki_id,
+                Park.name,
+                func.max(ParkSchedule.fetched_at).label('last_fetched')
+            )
+            .outerjoin(ParkSchedule, Park.park_id == ParkSchedule.park_id)
+            .where(Park.is_active == True)
+            .where(Park.themeparks_wiki_id.is_not(None))
+            .group_by(Park.park_id, Park.themeparks_wiki_id, Park.name)
+            .subquery()
+        )
+
+        # Filter for parks with no schedule or stale schedule
+        stmt = (
+            select(subq)
+            .where(
+                (subq.c.last_fetched.is_(None)) |
+                (subq.c.last_fetched < cutoff_time)
+            )
+            .order_by(
+                subq.c.last_fetched.is_(None).desc(),  # NULL values first
+                subq.c.last_fetched.asc()
+            )
+        )
+
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def cleanup_old_schedules(self, days_to_keep: int = 7) -> int:
@@ -367,12 +366,11 @@ class ScheduleRepository:
         Returns:
             Number of entries deleted
         """
-        query = text("""
-            DELETE FROM park_schedules
-            WHERE schedule_date < DATE_SUB(CURDATE(), INTERVAL :days DAY)
-        """)
+        cutoff_date = date.today() - timedelta(days=days_to_keep)
 
-        result = self.conn.execute(query, {"days": days_to_keep})
+        stmt = delete(ParkSchedule).where(ParkSchedule.schedule_date < cutoff_date)
+
+        result = self.session.execute(stmt)
         deleted = result.rowcount
 
         if deleted > 0:

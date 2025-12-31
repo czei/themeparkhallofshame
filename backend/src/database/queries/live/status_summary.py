@@ -29,7 +29,7 @@ Example Response:
 from typing import Dict, Optional
 
 from sqlalchemy import select, func, and_, case, exists
-from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session
 
 from database.schema import (
     parks,
@@ -38,15 +38,13 @@ from database.schema import (
     park_activity_snapshots,
 )
 from database.queries.builders import Filters, StatusExpressions
+from utils.query_helpers import QueryClassBase
 
 
-class StatusSummaryQuery:
+class StatusSummaryQuery(QueryClassBase):
     """
     Query handler for live status summary counts.
     """
-
-    def __init__(self, connection: Connection):
-        self.conn = connection
 
     def get_summary(
         self,
@@ -183,7 +181,7 @@ class StatusSummaryQuery:
             .where(and_(*conditions))
         )
 
-        result = self.conn.execute(stmt).fetchone()
+        result = self.session.execute(stmt).fetchone()
 
         if result:
             return {

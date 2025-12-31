@@ -164,6 +164,8 @@ from database.connection import get_db_connection
 from sqlalchemy import text
 
 # Required tables for application to function
+# Note: ride_hourly_stats was dropped in migration 003_drop_hourly_stats
+# Ride hourly queries now use on-the-fly aggregation from ride_status_snapshots
 required_tables = [
     'parks',
     'rides',
@@ -172,7 +174,6 @@ required_tables = [
     'park_daily_stats',
     'ride_daily_stats',
     'park_hourly_stats',
-    'ride_hourly_stats',
     'park_live_rankings',
     'ride_live_rankings',
 ]

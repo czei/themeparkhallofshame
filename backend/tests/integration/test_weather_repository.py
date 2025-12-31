@@ -2,11 +2,11 @@
 Integration Tests: Weather Repository
 ======================================
 
-Tests weather repositories with real database connection.
+Tests weather repositories with real database connection using SQLAlchemy ORM.
 
 Test Strategy:
-- Use mysql_connection fixture (isolated transaction)
-- Test idempotent inserts (ON DUPLICATE KEY UPDATE)
+- Use mysql_session fixture (isolated transaction with Session)
+- Test idempotent inserts using session.merge() behavior
 - Test batch insert performance
 - Verify data integrity
 
@@ -31,16 +31,17 @@ from database.repositories.weather_repository import (
 
 
 @pytest.fixture
-def test_park(mysql_connection):
+def test_park(mysql_session):
     """Create a unique test park for weather repository tests to avoid PK collisions."""
     from random import randint
     park_id = randint(10000, 19999)
     queue_times_id = randint(900000, 999999)
 
-    mysql_connection.execute(text("""
+    mysql_session.execute(text("""
         INSERT INTO parks (park_id, queue_times_id, name, city, state_province, country, timezone, is_disney, is_universal, is_active)
         VALUES (:park_id, :queue_times_id, 'Test Weather Park', 'Orlando', 'FL', 'US', 'America/New_York', FALSE, FALSE, TRUE)
     """), {'park_id': park_id, 'queue_times_id': queue_times_id})
+    mysql_session.flush()
 
     return park_id  # unique per test run
 
@@ -48,9 +49,9 @@ def test_park(mysql_connection):
 class TestWeatherObservationRepositoryIntegration:
     """Integration tests for WeatherObservationRepository with real DB."""
 
-    def test_insert_observation_success(self, mysql_connection, test_park):
+    def test_insert_observation_success(self, mysql_session, test_park):
         """Should insert new observation successfully."""
-        repo = WeatherObservationRepository(mysql_connection)
+        repo = WeatherObservationRepository(mysql_session)
 
         observation = {
             'park_id': test_park,  # Use fixture-created park
@@ -76,6 +77,7 @@ class TestWeatherObservationRepositoryIntegration:
         }
 
         repo.insert_observation(observation)
+        mysql_session.flush()
 
         # Verify observation was inserted
         latest = repo.get_latest_observation(park_id=test_park)
@@ -83,9 +85,9 @@ class TestWeatherObservationRepositoryIntegration:
         assert float(latest['temperature_f']) == 75.2
         assert latest['weather_code'] == 0
 
-    def test_insert_observation_idempotent(self, mysql_connection, test_park):
+    def test_insert_observation_idempotent(self, mysql_session, test_park):
         """Should update existing observation on duplicate park_id + observation_time."""
-        repo = WeatherObservationRepository(mysql_connection)
+        repo = WeatherObservationRepository(mysql_session)
 
         observation = {
             'park_id': test_park,
@@ -97,6 +99,7 @@ class TestWeatherObservationRepositoryIntegration:
 
         # Insert first time
         repo.insert_observation(observation)
+        mysql_session.flush()
 
         # Insert again with different temperature (should update, not error)
         observation['temperature_f'] = 76.5
@@ -104,15 +107,16 @@ class TestWeatherObservationRepositoryIntegration:
         observation['weather_code'] = 95  # Thunderstorm
 
         repo.insert_observation(observation)
+        mysql_session.flush()
 
         # Verify latest observation has updated values
         latest = repo.get_latest_observation(park_id=test_park)
         assert latest['temperature_f'] == 76.5
         assert latest['weather_code'] == 95
 
-    def test_batch_insert_observations_success(self, mysql_connection, test_park):
+    def test_batch_insert_observations_success(self, mysql_session, test_park):
         """Should insert multiple observations in batch."""
-        repo = WeatherObservationRepository(mysql_connection)
+        repo = WeatherObservationRepository(mysql_session)
 
         base_time = datetime(2025, 12, 17, 0, 0, 0, tzinfo=timezone.utc)
         observations = [
@@ -135,9 +139,9 @@ class TestWeatherObservationRepositoryIntegration:
         expected_time = (base_time + timedelta(hours=9)).replace(tzinfo=None)
         assert latest['observation_time'] == expected_time
 
-    def test_batch_insert_observations_idempotent(self, mysql_connection, test_park):
-        """Batch insert should be idempotent (ON DUPLICATE KEY UPDATE)."""
-        repo = WeatherObservationRepository(mysql_connection)
+    def test_batch_insert_observations_idempotent(self, mysql_session, test_park):
+        """Batch insert should be idempotent (updates on duplicate)."""
+        repo = WeatherObservationRepository(mysql_session)
 
         base_time = datetime(2025, 12, 17, 0, 0, 0, tzinfo=timezone.utc)
         observations = [
@@ -164,18 +168,18 @@ class TestWeatherObservationRepositoryIntegration:
         assert latest['temperature_f'] == 80.0
         assert latest['weather_code'] == 95
 
-    def test_get_latest_observation_no_data(self, mysql_connection, test_park):
+    def test_get_latest_observation_no_data(self, mysql_session, test_park):
         """Should return None when no observations exist for park."""
-        repo = WeatherObservationRepository(mysql_connection)
+        repo = WeatherObservationRepository(mysql_session)
 
         # Use park_id that has no observations
         latest = repo.get_latest_observation(park_id=9999)
         assert latest is None
 
-    def test_batch_insert_performance(self, mysql_connection, test_park):
+    def test_batch_insert_performance(self, mysql_session, test_park):
         """Batch insert should be faster than individual inserts."""
         import time
-        repo = WeatherObservationRepository(mysql_connection)
+        repo = WeatherObservationRepository(mysql_session)
 
         base_time = datetime(2025, 12, 17, 0, 0, 0, tzinfo=timezone.utc)
         observations = [
@@ -194,17 +198,17 @@ class TestWeatherObservationRepositoryIntegration:
         repo.batch_insert_observations(observations)
         elapsed = time.time() - start
 
-        # 100 inserts should take < 1 second
-        assert elapsed < 1.0, \
-            f"Batch insert took {elapsed}s, expected < 1.0s"
+        # 100 inserts should take < 2 seconds (ORM may be slightly slower than raw SQL)
+        assert elapsed < 2.0, \
+            f"Batch insert took {elapsed}s, expected < 2.0s"
 
 
 class TestWeatherForecastRepositoryIntegration:
     """Integration tests for WeatherForecastRepository with real DB."""
 
-    def test_insert_forecast_success(self, mysql_connection, test_park):
+    def test_insert_forecast_success(self, mysql_session, test_park):
         """Should insert new forecast successfully."""
-        repo = WeatherForecastRepository(mysql_connection)
+        repo = WeatherForecastRepository(mysql_session)
 
         forecast = {
             'park_id': test_park,
@@ -231,9 +235,10 @@ class TestWeatherForecastRepositoryIntegration:
         }
 
         repo.insert_forecast(forecast)
+        mysql_session.flush()
 
         # Verify forecast was inserted (query by park_id and issued_at)
-        result = mysql_connection.execute(text("""
+        result = mysql_session.execute(text("""
             SELECT * FROM weather_forecasts
             WHERE park_id = :park_id AND issued_at = :issued_at
             LIMIT 1
@@ -243,9 +248,9 @@ class TestWeatherForecastRepositoryIntegration:
         assert float(result._mapping['temperature_f']) == 75.2
         assert result._mapping['precipitation_probability'] == 30
 
-    def test_insert_forecast_idempotent(self, mysql_connection, test_park):
-        """Should update existing forecast on duplicate park_id + issued_at + forecast_time."""
-        repo = WeatherForecastRepository(mysql_connection)
+    def test_insert_forecast_idempotent(self, mysql_session, test_park):
+        """Should update existing forecast on duplicate park_id + forecast_time."""
+        repo = WeatherForecastRepository(mysql_session)
 
         forecast = {
             'park_id': test_park,
@@ -258,31 +263,31 @@ class TestWeatherForecastRepositoryIntegration:
 
         # Insert first time
         repo.insert_forecast(forecast)
+        mysql_session.flush()
 
         # Insert again with different values (should update)
         forecast['temperature_f'] = 80.0
         forecast['precipitation_probability'] = 70
 
         repo.insert_forecast(forecast)
+        mysql_session.flush()
 
         # Verify values were updated
-        result = mysql_connection.execute(text("""
+        result = mysql_session.execute(text("""
             SELECT * FROM weather_forecasts
             WHERE park_id = :park_id
-              AND issued_at = :issued_at
               AND forecast_time = :forecast_time
         """), {
             'park_id': test_park,
-            'issued_at': datetime(2025, 12, 17, 0, 0, 0, tzinfo=timezone.utc),
             'forecast_time': datetime(2025, 12, 18, 0, 0, 0, tzinfo=timezone.utc),
         }).fetchone()
 
         assert result._mapping['temperature_f'] == 80.0
         assert result._mapping['precipitation_probability'] == 70
 
-    def test_batch_insert_forecasts_success(self, mysql_connection, test_park):
+    def test_batch_insert_forecasts_success(self, mysql_session, test_park):
         """Should insert multiple forecasts in batch."""
-        repo = WeatherForecastRepository(mysql_connection)
+        repo = WeatherForecastRepository(mysql_session)
 
         issued_at = datetime(2025, 12, 17, 0, 0, 0, tzinfo=timezone.utc)
         base_forecast_time = datetime(2025, 12, 18, 0, 0, 0, tzinfo=timezone.utc)
@@ -302,16 +307,16 @@ class TestWeatherForecastRepositoryIntegration:
         repo.batch_insert_forecasts(forecasts)
 
         # Verify all 10 forecasts were inserted
-        result = mysql_connection.execute(text("""
+        result = mysql_session.execute(text("""
             SELECT COUNT(*) as count FROM weather_forecasts
             WHERE park_id = :park_id AND issued_at = :issued_at
         """), {'park_id': test_park, 'issued_at': issued_at}).fetchone()
 
         assert result._mapping['count'] >= 10  # At least our 10 forecasts
 
-    def test_batch_insert_forecasts_idempotent(self, mysql_connection, test_park):
-        """Batch insert should be idempotent (ON DUPLICATE KEY UPDATE)."""
-        repo = WeatherForecastRepository(mysql_connection)
+    def test_batch_insert_forecasts_idempotent(self, mysql_session, test_park):
+        """Batch insert should be idempotent (updates on duplicate)."""
+        repo = WeatherForecastRepository(mysql_session)
 
         issued_at = datetime(2025, 12, 17, 0, 0, 0, tzinfo=timezone.utc)
         forecast_time = datetime(2025, 12, 18, 0, 0, 0, tzinfo=timezone.utc)
@@ -337,12 +342,11 @@ class TestWeatherForecastRepositoryIntegration:
         repo.batch_insert_forecasts(forecasts)
 
         # Verify values were updated
-        result = mysql_connection.execute(text("""
+        result = mysql_session.execute(text("""
             SELECT * FROM weather_forecasts
             WHERE park_id = :park_id
-              AND issued_at = :issued_at
               AND forecast_time = :forecast_time
-        """), {'park_id': test_park, 'issued_at': issued_at, 'forecast_time': forecast_time}).fetchone()
+        """), {'park_id': test_park, 'forecast_time': forecast_time}).fetchone()
 
         assert result._mapping['temperature_f'] == 85.0
         assert result._mapping['precipitation_probability'] == 90

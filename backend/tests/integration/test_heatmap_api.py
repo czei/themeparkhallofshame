@@ -12,7 +12,7 @@ ARCHITECTURE: These tests verify that the endpoint correctly:
 4. Rejects LIVE period
 5. Returns proper data types (numbers, not strings)
 
-Test Database: themepark_test (via mysql_connection fixture)
+Test Database: themepark_test (via mysql_session fixture)
 
 NOTE: Tests that require database access are skipped if TEST_DB_* environment
 variables are not properly configured. Run with proper test database config.

@@ -22,30 +22,30 @@ Database Tables:
 
 Single Source of Truth:
 - Formulas: utils/metrics.py
-- SQL Helpers: utils/sql_helpers.py
+- ORM Helpers: utils/query_helpers.py
 """
 
 from typing import List, Dict, Any
+from decimal import Decimal
 
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy import select, func, case, literal, and_, or_
+from sqlalchemy.orm import Session, aliased
 
+from models.orm_ride import Ride
+from models.orm_classification import RideClassification
+from models.orm_park import Park
+from models.orm_stats import RideHourlyStats
+from models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
+from utils.query_helpers import QueryClassBase, TimeIntervalHelper
 from utils.timezone import get_today_range_to_now_utc
-from utils.sql_helpers import (
-    RideStatusSQL,
-    ParkStatusSQL,
-    RideFilterSQL,
-)
+from utils.metrics import LIVE_WINDOW_HOURS
 
 
-class TodayRideRankingsQuery:
+class TodayRideRankingsQuery(QueryClassBase):
     """
     Query handler for today's CUMULATIVE ride rankings using pre-aggregated
     ride_hourly_stats (fast path).
     """
-
-    def __init__(self, connection: Connection):
-        self.conn = connection
 
     def get_rankings(
         self,
@@ -68,73 +68,186 @@ class TodayRideRankingsQuery:
         # Get time range from midnight Pacific to now (UTC)
         start_utc, now_utc = get_today_range_to_now_utc()
 
-        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
+        # Live window cutoff for current status (last 2 hours)
+        live_cutoff = TimeIntervalHelper.hours_ago(LIVE_WINDOW_HOURS)
 
-        # Latest status subqueries (tiny, bounded by live window)
-        current_status_sq = RideStatusSQL.current_status_subquery(
-            "r.ride_id", include_time_window=True, park_id_expr="r.park_id"
+        # =====================================================================
+        # SUBQUERY: Current status from latest snapshot
+        # =====================================================================
+        # Aliased table for subquery
+        rss_current = aliased(RideStatusSnapshot)
+        pas_current = aliased(ParkActivitySnapshot)
+
+        # Subquery to get the latest snapshot for each ride
+        latest_snapshot_subq = (
+            select(
+                rss_current.ride_id,
+                rss_current.status,
+                rss_current.computed_is_open,
+                func.row_number().over(
+                    partition_by=rss_current.ride_id,
+                    order_by=rss_current.recorded_at.desc()
+                ).label('rn')
+            )
+            .where(rss_current.recorded_at >= live_cutoff)
+            .subquery()
         )
-        current_is_open_sq = RideStatusSQL.current_is_open_subquery(
-            "r.ride_id", include_time_window=True, park_id_expr="r.park_id"
+
+        # Subquery to get current park status
+        park_status_subq = (
+            select(
+                pas_current.park_id,
+                pas_current.park_appears_open,
+                func.row_number().over(
+                    partition_by=pas_current.park_id,
+                    order_by=pas_current.recorded_at.desc()
+                ).label('rn')
+            )
+            .where(pas_current.recorded_at >= live_cutoff)
+            .subquery()
         )
-        park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
 
-        # Determine sort column/direction
-        sort_map = {
-            "downtime_hours": "downtime_hours DESC",
-            "uptime_percentage": "uptime_percentage ASC",
-            "current_is_open": "current_is_open ASC",  # down/closed first
-            "trend_percentage": "trend_percentage DESC",
-        }
-        sort_clause = sort_map.get(sort_by, "downtime_hours DESC")
+        # Current status expression (handles NULL status)
+        # Use MAX() around subquery columns for MySQL GROUP BY compatibility
+        current_status_expr = case(
+            (func.max(park_status_subq.c.park_appears_open) == False, literal('PARK_CLOSED')),
+            else_=func.coalesce(
+                func.max(latest_snapshot_subq.c.status),
+                case(
+                    (func.max(latest_snapshot_subq.c.computed_is_open) == True, literal('OPERATING')),
+                    else_=literal('DOWN')
+                )
+            )
+        ).label('current_status')
 
-        query = text(f"""
-            SELECT
-                r.ride_id,
-                r.queue_times_id,
-                p.queue_times_id AS park_queue_times_id,
-                r.name AS ride_name,
-                p.name AS park_name,
-                p.park_id,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-                rc.tier,
+        # Current is_open boolean
+        # Use MAX() around subquery columns for MySQL GROUP BY compatibility
+        current_is_open_expr = case(
+            (func.max(park_status_subq.c.park_appears_open) == False, literal(False)),
+            else_=or_(
+                func.max(latest_snapshot_subq.c.status) == 'OPERATING',
+                and_(
+                    func.max(latest_snapshot_subq.c.status).is_(None),
+                    func.max(latest_snapshot_subq.c.computed_is_open) == True
+                )
+            )
+        ).label('current_is_open')
 
-                -- Cumulative downtime from pre-aggregated hourly stats
-                ROUND(SUM(rhs.downtime_hours), 2) AS downtime_hours,
+        # Park is_open boolean
+        # Use MAX() around subquery column for MySQL GROUP BY compatibility
+        park_is_open_expr = func.coalesce(
+            func.max(park_status_subq.c.park_appears_open),
+            literal(False)
+        ).label('park_is_open')
 
-                -- Uptime percentage based on aggregated snapshots
-                ROUND(
-                    100 - (SUM(rhs.down_snapshots) * 100.0 / NULLIF(SUM(rhs.snapshot_count), 0)),
+        # =====================================================================
+        # MAIN QUERY: Aggregate from ride_hourly_stats
+        # =====================================================================
+        stmt = (
+            select(
+                Ride.ride_id,
+                Ride.queue_times_id,
+                Park.queue_times_id.label('park_queue_times_id'),
+                Ride.name.label('ride_name'),
+                Park.name.label('park_name'),
+                Park.park_id,
+                func.concat(Park.city, ', ', Park.state_province).label('location'),
+                RideClassification.tier,
+
+                # Cumulative downtime from pre-aggregated hourly stats
+                func.round(func.sum(RideHourlyStats.downtime_hours), 2).label('downtime_hours'),
+
+                # Uptime percentage based on aggregated snapshots
+                func.round(
+                    100 - (
+                        func.sum(RideHourlyStats.down_snapshots) * 100.0 /
+                        func.nullif(func.sum(RideHourlyStats.snapshot_count), 0)
+                    ),
                     1
-                ) AS uptime_percentage,
+                ).label('uptime_percentage'),
 
-                -- Current status (latest-only subquery for badge/sorting)
-                {current_status_sq},
-                {current_is_open_sq},
-                {park_is_open_sq},
+                # Current status columns (from subqueries)
+                current_status_expr,
+                current_is_open_expr,
+                park_is_open_expr,
 
-                -- Trend placeholder (not available for partial day)
-                NULL AS trend_percentage
+                # Trend placeholder (not available for partial day)
+                literal(None).label('trend_percentage')
+            )
+            .select_from(RideHourlyStats)
+            .join(Ride, RideHourlyStats.ride_id == Ride.ride_id)
+            .join(Park, Ride.park_id == Park.park_id)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .outerjoin(
+                latest_snapshot_subq,
+                and_(
+                    Ride.ride_id == latest_snapshot_subq.c.ride_id,
+                    latest_snapshot_subq.c.rn == 1
+                )
+            )
+            .outerjoin(
+                park_status_subq,
+                and_(
+                    Park.park_id == park_status_subq.c.park_id,
+                    park_status_subq.c.rn == 1
+                )
+            )
+            .where(RideHourlyStats.hour_start_utc >= start_utc)
+            .where(RideHourlyStats.hour_start_utc < now_utc)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+            .where(Park.is_active == True)
+        )
 
-            FROM ride_hourly_stats rhs
-            INNER JOIN rides r ON rhs.ride_id = r.ride_id
-            INNER JOIN parks p ON rhs.park_id = p.park_id
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE rhs.hour_start_utc >= :start_utc AND rhs.hour_start_utc < :now_utc
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND p.is_active = TRUE
-                {filter_clause}
-            GROUP BY r.ride_id, r.name, p.name, p.park_id, p.city, p.state_province, rc.tier
-            HAVING SUM(CASE WHEN rhs.ride_operated THEN 1 ELSE 0 END) > 0
-                AND downtime_hours > 0
-            ORDER BY {sort_clause}
-            LIMIT :limit
-        """)
+        # Apply Disney/Universal filter if requested
+        if filter_disney_universal:
+            stmt = stmt.where(
+                or_(
+                    Park.is_disney == True,
+                    Park.is_universal == True
+                )
+            )
 
-        result = self.conn.execute(query, {
-            "start_utc": start_utc,
-            "now_utc": now_utc,
-            "limit": limit
-        })
-        return [dict(row._mapping) for row in result]
+        # Group by all non-aggregated columns
+        stmt = stmt.group_by(
+            Ride.ride_id,
+            Ride.queue_times_id,
+            Park.queue_times_id,
+            Ride.name,
+            Park.name,
+            Park.park_id,
+            Park.city,
+            Park.state_province,
+            RideClassification.tier
+        )
+
+        # Having clause: only rides that operated and have downtime
+        stmt = stmt.having(
+            func.sum(case((RideHourlyStats.ride_operated == True, 1), else_=0)) > 0
+        ).having(
+            func.sum(RideHourlyStats.downtime_hours) > 0
+        )
+
+        # Apply sorting - use actual aggregate expressions, not literal strings
+        downtime_expr = func.sum(RideHourlyStats.downtime_hours)
+        uptime_expr = 100 - (
+            func.sum(RideHourlyStats.down_snapshots) * 100.0 /
+            func.nullif(func.sum(RideHourlyStats.snapshot_count), 0)
+        )
+
+        if sort_by == "uptime_percentage":
+            stmt = stmt.order_by(uptime_expr.asc())
+        elif sort_by == "current_is_open":
+            # Fall back to downtime since current_is_open comes from subquery
+            stmt = stmt.order_by(downtime_expr.desc())
+        elif sort_by == "trend_percentage":
+            # Trend not available for today, fall back to downtime
+            stmt = stmt.order_by(downtime_expr.desc())
+        else:  # Default: downtime_hours
+            stmt = stmt.order_by(downtime_expr.desc())
+
+        # Apply limit
+        stmt = stmt.limit(limit)
+
+        # Execute and return results
+        return self.execute_and_fetchall(stmt)

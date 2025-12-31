@@ -35,7 +35,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional
 from datetime import datetime, timezone
 
-from database.connection import get_db_connection
+from database.connection import get_db_session
 from database.repositories.weather_repository import (
     WeatherObservationRepository,
     WeatherForecastRepository
@@ -60,21 +60,22 @@ class WeatherCollector:
 
     Usage:
         ```python
-        collector = WeatherCollector(db_connection)
-        results = collector.run(mode='current')
+        with get_db_session() as session:
+            collector = WeatherCollector(session)
+            results = collector.run(mode='current')
         ```
     """
 
-    def __init__(self, db_connection):
+    def __init__(self, session):
         """Initialize weather collector.
 
         Args:
-            db_connection: MySQL database connection
+            session: SQLAlchemy ORM session
         """
-        self.db = db_connection
+        self.session = session
         self.api_client = get_openmeteo_client()
-        self.obs_repo = WeatherObservationRepository(db_connection)
-        self.fcst_repo = WeatherForecastRepository(db_connection)
+        self.obs_repo = WeatherObservationRepository(session)
+        self.fcst_repo = WeatherForecastRepository(session)
         self.rate_limiter = TokenBucket(rate=1.0)  # 1 request per second
         self.max_workers = 10
 
@@ -141,17 +142,17 @@ class WeatherCollector:
         Returns:
             List of park dictionaries with park_id, latitude, longitude
         """
-        from sqlalchemy import text
+        from sqlalchemy import select
+        from models import Park
 
-        sql = text("""
-            SELECT park_id, latitude, longitude, name
-            FROM parks
-            WHERE latitude IS NOT NULL
-              AND longitude IS NOT NULL
-            ORDER BY park_id
-        """)
+        stmt = (
+            select(Park.park_id, Park.latitude, Park.longitude, Park.name)
+            .where(Park.latitude.isnot(None))
+            .where(Park.longitude.isnot(None))
+            .order_by(Park.park_id)
+        )
 
-        result = self.db.execute(sql)
+        result = self.session.execute(stmt)
         parks = [dict(row._mapping) for row in result]
 
         logger.info(f"Found {len(parks)} parks to collect")
@@ -314,8 +315,8 @@ def main():
 
     # Connect to database
     try:
-        with get_db_connection() as conn:
-            collector = WeatherCollector(conn)
+        with get_db_session() as session:
+            collector = WeatherCollector(session)
 
             # Collect current weather
             if args.current:

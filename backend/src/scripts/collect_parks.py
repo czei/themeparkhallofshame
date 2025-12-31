@@ -28,7 +28,11 @@ from collector.queue_times_client import QueueTimesClient
 from collector.geocoding_client import GeocodingClient
 from database.repositories.park_repository import ParkRepository
 from database.repositories.ride_repository import RideRepository
-from database.connection import get_db_connection
+from database.connection import get_db_session
+from sqlalchemy import delete
+from models.orm_park import Park
+from models.orm_ride import Ride
+from models.orm_classification import RideClassification
 
 
 class ParkCollector:
@@ -81,11 +85,11 @@ class ParkCollector:
             parks_data = self._fetch_parks()
             logger.info(f"Found {len(parks_data)} parks from API")
 
-            # Step 2: Process each park with database connection
+            # Step 2: Process each park with database session
             logger.info("Step 2: Processing parks and rides...")
-            with get_db_connection() as conn:
-                park_repo = ParkRepository(conn)
-                ride_repo = RideRepository(conn)
+            with get_db_session() as session:
+                park_repo = ParkRepository(session)
+                ride_repo = RideRepository(session)
 
                 for park_data in parks_data:
                     self._process_park(park_data, park_repo, ride_repo)
@@ -102,16 +106,14 @@ class ParkCollector:
             sys.exit(1)
 
     def _clear_existing_data(self):
-        """Clear existing parks and rides data."""
+        """Clear existing parks and rides data using ORM."""
         try:
-            with get_db_connection() as conn:
-                from sqlalchemy import text
-
+            with get_db_session() as session:
                 # Delete in order due to foreign keys
                 logger.info("Clearing existing data...")
-                conn.execute(text("DELETE FROM ride_classifications"))
-                conn.execute(text("DELETE FROM rides"))
-                conn.execute(text("DELETE FROM parks"))
+                session.execute(delete(RideClassification))
+                session.execute(delete(Ride))
+                session.execute(delete(Park))
                 logger.info("Existing data cleared")
 
         except Exception as e:

@@ -38,12 +38,12 @@ def cleanup_before_schedule_tests(mysql_engine):
 
 
 @pytest.fixture
-def sample_park_id(mysql_connection):
+def sample_park_id(mysql_session):
     """Create a sample park and return its ID."""
     from sqlalchemy import text
 
     # Check if park already exists
-    result = mysql_connection.execute(
+    result = mysql_session.execute(
         text("SELECT park_id FROM parks WHERE queue_times_id = 99901 LIMIT 1")
     )
     row = result.fetchone()
@@ -51,15 +51,15 @@ def sample_park_id(mysql_connection):
         return row[0]
 
     # Create new park
-    mysql_connection.execute(text("""
+    mysql_session.execute(text("""
         INSERT INTO parks (park_id, queue_times_id, themeparks_wiki_id, name, city, state_province,
                           country, timezone, operator, is_disney, is_universal, is_active)
         VALUES (99901, 99901, 'test-uuid-12345', 'Test Schedule Park', 'Orlando', 'FL',
                 'US', 'America/New_York', 'Test', 0, 0, 1)
     """))
-    mysql_connection.commit()
+    mysql_session.commit()
 
-    result = mysql_connection.execute(
+    result = mysql_session.execute(
         text("SELECT park_id FROM parks WHERE queue_times_id = 99901")
     )
     return result.fetchone()[0]
@@ -76,7 +76,7 @@ class TestScheduleRepositoryStore:
     Priority: P1 - Foundation for schedule-based park detection
     """
 
-    def test_store_schedule_entry_upsert(self, mysql_connection, sample_park_id):
+    def test_store_schedule_entry_upsert(self, mysql_session, sample_park_id):
         """
         Store a schedule entry using upsert logic.
 
@@ -84,7 +84,7 @@ class TestScheduleRepositoryStore:
         When: _store_schedule_entry() is called
         Then: Entry is stored in database
         """
-        repo = ScheduleRepository(mysql_connection)
+        repo = ScheduleRepository(mysql_session)
 
         entry = {
             "date": "2025-12-15",
@@ -99,7 +99,7 @@ class TestScheduleRepositoryStore:
 
         # Verify in database
         from sqlalchemy import text
-        db_result = mysql_connection.execute(text("""
+        db_result = mysql_session.execute(text("""
             SELECT schedule_date, opening_time, closing_time, schedule_type
             FROM park_schedules
             WHERE park_id = :park_id AND schedule_date = '2025-12-15'
@@ -111,7 +111,7 @@ class TestScheduleRepositoryStore:
         # Opening time should be converted to UTC (14:00 UTC)
         assert row.opening_time.hour == 14
 
-    def test_store_schedule_entry_updates_existing(self, mysql_connection, sample_park_id):
+    def test_store_schedule_entry_updates_existing(self, mysql_session, sample_park_id):
         """
         Storing duplicate schedule entry should update, not create duplicate.
 
@@ -119,7 +119,7 @@ class TestScheduleRepositoryStore:
         When: Same date/type entry is stored with different times
         Then: Existing entry is updated
         """
-        repo = ScheduleRepository(mysql_connection)
+        repo = ScheduleRepository(mysql_session)
 
         # Store initial entry
         entry1 = {
@@ -141,7 +141,7 @@ class TestScheduleRepositoryStore:
 
         # Verify only one entry exists
         from sqlalchemy import text
-        count_result = mysql_connection.execute(text("""
+        count_result = mysql_session.execute(text("""
             SELECT COUNT(*) as count
             FROM park_schedules
             WHERE park_id = :park_id AND schedule_date = '2025-12-16'
@@ -149,7 +149,7 @@ class TestScheduleRepositoryStore:
         assert count_result.fetchone().count == 1
 
         # Verify closing time was updated (04:00 UTC = 23:00 EST next day)
-        db_result = mysql_connection.execute(text("""
+        db_result = mysql_session.execute(text("""
             SELECT closing_time FROM park_schedules
             WHERE park_id = :park_id AND schedule_date = '2025-12-16'
         """), {"park_id": sample_park_id})
@@ -168,7 +168,7 @@ class TestScheduleRepositoryIsOpen:
     Priority: P1 - Core functionality for park open detection
     """
 
-    def test_is_park_open_within_hours(self, mysql_connection, sample_park_id):
+    def test_is_park_open_within_hours(self, mysql_session, sample_park_id):
         """
         Park should be open when current time is within schedule.
 
@@ -176,12 +176,12 @@ class TestScheduleRepositoryIsOpen:
         When: Current time is 2pm EST (19:00 UTC)
         Then: is_park_open_now() returns True
         """
-        repo = ScheduleRepository(mysql_connection)
+        repo = ScheduleRepository(mysql_session)
 
         # Insert schedule for today
         today = date.today()
         from sqlalchemy import text
-        mysql_connection.execute(text("""
+        mysql_session.execute(text("""
             INSERT INTO park_schedules (park_id, schedule_date, opening_time, closing_time, schedule_type)
             VALUES (:park_id, :schedule_date, :opening, :closing, 'OPERATING')
             ON DUPLICATE KEY UPDATE opening_time = VALUES(opening_time), closing_time = VALUES(closing_time)
@@ -191,7 +191,7 @@ class TestScheduleRepositoryIsOpen:
             "opening": datetime.combine(today, datetime.min.time().replace(hour=14)),  # 9am EST = 14:00 UTC
             "closing": datetime.combine(today, datetime.min.time().replace(hour=3)) + timedelta(days=1)  # 10pm EST = 03:00 UTC next day
         })
-        mysql_connection.commit()
+        mysql_session.commit()
 
         # Check at 2pm EST = 19:00 UTC
         test_time = datetime.combine(today, datetime.min.time().replace(hour=19))
@@ -199,7 +199,7 @@ class TestScheduleRepositoryIsOpen:
 
         assert result is True
 
-    def test_is_park_closed_before_hours(self, mysql_connection, sample_park_id):
+    def test_is_park_closed_before_hours(self, mysql_session, sample_park_id):
         """
         Park should be closed when current time is before opening.
 
@@ -207,11 +207,11 @@ class TestScheduleRepositoryIsOpen:
         When: Current time is 7am EST (12:00 UTC)
         Then: is_park_open_now() returns False
         """
-        repo = ScheduleRepository(mysql_connection)
+        repo = ScheduleRepository(mysql_session)
 
         today = date.today()
         from sqlalchemy import text
-        mysql_connection.execute(text("""
+        mysql_session.execute(text("""
             INSERT INTO park_schedules (park_id, schedule_date, opening_time, closing_time, schedule_type)
             VALUES (:park_id, :schedule_date, :opening, :closing, 'OPERATING')
             ON DUPLICATE KEY UPDATE opening_time = VALUES(opening_time), closing_time = VALUES(closing_time)
@@ -221,7 +221,7 @@ class TestScheduleRepositoryIsOpen:
             "opening": datetime.combine(today, datetime.min.time().replace(hour=14)),  # 9am EST = 14:00 UTC
             "closing": datetime.combine(today, datetime.min.time().replace(hour=3)) + timedelta(days=1)
         })
-        mysql_connection.commit()
+        mysql_session.commit()
 
         # Check at 7am EST = 12:00 UTC (before opening)
         test_time = datetime.combine(today, datetime.min.time().replace(hour=12))
@@ -229,7 +229,7 @@ class TestScheduleRepositoryIsOpen:
 
         assert result is False
 
-    def test_is_park_closed_no_schedule(self, mysql_connection):
+    def test_is_park_closed_no_schedule(self, mysql_session):
         """
         Park with no schedule should return False.
 
@@ -237,7 +237,7 @@ class TestScheduleRepositoryIsOpen:
         When: is_park_open_now() is called
         Then: Returns False
         """
-        repo = ScheduleRepository(mysql_connection)
+        repo = ScheduleRepository(mysql_session)
 
         # Use a non-existent park ID
         result = repo.is_park_open_now(999999)
@@ -256,7 +256,7 @@ class TestScheduleRepositoryHasRecent:
     Priority: P2 - Used for fallback logic
     """
 
-    def test_has_recent_schedule_true(self, mysql_connection, sample_park_id):
+    def test_has_recent_schedule_true(self, mysql_session, sample_park_id):
         """
         Should return True when schedule was fetched recently.
 
@@ -264,24 +264,24 @@ class TestScheduleRepositoryHasRecent:
         When: has_recent_schedule(park_id) is called
         Then: Returns True
         """
-        repo = ScheduleRepository(mysql_connection)
+        repo = ScheduleRepository(mysql_session)
 
         # Insert schedule with recent fetched_at
         from sqlalchemy import text
-        mysql_connection.execute(text("""
+        mysql_session.execute(text("""
             INSERT INTO park_schedules (park_id, schedule_date, opening_time, closing_time,
                                        schedule_type, fetched_at)
             VALUES (:park_id, CURDATE() + INTERVAL 7 DAY, NOW(), NOW() + INTERVAL 12 HOUR,
                     'OPERATING', NOW())
             ON DUPLICATE KEY UPDATE fetched_at = NOW()
         """), {"park_id": sample_park_id})
-        mysql_connection.commit()
+        mysql_session.commit()
 
         result = repo.has_recent_schedule(sample_park_id, max_age_hours=24)
 
         assert result is True
 
-    def test_has_recent_schedule_false_old_data(self, mysql_connection):
+    def test_has_recent_schedule_false_old_data(self, mysql_session):
         """
         Should return False when schedule is stale.
 
@@ -289,29 +289,29 @@ class TestScheduleRepositoryHasRecent:
         When: has_recent_schedule(park_id) is called
         Then: Returns False
         """
-        repo = ScheduleRepository(mysql_connection)
+        repo = ScheduleRepository(mysql_session)
 
         # Create a separate test park for this test to avoid interference
         from sqlalchemy import text
-        mysql_connection.execute(text("""
+        mysql_session.execute(text("""
             INSERT IGNORE INTO parks (park_id, queue_times_id, name, city, country, timezone, is_active, is_disney, is_universal)
             VALUES (99902, 99902, 'Old Schedule Park', 'Test', 'US', 'America/New_York', 1, 0, 0)
         """))
-        mysql_connection.commit()
-        result = mysql_connection.execute(
+        mysql_session.commit()
+        result = mysql_session.execute(
             text("SELECT park_id FROM parks WHERE queue_times_id = 99902")
         )
         old_park_id = result.fetchone()[0]
 
         # Insert schedule with old fetched_at (48 hours ago)
-        mysql_connection.execute(text("""
+        mysql_session.execute(text("""
             INSERT INTO park_schedules (park_id, schedule_date, opening_time, closing_time,
                                        schedule_type, fetched_at)
             VALUES (:park_id, CURDATE() + INTERVAL 14 DAY, NOW(), NOW() + INTERVAL 12 HOUR,
                     'OPERATING', NOW() - INTERVAL 48 HOUR)
             ON DUPLICATE KEY UPDATE fetched_at = NOW() - INTERVAL 48 HOUR
         """), {"park_id": old_park_id})
-        mysql_connection.commit()
+        mysql_session.commit()
 
         result = repo.has_recent_schedule(old_park_id, max_age_hours=24)
 
@@ -329,7 +329,7 @@ class TestScheduleRepositoryGetForDate:
     Priority: P2 - Used for displaying park hours
     """
 
-    def test_get_schedule_for_date_exists(self, mysql_connection, sample_park_id):
+    def test_get_schedule_for_date_exists(self, mysql_session, sample_park_id):
         """
         Should return schedule when it exists.
 
@@ -337,18 +337,18 @@ class TestScheduleRepositoryGetForDate:
         When: get_schedule_for_date() is called
         Then: Returns schedule dict
         """
-        repo = ScheduleRepository(mysql_connection)
+        repo = ScheduleRepository(mysql_session)
 
         target_date = date.today() + timedelta(days=5)
 
         # Insert schedule
         from sqlalchemy import text
-        mysql_connection.execute(text("""
+        mysql_session.execute(text("""
             INSERT INTO park_schedules (park_id, schedule_date, opening_time, closing_time, schedule_type)
             VALUES (:park_id, :schedule_date, NOW(), NOW() + INTERVAL 12 HOUR, 'OPERATING')
             ON DUPLICATE KEY UPDATE opening_time = NOW()
         """), {"park_id": sample_park_id, "schedule_date": target_date})
-        mysql_connection.commit()
+        mysql_session.commit()
 
         result = repo.get_schedule_for_date(sample_park_id, target_date)
 
@@ -356,7 +356,7 @@ class TestScheduleRepositoryGetForDate:
         assert result["park_id"] == sample_park_id
         assert result["schedule_type"] == "OPERATING"
 
-    def test_get_schedule_for_date_not_exists(self, mysql_connection, sample_park_id):
+    def test_get_schedule_for_date_not_exists(self, mysql_session, sample_park_id):
         """
         Should return None when schedule doesn't exist.
 
@@ -364,7 +364,7 @@ class TestScheduleRepositoryGetForDate:
         When: get_schedule_for_date() is called
         Then: Returns None
         """
-        repo = ScheduleRepository(mysql_connection)
+        repo = ScheduleRepository(mysql_session)
 
         # Far future date unlikely to have schedule
         future_date = date.today() + timedelta(days=365)
@@ -386,7 +386,7 @@ class TestScheduleRepositoryFetchFromAPI:
     """
 
     @patch('database.repositories.schedule_repository.get_themeparks_wiki_client')
-    def test_fetch_and_store_schedule_success(self, mock_get_client, mysql_connection, sample_park_id):
+    def test_fetch_and_store_schedule_success(self, mock_get_client, mysql_session, sample_park_id):
         """
         Should fetch and store schedule from API.
 
@@ -415,7 +415,7 @@ class TestScheduleRepositoryFetchFromAPI:
         }
         mock_get_client.return_value = mock_client
 
-        repo = ScheduleRepository(mysql_connection)
+        repo = ScheduleRepository(mysql_session)
 
         count = repo.fetch_and_store_schedule(sample_park_id, "test-wiki-id")
 
@@ -423,7 +423,7 @@ class TestScheduleRepositoryFetchFromAPI:
         mock_client.get_entity_schedule.assert_called_once_with("test-wiki-id")
 
     @patch('database.repositories.schedule_repository.get_themeparks_wiki_client')
-    def test_fetch_and_store_schedule_empty_response(self, mock_get_client, mysql_connection, sample_park_id):
+    def test_fetch_and_store_schedule_empty_response(self, mock_get_client, mysql_session, sample_park_id):
         """
         Should handle empty schedule response.
 
@@ -438,7 +438,7 @@ class TestScheduleRepositoryFetchFromAPI:
         }
         mock_get_client.return_value = mock_client
 
-        repo = ScheduleRepository(mysql_connection)
+        repo = ScheduleRepository(mysql_session)
 
         count = repo.fetch_and_store_schedule(sample_park_id, "test-wiki-id")
 
@@ -456,7 +456,7 @@ class TestScheduleRepositoryCleanup:
     Priority: P3 - Database maintenance
     """
 
-    def test_cleanup_old_schedules(self, mysql_connection, sample_park_id):
+    def test_cleanup_old_schedules(self, mysql_session, sample_park_id):
         """
         Should delete schedules older than specified days.
 
@@ -464,16 +464,16 @@ class TestScheduleRepositoryCleanup:
         When: cleanup_old_schedules(days_to_keep=7) is called
         Then: Old entries are deleted
         """
-        repo = ScheduleRepository(mysql_connection)
+        repo = ScheduleRepository(mysql_session)
 
         # Insert old schedule (10 days ago)
         from sqlalchemy import text
-        mysql_connection.execute(text("""
+        mysql_session.execute(text("""
             INSERT INTO park_schedules (park_id, schedule_date, opening_time, closing_time, schedule_type)
             VALUES (:park_id, CURDATE() - INTERVAL 10 DAY, NOW(), NOW() + INTERVAL 12 HOUR, 'OPERATING')
             ON DUPLICATE KEY UPDATE opening_time = NOW()
         """), {"park_id": sample_park_id})
-        mysql_connection.commit()
+        mysql_session.commit()
 
         deleted = repo.cleanup_old_schedules(days_to_keep=7)
 

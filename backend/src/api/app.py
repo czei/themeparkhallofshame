@@ -15,6 +15,7 @@ from api.routes.trends import trends_bp
 from api.routes.audit import audit_bp
 from api.routes.search import search_bp
 from api.middleware.error_handler import register_error_handlers
+from models.base import db_session
 
 
 def create_app() -> Flask:
@@ -51,6 +52,12 @@ def create_app() -> Flask:
 
     # Register error handlers
     register_error_handlers(app)
+
+    # SQLAlchemy session teardown (remove scoped_session at end of request)
+    @app.teardown_appcontext
+    def shutdown_session(exception=None):
+        """Remove scoped_session at end of request to prevent connection leaks."""
+        db_session.remove()
 
     # Log startup
     logger.info(f"Flask app created (env={FLASK_ENV}, debug={FLASK_DEBUG})")

@@ -23,15 +23,16 @@ from database.repositories.status_change_repository import RideStatusChangeRepos
 class TestRideStatusChangeRepository:
     """Test ride status change operations."""
 
-    def test_insert_status_change(self, mysql_connection, sample_park_data, sample_ride_data):
+    def test_insert_status_change(self, mysql_session, sample_park_data, sample_ride_data):
         """Insert a status change event."""
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        conn = mysql_session.connection()
+        park_id = insert_sample_park(conn, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(conn, sample_ride_data)
 
-        repo = RideStatusChangeRepository(mysql_connection)
+        repo = RideStatusChangeRepository(mysql_session)
         change_data = {
             'ride_id': ride_id,
             'changed_at': datetime.now(),
@@ -45,15 +46,16 @@ class TestRideStatusChangeRepository:
         assert change_id is not None
         assert change_id > 0
 
-    def test_get_latest_by_ride(self, mysql_connection, sample_park_data, sample_ride_data):
+    def test_get_latest_by_ride(self, mysql_session, sample_park_data, sample_ride_data):
         """Get most recent status change for a ride."""
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        conn = mysql_session.connection()
+        park_id = insert_sample_park(conn, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(conn, sample_ride_data)
 
-        repo = RideStatusChangeRepository(mysql_connection)
+        repo = RideStatusChangeRepository(mysql_session)
 
         # Insert 2 status changes with distinct timestamps
         from datetime import timedelta
@@ -68,24 +70,24 @@ class TestRideStatusChangeRepository:
         assert latest is not None
         assert latest['duration_in_previous_status'] == 120  # Latest change
 
-    def test_get_latest_by_ride_not_found(self, mysql_connection):
+    def test_get_latest_by_ride_not_found(self, mysql_session):
         """Get latest status change for nonexistent ride."""
-        repo = RideStatusChangeRepository(mysql_connection)
+        repo = RideStatusChangeRepository(mysql_session)
 
         result = repo.get_latest_by_ride(999)
 
         assert result is None
 
-    @pytest.mark.skip(reason="Requires MySQL-specific DATE_SUB() function")
-    def test_count_changes_by_ride(self, mysql_connection, sample_park_data, sample_ride_data):
+    def test_count_changes_by_ride(self, mysql_session, sample_park_data, sample_ride_data):
         """Count status changes for a ride."""
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        conn = mysql_session.connection()
+        park_id = insert_sample_park(conn, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(conn, sample_ride_data)
 
-        repo = RideStatusChangeRepository(mysql_connection)
+        repo = RideStatusChangeRepository(mysql_session)
 
         # Insert changes: 2 to open, 1 to closed
         repo.insert({'ride_id': ride_id, 'changed_at': datetime.now(),
@@ -101,10 +103,9 @@ class TestRideStatusChangeRepository:
         assert counts['to_open'] == 2
         assert counts['to_closed'] == 1
 
-    @pytest.mark.skip(reason="Requires MySQL-specific DATE_SUB() function")
-    def test_count_changes_no_changes(self, mysql_connection):
+    def test_count_changes_no_changes(self, mysql_session):
         """Count changes for ride with no status changes."""
-        repo = RideStatusChangeRepository(mysql_connection)
+        repo = RideStatusChangeRepository(mysql_session)
 
         counts = repo.count_changes_by_ride(999)
 

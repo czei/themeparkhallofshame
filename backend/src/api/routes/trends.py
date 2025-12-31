@@ -22,7 +22,7 @@ from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 
-from database.connection import get_db_connection
+from database.connection import get_db_connection, get_db_session
 
 # New query imports - each file handles one specific data source
 from database.queries.trends import (
@@ -124,40 +124,43 @@ def get_trends():
         filter_disney_universal = (park_filter == 'disney-universal')
 
         # Get database connection using context manager
-        with get_db_connection() as conn:
-            # Route to appropriate query class based on category
-            if category == 'parks-improving':
-                # See: database/queries/trends/improving_parks.py
-                query = ImprovingParksQuery(conn)
+        # Note: ImprovingParksQuery uses ORM (Session), others still use Core (Connection)
+        if category == 'parks-improving':
+            # See: database/queries/trends/improving_parks.py (ORM)
+            with get_db_session() as session:
+                query = ImprovingParksQuery(session)
                 results = query.get_improving(
                     period=normalized_period,
                     filter_disney_universal=filter_disney_universal,
                     limit=limit
                 )
-            elif category == 'parks-declining':
-                # See: database/queries/trends/declining_parks.py
-                query = DecliningParksQuery(conn)
-                results = query.get_declining(
-                    period=normalized_period,
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
-            elif category == 'rides-improving':
-                # See: database/queries/trends/improving_rides.py
-                query = ImprovingRidesQuery(conn)
-                results = query.get_improving(
-                    period=normalized_period,
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
-            elif category == 'rides-declining':
-                # See: database/queries/trends/declining_rides.py
-                query = DecliningRidesQuery(conn)
-                results = query.get_declining(
-                    period=normalized_period,
-                    filter_disney_universal=filter_disney_universal,
-                    limit=limit
-                )
+        else:
+            with get_db_session() as session:
+                # Route to appropriate query class based on category
+                if category == 'parks-declining':
+                    # See: database/queries/trends/declining_parks.py
+                    query = DecliningParksQuery(session)
+                    results = query.get_declining(
+                        period=normalized_period,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                elif category == 'rides-improving':
+                    # See: database/queries/trends/improving_rides.py
+                    query = ImprovingRidesQuery(session)
+                    results = query.get_improving(
+                        period=normalized_period,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
+                elif category == 'rides-declining':
+                    # See: database/queries/trends/declining_rides.py
+                    query = DecliningRidesQuery(session)
+                    results = query.get_declining(
+                        period=normalized_period,
+                        filter_disney_universal=filter_disney_universal,
+                        limit=limit
+                    )
 
         results = _attach_queue_times_urls(category, results)
 
@@ -274,34 +277,34 @@ def get_chart_data():
         filter_disney_universal = (park_filter == 'disney-universal')
 
         # Get database connection
-        with get_db_connection() as conn:
+        with get_db_session() as session:
             if period == 'live':
                 # LIVE: 5-minute granularity for recent data (last 60 minutes)
                 granularity = 'minutes'
                 if data_type == 'parks':
                     # See: database/queries/charts/park_shame_history.py
-                    query = ParkShameHistoryQuery(conn)
+                    query = ParkShameHistoryQuery(session)
                     chart_data = query.get_live(
                         filter_disney_universal=filter_disney_universal,
                         limit=limit,
                         minutes=60
                     )
                 elif data_type == 'waittimes':
-                    query = ParkWaitTimeHistoryQuery(conn)
+                    query = ParkWaitTimeHistoryQuery(session)
                     chart_data = query.get_live(
                         filter_disney_universal=filter_disney_universal,
                         limit=limit,
                         minutes=60
                     )
                 elif data_type == 'rides':
-                    query = RideDowntimeHistoryQuery(conn)
+                    query = RideDowntimeHistoryQuery(session)
                     chart_data = query.get_live(
                         filter_disney_universal=filter_disney_universal,
                         limit=limit,
                         minutes=60
                     )
                 else:  # ridewaittimes
-                    query = RideWaitTimeHistoryQuery(conn)
+                    query = RideWaitTimeHistoryQuery(session)
                     chart_data = query.get_live(
                         filter_disney_universal=filter_disney_universal,
                         limit=limit,
@@ -318,7 +321,7 @@ def get_chart_data():
                 granularity = 'hourly'
                 if data_type == 'parks':
                     # See: database/queries/charts/park_shame_history.py
-                    query = ParkShameHistoryQuery(conn)
+                    query = ParkShameHistoryQuery(session)
                     chart_data = query.get_hourly(
                         target_date=today,
                         filter_disney_universal=filter_disney_universal,
@@ -326,7 +329,7 @@ def get_chart_data():
                     )
                 elif data_type == 'waittimes':
                     # See: database/queries/charts/park_waittime_history.py
-                    query = ParkWaitTimeHistoryQuery(conn)
+                    query = ParkWaitTimeHistoryQuery(session)
                     chart_data = query.get_hourly(
                         target_date=today,
                         filter_disney_universal=filter_disney_universal,
@@ -334,7 +337,7 @@ def get_chart_data():
                     )
                 elif data_type == 'rides':
                     # See: database/queries/charts/ride_downtime_history.py
-                    query = RideDowntimeHistoryQuery(conn)
+                    query = RideDowntimeHistoryQuery(session)
                     chart_data = query.get_hourly(
                         target_date=today,
                         filter_disney_universal=filter_disney_universal,
@@ -342,7 +345,7 @@ def get_chart_data():
                     )
                 else:  # ridewaittimes
                     # See: database/queries/charts/ride_waittime_history.py
-                    query = RideWaitTimeHistoryQuery(conn)
+                    query = RideWaitTimeHistoryQuery(session)
                     chart_data = query.get_hourly(
                         target_date=today,
                         filter_disney_universal=filter_disney_universal,
@@ -359,28 +362,28 @@ def get_chart_data():
                 granularity = 'hourly'
                 yesterday = today - timedelta(days=1)
                 if data_type == 'parks':
-                    query = ParkShameHistoryQuery(conn)
+                    query = ParkShameHistoryQuery(session)
                     chart_data = query.get_hourly(
                         target_date=yesterday,
                         filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
                 elif data_type == 'waittimes':
-                    query = ParkWaitTimeHistoryQuery(conn)
+                    query = ParkWaitTimeHistoryQuery(session)
                     chart_data = query.get_hourly(
                         target_date=yesterday,
                         filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
                 elif data_type == 'rides':
-                    query = RideDowntimeHistoryQuery(conn)
+                    query = RideDowntimeHistoryQuery(session)
                     chart_data = query.get_hourly(
                         target_date=yesterday,
                         filter_disney_universal=filter_disney_universal,
                         limit=limit
                     )
                 else:  # ridewaittimes
-                    query = RideWaitTimeHistoryQuery(conn)
+                    query = RideWaitTimeHistoryQuery(session)
                     chart_data = query.get_hourly(
                         target_date=yesterday,
                         filter_disney_universal=filter_disney_universal,
@@ -403,7 +406,7 @@ def get_chart_data():
 
                 if data_type == 'parks':
                     # See: database/queries/charts/park_shame_history.py
-                    query = ParkShameHistoryQuery(conn)
+                    query = ParkShameHistoryQuery(session)
                     chart_data = query.get_daily(
                         days=days,
                         filter_disney_universal=filter_disney_universal,
@@ -411,7 +414,7 @@ def get_chart_data():
                     )
                 elif data_type == 'waittimes':
                     # See: database/queries/charts/park_waittime_history.py
-                    query = ParkWaitTimeHistoryQuery(conn)
+                    query = ParkWaitTimeHistoryQuery(session)
                     chart_data = query.get_daily(
                         days=days,
                         filter_disney_universal=filter_disney_universal,
@@ -419,7 +422,7 @@ def get_chart_data():
                     )
                 elif data_type == 'rides':
                     # See: database/queries/charts/ride_downtime_history.py
-                    query = RideDowntimeHistoryQuery(conn)
+                    query = RideDowntimeHistoryQuery(session)
                     chart_data = query.get_daily(
                         days=days,
                         filter_disney_universal=filter_disney_universal,
@@ -427,7 +430,7 @@ def get_chart_data():
                     )
                 else:  # ridewaittimes
                     # See: database/queries/charts/ride_waittime_history.py
-                    query = RideWaitTimeHistoryQuery(conn)
+                    query = RideWaitTimeHistoryQuery(session)
                     chart_data = query.get_daily(
                         days=days,
                         filter_disney_universal=filter_disney_universal,
@@ -533,8 +536,8 @@ def get_longest_wait_times():
         )
 
         def compute_results():
-            with get_db_connection() as conn:
-                query = LongestWaitTimesQuery(conn)
+            with get_db_session() as session:
+                query = LongestWaitTimesQuery(session)
                 if entity == 'parks':
                     return query.get_park_rankings(
                         period=period,
@@ -647,8 +650,8 @@ def get_least_reliable():
         )
 
         def compute_results():
-            with get_db_connection() as conn:
-                query = LeastReliableRidesQuery(conn)
+            with get_db_session() as session:
+                query = LeastReliableRidesQuery(session)
                 if entity == 'parks':
                     return query.get_park_rankings(
                         period=period,
@@ -782,7 +785,7 @@ def get_heatmap_data():
         filter_disney_universal = (park_filter == 'disney-universal')
 
         # Get database connection
-        with get_db_connection() as conn:
+        with get_db_session() as session:
             # Determine granularity and call appropriate method
             if period in ['today', 'yesterday']:
                 # Hourly granularity
@@ -790,7 +793,7 @@ def get_heatmap_data():
                 target_date = today if period == 'today' else today - timedelta(days=1)
 
                 if heatmap_type == 'parks':
-                    query = ParkWaitTimeHistoryQuery(conn)
+                    query = ParkWaitTimeHistoryQuery(session)
                     chart_data = query.get_hourly(
                         target_date=target_date,
                         filter_disney_universal=filter_disney_universal,
@@ -799,7 +802,7 @@ def get_heatmap_data():
                     metric = 'avg_wait_time_minutes'
                     metric_unit = 'minutes'
                 elif heatmap_type == 'parks-shame':
-                    query = ParkShameHistoryQuery(conn)
+                    query = ParkShameHistoryQuery(session)
                     chart_data = query.get_hourly(
                         target_date=target_date,
                         filter_disney_universal=filter_disney_universal,
@@ -808,7 +811,7 @@ def get_heatmap_data():
                     metric = 'shame_score'
                     metric_unit = 'points'
                 elif heatmap_type == 'rides-downtime':
-                    query = RideDowntimeHistoryQuery(conn)
+                    query = RideDowntimeHistoryQuery(session)
                     chart_data = query.get_hourly(
                         target_date=target_date,
                         filter_disney_universal=filter_disney_universal,
@@ -817,7 +820,7 @@ def get_heatmap_data():
                     metric = 'downtime_hours'
                     metric_unit = 'hours'
                 else:  # rides-waittimes
-                    query = RideWaitTimeHistoryQuery(conn)
+                    query = RideWaitTimeHistoryQuery(session)
                     chart_data = query.get_hourly(
                         target_date=target_date,
                         filter_disney_universal=filter_disney_universal,
@@ -837,7 +840,7 @@ def get_heatmap_data():
                     days = (end_date - start_date).days + 1
 
                 if heatmap_type == 'parks':
-                    query = ParkWaitTimeHistoryQuery(conn)
+                    query = ParkWaitTimeHistoryQuery(session)
                     chart_data = query.get_daily(
                         days=days,
                         filter_disney_universal=filter_disney_universal,
@@ -846,7 +849,7 @@ def get_heatmap_data():
                     metric = 'avg_wait_time_minutes'
                     metric_unit = 'minutes'
                 elif heatmap_type == 'parks-shame':
-                    query = ParkShameHistoryQuery(conn)
+                    query = ParkShameHistoryQuery(session)
                     chart_data = query.get_daily(
                         days=days,
                         filter_disney_universal=filter_disney_universal,
@@ -855,7 +858,7 @@ def get_heatmap_data():
                     metric = 'shame_score'
                     metric_unit = 'points'
                 elif heatmap_type == 'rides-downtime':
-                    query = RideDowntimeHistoryQuery(conn)
+                    query = RideDowntimeHistoryQuery(session)
                     chart_data = query.get_daily(
                         days=days,
                         filter_disney_universal=filter_disney_universal,
@@ -864,7 +867,7 @@ def get_heatmap_data():
                     metric = 'downtime_hours'
                     metric_unit = 'hours'
                 else:  # rides-waittimes
-                    query = RideWaitTimeHistoryQuery(conn)
+                    query = RideWaitTimeHistoryQuery(session)
                     chart_data = query.get_daily(
                         days=days,
                         filter_disney_universal=filter_disney_universal,

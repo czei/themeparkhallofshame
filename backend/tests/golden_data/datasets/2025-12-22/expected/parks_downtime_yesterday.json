@@ -1,0 +1,112 @@
+{
+  "query_date": "2025-12-22",
+  "period": "yesterday",
+  "generated_at": "2025-12-23T16:34:18.327041+00:00",
+  "parks": [
+    {
+      "park_id": 152,
+      "park_name": "Kennywood",
+      "is_disney": false,
+      "is_universal": false,
+      "shame_score": 35.3
+    },
+    {
+      "park_id": 169,
+      "park_name": "Six Flags Fiesta Texas",
+      "is_disney": false,
+      "is_universal": false,
+      "shame_score": 1.3
+    },
+    {
+      "park_id": 168,
+      "park_name": "Six Flags Discovery Kingdom",
+      "is_disney": false,
+      "is_universal": false,
+      "shame_score": 1.0
+    },
+    {
+      "park_id": 185,
+      "park_name": "Six Flags Over Texas",
+      "is_disney": false,
+      "is_universal": false,
+      "shame_score": 1.0
+    },
+    {
+      "park_id": 194,
+      "park_name": "Disney California Adventure",
+      "is_disney": true,
+      "is_universal": false,
+      "shame_score": 0.5
+    },
+    {
+      "park_id": 182,
+      "park_name": "Six Flags Magic Mountain",
+      "is_disney": false,
+      "is_universal": false,
+      "shame_score": 0.5
+    },
+    {
+      "park_id": 198,
+      "park_name": "Epcot",
+      "is_disney": true,
+      "is_universal": false,
+      "shame_score": 0.5
+    },
+    {
+      "park_id": 143,
+      "park_name": "Dollywood",
+      "is_disney": false,
+      "is_universal": false,
+      "shame_score": 0.4
+    },
+    {
+      "park_id": 197,
+      "park_name": "Disneyland",
+      "is_disney": true,
+      "is_universal": false,
+      "shame_score": 0.3
+    },
+    {
+      "park_id": 188,
+      "park_name": "Epic Universe",
+      "is_disney": false,
+      "is_universal": true,
+      "shame_score": 0.3
+    },
+    {
+      "park_id": 190,
+      "park_name": "Universal Studios At Universal Orlando",
+      "is_disney": false,
+      "is_universal": true,
+      "shame_score": 0.3
+    },
+    {
+      "park_id": 193,
+      "park_name": "Animal Kingdom",
+      "is_disney": true,
+      "is_universal": false,
+      "shame_score": 0.2
+    },
+    {
+      "park_id": 196,
+      "park_name": "Disney Magic Kingdom",
+      "is_disney": true,
+      "is_universal": false,
+      "shame_score": 0.2
+    },
+    {
+      "park_id": 191,
+      "park_name": "Universal Studios Hollywood",
+      "is_disney": false,
+      "is_universal": true,
+      "shame_score": 0.1
+    },
+    {
+      "park_id": 144,
+      "park_name": "Silver Dollar City",
+      "is_disney": false,
+      "is_universal": false,
+      "shame_score": 0.0
+    }
+  ]
+}

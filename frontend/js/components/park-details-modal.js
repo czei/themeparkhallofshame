@@ -322,7 +322,8 @@ class ParkDetailsModal {
      */
     renderTodayShameBreakdown(breakdown, chartData = null, excludedRidesCount = 0) {
         const {
-            rides_with_downtime,
+            rides,  // Array of ride objects (use this for filtering)
+            rides_with_downtime,  // Integer count (for backwards compatibility)
             rides_affected_count,
             total_park_weight,
             total_downtime_hours,
@@ -332,6 +333,9 @@ class ParkDetailsModal {
             breakdown_type
         } = breakdown;
 
+        // Use rides array, falling back to rides_with_downtime if it's an array (legacy)
+        const ridesArray = Array.isArray(rides) ? rides : (Array.isArray(rides_with_downtime) ? rides_with_downtime : []);
+
         // Determine display text based on breakdown_type
         const isYesterday = breakdown_type === 'yesterday';
         const periodTitle = isYesterday ? "Yesterday's" : "Today's";
@@ -340,7 +344,7 @@ class ParkDetailsModal {
         const periodText = isYesterday ? 'yesterday' : 'today';
 
         // If no data available
-        if (!rides_with_downtime) {
+        if (!ridesArray || ridesArray.length === 0) {
             return `
                 <div class="shame-breakdown-section">
                     <div class="shame-header">
@@ -356,9 +360,9 @@ class ParkDetailsModal {
         }
 
         // Group rides by tier
-        const tier1Rides = rides_with_downtime.filter(r => r.tier === 1);
-        const tier2Rides = rides_with_downtime.filter(r => r.tier === 2);
-        const tier3Rides = rides_with_downtime.filter(r => r.tier === 3);
+        const tier1Rides = ridesArray.filter(r => r.tier === 1);
+        const tier2Rides = ridesArray.filter(r => r.tier === 2);
+        const tier3Rides = ridesArray.filter(r => r.tier === 3);
 
         return `
             <div class="shame-breakdown-section today-breakdown">
@@ -413,9 +417,9 @@ class ParkDetailsModal {
 
                 ${chartData ? this.renderShameChart(chartData, isYesterday) : ''}
 
-                ${rides_with_downtime.length > 0 ? `
+                ${ridesArray.length > 0 ? `
                     <div class="rides-down-section">
-                        <h4>Rides With Downtime ${isYesterday ? 'Yesterday' : 'Today'} (${rides_affected_count})</h4>
+                        <h4>Rides With Downtime ${isYesterday ? 'Yesterday' : 'Today'} (${ridesArray.length})</h4>
                         <p class="rides-section-note">All rides that experienced downtime during operating hours ${periodText}, sorted by total downtime.</p>
                         <div class="rides-down-list today-list">
                             ${tier1Rides.length > 0 ? this.renderTodayRidesByTier(tier1Rides, 1, 'Flagship Attractions', '3x weight') : ''}
@@ -462,7 +466,8 @@ class ParkDetailsModal {
      */
     renderHistoricalShameBreakdown(breakdown, excludedRidesCount = 0) {
         const {
-            rides_with_downtime,
+            rides,  // Array of ride objects (use this for filtering)
+            rides_with_downtime,  // Integer count (for backwards compatibility)
             rides_affected_count,
             total_park_weight,
             total_downtime_hours,
@@ -473,12 +478,15 @@ class ParkDetailsModal {
             breakdown_type
         } = breakdown;
 
+        // Use rides array, falling back to rides_with_downtime if it's an array (legacy)
+        const ridesArray = Array.isArray(rides) ? rides : (Array.isArray(rides_with_downtime) ? rides_with_downtime : []);
+
         const isWeekly = breakdown_type === 'last_week';
         const periodBadgeText = isWeekly ? 'LAST WEEK' : 'LAST MONTH';
         const periodBadgeClass = isWeekly ? 'last-week' : 'last-month';
 
         // If no data available
-        if (!rides_with_downtime || rides_with_downtime.length === 0) {
+        if (!ridesArray || ridesArray.length === 0) {
             return `
                 <div class="shame-breakdown-section">
                     <div class="shame-header">
@@ -495,9 +503,9 @@ class ParkDetailsModal {
         }
 
         // Group rides by tier
-        const tier1Rides = rides_with_downtime.filter(r => r.tier === 1);
-        const tier2Rides = rides_with_downtime.filter(r => r.tier === 2);
-        const tier3Rides = rides_with_downtime.filter(r => r.tier === 3);
+        const tier1Rides = ridesArray.filter(r => r.tier === 1);
+        const tier2Rides = ridesArray.filter(r => r.tier === 2);
+        const tier3Rides = ridesArray.filter(r => r.tier === 3);
 
         return `
             <div class="shame-breakdown-section historical-breakdown">
@@ -555,9 +563,9 @@ class ParkDetailsModal {
                     ` : ''}
                 </div>
 
-                ${rides_with_downtime.length > 0 ? `
+                ${ridesArray.length > 0 ? `
                     <div class="rides-down-section">
-                        <h4>Rides With Downtime (${rides_affected_count})</h4>
+                        <h4>Rides With Downtime (${ridesArray.length})</h4>
                         <p class="rides-section-note">All rides that experienced downtime during ${period_label || 'this period'}, sorted by total downtime.</p>
                         <div class="rides-down-list historical-list">
                             ${tier1Rides.length > 0 ? this.renderHistoricalRidesByTier(tier1Rides, 1, 'Flagship Attractions', '3x weight') : ''}

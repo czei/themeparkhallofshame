@@ -1,4934 +1,1298 @@
 """
 Theme Park Downtime Tracker - Statistics Repository
-Provides data access layer for aggregate statistics tables.
+Provides data access layer for aggregate statistics tables using SQLAlchemy ORM.
 
-DEPRECATION NOTICE
-==================
-This file is being phased out in favor of modular query classes.
+MIGRATION NOTE
+==============
+This is a minimal ORM migration. Most query methods have been migrated to
+modular query classes in database/queries/ and are NOT included here.
 
-For new development, use the query classes in database/queries/ instead:
+For new development, use the query classes in database/queries/:
+    - Rankings: queries/rankings/
+    - Trends: queries/trends/
+    - Charts: queries/charts/
+    - Live data: queries/live/
+    - Today data: queries/today/
+    - Yesterday data: queries/yesterday/
 
-    Rankings (tables):
-    - GET /parks/downtime?period=7days → queries/rankings/park_downtime_rankings.py
-    - GET /rides/downtime?period=7days → queries/rankings/ride_downtime_rankings.py
-    - GET /parks/waittimes            → queries/rankings/park_wait_time_rankings.py
-    - GET /rides/waittimes            → queries/rankings/ride_wait_time_rankings.py
-
-    Trends (improving/declining):
-    - GET /trends?category=parks-improving → queries/trends/improving_parks.py
-    - GET /trends?category=parks-declining → queries/trends/declining_parks.py
-    - GET /trends?category=rides-improving → queries/trends/improving_rides.py
-    - GET /trends?category=rides-declining → queries/trends/declining_rides.py
-
-    Charts (time series):
-    - GET /trends/chart-data?type=parks → queries/charts/park_shame_history.py
-    - GET /trends/chart-data?type=rides → queries/charts/ride_downtime_history.py
-
-    Live data (today):
-    - GET /live/status-summary        → queries/live/status_summary.py
-    - GET /parks/downtime?period=today → queries/live/live_park_rankings.py
-    - GET /rides/downtime?period=today → queries/live/live_ride_rankings.py
-
-Methods still in use (not yet migrated):
+Methods Implemented (still in use):
 - get_aggregate_park_stats()
 - get_park_tier_distribution()
 - get_park_operating_sessions()
 - get_park_current_status()
+- get_last_aggregation_status()
+- check_aggregation_health()
 
-Migration Guide:
-1. Import the specific query class you need
-2. Instantiate with connection: query = ParkDowntimeRankingsQuery(conn)
-3. Call the appropriate method: results = query.get_weekly(year, week)
+All other methods have been migrated to modular query classes or are deprecated.
 """
 
 from typing import List, Dict, Any, Optional
-from datetime import date, datetime, timedelta
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from datetime import datetime, date, timedelta
+from sqlalchemy.orm import Session
+from sqlalchemy import func, and_, text, distinct
 
-from utils.metrics import SNAPSHOT_INTERVAL_MINUTES
-
-try:
-    from ...utils.logger import logger
-    from ...utils.timezone import get_today_pacific, get_pacific_day_range_utc
-    from ...utils.sql_helpers import (
-        RideStatusSQL, ParkStatusSQL, DowntimeSQL, UptimeSQL,
-        RideFilterSQL, AffectedRidesSQL, ShameScoreSQL
-    )
-    from ...utils.metrics import (
-        SNAPSHOT_INTERVAL_MINUTES,
-        calculate_shame_score,
-        calculate_instantaneous_shame_score,
-        calculate_downtime_hours
-    )
-except ImportError:
-    from utils.logger import logger
-    from utils.timezone import get_today_pacific, get_pacific_day_range_utc
-    from utils.sql_helpers import (
-        RideStatusSQL, ParkStatusSQL, DowntimeSQL, UptimeSQL,
-        RideFilterSQL, ShameScoreSQL
-    )
-    from utils.metrics import (
-        SNAPSHOT_INTERVAL_MINUTES,
-        calculate_shame_score,
-        calculate_instantaneous_shame_score,
-        calculate_downtime_hours
-    )
+from models.orm_park import Park
+from models.orm_ride import Ride
+from models.orm_stats import ParkDailyStats, ParkHourlyStats, RideDailyStats, RideHourlyStats, ParkLiveRankings
+from models.orm_snapshots import RideStatusSnapshot, ParkActivitySnapshot
+from models.orm_classification import RideClassification
 
 
 class StatsRepository:
     """
-    Repository for statistics queries across all aggregate tables.
+    Repository for statistics queries using SQLAlchemy ORM.
 
-    Implements:
-    - Park statistics queries (daily/weekly/monthly/yearly)
-    - Ride statistics queries (daily/weekly/monthly/yearly)
-    - Trend analysis queries
-    - Operating session queries
+    Note: This is a minimal implementation. Most query methods have been
+    migrated to modular query classes in database/queries/.
     """
 
-    def __init__(self, connection: Connection):
+    def __init__(self, session: Session):
         """
-        Initialize repository with database connection.
+        Initialize repository with SQLAlchemy session.
 
         Args:
-            connection: SQLAlchemy connection object
+            session: SQLAlchemy session object
         """
-        self.conn = connection
+        self.session = session
 
-    # Park Statistics
-
-    def get_park_daily_stats(
+    def get_aggregate_park_stats(
         self,
-        park_id: int,
+        park_id: Optional[int] = None,
+        period: str = "daily",
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        limit: int = 30
+        filter_disney_universal: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Get aggregated statistics for parks over a period.
+
+        Can return stats for a single park (if park_id provided) or summary
+        stats across all parks.
+
+        Args:
+            park_id: Park ID (optional - if None, returns summary stats)
+            period: "daily", "weekly", "monthly", "today", "yesterday", etc.
+            start_date: Start date (YYYY-MM-DD) or None
+            end_date: End date (YYYY-MM-DD) or None
+            filter_disney_universal: If True, filter to Disney/Universal parks only
+
+        Returns:
+            Dictionary with aggregated statistics
+        """
+        # If no park_id, return summary stats across all parks
+        if park_id is None:
+            return self._get_summary_stats(period, filter_disney_universal)
+
+        park = self.session.query(Park).filter(Park.park_id == park_id).first()
+        if not park:
+            return {}
+
+        # Determine which stats table to query
+        if period == "daily":
+            stats_model = ParkDailyStats
+            date_field = ParkDailyStats.stat_date
+        else:
+            # Weekly/monthly aggregation not implemented yet
+            raise NotImplementedError(f"Period '{period}' aggregation not yet implemented in ORM")
+
+        # Build query with optional date filtering
+        query = self.session.query(
+            func.sum(stats_model.total_downtime_hours).label('total_downtime'),
+            func.avg(stats_model.avg_uptime_percentage).label('avg_uptime'),
+            func.sum(stats_model.rides_with_downtime).label('total_affected_rides'),
+            func.count(distinct(date_field)).label('days_tracked')
+        ).filter(stats_model.park_id == park_id)
+
+        if start_date:
+            query = query.filter(date_field >= start_date)
+        if end_date:
+            query = query.filter(date_field <= end_date)
+
+        result = query.first()
+
+        if not result:
+            return {}
+
+        return {
+            'park_id': park_id,
+            'park_name': park.name,
+            'period': period,
+            'total_downtime_hours': float(result.total_downtime or 0),
+            'avg_uptime_percentage': float(result.avg_uptime or 0),
+            'total_affected_rides': int(result.total_affected_rides or 0),
+            'days_tracked': int(result.days_tracked or 0)
+        }
+
+    def _get_summary_stats(
+        self,
+        period: str,
+        filter_disney_universal: bool
+    ) -> Dict[str, Any]:
+        """
+        Get summary stats from pre-aggregated tables based on period.
+
+        Uses pure ORM queries - no raw SQL.
+
+        Each period uses a single efficient query on already-aggregated tables:
+        - LIVE: ParkLiveRankings
+        - TODAY: ParkHourlyStats (last 24 hours)
+        - YESTERDAY: ParkDailyStats (yesterday)
+        - LAST_WEEK: ParkDailyStats (last 7 days)
+        - LAST_MONTH: ParkDailyStats (last 30 days)
+        """
+        if period == 'live':
+            return self._get_live_summary_stats(filter_disney_universal)
+        elif period == 'today':
+            return self._get_today_summary_stats(filter_disney_universal)
+        elif period == 'yesterday':
+            return self._get_daily_summary_stats(1, filter_disney_universal, 'yesterday')
+        elif period == 'last_week':
+            return self._get_daily_summary_stats(7, filter_disney_universal, 'last_week')
+        elif period == 'last_month':
+            return self._get_daily_summary_stats(30, filter_disney_universal, 'last_month')
+        else:
+            # Default to live
+            return self._get_live_summary_stats(filter_disney_universal)
+
+    def _get_live_summary_stats(self, filter_disney_universal: bool) -> Dict[str, Any]:
+        """Get summary stats from ParkLiveRankings using ORM."""
+        query = self.session.query(
+            func.count(ParkLiveRankings.park_id).label('total_parks'),
+            func.coalesce(func.sum(ParkLiveRankings.total_rides), 0).label('total_rides'),
+            func.coalesce(func.sum(ParkLiveRankings.rides_down), 0).label('rides_down'),
+            func.coalesce(func.sum(ParkLiveRankings.total_downtime_hours), 0).label('total_downtime_hours'),
+            func.coalesce(
+                func.avg(100 - (ParkLiveRankings.rides_down * 100.0 /
+                         func.nullif(ParkLiveRankings.total_rides, 0))),
+                100
+            ).label('avg_uptime')
+        )
+
+        if filter_disney_universal:
+            query = query.filter(
+                (ParkLiveRankings.is_disney == True) | (ParkLiveRankings.is_universal == True)
+            )
+
+        result = query.first()
+        return self._format_summary_result(result, 'live', filter_disney_universal)
+
+    def _get_today_summary_stats(self, filter_disney_universal: bool) -> Dict[str, Any]:
+        """Get summary stats from ParkHourlyStats for last 24 hours using ORM."""
+        cutoff = datetime.utcnow() - timedelta(hours=24)
+
+        query = self.session.query(
+            func.count(distinct(ParkHourlyStats.park_id)).label('total_parks'),
+            func.coalesce(
+                func.sum(ParkHourlyStats.rides_operating + ParkHourlyStats.rides_down), 0
+            ).label('total_rides'),
+            func.coalesce(func.sum(ParkHourlyStats.rides_down), 0).label('rides_down'),
+            func.coalesce(func.sum(ParkHourlyStats.total_downtime_hours), 0).label('total_downtime_hours'),
+            func.coalesce(
+                func.avg(100 - (ParkHourlyStats.rides_down * 100.0 /
+                         func.nullif(ParkHourlyStats.rides_operating + ParkHourlyStats.rides_down, 0))),
+                100
+            ).label('avg_uptime')
+        ).filter(
+            ParkHourlyStats.hour_start_utc >= cutoff,
+            ParkHourlyStats.park_was_open == True
+        )
+
+        if filter_disney_universal:
+            query = query.join(Park, ParkHourlyStats.park_id == Park.park_id).filter(
+                (Park.is_disney == True) | (Park.is_universal == True)
+            )
+
+        result = query.first()
+        return self._format_summary_result(result, 'today', filter_disney_universal)
+
+    def _get_daily_summary_stats(
+        self,
+        days: int,
+        filter_disney_universal: bool,
+        period_name: str
+    ) -> Dict[str, Any]:
+        """Get summary stats from ParkDailyStats for specified period using ORM.
+
+        Uses calendar-based date ranges to match the rankings queries:
+        - yesterday: Pacific yesterday
+        - last_week: Previous calendar week (Sun-Sat)
+        - last_month: Previous calendar month
+        """
+        from utils.timezone import (
+            get_yesterday_date_range,
+            get_last_week_date_range,
+            get_last_month_date_range
+        )
+
+        if period_name == 'yesterday':
+            start_date, end_date, _ = get_yesterday_date_range()
+        elif period_name == 'last_week':
+            start_date, end_date, _ = get_last_week_date_range()
+        elif period_name == 'last_month':
+            start_date, end_date, _ = get_last_month_date_range()
+        else:
+            # Fallback to simple days calculation
+            today = date.today()
+            start_date = today - timedelta(days=days)
+            end_date = today
+
+        # Filter by date range
+        date_filter = and_(
+            ParkDailyStats.stat_date >= start_date,
+            ParkDailyStats.stat_date <= end_date
+        )
+
+        query = self.session.query(
+            func.count(distinct(ParkDailyStats.park_id)).label('total_parks'),
+            func.coalesce(func.sum(ParkDailyStats.total_rides_tracked), 0).label('total_rides'),
+            func.coalesce(func.sum(ParkDailyStats.rides_with_downtime), 0).label('rides_down'),
+            func.coalesce(func.sum(ParkDailyStats.total_downtime_hours), 0).label('total_downtime_hours'),
+            func.coalesce(func.avg(ParkDailyStats.avg_uptime_percentage), 100).label('avg_uptime')
+        ).filter(date_filter)
+
+        if filter_disney_universal:
+            query = query.join(Park, ParkDailyStats.park_id == Park.park_id).filter(
+                (Park.is_disney == True) | (Park.is_universal == True)
+            )
+
+        result = query.first()
+        return self._format_summary_result(result, period_name, filter_disney_universal)
+
+    def _format_summary_result(
+        self,
+        result,
+        period: str,
+        filter_disney_universal: bool
+    ) -> Dict[str, Any]:
+        """Format ORM query result into standard summary stats dict.
+
+        Note: Field names must match what frontend expects:
+        - total_parks_tracked (not total_parks)
+        """
+        if not result or result.total_parks is None:
+            return {
+                'period': period,
+                'filter_disney_universal': filter_disney_universal,
+                'total_parks': 0,
+                'total_parks_tracked': 0,  # Frontend expects this field
+                'rides_operating': 0,
+                'rides_down': 0,
+                'rides_closed': 0,
+                'rides_refurbishment': 0,
+                'total_downtime_hours': 0.0,
+                'avg_uptime_percentage': 100.0
+            }
+
+        total_rides = int(result.total_rides or 0)
+        rides_down = int(result.rides_down or 0)
+        total_parks = int(result.total_parks or 0)
+
+        return {
+            'period': period,
+            'filter_disney_universal': filter_disney_universal,
+            'total_parks': total_parks,
+            'total_parks_tracked': total_parks,  # Frontend expects this field
+            'rides_operating': total_rides - rides_down,
+            'rides_down': rides_down,
+            'rides_closed': 0,
+            'rides_refurbishment': 0,
+            'total_downtime_hours': float(result.total_downtime_hours or 0),
+            'avg_uptime_percentage': round(float(result.avg_uptime or 100), 1)
+        }
+
+    def get_hourly_stats(
+        self,
+        start_hour: datetime,
+        end_hour: datetime,
+        park_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
-        Get daily statistics for a specific park.
+        Get hourly statistics from park_hourly_stats table.
+
+        Args:
+            start_hour: Start datetime (UTC)
+            end_hour: End datetime (UTC)
+            park_id: Optional park ID to filter by
+
+        Returns:
+            List of hourly stats dictionaries with:
+            - park_id
+            - hour_start_utc
+            - avg_wait_time_minutes
+            - snapshot_count
+            - shame_score
+        """
+        query = (
+            self.session.query(ParkHourlyStats)
+            .filter(
+                and_(
+                    ParkHourlyStats.hour_start_utc >= start_hour,
+                    ParkHourlyStats.hour_start_utc < end_hour,
+                    ParkHourlyStats.park_was_open.is_(True)
+                )
+            )
+        )
+
+        if park_id:
+            query = query.filter(ParkHourlyStats.park_id == park_id)
+
+        results = query.all()
+
+        return [
+            {
+                'park_id': row.park_id,
+                'hour_start_utc': row.hour_start_utc,
+                'avg_wait_time_minutes': float(row.avg_wait_time_minutes) if row.avg_wait_time_minutes else None,
+                'snapshot_count': row.snapshot_count,
+                'shame_score': float(row.shame_score) if row.shame_score else None,
+                'rides_down': row.rides_down,
+                'rides_operating': row.rides_operating,
+                'total_downtime_hours': float(row.total_downtime_hours) if row.total_downtime_hours else None,
+                'weighted_downtime_hours': float(row.weighted_downtime_hours) if row.weighted_downtime_hours else None,
+            }
+            for row in results
+        ]
+
+    def get_park_tier_distribution(self, park_id: int) -> Dict[str, Any]:
+        """
+        Get distribution of rides by tier for a park.
 
         Args:
             park_id: Park ID
-            start_date: Start date (YYYY-MM-DD) or None for 30 days ago
-            end_date: End date (YYYY-MM-DD) or None for today
-            limit: Maximum number of results
 
         Returns:
-            List of daily statistics dictionaries
+            Dictionary with tier distribution
         """
-        query = text("""
-            SELECT
-                stat_date,
-                park_id,
-                total_downtime_hours,
-                avg_uptime_percentage,
-                rides_with_downtime,
-                total_rides_tracked,
-                operating_hours_minutes
-            FROM park_daily_stats
-            WHERE park_id = :park_id
-                AND stat_date >= COALESCE(:start_date, DATE_SUB(CURDATE(), INTERVAL 30 DAY))
-                AND stat_date <= COALESCE(:end_date, CURDATE())
-            ORDER BY stat_date DESC
-            LIMIT :limit
-        """)
+        park = self.session.query(Park).filter(Park.park_id == park_id).first()
+        if not park:
+            return {}
 
-        result = self.conn.execute(query, {
-            "park_id": park_id,
-            "start_date": start_date,
-            "end_date": end_date,
-            "limit": limit
-        })
-        return [dict(row._mapping) for row in result]
+        # Count rides by tier
+        tier_counts = (
+            self.session.query(
+                Ride.tier,
+                func.count(Ride.ride_id).label('count')
+            )
+            .filter(
+                and_(
+                    Ride.park_id == park_id,
+                    Ride.is_active.is_(True)
+                )
+            )
+            .group_by(Ride.tier)
+            .all()
+        )
 
-    def get_park_weekly_stats(
-        self,
-        park_id: int,
-        year: Optional[int] = None,
-        limit: int = 12
-    ) -> List[Dict[str, Any]]:
-        """
-        Get weekly statistics for a specific park.
+        distribution = {
+            'park_id': park_id,
+            'park_name': park.name,
+            'tier_1_count': 0,
+            'tier_2_count': 0,
+            'tier_3_count': 0,
+            'unclassified_count': 0,
+            'total_rides': 0
+        }
 
-        Args:
-            park_id: Park ID
-            year: Year or None for current year
-            limit: Maximum number of results
+        for tier, count in tier_counts:
+            if tier == 1:
+                distribution['tier_1_count'] = count
+            elif tier == 2:
+                distribution['tier_2_count'] = count
+            elif tier == 3:
+                distribution['tier_3_count'] = count
+            else:
+                distribution['unclassified_count'] = count
 
-        Returns:
-            List of weekly statistics dictionaries
-        """
-        query = text("""
-            SELECT
-                year,
-                week_number,
-                park_id,
-                total_downtime_hours,
-                avg_uptime_percentage,
-                rides_with_downtime,
-                total_rides_tracked,
-                trend_vs_previous_week
-            FROM park_weekly_stats
-            WHERE park_id = :park_id
-                AND year = COALESCE(:year, YEAR(CURDATE()))
-            ORDER BY year DESC, week_number DESC
-            LIMIT :limit
-        """)
+            distribution['total_rides'] += count
 
-        result = self.conn.execute(query, {
-            "park_id": park_id,
-            "year": year,
-            "limit": limit
-        })
-        return [dict(row._mapping) for row in result]
-
-    def get_park_monthly_stats(
-        self,
-        park_id: int,
-        year: Optional[int] = None,
-        limit: int = 12
-    ) -> List[Dict[str, Any]]:
-        """
-        Get monthly statistics for a specific park.
-
-        Args:
-            park_id: Park ID
-            year: Year or None for current year
-            limit: Maximum number of results
-
-        Returns:
-            List of monthly statistics dictionaries
-        """
-        query = text("""
-            SELECT
-                year,
-                month,
-                park_id,
-                total_downtime_hours,
-                avg_uptime_percentage,
-                rides_with_downtime,
-                total_rides_tracked,
-                trend_vs_previous_month
-            FROM park_monthly_stats
-            WHERE park_id = :park_id
-                AND year = COALESCE(:year, YEAR(CURDATE()))
-            ORDER BY year DESC, month DESC
-            LIMIT :limit
-        """)
-
-        result = self.conn.execute(query, {
-            "park_id": park_id,
-            "year": year,
-            "limit": limit
-        })
-        return [dict(row._mapping) for row in result]
-
-    # Ride Statistics
-
-    def get_ride_daily_stats(
-        self,
-        ride_id: int,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        limit: int = 30
-    ) -> List[Dict[str, Any]]:
-        """
-        Get daily statistics for a specific ride.
-
-        Args:
-            ride_id: Ride ID
-            start_date: Start date (YYYY-MM-DD) or None for 30 days ago
-            end_date: End date (YYYY-MM-DD) or None for today
-            limit: Maximum number of results
-
-        Returns:
-            List of daily statistics dictionaries
-        """
-        query = text("""
-            SELECT
-                stat_date,
-                ride_id,
-                downtime_minutes,
-                uptime_percentage,
-                status_changes,
-                avg_wait_time,
-                peak_wait_time,
-                operating_hours_minutes
-            FROM ride_daily_stats
-            WHERE ride_id = :ride_id
-                AND stat_date >= COALESCE(:start_date, DATE_SUB(CURDATE(), INTERVAL 30 DAY))
-                AND stat_date <= COALESCE(:end_date, CURDATE())
-            ORDER BY stat_date DESC
-            LIMIT :limit
-        """)
-
-        result = self.conn.execute(query, {
-            "ride_id": ride_id,
-            "start_date": start_date,
-            "end_date": end_date,
-            "limit": limit
-        })
-        return [dict(row._mapping) for row in result]
-
-    def get_ride_weekly_stats(
-        self,
-        ride_id: int,
-        year: Optional[int] = None,
-        limit: int = 12
-    ) -> List[Dict[str, Any]]:
-        """
-        Get weekly statistics for a specific ride.
-
-        Args:
-            ride_id: Ride ID
-            year: Year or None for current year
-            limit: Maximum number of results
-
-        Returns:
-            List of weekly statistics dictionaries
-        """
-        query = text("""
-            SELECT
-                year,
-                week_number,
-                ride_id,
-                downtime_minutes,
-                uptime_percentage,
-                status_changes,
-                avg_wait_time,
-                peak_wait_time,
-                trend_vs_previous_week
-            FROM ride_weekly_stats
-            WHERE ride_id = :ride_id
-                AND year = COALESCE(:year, YEAR(CURDATE()))
-            ORDER BY year DESC, week_number DESC
-            LIMIT :limit
-        """)
-
-        result = self.conn.execute(query, {
-            "ride_id": ride_id,
-            "year": year,
-            "limit": limit
-        })
-        return [dict(row._mapping) for row in result]
-
-    # Operating Sessions
+        return distribution
 
     def get_park_operating_sessions(
         self,
         park_id: int,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        limit: int = 30
+        limit: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
-        Get operating sessions for a specific park.
+        Get park operating sessions (when park was open).
 
         Args:
             park_id: Park ID
             start_date: Start date (YYYY-MM-DD) or None for 30 days ago
             end_date: End date (YYYY-MM-DD) or None for today
-            limit: Maximum number of results
+            limit: Maximum number of sessions to return (optional)
 
         Returns:
             List of operating session dictionaries
         """
-        query = text("""
-            SELECT
-                session_id,
-                park_id,
-                session_date,
-                session_start_utc,
-                session_end_utc,
-                operating_minutes
-            FROM park_operating_sessions
-            WHERE park_id = :park_id
-                AND session_date >= COALESCE(:start_date, DATE_SUB(CURDATE(), INTERVAL 30 DAY))
-                AND session_date <= COALESCE(:end_date, CURDATE())
-            ORDER BY session_date DESC
-            LIMIT :limit
-        """)
-
-        result = self.conn.execute(query, {
-            "park_id": park_id,
-            "start_date": start_date,
-            "end_date": end_date,
-            "limit": limit
-        })
-        return [dict(row._mapping) for row in result]
-
-    # Trend Analysis
-
-    def get_park_downtime_trend(
-        self,
-        park_id: int,
-        period: str = "daily",
-        days: int = 30
-    ) -> List[Dict[str, Any]]:
-        """
-        Get downtime trend for a park over time.
-
-        Args:
-            park_id: Park ID
-            period: "daily" or "weekly"
-            days: Number of days to analyze
-
-        Returns:
-            List of trend data points
-        """
-        if period == "daily":
-            query = text("""
-                SELECT
-                    stat_date AS period_key,
-                    total_downtime_hours,
-                    avg_uptime_percentage,
-                    rides_with_downtime
-                FROM park_daily_stats
-                WHERE park_id = :park_id
-                    AND stat_date >= DATE_SUB(CURDATE(), INTERVAL :days DAY)
-                ORDER BY stat_date ASC
-            """)
-        else:  # weekly
-            query = text("""
-                SELECT
-                    CONCAT(year, '-W', LPAD(week_number, 2, '0')) AS period_key,
-                    total_downtime_hours,
-                    avg_uptime_percentage,
-                    rides_with_downtime
-                FROM park_weekly_stats
-                WHERE park_id = :park_id
-                    AND CONCAT(year, '-', LPAD(week_number, 2, '0')) >=
-                        DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL :days DAY), '%Y-%U')
-                ORDER BY year ASC, week_number ASC
-            """)
-
-        result = self.conn.execute(query, {"park_id": park_id, "days": days})
-        return [dict(row._mapping) for row in result]
-
-    def get_ride_downtime_trend(
-        self,
-        ride_id: int,
-        period: str = "daily",
-        days: int = 30
-    ) -> List[Dict[str, Any]]:
-        """
-        Get downtime trend for a ride over time.
-
-        Args:
-            ride_id: Ride ID
-            period: "daily" or "weekly"
-            days: Number of days to analyze
-
-        Returns:
-            List of trend data points
-        """
-        if period == "daily":
-            query = text("""
-                SELECT
-                    stat_date AS period_key,
-                    downtime_minutes,
-                    uptime_percentage,
-                    downtime_event_count,
-                    avg_wait_time
-                FROM ride_daily_stats
-                WHERE ride_id = :ride_id
-                    AND stat_date >= DATE_SUB(CURDATE(), INTERVAL :days DAY)
-                ORDER BY stat_date ASC
-            """)
-        else:  # weekly
-            query = text("""
-                SELECT
-                    CONCAT(year, '-W', LPAD(week_number, 2, '0')) AS period_key,
-                    downtime_minutes,
-                    uptime_percentage,
-                    downtime_event_count,
-                    avg_wait_time
-                FROM ride_weekly_stats
-                WHERE ride_id = :ride_id
-                    AND CONCAT(year, '-', LPAD(week_number, 2, '0')) >=
-                        DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL :days DAY), '%Y-%U')
-                ORDER BY year ASC, week_number ASC
-            """)
-
-        result = self.conn.execute(query, {"ride_id": ride_id, "days": days})
-        return [dict(row._mapping) for row in result]
-
-    # Comparative Analysis
-
-    def get_park_comparison(
-        self,
-        park_ids: List[int],
-        period: str = "weekly",
-        stat_date: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Compare statistics across multiple parks.
-
-        Args:
-            park_ids: List of park IDs to compare
-            period: "daily", "weekly", "monthly", or "yearly"
-            stat_date: Date string (YYYY-MM-DD) or None for current period
-
-        Returns:
-            List of park comparison data
-        """
-        if period == "daily":
-            query = text("""
-                SELECT
-                    p.park_id,
-                    p.name AS park_name,
-                    pds.total_downtime_hours,
-                    pds.avg_uptime_percentage,
-                    pds.rides_with_downtime,
-                    pds.total_rides_tracked
-                FROM parks p
-                INNER JOIN park_daily_stats pds ON p.park_id = pds.park_id
-                WHERE p.park_id IN :park_ids
-                    AND pds.stat_date = COALESCE(:stat_date, CURDATE())
-                ORDER BY pds.total_downtime_hours DESC
-            """)
-        elif period == "weekly":
-            query = text("""
-                SELECT
-                    p.park_id,
-                    p.name AS park_name,
-                    pws.total_downtime_hours,
-                    pws.avg_uptime_percentage,
-                    pws.rides_with_downtime,
-                    pws.total_rides_tracked
-                FROM parks p
-                INNER JOIN park_weekly_stats pws ON p.park_id = pws.park_id
-                WHERE p.park_id IN :park_ids
-                    AND pws.year = YEAR(COALESCE(:stat_date, CURDATE()))
-                    AND pws.week_number = WEEK(COALESCE(:stat_date, CURDATE()), 3)
-                ORDER BY pws.total_downtime_hours DESC
-            """)
-        elif period == "monthly":
-            query = text("""
-                SELECT
-                    p.park_id,
-                    p.name AS park_name,
-                    pms.total_downtime_hours,
-                    pms.avg_uptime_percentage,
-                    pms.rides_with_downtime,
-                    pms.total_rides_tracked
-                FROM parks p
-                INNER JOIN park_monthly_stats pms ON p.park_id = pms.park_id
-                WHERE p.park_id IN :park_ids
-                    AND pms.year = YEAR(COALESCE(:stat_date, CURDATE()))
-                    AND pms.month = MONTH(COALESCE(:stat_date, CURDATE()))
-                ORDER BY pms.total_downtime_hours DESC
-            """)
-        else:  # yearly
-            query = text("""
-                SELECT
-                    p.park_id,
-                    p.name AS park_name,
-                    pys.total_downtime_hours,
-                    pys.avg_uptime_percentage,
-                    pys.rides_with_downtime,
-                    pys.total_rides_tracked
-                FROM parks p
-                INNER JOIN park_yearly_stats pys ON p.park_id = pys.park_id
-                WHERE p.park_id IN :park_ids
-                    AND pys.year = YEAR(COALESCE(:stat_date, CURDATE()))
-                ORDER BY pys.total_downtime_hours DESC
-            """)
-
-        result = self.conn.execute(query, {
-            "park_ids": tuple(park_ids),
-            "stat_date": stat_date
-        })
-        return [dict(row._mapping) for row in result]
-
-    # Aggregation Status
-
-    def get_last_aggregation_status(
-        self,
-        aggregation_type: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Get status of most recent aggregations.
-
-        Args:
-            aggregation_type: "daily", "weekly", "monthly", "yearly", or None for all
-
-        Returns:
-            List of aggregation log entries
-        """
-        type_filter = "AND aggregation_type = :aggregation_type" if aggregation_type else ""
-
-        query = text(f"""
-            SELECT
-                log_id,
-                aggregation_type,
-                aggregated_from_ts,
-                aggregated_until_ts,
-                status,
-                records_aggregated,
-                error_message,
-                created_at
-            FROM aggregation_log
-            WHERE 1=1 {type_filter}
-            ORDER BY created_at DESC
-            LIMIT 10
-        """)
-
-        params = {}
-        if aggregation_type:
-            params["aggregation_type"] = aggregation_type
-
-        result = self.conn.execute(query, params)
-        return [dict(row._mapping) for row in result]
-
-    def check_aggregation_health(self) -> Dict[str, Any]:
-        """
-        Check aggregation health status.
-
-        Returns:
-            Dictionary with health metrics
-        """
-        query = text("""
-            SELECT
-                aggregation_type,
-                MAX(aggregated_until_ts) AS last_aggregated_until,
-                SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success_count,
-                SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_count,
-                MAX(created_at) AS last_run_at
-            FROM aggregation_log
-            WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-            GROUP BY aggregation_type
-        """)
-
-        result = self.conn.execute(query)
-        return {row.aggregation_type: dict(row._mapping) for row in result}
-
-    # Park Rankings (User Story 1)
-
-    def get_park_daily_rankings(
-        self,
-        stat_date,
-        filter_disney_universal: bool = False,
-        limit: int = 50,
-        weighted: bool = False
-    ) -> List[Dict[str, Any]]:
-        """
-        Get park rankings by downtime for a specific day.
-
-        Args:
-            stat_date: Date to rank (date object)
-            filter_disney_universal: Filter to only Disney/Universal parks
-            limit: Maximum results
-            weighted: Use weighted scoring by ride tier
-
-        Returns:
-            List of park ranking dictionaries
-        """
-        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-
-        if weighted:
-            # Weighted ranking query (Query 1b from data-model.md)
-            query = text(f"""
-                WITH park_weights AS (
-                    SELECT
-                        p.park_id,
-                        SUM(IFNULL(rc.tier_weight, 2)) AS total_park_weight,
-                        COUNT(r.ride_id) AS total_rides
-                    FROM parks p
-                    INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
-                        AND r.category = 'ATTRACTION'  -- Only include mechanical rides
-                    LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                    WHERE p.is_active = TRUE
-                        {disney_filter}
-                    GROUP BY p.park_id
-                ),
-                weighted_downtime AS (
-                    SELECT
-                        p.park_id,
-                        SUM(rds.downtime_minutes / 60.0 * IFNULL(rc.tier_weight, 2)) AS total_weighted_downtime_hours
-                    FROM parks p
-                    INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
-                        AND r.category = 'ATTRACTION'  -- Only include mechanical rides
-                    LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                    INNER JOIN ride_daily_stats rds ON r.ride_id = rds.ride_id
-                    WHERE rds.stat_date = :stat_date
-                        AND p.is_active = TRUE
-                        {disney_filter}
-                    GROUP BY p.park_id
-                )
-                SELECT
-                    p.park_id,
-                    p.queue_times_id,
-                    p.name AS park_name,
-                    CONCAT(p.city, ', ', p.state_province) AS location,
-                    wd.total_weighted_downtime_hours AS total_downtime_hours,
-                    ROUND((wd.total_weighted_downtime_hours / pw.total_park_weight) * 10, 1) AS shame_score,
-                    pds.rides_with_downtime AS affected_rides_count,
-                    pds.avg_uptime_percentage AS uptime_percentage,
-                    ROUND(
-                        ((wd.total_weighted_downtime_hours - IFNULL(prev_wd.total_weighted_downtime_hours, 0)) /
-                         NULLIF(prev_wd.total_weighted_downtime_hours, 0)) * 100,
-                        2
-                    ) AS trend_percentage
-                FROM parks p
-                INNER JOIN park_weights pw ON p.park_id = pw.park_id
-                INNER JOIN weighted_downtime wd ON p.park_id = wd.park_id
-                INNER JOIN park_daily_stats pds ON p.park_id = pds.park_id AND pds.stat_date = :stat_date
-                LEFT JOIN (
-                    SELECT
-                        p2.park_id,
-                        SUM(rds2.downtime_minutes / 60.0 * IFNULL(rc2.tier_weight, 2)) AS total_weighted_downtime_hours
-                    FROM parks p2
-                    INNER JOIN rides r2 ON p2.park_id = r2.park_id AND r2.is_active = TRUE
-                        AND r2.category = 'ATTRACTION'  -- Only include mechanical rides
-                    LEFT JOIN ride_classifications rc2 ON r2.ride_id = rc2.ride_id
-                    INNER JOIN ride_daily_stats rds2 ON r2.ride_id = rds2.ride_id
-                    WHERE rds2.stat_date = DATE_SUB(:stat_date, INTERVAL 1 DAY)
-                        AND p2.is_active = TRUE
-                    GROUP BY p2.park_id
-                ) prev_wd ON p.park_id = prev_wd.park_id
-                WHERE p.is_active = TRUE
-                    AND wd.total_weighted_downtime_hours > 0  -- Only show parks with actual downtime (Hall of Shame)
-                ORDER BY wd.total_weighted_downtime_hours DESC
-                LIMIT :limit
-            """)
-        else:
-            # Standard ranking query (Query 1 from data-model.md)
-            query = text(f"""
-                SELECT
-                    p.park_id,
-                    p.queue_times_id,
-                    p.name AS park_name,
-                    CONCAT(p.city, ', ', p.state_province) AS location,
-                    pds.total_downtime_hours,
-                    pds.rides_with_downtime AS affected_rides_count,
-                    pds.avg_uptime_percentage AS uptime_percentage,
-                    prev.total_downtime_hours AS prev_day_downtime,
-                    ROUND(
-                        ((pds.total_downtime_hours - IFNULL(prev.total_downtime_hours, 0)) /
-                         NULLIF(prev.total_downtime_hours, 0)) * 100,
-                        2
-                    ) AS trend_percentage
-                FROM parks p
-                INNER JOIN park_daily_stats pds ON p.park_id = pds.park_id
-                LEFT JOIN park_daily_stats prev ON p.park_id = prev.park_id
-                    AND prev.stat_date = DATE_SUB(pds.stat_date, INTERVAL 1 DAY)
-                WHERE pds.stat_date = :stat_date
-                    AND p.is_active = TRUE
-                    AND pds.operating_hours_minutes > 0  -- Exclude closed parks
-                    AND pds.total_downtime_hours > 0  -- Only show parks with actual downtime (Hall of Shame)
-                    {disney_filter}
-                ORDER BY pds.total_downtime_hours DESC
-                LIMIT :limit
-            """)
-
-        result = self.conn.execute(query, {
-            "stat_date": stat_date,
-            "limit": limit
-        })
-        return [dict(row._mapping) for row in result]
-
-    def get_park_weekly_rankings(
-        self,
-        year: int,
-        week_number: int,
-        filter_disney_universal: bool = False,
-        limit: int = 50,
-        weighted: bool = False
-    ) -> List[Dict[str, Any]]:
-        """
-        Get park rankings by downtime for a specific week.
-        Aggregates from daily stats instead of relying on weekly_stats table.
-
-        Args:
-            year: Year
-            week_number: ISO week number
-            filter_disney_universal: Filter to only Disney/Universal parks
-            limit: Maximum results
-            weighted: Use weighted scoring by ride tier
-
-        Returns:
-            List of park ranking dictionaries
-        """
-        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-
-        if weighted:
-            query = text(f"""
-                WITH park_weights AS (
-                    SELECT
-                        p.park_id,
-                        SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
-                    FROM parks p
-                    INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
-                        AND r.category = 'ATTRACTION'
-                    LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                    WHERE p.is_active = TRUE
-                        {disney_filter}
-                    GROUP BY p.park_id
-                ),
-                weighted_downtime AS (
-                    SELECT
-                        r.park_id,
-                        SUM(rws.downtime_minutes / 60.0 * COALESCE(rc.tier_weight, 2)) AS total_weighted_downtime_hours
-                    FROM ride_weekly_stats rws
-                    INNER JOIN rides r ON rws.ride_id = r.ride_id
-                    INNER JOIN parks p ON r.park_id = p.park_id
-                    LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                    WHERE rws.year = :year
-                        AND rws.week_number = :week_number
-                        AND p.is_active = TRUE
-                        {disney_filter}
-                    GROUP BY r.park_id
-                )
-                SELECT
-                    p.park_id,
-                    p.queue_times_id,
-                    p.name AS park_name,
-                    CONCAT(p.city, ', ', p.state_province) AS location,
-                    pws.total_downtime_hours,
-                    ROUND((wd.total_weighted_downtime_hours / pw.total_park_weight) * 10, 1) AS shame_score,
-                    pws.rides_with_downtime AS affected_rides_count,
-                    pws.avg_uptime_percentage AS uptime_percentage,
-                    pws.trend_vs_previous_week AS trend_percentage
-                FROM parks p
-                INNER JOIN park_weekly_stats pws ON p.park_id = pws.park_id
-                LEFT JOIN park_weights pw ON p.park_id = pw.park_id
-                LEFT JOIN weighted_downtime wd ON p.park_id = wd.park_id
-                WHERE pws.year = :year
-                    AND pws.week_number = :week_number
-                    AND p.is_active = TRUE
-                    {disney_filter}
-                ORDER BY shame_score DESC
-                LIMIT :limit
-            """)
-
-            params = {
-                "year": year,
-                "week_number": week_number,
-                "limit": limit
-            }
-        else:
-            query = text(f"""
-                SELECT
-                    p.park_id,
-                    p.queue_times_id,
-                    p.name AS park_name,
-                    CONCAT(p.city, ', ', p.state_province) AS location,
-                    pws.total_downtime_hours,
-                    pws.rides_with_downtime AS affected_rides_count,
-                    pws.avg_uptime_percentage AS uptime_percentage,
-                    pws.trend_vs_previous_week AS trend_percentage
-                FROM parks p
-                INNER JOIN park_weekly_stats pws ON p.park_id = pws.park_id
-                WHERE pws.year = :year
-                    AND pws.week_number = :week_number
-                    AND p.is_active = TRUE
-                    {disney_filter}
-                ORDER BY pws.total_downtime_hours DESC
-                LIMIT :limit
-            """)
-            params = {
-                "year": year,
-                "week_number": week_number,
-                "limit": limit
-            }
-
-        result = self.conn.execute(query, params)
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    def get_park_monthly_rankings(
-        self,
-        year: int,
-        month: int,
-        filter_disney_universal: bool = False,
-        limit: int = 50,
-        weighted: bool = False
-    ) -> List[Dict[str, Any]]:
-        """
-        Get park rankings by downtime for a specific month.
-
-        Args:
-            year: Year
-            month: Month (1-12)
-            filter_disney_universal: Filter to only Disney/Universal parks
-            limit: Maximum results
-            weighted: Use weighted scoring by ride tier
-
-        Returns:
-            List of park ranking dictionaries
-        """
-        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-
-        # Include shame_score calculation using tier weights from ride_daily_stats
-        query = text(f"""
-            WITH park_weights AS (
-                -- Calculate total weight for each park based on tier classifications
-                SELECT
-                    p.park_id,
-                    SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
-                FROM parks p
-                INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE p.is_active = TRUE
-                    {disney_filter}
-                GROUP BY p.park_id
-            ),
-            weighted_downtime AS (
-                -- Calculate weighted downtime from ride daily stats for the month
-                SELECT
-                    p.park_id,
-                    SUM(rds.downtime_minutes / 60.0 * COALESCE(rc.tier_weight, 2)) AS total_weighted_downtime_hours
-                FROM parks p
-                INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                INNER JOIN ride_daily_stats rds ON r.ride_id = rds.ride_id
-                WHERE YEAR(rds.stat_date) = :year AND MONTH(rds.stat_date) = :month
-                    AND p.is_active = TRUE
-                    {disney_filter}
-                GROUP BY p.park_id
+        # Query park_activity_snapshots to find when park was open
+        query = (
+            self.session.query(
+                func.date(ParkActivitySnapshot.recorded_at).label('date'),
+                func.min(ParkActivitySnapshot.recorded_at).label('first_open'),
+                func.max(ParkActivitySnapshot.recorded_at).label('last_open'),
+                func.count(ParkActivitySnapshot.snapshot_id).label('snapshots')
             )
-            SELECT
-                p.park_id,
-                p.queue_times_id,
-                p.name AS park_name,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-                pms.total_downtime_hours,
-                ROUND((wd.total_weighted_downtime_hours / NULLIF(pw.total_park_weight, 0)) * 10, 1) AS shame_score,
-                pms.rides_with_downtime AS affected_rides_count,
-                pms.avg_uptime_percentage AS uptime_percentage,
-                pms.trend_vs_previous_month AS trend_percentage
-            FROM parks p
-            INNER JOIN park_monthly_stats pms ON p.park_id = pms.park_id
-            LEFT JOIN park_weights pw ON p.park_id = pw.park_id
-            LEFT JOIN weighted_downtime wd ON p.park_id = wd.park_id
-            WHERE pms.year = :year
-                AND pms.month = :month
-                AND p.is_active = TRUE
-                {disney_filter}
-            ORDER BY shame_score DESC
-            LIMIT :limit
-        """)
+            .filter(
+                and_(
+                    ParkActivitySnapshot.park_id == park_id,
+                    ParkActivitySnapshot.park_appears_open.is_(True)
+                )
+            )
+            .group_by(func.date(ParkActivitySnapshot.recorded_at))
+            .order_by(func.date(ParkActivitySnapshot.recorded_at).desc())
+        )
 
-        result = self.conn.execute(query, {
-            "year": year,
-            "month": month,
-            "limit": limit
-        })
-        return [dict(row._mapping) for row in result]
-
-    def get_aggregate_park_stats(
-        self,
-        period: str,
-        filter_disney_universal: bool = False
-    ) -> Dict[str, Any]:
-        """
-        Get aggregate statistics for all parks.
-
-        PERFORMANCE OPTIMIZED: Uses simple queries on indexed tables.
-        - total_parks_tracked: Count of active parks
-        - peak_downtime_hours: Peak ride downtime from aggregation tables
-        - currently_down_rides: Sum from ride_live_rankings cache (if available)
-
-        Args:
-            period: 'live', 'today', 'yesterday', 'last_week', or 'last_month'
-            filter_disney_universal: Filter to only Disney/Universal parks
-
-        Returns:
-            Dictionary with aggregate statistics
-        """
-        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-
-        # Determine date range for peak downtime based on period
-        if period in ('live', 'today'):
-            date_interval = 1
-        elif period == 'yesterday':
-            date_interval = 2  # Include yesterday and day before for context
-        elif period == 'last_week':
-            date_interval = 7
-        else:  # last_month
-            date_interval = 30
-
-        count_filter = None
-        if period == 'today':
-            count_filter = "pds.stat_date = CURDATE()"
-        elif period == 'yesterday':
-            count_filter = "pds.stat_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY)"
-        elif period == 'last_week':
-            count_filter = "pds.stat_date BETWEEN DATE_SUB(CURDATE(), INTERVAL 6 DAY) AND CURDATE()"
-        elif period == 'last_month':
-            count_filter = "pds.stat_date BETWEEN DATE_SUB(CURDATE(), INTERVAL 29 DAY) AND CURDATE()"
-
-        if period == 'today':
-            total_parks_expr = f"""(
-                SELECT COUNT(DISTINCT phs.park_id)
-                FROM park_hourly_stats phs
-                INNER JOIN parks p ON phs.park_id = p.park_id
-                WHERE phs.hour_start_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)
-                    AND p.is_active = TRUE
-                    {disney_filter}
-            )"""
-        elif count_filter:
-            total_parks_expr = f"""(
-                SELECT COUNT(DISTINCT pds.park_id)
-                FROM park_daily_stats pds
-                INNER JOIN parks p ON pds.park_id = p.park_id
-                WHERE {count_filter}
-                    AND p.is_active = TRUE
-                    {disney_filter}
-            )"""
+        # Apply date filters
+        if start_date:
+            query = query.filter(func.date(ParkActivitySnapshot.recorded_at) >= start_date)
         else:
-            total_parks_expr = f"""(
-                SELECT COUNT(DISTINCT p.park_id)
-                FROM parks p
-                WHERE p.is_active = TRUE
-                {disney_filter}
-            )"""
+            # Default to 30 days ago - use timedelta for database-agnostic date math
+            query = query.filter(
+                func.date(ParkActivitySnapshot.recorded_at) >= (date.today() - timedelta(days=30))
+            )
 
-        if period == 'today':
-            peak_clause = "phs.hour_start_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL :date_interval DAY)"
-        elif count_filter:
-            peak_clause = count_filter
-        else:
-            peak_clause = "pds.stat_date >= DATE_SUB(CURDATE(), INTERVAL :date_interval DAY)"
+        if end_date:
+            query = query.filter(func.date(ParkActivitySnapshot.recorded_at) <= end_date)
 
-        # Simple, fast query using indexed columns only
-        # disney_filter applied to all subqueries for consistency
-        query = text(f"""
-            SELECT
-                {total_parks_expr} AS total_parks_tracked,
-                COALESCE((
-                    SELECT ROUND(MAX({('phs.total_downtime_hours' if period=='today' else 'pds.total_downtime_hours')}), 2)
-                    FROM {('park_hourly_stats phs' if period=='today' else 'park_daily_stats pds')}
-                    INNER JOIN parks p ON {('phs.park_id' if period=='today' else 'pds.park_id')} = p.park_id
-                    WHERE {peak_clause}
-                    {disney_filter}
-                ), 0) AS peak_downtime_hours,
-                -- Use sum of rides_down from park_hourly_stats (fast, indexed)
-                COALESCE((
-                    SELECT SUM(phs.rides_down)
-                    FROM park_hourly_stats phs
-                    INNER JOIN parks p ON phs.park_id = p.park_id
-                    WHERE phs.hour_start_utc = (
-                        SELECT MAX(hour_start_utc) FROM park_hourly_stats
-                    )
-                    {disney_filter}
-                ), 0) AS currently_down_rides
-        """)
+        query = query.limit(100)
 
-        result = self.conn.execute(query, {"date_interval": date_interval})
-        row = result.fetchone()
-        if row:
-            return dict(row._mapping)
-        return {
-            "total_parks_tracked": 0,
-            "peak_downtime_hours": 0.0,
-            "currently_down_rides": 0
-        }
+        results = query.all()
 
-    def get_park_tier_distribution(self, park_id: int) -> Dict[str, Any]:
-        """
-        Get ride tier distribution for a park.
-
-        Args:
-            park_id: Park ID
-
-        Returns:
-            Dictionary with tier counts
-        """
-        query = text("""
-            SELECT
-                COUNT(*) AS total_rides,
-                SUM(CASE WHEN rc.tier = 1 THEN 1 ELSE 0 END) AS tier_1_count,
-                SUM(CASE WHEN rc.tier = 2 THEN 1 ELSE 0 END) AS tier_2_count,
-                SUM(CASE WHEN rc.tier = 3 THEN 1 ELSE 0 END) AS tier_3_count,
-                SUM(CASE WHEN rc.tier IS NULL THEN 1 ELSE 0 END) AS unclassified_count
-            FROM rides r
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE r.park_id = :park_id
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-        """)
-
-        result = self.conn.execute(query, {"park_id": park_id})
-        row = result.fetchone()
-        return dict(row._mapping) if row else {}
+        return [
+            {
+                'park_id': park_id,
+                'date': str(row.date),
+                'first_open_at': row.first_open.isoformat() if row.first_open else None,
+                'last_open_at': row.last_open.isoformat() if row.last_open else None,
+                'operating_hours': (row.last_open - row.first_open).total_seconds() / 3600.0 if row.first_open and row.last_open else 0,
+                'snapshot_count': row.snapshots
+            }
+            for row in results
+        ]
 
     def get_park_current_status(self, park_id: int) -> Dict[str, Any]:
         """
-        Get current ride status summary for a park.
+        Get current operating status for a park.
 
         Args:
             park_id: Park ID
 
         Returns:
-            Dictionary with current status counts
+            Dictionary with current status
         """
-        query = text("""
-            SELECT
-                COUNT(DISTINCT r.ride_id) AS total_rides,
-                SUM(CASE
-                    WHEN (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = TRUE))
-                    THEN 1 ELSE 0
-                END) AS rides_open,
-                SUM(CASE
-                    WHEN (rss.status IN ('DOWN', 'CLOSED', 'REFURBISHMENT') OR (rss.status IS NULL AND rss.computed_is_open = FALSE))
-                    THEN 1 ELSE 0
-                END) AS rides_closed,
-                MAX(rss.recorded_at) AS last_updated
-            FROM rides r
-            LEFT JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-                AND rss.recorded_at = (
-                    SELECT MAX(recorded_at)
-                    FROM ride_status_snapshots
-                    WHERE ride_id = r.ride_id
-                )
-            WHERE r.park_id = :park_id
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
-        """)
+        park = self.session.query(Park).filter(Park.park_id == park_id).first()
+        if not park:
+            return {}
 
-        result = self.conn.execute(query, {"park_id": park_id})
-        row = result.fetchone()
-        return dict(row._mapping) if row else {}
+        # Get most recent park activity snapshot
+        latest_park_snapshot = (
+            self.session.query(ParkActivitySnapshot)
+            .filter(ParkActivitySnapshot.park_id == park_id)
+            .order_by(ParkActivitySnapshot.recorded_at.desc())
+            .first()
+        )
 
-    def get_park_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
-        """
-        Get detailed shame score breakdown for a park (LIVE period).
-
-        CRITICAL: Reads from park_live_rankings - the SAME table used by Rankings API.
-        This ensures Rankings and Details always show identical shame_score values.
-
-        For rides_down list, uses ride_live_rankings for the detailed breakdown.
-
-        Args:
-            park_id: Park ID
-
-        Returns:
-            Dictionary with:
-            - rides_down: List of rides currently down with tier info
-            - total_park_weight: Sum of all tier weights
-            - shame_score: THE stored shame score from park_live_rankings
-            - park_is_open: Whether park appears open
-        """
-        # STEP 1: Get the STORED shame_score from park_live_rankings
-        # This is THE authoritative value for LIVE - same source as Rankings API
-        rankings_query = text("""
-            SELECT
-                plr.shame_score,
-                plr.park_is_open,
-                plr.total_park_weight,
-                plr.rides_down AS rides_down_count,
-                plr.calculated_at
-            FROM park_live_rankings plr
-            WHERE plr.park_id = :park_id
-            LIMIT 1
-        """)
-        rankings_result = self.conn.execute(rankings_query, {"park_id": park_id})
-        rankings_row = rankings_result.fetchone()
-
-        if not rankings_row:
-            # No live rankings data for this park
+        if not latest_park_snapshot:
             return {
-                "rides_down": [],
-                "rides_excluded": [],
-                "total_park_weight": 0,
-                "total_weighted_down": 0,
-                "total_excluded_weight": 0,
-                "shame_score": 0.0,
-                "park_is_open": False,
-                "breakdown_type": "live",
-                "tier_weights": {1: 3, 2: 2, 3: 1}
+                'park_id': park_id,
+                'park_name': park.name,
+                'is_open': False,
+                'last_updated': None,
+                'rides_open': 0,
+                'rides_closed': 0,
+                'total_rides': 0
             }
 
-        # THE stored shame_score from park_live_rankings - same as Rankings API
-        stored_shame_score = float(rankings_row.shame_score) if rankings_row.shame_score is not None else 0.0
-        park_is_open = bool(rankings_row.park_is_open)
-        total_park_weight = float(rankings_row.total_park_weight) if rankings_row.total_park_weight else 0
-
-        # STEP 2: Get rides currently down from ride_live_rankings
-        rides_down_query = text("""
-            SELECT
-                rlr.ride_id,
-                rlr.ride_name,
-                rlr.tier,
-                rlr.tier_weight,
-                rlr.current_status AS status
-            FROM ride_live_rankings rlr
-            WHERE rlr.park_id = :park_id
-              AND rlr.is_down = TRUE
-            ORDER BY rlr.tier ASC, rlr.ride_name ASC
-        """)
-
-        rides_down_result = self.conn.execute(rides_down_query, {"park_id": park_id})
-
-        rides_down = []
-        total_weighted_down = 0
-        for row in rides_down_result:
-            ride_data = {
-                "ride_id": row.ride_id,
-                "ride_name": row.ride_name,
-                "tier": row.tier,
-                "tier_weight": float(row.tier_weight) if row.tier_weight else 2.0,
-                "status": row.status
-            }
-            rides_down.append(ride_data)
-            total_weighted_down += float(row.tier_weight) if row.tier_weight else 2.0
-
-        # STEP 3: Get rides EXCLUDED from the 7-day denominator
-        # These rides haven't operated in the last 7 days (seasonal closures, long-term refurbishments)
-        rides_excluded_query = text("""
-            SELECT
-                r.ride_id,
-                r.name AS ride_name,
-                COALESCE(rc.tier, 3) AS tier,
-                COALESCE(rc.tier_weight, 2.0) AS tier_weight,
-                r.last_operated_at,
-                CASE
-                    WHEN r.last_operated_at IS NULL THEN 'Never operated'
-                    ELSE CONCAT('Last operated ', TIMESTAMPDIFF(DAY, r.last_operated_at, UTC_TIMESTAMP()), ' days ago')
-                END AS exclusion_reason
-            FROM rides r
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE r.park_id = :park_id
-              AND r.is_active = TRUE
-              AND r.category = 'ATTRACTION'
-              AND (r.last_operated_at IS NULL OR r.last_operated_at < UTC_TIMESTAMP() - INTERVAL 7 DAY)
-            ORDER BY rc.tier ASC, r.name ASC
-        """)
-
-        rides_excluded_result = self.conn.execute(rides_excluded_query, {"park_id": park_id})
-
-        rides_excluded = []
-        total_excluded_weight = 0
-        for row in rides_excluded_result:
-            ride_data = {
-                "ride_id": row.ride_id,
-                "ride_name": row.ride_name,
-                "tier": row.tier,
-                "tier_weight": float(row.tier_weight) if row.tier_weight else 2.0,
-                "last_operated_at": row.last_operated_at,
-                "exclusion_reason": row.exclusion_reason
-            }
-            rides_excluded.append(ride_data)
-            total_excluded_weight += float(row.tier_weight) if row.tier_weight else 2.0
+        # Count active rides
+        total_rides = (
+            self.session.query(func.count(Ride.ride_id))
+            .filter(
+                and_(
+                    Ride.park_id == park_id,
+                    Ride.is_active.is_(True)
+                )
+            )
+            .scalar() or 0
+        )
 
         return {
-            "rides_down": rides_down,
-            "rides_excluded": rides_excluded,
-            "total_park_weight": total_park_weight,
-            "total_weighted_down": total_weighted_down,
-            "total_excluded_weight": total_excluded_weight,
-            "shame_score": stored_shame_score,  # From park_live_rankings - same as Rankings API
-            "park_is_open": park_is_open,
-            "breakdown_type": "live",
-            "tier_weights": {
-                1: 3,  # Tier 1 (Flagship) = 3x weight
-                2: 2,  # Tier 2 (Standard) = 2x weight
-                3: 1   # Tier 3 (Minor) = 1x weight
-            }
+            'park_id': park_id,
+            'park_name': park.name,
+            'is_open': latest_park_snapshot.park_appears_open,
+            'last_updated': latest_park_snapshot.recorded_at.isoformat() if latest_park_snapshot.recorded_at else None,
+            'rides_open': latest_park_snapshot.rides_open,
+            'rides_closed': latest_park_snapshot.rides_closed,
+            'total_rides': total_rides,
+            'avg_wait_time': float(latest_park_snapshot.avg_wait_time) if latest_park_snapshot.avg_wait_time else None,
+            'max_wait_time': latest_park_snapshot.max_wait_time
         }
+
+    def get_last_aggregation_status(self) -> Dict[str, Any]:
+        """
+        Get status of last hourly and daily aggregation runs.
+
+        Note: Hourly aggregation status requires ParkHourlyStats ORM model (not yet implemented).
+        Currently only returns daily aggregation status.
+
+        Returns:
+            Dictionary with aggregation status
+        """
+        # Get latest daily aggregation
+        latest_daily = (
+            self.session.query(func.max(ParkDailyStats.stat_date))
+            .scalar()
+        )
+
+        # Calculate daily lag
+        now = datetime.utcnow()
+        daily_lag_hours = None
+        if latest_daily:
+            daily_lag = now - datetime.combine(latest_daily, datetime.min.time())
+            daily_lag_hours = daily_lag.total_seconds() / 3600.0
+
+        # TODO: Add hourly aggregation status when ParkHourlyStats ORM model is created
+        return {
+            'last_hourly_aggregation': None,  # Not implemented yet
+            'last_daily_aggregation': str(latest_daily) if latest_daily else None,
+            'hourly_lag_hours': None,  # Not implemented yet
+            'daily_lag_hours': round(daily_lag_hours, 2) if daily_lag_hours is not None else None,
+            'is_healthy': False  # Can't determine without hourly stats
+        }
+
+    def get_live_shame_chart_data(
+        self,
+        park_id: int,
+        minutes: int = 60
+    ) -> Dict[str, Any]:
+        """
+        Get recent shame score data for live chart display.
+
+        Fetches the last N minutes of stored shame_score data at 5-minute granularity
+        from park_activity_snapshots.
+
+        Args:
+            park_id: Park ID
+            minutes: Number of minutes to look back (default 60)
+
+        Returns:
+            Dictionary with chart data:
+            - labels: List of time labels (HH:MM format in Pacific)
+            - data: List of shame scores
+            - granularity: "minutes"
+            - current: Most recent non-null value
+        """
+        from datetime import timedelta, timezone
+
+        now_utc = datetime.now(timezone.utc)
+        start_utc = now_utc - timedelta(minutes=minutes)
+
+        # Query park_activity_snapshots for recent shame scores
+        results = (
+            self.session.query(
+                ParkActivitySnapshot.recorded_at,
+                ParkActivitySnapshot.shame_score
+            )
+            .filter(
+                and_(
+                    ParkActivitySnapshot.park_id == park_id,
+                    ParkActivitySnapshot.recorded_at >= start_utc,
+                    ParkActivitySnapshot.recorded_at < now_utc
+                )
+            )
+            .order_by(ParkActivitySnapshot.recorded_at)
+            .all()
+        )
+
+        # Convert to Pacific time labels (UTC-8)
+        labels = []
+        data = []
+        for row in results:
+            # Convert UTC to Pacific (subtract 8 hours)
+            pacific_time = row.recorded_at - timedelta(hours=8)
+            labels.append(pacific_time.strftime('%H:%M'))
+            data.append(float(row.shame_score) if row.shame_score is not None else None)
+
+        # Find most recent non-null value for 'current'
+        current = 0.0
+        for val in reversed(data):
+            if val is not None:
+                current = val
+                break
+
+        return {
+            "labels": labels,
+            "data": data,
+            "granularity": "minutes",
+            "current": current
+        }
+
+    def check_aggregation_health(self) -> Dict[str, Any]:
+        """
+        Comprehensive health check of aggregation system.
+
+        Note: Hourly stats count requires ParkHourlyStats ORM model (not yet implemented).
+
+        Returns:
+            Dictionary with health check results
+        """
+        status = self.get_last_aggregation_status()
+
+        # Count total records in daily stats table
+        daily_count = self.session.query(func.count(ParkDailyStats.stat_date)).scalar() or 0
+
+        # Check snapshot freshness
+        latest_snapshot = (
+            self.session.query(func.max(RideStatusSnapshot.recorded_at))
+            .scalar()
+        )
+
+        snapshot_lag_minutes = None
+        if latest_snapshot:
+            snapshot_lag = datetime.utcnow() - latest_snapshot
+            snapshot_lag_minutes = snapshot_lag.total_seconds() / 60.0
+
+        return {
+            **status,
+            'hourly_stats_count': None,  # Not implemented yet
+            'daily_stats_count': daily_count,
+            'latest_snapshot': latest_snapshot.isoformat() if latest_snapshot else None,
+            'snapshot_lag_minutes': round(snapshot_lag_minutes, 2) if snapshot_lag_minutes is not None else None,
+            'snapshot_is_fresh': (snapshot_lag_minutes is not None and snapshot_lag_minutes < 15) if snapshot_lag_minutes is not None else False,
+            'overall_healthy': (snapshot_lag_minutes is not None and snapshot_lag_minutes < 15) if snapshot_lag_minutes is not None else False
+        }
+
+    # === SHAME BREAKDOWN METHODS ===
+    # These ORM methods return shame score breakdown for park details modal
 
     def get_park_today_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
         """
-        Get CUMULATIVE shame score breakdown for a park (today period).
-
-        SINGLE SOURCE OF TRUTH: Uses park_hourly_stats and ride_hourly_stats
-        tables - the SAME source as TodayParkRankingsQuery. This ensures the
-        shame score shown in the popup EXACTLY matches the rankings table.
-
-        Unlike get_park_shame_breakdown() which shows LIVE/instantaneous data,
-        this returns cumulative downtime data for the entire day:
-        - All rides that had ANY downtime today (not just currently down)
-        - Total downtime hours per ride
-        - Cumulative shame score based on weighted downtime
+        Get shame breakdown for today using hourly stats.
 
         Args:
             park_id: Park ID
 
         Returns:
-            Dictionary with:
-            - rides_with_downtime: List of rides that had downtime today
-            - total_park_weight: Sum of all tier weights for operated rides
-            - total_downtime_hours: Total cumulative downtime hours
-            - weighted_downtime_hours: Total weighted downtime hours
-            - shame_score: Cumulative shame score (SAME as rankings table)
-            - park_is_open: Whether park is currently open
+            Dictionary with shame score, breakdown metrics, and rides array
         """
-        from utils.timezone import get_today_pacific, get_pacific_day_range_utc
-        from utils.sql_helpers import ParkStatusSQL
+        from utils.timezone import get_today_range_to_now_utc
 
-        # Use SAME time range as TodayParkRankingsQuery
-        today = get_today_pacific()
-        start_utc, end_utc = get_pacific_day_range_utc(today)
+        start_utc, end_utc = get_today_range_to_now_utc()
 
-        # Check if park is currently open
-        park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
-        park_open_query = text(f"""
-            SELECT p.park_id, {park_is_open_sq}
-            FROM parks p
-            WHERE p.park_id = :park_id
-        """)
-        park_open_result = self.conn.execute(park_open_query, {"park_id": park_id})
-        park_open_row = park_open_result.fetchone()
-        park_is_open = bool(park_open_row and park_open_row.park_is_open) if park_open_row else False
+        # Get today's hourly stats
+        hourly_stats = (
+            self.session.query(ParkHourlyStats)
+            .filter(
+                and_(
+                    ParkHourlyStats.park_id == park_id,
+                    ParkHourlyStats.hour_start_utc >= start_utc,
+                    ParkHourlyStats.hour_start_utc < end_utc,
+                    ParkHourlyStats.park_was_open.is_(True)
+                )
+            )
+            .all()
+        )
 
-        # Get park-level stats from park_hourly_stats - SAME source as rankings
-        # This ensures shame_score EXACTLY matches the rankings table
-        park_stats_query = text("""
-            SELECT
-                ROUND(AVG(phs.shame_score), 1) AS shame_score,
-                ROUND(SUM(phs.total_downtime_hours), 2) AS total_downtime_hours,
-                ROUND(SUM(phs.weighted_downtime_hours), 2) AS weighted_downtime_hours,
-                ROUND(AVG(phs.effective_park_weight), 1) AS effective_park_weight
-            FROM park_hourly_stats phs
-            WHERE phs.park_id = :park_id
-              AND phs.hour_start_utc >= :start_utc
-              AND phs.hour_start_utc < :end_utc
-        """)
-        park_stats_result = self.conn.execute(park_stats_query, {
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
-        park_row = park_stats_result.fetchone()
+        if not hourly_stats:
+            return {'shame_score': 0, 'total_downtime_hours': 0, 'weighted_downtime_hours': 0, 'rides': []}
 
-        # CRITICAL FIX: Calculate shame_score from corrected downtime data
-        # instead of using AVG(phs.shame_score) which includes non-operating rides
-        total_downtime_hours = float(park_row.total_downtime_hours) if park_row and park_row.total_downtime_hours else 0.0
-        weighted_downtime_hours = float(park_row.weighted_downtime_hours) if park_row and park_row.weighted_downtime_hours else 0.0
-        total_park_weight = float(park_row.effective_park_weight) if park_row and park_row.effective_park_weight else 0.0
+        # Calculate averages
+        total_shame = sum(float(h.shame_score or 0) for h in hourly_stats)
+        total_downtime = sum(float(h.total_downtime_hours or 0) for h in hourly_stats)
+        weighted_downtime = sum(float(h.weighted_downtime_hours or 0) for h in hourly_stats)
 
-        # Calculate shame_score from CORRECTED downtime data (SINGLE SOURCE OF TRUTH)
-        from utils.metrics import calculate_shame_score
-        shame_score = calculate_shame_score(weighted_downtime_hours, total_park_weight) or 0.0
-
-        # Get ride-level breakdown from ride_hourly_stats - SAME source as park aggregates
-        # Sum across hours to get total downtime per ride
-        rides_query = text("""
-            SELECT
-                r.ride_id,
-                r.name AS ride_name,
-                COALESCE(rc.tier, 2) AS tier,
-                COALESCE(rc.tier_weight, 2) AS tier_weight,
-                -- Sum downtime across all hours today
-                ROUND(SUM(rhs.downtime_hours), 2) AS downtime_hours,
-                -- Weighted downtime (downtime × tier_weight)
-                ROUND(SUM(rhs.downtime_hours * COALESCE(rc.tier_weight, 2)), 2) AS weighted_downtime_hours,
-                -- Is currently down? Check latest hour's data
-                MAX(CASE
-                    WHEN rhs.hour_start_utc = (
-                        SELECT MAX(hour_start_utc) FROM ride_hourly_stats
-                        WHERE ride_id = r.ride_id AND hour_start_utc >= :start_utc AND hour_start_utc < :end_utc
-                    ) AND rhs.down_snapshots > 0
-                    THEN 1 ELSE 0
-                END) AS is_currently_down,
-                -- Latest status from raw snapshots (for display)
-                (SELECT rss.status FROM ride_status_snapshots rss
-                 WHERE rss.ride_id = r.ride_id
-                 ORDER BY rss.recorded_at DESC LIMIT 1) AS current_status
-            FROM rides r
-            INNER JOIN ride_hourly_stats rhs ON r.ride_id = rhs.ride_id
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE r.park_id = :park_id
-              AND r.is_active = TRUE
-              AND r.category = 'ATTRACTION'
-              AND rhs.hour_start_utc >= :start_utc
-              AND rhs.hour_start_utc < :end_utc
-              AND rhs.ride_operated = 1
-            GROUP BY r.ride_id, r.name, rc.tier, rc.tier_weight
-            HAVING SUM(rhs.downtime_hours) > 0
-            ORDER BY weighted_downtime_hours DESC, downtime_hours DESC
-        """)
-
-        rides_result = self.conn.execute(rides_query, {
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
-
-        rides_with_downtime = []
-        for row in rides_result:
-            ride_data = {
-                "ride_id": row.ride_id,
-                "ride_name": row.ride_name,
-                "tier": row.tier,
-                "tier_weight": float(row.tier_weight),
-                "downtime_hours": float(row.downtime_hours),
-                "weighted_downtime_hours": float(row.weighted_downtime_hours),
-                "weighted_contribution": float(row.weighted_downtime_hours),  # Alias for frontend
-                "is_currently_down": bool(row.is_currently_down),
-                "current_status": row.current_status
-            }
-            rides_with_downtime.append(ride_data)
+        # Get ride-level downtime data for today
+        # Note: ride_hourly_stats may not exist in all deployments
+        try:
+            rides = self._get_rides_with_downtime_for_today(park_id, start_utc, end_utc)
+        except Exception:
+            # Table doesn't exist or other error - return empty rides array
+            rides = []
 
         return {
-            "rides_with_downtime": rides_with_downtime,
-            "rides_affected_count": len(rides_with_downtime),
-            "total_park_weight": total_park_weight,
-            "total_downtime_hours": total_downtime_hours,
-            "weighted_downtime_hours": weighted_downtime_hours,
-            "shame_score": shame_score,
-            "park_is_open": park_is_open,
-            "breakdown_type": "today",
-            "explanation": "Average shame score during operating hours today. Shows all rides that experienced downtime while the park was open.",
-            "tier_weights": {
-                1: 3,  # Tier 1 (Flagship) = 3x weight
-                2: 2,  # Tier 2 (Standard) = 2x weight
-                3: 1   # Tier 3 (Minor) = 1x weight
-            }
+            'shame_score': round(total_shame / len(hourly_stats), 1) if hourly_stats else 0,
+            'total_downtime_hours': round(total_downtime, 2),
+            'weighted_downtime_hours': round(weighted_downtime, 2),
+            'hours_tracked': len(hourly_stats),
+            'rides': rides,
+            'rides_affected_count': len(rides)
         }
+
+    def _get_rides_with_downtime_for_today(
+        self,
+        park_id: int,
+        start_utc: datetime,
+        end_utc: datetime
+    ) -> List[Dict[str, Any]]:
+        """
+        Get rides with downtime for today using RideHourlyStats.
+
+        Args:
+            park_id: Park ID
+            start_utc: Start of today (Pacific midnight) in UTC
+            end_utc: Current time in UTC
+
+        Returns:
+            List of ride dictionaries with downtime details, sorted by weighted contribution desc
+        """
+        # Tier weights for calculating weighted contribution
+        # Maps stored tier_weight (1,2,3) to actual multipliers (2,5,10)
+        TIER_WEIGHT_MAP = {1: 2, 2: 5, 3: 10}
+
+        # Query ride hourly stats aggregated for today, joined with ride info
+        results = (
+            self.session.query(
+                RideHourlyStats.ride_id,
+                Ride.name.label('ride_name'),
+                RideClassification.tier,
+                RideClassification.tier_weight,
+                func.sum(RideHourlyStats.downtime_hours).label('total_downtime_hours')
+            )
+            .join(Ride, RideHourlyStats.ride_id == Ride.ride_id)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .filter(
+                and_(
+                    RideHourlyStats.park_id == park_id,
+                    RideHourlyStats.hour_start_utc >= start_utc,
+                    RideHourlyStats.hour_start_utc < end_utc,
+                    RideHourlyStats.downtime_hours > 0
+                )
+            )
+            .group_by(RideHourlyStats.ride_id, Ride.name, RideClassification.tier, RideClassification.tier_weight)
+            .all()
+        )
+
+        rides = []
+        for r in results:
+            tier = r.tier or 3  # Default to tier 3 if unclassified
+            stored_weight = r.tier_weight or 1  # Default stored weight
+            # Convert stored weight (1,2,3) to actual multiplier (2,5,10)
+            tier_weight = TIER_WEIGHT_MAP.get(stored_weight, 2)
+            downtime_hours = float(r.total_downtime_hours or 0)
+            weighted_contribution = downtime_hours * tier_weight
+
+            rides.append({
+                'ride_id': r.ride_id,
+                'ride_name': r.ride_name,
+                'tier': tier,
+                'tier_weight': tier_weight,
+                'downtime_hours': round(downtime_hours, 2),
+                'weighted_contribution': round(weighted_contribution, 2),
+                'status': 'DOWN'
+            })
+
+        # Sort by weighted contribution (descending)
+        rides.sort(key=lambda x: x['weighted_contribution'], reverse=True)
+        return rides
+
+    def _get_rides_with_downtime_for_date(
+        self,
+        park_id: int,
+        stat_date: date
+    ) -> List[Dict[str, Any]]:
+        """
+        Get rides with downtime for a park on a specific date.
+
+        Args:
+            park_id: Park ID
+            stat_date: The date to query
+
+        Returns:
+            List of ride dictionaries with downtime details, sorted by weighted downtime desc
+        """
+        # Tier weights for calculating weighted contribution
+        TIER_WEIGHTS = {1: 10, 2: 5, 3: 2}
+
+        # Query ride daily stats joined with ride info and classification
+        # Sort by tier-weighted downtime (tier 1 = 10x, tier 2 = 5x, tier 3 = 2x)
+        results = (
+            self.session.query(
+                RideDailyStats.ride_id,
+                Ride.name.label('ride_name'),
+                RideClassification.tier,
+                RideClassification.tier_weight,
+                RideDailyStats.downtime_minutes
+            )
+            .join(Ride, RideDailyStats.ride_id == Ride.ride_id)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .filter(
+                and_(
+                    Ride.park_id == park_id,
+                    RideDailyStats.stat_date == stat_date,
+                    RideDailyStats.downtime_minutes > 0
+                )
+            )
+            .order_by(RideDailyStats.downtime_minutes.desc())
+            .all()
+        )
+
+        rides = []
+        for r in results:
+            tier = r.tier or 3  # Default to tier 3 if unclassified
+            tier_weight = r.tier_weight or TIER_WEIGHTS.get(tier, 2)
+            downtime_hours = float(r.downtime_minutes) / 60
+            weighted_contribution = downtime_hours * tier_weight
+
+            rides.append({
+                'ride_id': r.ride_id,
+                'ride_name': r.ride_name,
+                'tier': tier,
+                'tier_weight': tier_weight,
+                'downtime_hours': round(downtime_hours, 2),
+                'weighted_contribution': round(weighted_contribution, 2),
+                'status': 'DOWN'
+            })
+
+        # Sort by weighted contribution (descending)
+        rides.sort(key=lambda x: x['weighted_contribution'], reverse=True)
+        return rides
+
+    def _get_rides_with_downtime_for_date_range(
+        self,
+        park_id: int,
+        start_date: date,
+        end_date: date
+    ) -> List[Dict[str, Any]]:
+        """
+        Get aggregated rides with downtime for a park across a date range.
+
+        Args:
+            park_id: Park ID
+            start_date: Start date (inclusive)
+            end_date: End date (inclusive)
+
+        Returns:
+            List of ride dictionaries with total downtime across the period
+        """
+        from sqlalchemy import func
+
+        TIER_WEIGHTS = {1: 10, 2: 5, 3: 2}
+
+        # Aggregate downtime across all days in range, joining with classification for tier
+        results = (
+            self.session.query(
+                RideDailyStats.ride_id,
+                Ride.name.label('ride_name'),
+                RideClassification.tier,
+                RideClassification.tier_weight,
+                func.sum(RideDailyStats.downtime_minutes).label('total_downtime_minutes')
+            )
+            .join(Ride, RideDailyStats.ride_id == Ride.ride_id)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .filter(
+                and_(
+                    Ride.park_id == park_id,
+                    RideDailyStats.stat_date >= start_date,
+                    RideDailyStats.stat_date <= end_date,
+                    RideDailyStats.downtime_minutes > 0
+                )
+            )
+            .group_by(RideDailyStats.ride_id, Ride.name, RideClassification.tier, RideClassification.tier_weight)
+            .order_by(func.sum(RideDailyStats.downtime_minutes).desc())
+            .all()
+        )
+
+        rides = []
+        for r in results:
+            tier = r.tier or 3
+            tier_weight = r.tier_weight or TIER_WEIGHTS.get(tier, 2)
+            downtime_hours = float(r.total_downtime_minutes) / 60
+            weighted_contribution = downtime_hours * tier_weight
+
+            rides.append({
+                'ride_id': r.ride_id,
+                'ride_name': r.ride_name,
+                'tier': tier,
+                'tier_weight': tier_weight,
+                'downtime_hours': round(downtime_hours, 2),
+                'weighted_contribution': round(weighted_contribution, 2),
+                'status': 'DOWN'
+            })
+
+        rides.sort(key=lambda x: x['weighted_contribution'], reverse=True)
+        return rides
 
     def get_park_yesterday_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
         """
-        Get CUMULATIVE shame score breakdown for a park (yesterday period).
+        Get shame breakdown for yesterday using daily stats.
 
-        Like get_park_today_shame_breakdown() but for the previous complete day.
-        This returns cumulative downtime data for all of yesterday:
-        - All rides that had ANY downtime yesterday
-        - Total downtime hours per ride
-        - Cumulative shame score based on weighted downtime
+        CRITICAL FIX (2025-12-28):
+        ==========================
+        Now reads shame_score, weighted_downtime_hours, and effective_park_weight
+        DIRECTLY from park_daily_stats - no on-the-fly calculations.
+
+        This ensures Details popup shows EXACTLY the same shame_score as Rankings.
+        Previously, this method calculated total_park_weight from only rides WITH
+        downtime, which systematically inflated the shame_score (e.g., 13.7 vs 8.7).
 
         Args:
             park_id: Park ID
 
         Returns:
-            Dictionary with:
-            - rides_with_downtime: List of rides that had downtime yesterday
-            - total_park_weight: Sum of all tier weights for operated rides
-            - total_downtime_hours: Total cumulative downtime hours
-            - weighted_downtime_hours: Total weighted downtime hours
-            - shame_score: Cumulative shame score
-            - breakdown_type: "yesterday"
+            Dictionary with shame score and breakdown metrics
         """
-        from utils.timezone import get_yesterday_range_utc
-        from utils.sql_helpers import RideStatusSQL, ParkStatusSQL, timestamp_match_condition
-        from database.calculators.shame_score import ShameScoreCalculator
+        from utils.timezone import get_yesterday_date_range
 
-        start_utc, end_utc, period_label = get_yesterday_range_utc()
+        start_date, end_date, _ = get_yesterday_date_range()
 
-        # CRITICAL: Use minute-level timestamp matching for joining tables
-        # The data collector inserts snapshots with 1-2 second drift between tables
-        ts_match = timestamp_match_condition("pas.recorded_at", "rss.recorded_at")
+        # Get yesterday's daily stats
+        daily_stat = (
+            self.session.query(ParkDailyStats)
+            .filter(
+                and_(
+                    ParkDailyStats.park_id == park_id,
+                    ParkDailyStats.stat_date == start_date
+                )
+            )
+            .first()
+        )
 
-        # Snapshot interval imported from utils.metrics (10 minutes)
+        if not daily_stat:
+            return {'shame_score': 0, 'total_downtime_hours': 0, 'rides': [],
+                    'weighted_downtime_hours': 0, 'total_park_weight': 0, 'rides_affected_count': 0}
 
-        # PARK-TYPE AWARE: Disney/Universal only count DOWN, others count CLOSED too
-        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
-        # Use with_fallback=True to handle parks with missing schedule data but active rides
-        park_open = ParkStatusSQL.park_appears_open_filter("pas", with_fallback=True)
-        # PARK-TYPE AWARE: Must pass park_id_expr to check park_appears_open during operation
-        # Use with_fallback=True to handle parks with missing schedule data but active rides
-        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p", park_id_expr="r.park_id", with_fallback=True)
+        # Get detailed ride-level downtime data for frontend display
+        rides = self._get_rides_with_downtime_for_date(park_id, start_date)
 
-        # Get total park weight - ONLY for rides that have operated yesterday
-        weight_query = text(f"""
-            SELECT SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
-            FROM rides r
-            INNER JOIN parks p ON r.park_id = p.park_id
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE r.park_id = :park_id
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND {has_operated}
-        """)
-        weight_result = self.conn.execute(weight_query, {
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
-        weight_row = weight_result.fetchone()
-        total_park_weight = float(weight_row.total_park_weight) if weight_row and weight_row.total_park_weight else 0
-
-        # Get rides that had ANY downtime yesterday with cumulative hours
-        rides_query = text(f"""
-            SELECT
-                r.ride_id,
-                r.name AS ride_name,
-                COALESCE(rc.tier, 2) AS tier,
-                COALESCE(rc.tier_weight, 2) AS tier_weight,
-                -- Total downtime hours for this ride yesterday
-                ROUND(
-                    SUM(CASE
-                        WHEN {is_down} AND {park_open}
-                        THEN {SNAPSHOT_INTERVAL_MINUTES} / 60.0
-                        ELSE 0
-                    END),
-                    2
-                ) AS downtime_hours,
-                -- Weighted downtime hours
-                ROUND(
-                    SUM(CASE
-                        WHEN {is_down} AND {park_open}
-                        THEN ({SNAPSHOT_INTERVAL_MINUTES} / 60.0) * COALESCE(rc.tier_weight, 2)
-                        ELSE 0
-                    END),
-                    2
-                ) AS weighted_downtime_hours
-            FROM rides r
-            INNER JOIN parks p ON r.park_id = p.park_id
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            INNER JOIN park_activity_snapshots pas ON r.park_id = pas.park_id
-                AND {ts_match}
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE r.park_id = :park_id
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                AND {has_operated}
-            GROUP BY r.ride_id, r.name, rc.tier, rc.tier_weight
-            HAVING downtime_hours > 0
-            ORDER BY weighted_downtime_hours DESC, downtime_hours DESC
-        """)
-
-        rides_result = self.conn.execute(rides_query, {
-            "park_id": park_id,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
-
-        rides_with_downtime = []
-        total_downtime_hours = 0
-        total_weighted_downtime = 0
-        for row in rides_result:
-            ride_data = {
-                "ride_id": row.ride_id,
-                "ride_name": row.ride_name,
-                "tier": row.tier,
-                "tier_weight": float(row.tier_weight),
-                "downtime_hours": float(row.downtime_hours),
-                "weighted_downtime_hours": float(row.weighted_downtime_hours),
-                "weighted_contribution": float(row.weighted_downtime_hours),  # Alias for frontend
-            }
-            rides_with_downtime.append(ride_data)
-            total_downtime_hours += float(row.downtime_hours)
-            total_weighted_downtime += float(row.weighted_downtime_hours)
-
-        # CRITICAL FIX: Calculate shame_score from corrected downtime data (SINGLE SOURCE OF TRUTH)
-        # Previously used AVG(pas.shame_score) which included non-operating rides
-        # Now calculate from weighted_downtime_hours which only includes rides that operated
-        from utils.metrics import calculate_shame_score
-        shame_score = calculate_shame_score(total_weighted_downtime, total_park_weight) or 0.0
+        # CRITICAL: Read pre-computed values from park_daily_stats
+        # DO NOT recalculate - this is the single source of truth
+        shame_score = float(daily_stat.shame_score or 0)
+        weighted_downtime_hours = float(daily_stat.weighted_downtime_hours or 0)
+        total_park_weight = float(daily_stat.effective_park_weight or 0)
 
         return {
-            "rides_with_downtime": rides_with_downtime,
-            "rides_affected_count": len(rides_with_downtime),
-            "total_park_weight": total_park_weight,
-            "total_downtime_hours": round(total_downtime_hours, 2),
-            "weighted_downtime_hours": round(total_weighted_downtime, 2),
-            "shame_score": shame_score,
-            "breakdown_type": "yesterday",
-            "period_label": period_label,
-            "explanation": "Average shame score during operating hours yesterday. Shows all rides that experienced downtime while the park was open.",
-            "tier_weights": {
-                1: 3,  # Tier 1 (Flagship) = 3x weight
-                2: 2,  # Tier 2 (Standard) = 2x weight
-                3: 1   # Tier 3 (Minor) = 1x weight
-            }
+            'shame_score': round(shame_score, 1),  # Round to 1 decimal for consistency
+            'total_downtime_hours': float(daily_stat.total_downtime_hours or 0),
+            'avg_uptime_percentage': float(daily_stat.avg_uptime_percentage or 0),
+            'rides_with_downtime': daily_stat.rides_with_downtime or 0,
+            'rides': rides,  # Array of rides with downtime details for frontend
+            'weighted_downtime_hours': round(weighted_downtime_hours, 2),
+            'total_park_weight': round(total_park_weight, 2),
+            'rides_affected_count': len(rides)
         }
 
     def get_park_weekly_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
         """
-        Get AVERAGE shame score breakdown for a park for the previous calendar week.
-
-        Returns the average of daily shame scores (not cumulative).
-        This matches the LAST_WEEK period in the rankings table.
+        Get shame breakdown for last week using daily stats.
 
         Args:
             park_id: Park ID
 
         Returns:
-            Dictionary with:
-            - rides_with_downtime: List of rides that had downtime during the week
-            - shame_score: Average of daily shame scores
-            - period_label: Human-readable date range (e.g., "Nov 24-30, 2024")
-            - breakdown_type: "last_week"
+            Dictionary with average shame score and breakdown metrics
         """
         from utils.timezone import get_last_week_date_range
-        return self._get_historical_shame_breakdown(
-            park_id=park_id,
-            period_type="last_week",
-            get_date_range=get_last_week_date_range
+        from utils.metrics import calculate_shame_score
+
+        start_date, end_date, _ = get_last_week_date_range()
+
+        # Get daily stats for the week (only operating days for consistency with Rankings)
+        daily_stats = (
+            self.session.query(ParkDailyStats)
+            .filter(
+                and_(
+                    ParkDailyStats.park_id == park_id,
+                    ParkDailyStats.stat_date >= start_date,
+                    ParkDailyStats.stat_date <= end_date,
+                    ParkDailyStats.operating_hours_minutes > 0  # Only count operating days
+                )
+            )
+            .all()
         )
+
+        if not daily_stats:
+            return {'shame_score': 0, 'total_downtime_hours': 0, 'days_tracked': 0,
+                    'rides': [], 'weighted_downtime_hours': 0, 'total_park_weight': 0,
+                    'rides_affected_count': 0, 'period_label': 'Last 7 Days'}
+
+        # Get aggregated ride-level downtime data for frontend
+        rides = self._get_rides_with_downtime_for_date_range(park_id, start_date, end_date)
+
+        # Calculate weighted downtime from rides
+        weighted_downtime_hours = sum(r.get('weighted_contribution', 0) for r in rides)
+        total_park_weight = sum(float(r.get('tier_weight', 2)) for r in rides) if rides else 0
+
+        # Calculate shame_score: prefer stored values, fallback to ride data
+        # Use MySQL-style rounding (ROUND_HALF_UP) for consistency with Rankings API
+        from decimal import Decimal, ROUND_HALF_UP
+        def mysql_round(value, decimals=1):
+            """Round using MySQL ROUND() semantics (half up, not banker's rounding)."""
+            d = Decimal(str(value))
+            return float(d.quantize(Decimal(10) ** -decimals, rounding=ROUND_HALF_UP))
+
+        valid_shame_scores = [float(s.shame_score) for s in daily_stats if s.shame_score is not None]
+        if valid_shame_scores:
+            # Use average of valid stored values
+            shame_score = mysql_round(sum(valid_shame_scores) / len(valid_shame_scores), 1)
+        elif rides and total_park_weight > 0:
+            # Fallback: calculate from ride data when all aggregations failed
+            calculated = calculate_shame_score(weighted_downtime_hours, total_park_weight)
+            shame_score = mysql_round(float(calculated), 1) if calculated is not None else 0.0
+        else:
+            shame_score = 0.0
+
+        total_downtime = sum(float(s.total_downtime_hours or 0) for s in daily_stats)
+
+        return {
+            'shame_score': shame_score,
+            'total_downtime_hours': round(total_downtime, 2),
+            'avg_daily_downtime': round(total_downtime / len(daily_stats), 2),
+            'days_tracked': len(daily_stats),
+            'days_in_period': len(daily_stats),
+            'rides': rides,
+            'weighted_downtime_hours': round(weighted_downtime_hours, 2),
+            'total_park_weight': round(total_park_weight, 2),
+            'rides_affected_count': len(rides),
+            'period_label': f'{start_date.strftime("%b %d")} - {end_date.strftime("%b %d, %Y")}'
+        }
 
     def get_park_monthly_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
         """
-        Get AVERAGE shame score breakdown for a park for the previous calendar month.
-
-        Returns the average of daily shame scores (not cumulative).
-        This matches the LAST_MONTH period in the rankings table.
+        Get shame breakdown for last month using daily stats.
 
         Args:
             park_id: Park ID
 
         Returns:
-            Dictionary with:
-            - rides_with_downtime: List of rides that had downtime during the month
-            - shame_score: Average of daily shame scores
-            - period_label: Human-readable date range (e.g., "November 2024")
-            - breakdown_type: "last_month"
+            Dictionary with average shame score and breakdown metrics
         """
         from utils.timezone import get_last_month_date_range
-        return self._get_historical_shame_breakdown(
-            park_id=park_id,
-            period_type="last_month",
-            get_date_range=get_last_month_date_range
+        from utils.metrics import calculate_shame_score
+
+        start_date, end_date, _ = get_last_month_date_range()
+
+        # Get daily stats for the month (only operating days for consistency with Rankings)
+        daily_stats = (
+            self.session.query(ParkDailyStats)
+            .filter(
+                and_(
+                    ParkDailyStats.park_id == park_id,
+                    ParkDailyStats.stat_date >= start_date,
+                    ParkDailyStats.stat_date <= end_date,
+                    ParkDailyStats.operating_hours_minutes > 0  # Only count operating days
+                )
+            )
+            .all()
         )
 
-    def _get_historical_shame_breakdown(
-        self,
-        park_id: int,
-        period_type: str,
-        get_date_range
-    ) -> Dict[str, Any]:
+        if not daily_stats:
+            return {'shame_score': 0, 'total_downtime_hours': 0, 'days_tracked': 0,
+                    'rides': [], 'weighted_downtime_hours': 0, 'total_park_weight': 0,
+                    'rides_affected_count': 0, 'period_label': 'Last 30 Days'}
+
+        # Get aggregated ride-level downtime data for frontend
+        rides = self._get_rides_with_downtime_for_date_range(park_id, start_date, end_date)
+
+        # Calculate weighted downtime from rides
+        weighted_downtime_hours = sum(r.get('weighted_contribution', 0) for r in rides)
+        total_park_weight = sum(float(r.get('tier_weight', 2)) for r in rides) if rides else 0
+
+        # Calculate shame_score: prefer stored values, fallback to ride data
+        # Use MySQL-style rounding (ROUND_HALF_UP) for consistency with Rankings API
+        from decimal import Decimal, ROUND_HALF_UP
+        def mysql_round(value, decimals=1):
+            """Round using MySQL ROUND() semantics (half up, not banker's rounding)."""
+            d = Decimal(str(value))
+            return float(d.quantize(Decimal(10) ** -decimals, rounding=ROUND_HALF_UP))
+
+        valid_shame_scores = [float(s.shame_score) for s in daily_stats if s.shame_score is not None]
+        if valid_shame_scores:
+            # Use average of valid stored values
+            shame_score = mysql_round(sum(valid_shame_scores) / len(valid_shame_scores), 1)
+        elif rides and total_park_weight > 0:
+            # Fallback: calculate from ride data when all aggregations failed
+            calculated = calculate_shame_score(weighted_downtime_hours, total_park_weight)
+            shame_score = mysql_round(float(calculated), 1) if calculated is not None else 0.0
+        else:
+            shame_score = 0.0
+
+        total_downtime = sum(float(s.total_downtime_hours or 0) for s in daily_stats)
+
+        return {
+            'shame_score': shame_score,
+            'total_downtime_hours': round(total_downtime, 2),
+            'avg_daily_downtime': round(total_downtime / len(daily_stats), 2),
+            'days_tracked': len(daily_stats),
+            'days_in_period': len(daily_stats),
+            'rides': rides,
+            'weighted_downtime_hours': round(weighted_downtime_hours, 2),
+            'total_park_weight': round(total_park_weight, 2),
+            'rides_affected_count': len(rides),
+            'period_label': f'{start_date.strftime("%b %d")} - {end_date.strftime("%b %d, %Y")}'
+        }
+
+    def get_excluded_rides(self, park_id: int) -> List[Dict[str, Any]]:
         """
-        Internal method to get historical shame score breakdown for a park.
+        Get list of rides excluded from shame calculations for a park.
 
-        Used by get_park_weekly_shame_breakdown and get_park_monthly_shame_breakdown.
-
-        The shame score is calculated as the AVERAGE of daily shame scores:
-        - For each day: daily_shame = (daily_weighted_downtime / total_park_weight) × 10
-        - Final score: average of all daily shame scores
-
-        This makes historical periods comparable to LIVE/TODAY (same 0-100 scale).
+        Rides are excluded if they haven't operated in the last 7 days.
 
         Args:
             park_id: Park ID
-            period_type: "last_week" or "last_month"
-            get_date_range: Function that returns (start_date, end_date, period_label)
 
         Returns:
-            Dictionary with breakdown data
+            List of excluded ride dictionaries with tier, last_operated_at, days_since_operation
         """
-        start_date, end_date, period_label = get_date_range()
+        from datetime import timedelta
 
-        # Get total park weight (all active rides)
-        weight_query = text("""
-            SELECT SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
-            FROM rides r
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE r.park_id = :park_id
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-        """)
-        weight_result = self.conn.execute(weight_query, {"park_id": park_id})
-        weight_row = weight_result.fetchone()
-        total_park_weight = float(weight_row.total_park_weight) if weight_row and weight_row.total_park_weight else 0
+        # Get rides that haven't operated in last 7 days
+        now = datetime.utcnow()
+        seven_days_ago = now - timedelta(days=7)
 
-        # Get rides with downtime during the period with per-ride stats
-        # Uses ride_daily_stats which has pre-aggregated daily downtime data
-        rides_query = text("""
-            SELECT
-                r.ride_id,
-                r.name AS ride_name,
-                COALESCE(rc.tier, 2) AS tier,
-                COALESCE(rc.tier_weight, 2) AS tier_weight,
-                -- Total downtime across the period
-                ROUND(SUM(rds.downtime_minutes) / 60.0, 2) AS downtime_hours,
-                -- Weighted downtime
-                ROUND(SUM(rds.downtime_minutes / 60.0 * COALESCE(rc.tier_weight, 2)), 2) AS weighted_downtime_hours,
-                -- Number of days with downtime
-                COUNT(DISTINCT rds.stat_date) AS days_with_downtime
-            FROM rides r
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            INNER JOIN ride_daily_stats rds ON r.ride_id = rds.ride_id
-            WHERE r.park_id = :park_id
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND rds.stat_date >= :start_date AND rds.stat_date <= :end_date
-                AND rds.downtime_minutes > 0
-            GROUP BY r.ride_id, r.name, rc.tier, rc.tier_weight
-            ORDER BY weighted_downtime_hours DESC
-        """)
-
-        rides_result = self.conn.execute(rides_query, {
-            "park_id": park_id,
-            "start_date": start_date,
-            "end_date": end_date
-        })
-
-        rides_with_downtime = []
-        total_downtime_hours = 0
-        total_weighted_downtime = 0
-        for row in rides_result:
-            ride_data = {
-                "ride_id": row.ride_id,
-                "ride_name": row.ride_name,
-                "tier": row.tier,
-                "tier_weight": float(row.tier_weight),
-                "downtime_hours": float(row.downtime_hours),
-                "weighted_downtime_hours": float(row.weighted_downtime_hours),
-                "weighted_contribution": float(row.weighted_downtime_hours),  # Alias for frontend
-                "days_with_downtime": row.days_with_downtime
-            }
-            rides_with_downtime.append(ride_data)
-            total_downtime_hours += float(row.downtime_hours)
-            total_weighted_downtime += float(row.weighted_downtime_hours)
-
-        # Calculate AVERAGE daily shame score (consistent with rankings)
-        # First, get daily shame scores for this park during the period
-        daily_shame_query = text("""
-            WITH daily_weighted_downtime AS (
-                SELECT
-                    rds.stat_date,
-                    SUM(rds.downtime_minutes / 60.0 * COALESCE(rc.tier_weight, 2)) AS weighted_downtime_hours
-                FROM ride_daily_stats rds
-                INNER JOIN rides r ON rds.ride_id = r.ride_id
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE r.park_id = :park_id
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                    AND rds.stat_date >= :start_date AND rds.stat_date <= :end_date
-                GROUP BY rds.stat_date
+        # Subquery for rides that have operated recently
+        # (status='OPERATING' or computed_is_open=TRUE)
+        operated_rides = (
+            self.session.query(distinct(RideStatusSnapshot.ride_id))
+            .filter(
+                and_(
+                    RideStatusSnapshot.recorded_at >= seven_days_ago,
+                    RideStatusSnapshot.status == 'OPERATING'
+                )
             )
-            SELECT
-                AVG(
-                    COALESCE((weighted_downtime_hours / NULLIF(:total_park_weight, 0)) * 10, 0)
-                ) AS avg_daily_shame_score
-            FROM daily_weighted_downtime
-        """)
+            .subquery()
+        )
 
-        shame_result = self.conn.execute(daily_shame_query, {
-            "park_id": park_id,
-            "start_date": start_date,
-            "end_date": end_date,
-            "total_park_weight": total_park_weight
-        })
-        shame_row = shame_result.fetchone()
-        shame_score = round(float(shame_row.avg_daily_shame_score or 0), 1)
-
-        # Count operating days in the period
-        days_in_period = (end_date - start_date).days + 1
-
-        return {
-            "rides_with_downtime": rides_with_downtime,
-            "rides_affected_count": len(rides_with_downtime),
-            "total_park_weight": total_park_weight,
-            "total_downtime_hours": round(total_downtime_hours, 2),
-            "weighted_downtime_hours": round(total_weighted_downtime, 2),
-            "shame_score": shame_score,
-            "period_label": period_label,
-            "days_in_period": days_in_period,
-            "breakdown_type": period_type,
-            "explanation": f"Average daily shame score for {period_label}. Shows all rides that experienced downtime during this period.",
-            "tier_weights": {
-                1: 3,  # Tier 1 (Flagship) = 3x weight
-                2: 2,  # Tier 2 (Standard) = 2x weight
-                3: 1   # Tier 3 (Minor) = 1x weight
-            }
-        }
-
-    def get_ride_daily_rankings(
-        self,
-        stat_date: date,
-        filter_disney_universal: bool = False,
-        limit: int = 100
-    ) -> List[Dict[str, Any]]:
-        """
-        Get ride downtime rankings for a specific day.
-
-        Uses centralized SQL helpers for consistent status logic.
-
-        Args:
-            stat_date: Date to get rankings for
-            filter_disney_universal: If True, only include Disney & Universal parks
-            limit: Maximum number of rides to return
-
-        Returns:
-            List of rides ranked by downtime hours with current status
-        """
-        # Use centralized helpers for consistent logic
-        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
-        # Pass park_id_expr to ensure rides at closed parks show PARK_CLOSED, not DOWN
-        current_status_sq = RideStatusSQL.current_status_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
-        current_is_open_sq = RideStatusSQL.current_is_open_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
-
-        query = text(f"""
-            SELECT
-                r.ride_id,
-                r.name AS ride_name,
-                rc.tier,
-                p.park_id,
-                p.name AS park_name,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-                rds.downtime_minutes / 60.0 AS downtime_hours,
-                rds.uptime_percentage,
-                rds.avg_wait_time,
-                rds.peak_wait_time,
-                -- Get current status using centralized helper
-                {current_status_sq},
-                -- Boolean for frontend compatibility using centralized helper
-                {current_is_open_sq},
-                -- Trend: compare to previous day
-                CASE
-                    WHEN prev_day.downtime_minutes > 0 THEN
-                        ((rds.downtime_minutes - prev_day.downtime_minutes) / prev_day.downtime_minutes * 1.0) * 100
-                    ELSE NULL
-                END AS trend_percentage
-            FROM ride_daily_stats rds
-            JOIN rides r ON rds.ride_id = r.ride_id
-            JOIN parks p ON r.park_id = p.park_id
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            LEFT JOIN ride_daily_stats prev_day ON rds.ride_id = prev_day.ride_id
-                AND prev_day.stat_date = DATE_SUB(:stat_date, INTERVAL 1 DAY)
-            WHERE rds.stat_date = :stat_date
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND p.is_active = TRUE
-                AND rds.operating_hours_minutes > 0
-                AND rds.downtime_minutes > 0
-                {filter_clause}
-            ORDER BY rds.downtime_minutes DESC
-            LIMIT :limit
-        """)
-
-        result = self.conn.execute(query, {
-            "stat_date": stat_date,
-            "limit": limit
-        })
-
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    def get_ride_weekly_rankings(
-        self,
-        year: int,
-        week_number: int,
-        filter_disney_universal: bool = False,
-        limit: int = 100
-    ) -> List[Dict[str, Any]]:
-        """
-        Get ride downtime rankings for a specific week.
-        Aggregates from daily stats instead of relying on weekly_stats table.
-
-        Uses centralized SQL helpers for consistent status logic.
-
-        Args:
-            year: Year
-            week_number: ISO week number
-            filter_disney_universal: If True, only include Disney & Universal parks
-            limit: Maximum number of rides to return
-
-        Returns:
-            List of rides ranked by downtime hours with current status
-        """
-        # Use centralized helpers for consistent logic
-        disney_filter = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
-        # Pass park_id_expr to ensure rides at closed parks show PARK_CLOSED, not DOWN
-        current_status_sq = RideStatusSQL.current_status_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
-        current_is_open_sq = RideStatusSQL.current_is_open_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
-
-        query = text(f"""
-            SELECT
-                r.ride_id,
-                r.queue_times_id,
-                p.queue_times_id AS park_queue_times_id,
-                r.name AS ride_name,
-                rc.tier,
-                p.park_id,
-                p.name AS park_name,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-                ROUND(rws.downtime_minutes / 60.0, 2) AS downtime_hours,
-                rws.uptime_percentage,
-                rws.avg_wait_time,
-                rws.peak_wait_time,
-                {current_status_sq},
-                {current_is_open_sq},
-                NULL AS trend_percentage
-            FROM ride_weekly_stats rws
-            JOIN rides r ON rws.ride_id = r.ride_id
-            JOIN parks p ON r.park_id = p.park_id
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE rws.year = :year
-                AND rws.week_number = :week_number
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND p.is_active = TRUE
-                {disney_filter}
-            ORDER BY downtime_hours DESC
-            LIMIT :limit
-        """)
-
-        result = self.conn.execute(query, {
-            "year": year,
-            "week_number": week_number,
-            "limit": limit
-        })
-
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    def get_ride_monthly_rankings(
-        self,
-        year: int,
-        month: int,
-        filter_disney_universal: bool = False,
-        limit: int = 100
-    ) -> List[Dict[str, Any]]:
-        """
-        Get ride downtime rankings for a specific month.
-
-        Uses centralized SQL helpers for consistent status logic.
-
-        Args:
-            year: Year
-            month: Month (1-12)
-            filter_disney_universal: If True, only include Disney & Universal parks
-            limit: Maximum number of rides to return
-
-        Returns:
-            List of rides ranked by downtime hours with current status
-        """
-        # Use centralized helpers for consistent logic
-        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
-        # Pass park_id_expr to ensure rides at closed parks show PARK_CLOSED, not DOWN
-        current_status_sq = RideStatusSQL.current_status_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
-        current_is_open_sq = RideStatusSQL.current_is_open_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
-
-        query = text(f"""
-            SELECT
-                r.ride_id,
-                r.queue_times_id,
-                p.queue_times_id AS park_queue_times_id,
-                r.name AS ride_name,
-                rc.tier,
-                p.park_id,
-                p.name AS park_name,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-                rms.downtime_minutes / 60.0 AS downtime_hours,
-                rms.uptime_percentage,
-                rms.avg_wait_time,
-                rms.peak_wait_time,
-                -- Get current status using centralized helper
-                {current_status_sq},
-                -- Boolean for frontend compatibility using centralized helper
-                {current_is_open_sq},
-                -- Trend: compare to previous month
-                CASE
-                    WHEN prev_month.downtime_minutes > 0 THEN
-                        ((rms.downtime_minutes - prev_month.downtime_minutes) / prev_month.downtime_minutes * 1.0) * 100
-                    ELSE NULL
-                END AS trend_percentage
-            FROM ride_monthly_stats rms
-            JOIN rides r ON rms.ride_id = r.ride_id
-            JOIN parks p ON r.park_id = p.park_id
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            LEFT JOIN ride_monthly_stats prev_month ON rms.ride_id = prev_month.ride_id
-                AND prev_month.year = :prev_year
-                AND prev_month.month = :prev_month
-            WHERE rms.year = :year
-                AND rms.month = :month
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND p.is_active = TRUE
-                {filter_clause}
-            ORDER BY rms.downtime_minutes DESC
-            LIMIT :limit
-        """)
-
-        # Calculate previous month
-        prev_year = year if month > 1 else year - 1
-        prev_month_num = month - 1 if month > 1 else 12
-
-        result = self.conn.execute(query, {
-            "year": year,
-            "month": month,
-            "prev_year": prev_year,
-            "prev_month": prev_month_num,
-            "limit": limit
-        })
-
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    def get_live_wait_times(
-        self,
-        filter_disney_universal: bool = False,
-        limit: int = 100
-    ) -> List[Dict[str, Any]]:
-        """
-        Get current live wait times from most recent snapshots.
-
-        Args:
-            filter_disney_universal: If True, only include Disney & Universal parks
-            limit: Maximum number of rides to return
-
-        Returns:
-            List of rides sorted by longest current wait times descending
-        """
-        query = text("""
-            SELECT
-                r.ride_id,
-                r.name AS ride_name,
-                r.tier,
-                p.park_id,
-                p.name AS park_name,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-                rss.wait_time AS current_wait_minutes,
-                rss.computed_is_open AS current_is_open,
-                rss.recorded_at AS last_updated,
-                -- Get 7-day average for trend comparison
-                (
-                    SELECT AVG(avg_wait_time)
-                    FROM ride_weekly_stats
-                    WHERE ride_id = r.ride_id
-                        AND year = YEAR(CURDATE())
-                        AND week_number = WEEK(CURDATE(), 3)
-                ) AS avg_wait_7days,
-                -- Trend percentage (current vs 7-day average)
-                CASE
-                    WHEN (
-                        SELECT AVG(avg_wait_time)
-                        FROM ride_weekly_stats
-                        WHERE ride_id = r.ride_id
-                            AND year = YEAR(CURDATE())
-                            AND week_number = WEEK(CURDATE(), 3)
-                    ) > 0 THEN
-                        ((rss.wait_time - (
-                            SELECT AVG(avg_wait_time)
-                            FROM ride_weekly_stats
-                            WHERE ride_id = r.ride_id
-                                AND year = YEAR(CURDATE())
-                                AND week_number = WEEK(CURDATE(), 3)
-                        )) / (
-                            SELECT AVG(avg_wait_time)
-                            FROM ride_weekly_stats
-                            WHERE ride_id = r.ride_id
-                                AND year = YEAR(CURDATE())
-                                AND week_number = WEEK(CURDATE(), 3)
-                        )) * 100
-                    ELSE NULL
-                END AS trend_percentage
-            FROM rides r
-            JOIN parks p ON r.park_id = p.park_id
-            JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            WHERE rss.recorded_at = (
-                    SELECT MAX(recorded_at)
-                    FROM ride_status_snapshots
-                    WHERE ride_id = r.ride_id
+        # Get rides in park that are NOT in operated list
+        excluded = (
+            self.session.query(Ride)
+            .filter(
+                and_(
+                    Ride.park_id == park_id,
+                    Ride.is_active.is_(True),
+                    ~Ride.ride_id.in_(operated_rides)
                 )
-                AND (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = TRUE))
-                AND rss.wait_time > 0
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
-                AND p.is_active = TRUE
-                {:filter_clause}
-            ORDER BY rss.wait_time DESC
-            LIMIT :limit
-        """.replace(
-            "{:filter_clause}",
-            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-        ))
-
-        result = self.conn.execute(query, {"limit": limit})
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    def get_average_wait_times(
-        self,
-        filter_disney_universal: bool = False,
-        limit: int = 100
-    ) -> List[Dict[str, Any]]:
-        """
-        Get 7-day average wait times from weekly stats.
-
-        Args:
-            filter_disney_universal: If True, only include Disney & Universal parks
-            limit: Maximum number of rides to return
-
-        Returns:
-            List of rides sorted by longest average wait times descending
-        """
-        query = text("""
-            SELECT
-                r.ride_id,
-                r.name AS ride_name,
-                r.tier,
-                p.park_id,
-                p.name AS park_name,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-                rws.avg_wait_time AS avg_wait_7days,
-                rws.peak_wait_time AS peak_wait_7days,
-                -- Get current status
-                (
-                    SELECT computed_is_open
-                    FROM ride_status_snapshots
-                    WHERE ride_id = r.ride_id
-                    ORDER BY recorded_at DESC
-                    LIMIT 1
-                ) AS current_is_open,
-                -- Trend: compare to previous week's average
-                CASE
-                    WHEN prev_week.avg_wait_time > 0 THEN
-                        ((rws.avg_wait_time - prev_week.avg_wait_time * 1.0) / prev_week.avg_wait_time) * 100
-                    ELSE NULL
-                END AS trend_percentage
-            FROM ride_weekly_stats rws
-            JOIN rides r ON rws.ride_id = r.ride_id
-            JOIN parks p ON r.park_id = p.park_id
-            LEFT JOIN ride_weekly_stats prev_week ON rws.ride_id = prev_week.ride_id
-                AND prev_week.year = :prev_year
-                AND prev_week.week_number = :prev_week
-            WHERE rws.year = :year
-                AND rws.week_number = :week_number
-                AND rws.avg_wait_time > 0
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
-                AND p.is_active = TRUE
-                {:filter_clause}
-            ORDER BY rws.avg_wait_time DESC
-            LIMIT :limit
-        """.replace(
-            "{:filter_clause}",
-            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-        ))
-
-        # Calculate current and previous week
-        from datetime import timedelta
-        current_date = datetime.now()
-        year = current_date.year
-        week_number = current_date.isocalendar()[1]
-
-        prev_week_date = current_date - timedelta(weeks=1)
-        prev_year = prev_week_date.year
-        prev_week_num = prev_week_date.isocalendar()[1]
-
-        result = self.conn.execute(query, {
-            "year": year,
-            "week_number": week_number,
-            "prev_year": prev_year,
-            "prev_week": prev_week_num,
-            "limit": limit
-        })
-
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    def get_peak_wait_times(
-        self,
-        filter_disney_universal: bool = False,
-        limit: int = 100
-    ) -> List[Dict[str, Any]]:
-        """
-        Get peak wait times from weekly stats.
-
-        Args:
-            filter_disney_universal: If True, only include Disney & Universal parks
-            limit: Maximum number of rides to return
-
-        Returns:
-            List of rides sorted by longest peak wait times descending
-        """
-        query = text("""
-            SELECT
-                r.ride_id,
-                r.name AS ride_name,
-                r.tier,
-                p.park_id,
-                p.name AS park_name,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-                rws.peak_wait_time AS peak_wait_7days,
-                rws.avg_wait_time AS avg_wait_7days,
-                -- Get current status
-                (
-                    SELECT computed_is_open
-                    FROM ride_status_snapshots
-                    WHERE ride_id = r.ride_id
-                    ORDER BY recorded_at DESC
-                    LIMIT 1
-                ) AS current_is_open,
-                -- Trend: compare to previous week's peak
-                CASE
-                    WHEN prev_week.peak_wait_time > 0 THEN
-                        ((rws.peak_wait_time - prev_week.peak_wait_time * 1.0) / prev_week.peak_wait_time) * 100
-                    ELSE NULL
-                END AS trend_percentage
-            FROM ride_weekly_stats rws
-            JOIN rides r ON rws.ride_id = r.ride_id
-            JOIN parks p ON r.park_id = p.park_id
-            LEFT JOIN ride_weekly_stats prev_week ON rws.ride_id = prev_week.ride_id
-                AND prev_week.year = :prev_year
-                AND prev_week.week_number = :prev_week
-            WHERE rws.year = :year
-                AND rws.week_number = :week_number
-                AND rws.peak_wait_time > 0
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'  -- Only include mechanical rides
-                AND p.is_active = TRUE
-                {:filter_clause}
-            ORDER BY rws.peak_wait_time DESC
-            LIMIT :limit
-        """.replace(
-            "{:filter_clause}",
-            "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-        ))
-
-        # Calculate current and previous week
-        from datetime import timedelta
-        current_date = datetime.now()
-        year = current_date.year
-        week_number = current_date.isocalendar()[1]
-
-        prev_week_date = current_date - timedelta(weeks=1)
-        prev_year = prev_week_date.year
-        prev_week_num = prev_week_date.isocalendar()[1]
-
-        result = self.conn.execute(query, {
-            "year": year,
-            "week_number": week_number,
-            "prev_year": prev_year,
-            "prev_week": prev_week_num,
-            "limit": limit
-        })
-
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    def get_wait_times_by_period(
-        self,
-        period: str = 'today',
-        filter_disney_universal: bool = False,
-        limit: int = 100
-    ) -> List[Dict[str, Any]]:
-        """
-        Get wait times for a specified period (today, 7days, 30days).
-
-        Args:
-            period: Time period - 'today', '7days', or '30days'
-            filter_disney_universal: If True, only include Disney & Universal parks
-            limit: Maximum number of rides to return
-
-        Returns:
-            List of rides sorted by longest average wait times descending
-        """
-        from datetime import timedelta
-
-        filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-
-        if period == 'today':
-            # Get Pacific day bounds in UTC - "today" means Pacific calendar day
-            today_pacific = get_today_pacific()
-            start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
-            yesterday_pacific = today_pacific - timedelta(days=1)
-
-            # Query today's average wait times from LIVE snapshots (not ride_daily_stats)
-            # This provides real-time data that updates every 10 minutes
-            query = text(f"""
-                SELECT
-                    r.ride_id,
-                    r.queue_times_id,
-                    p.queue_times_id AS park_queue_times_id,
-                    r.name AS ride_name,
-                    r.tier,
-                    p.park_id,
-                    p.name AS park_name,
-                    CONCAT(p.city, ', ', p.state_province) AS location,
-                    ROUND(AVG(rss.wait_time), 0) AS avg_wait_minutes,
-                    MAX(rss.wait_time) AS peak_wait_minutes,
-                    -- Get current status from latest snapshot
-                    (
-                        SELECT computed_is_open
-                        FROM ride_status_snapshots
-                        WHERE ride_id = r.ride_id
-                        ORDER BY recorded_at DESC
-                        LIMIT 1
-                    ) AS current_is_open,
-                    -- Park is operating if ANY ride has wait_time > 0 (not just "open" flag)
-                    (
-                        SELECT CASE WHEN MAX(rss2.wait_time) > 0 THEN 1 ELSE 0 END
-                        FROM ride_status_snapshots rss2
-                        JOIN rides r2 ON rss2.ride_id = r2.ride_id
-                        WHERE r2.park_id = p.park_id
-                        AND rss2.recorded_at = (
-                            SELECT MAX(recorded_at)
-                            FROM ride_status_snapshots
-                            WHERE ride_id = rss2.ride_id
-                        )
-                    ) AS park_is_open,
-                    -- Trend: compare to yesterday's daily stats
-                    CASE
-                        WHEN prev_day.avg_wait_time > 0 THEN
-                            ((AVG(rss.wait_time) - prev_day.avg_wait_time) / prev_day.avg_wait_time) * 100
-                        ELSE NULL
-                    END AS trend_percentage
-                FROM ride_status_snapshots rss
-                JOIN rides r ON rss.ride_id = r.ride_id
-                JOIN parks p ON r.park_id = p.park_id
-                INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
-                LEFT JOIN ride_daily_stats prev_day ON r.ride_id = prev_day.ride_id
-                    AND prev_day.stat_date = :yesterday_pacific
-                WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                    AND rss.wait_time > 0
-                    AND (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = TRUE))
-                    AND pas.park_appears_open = TRUE
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'  -- Only include mechanical rides
-                    AND p.is_active = TRUE
-                    {filter_clause}
-                GROUP BY r.ride_id, r.queue_times_id, p.queue_times_id, r.name, r.tier, p.park_id, p.name, p.city, p.state_province, prev_day.avg_wait_time
-                HAVING AVG(rss.wait_time) > 0
-                ORDER BY avg_wait_minutes DESC
-                LIMIT :limit
-            """)
-            params = {
-                "limit": limit,
-                "start_utc": start_utc,
-                "end_utc": end_utc,
-                "yesterday_pacific": yesterday_pacific
-            }
-
-        elif period == '7days':
-            # Query 7-day average from ride_weekly_stats
-            current_date = datetime.now()
-            year = current_date.year
-            week_number = current_date.isocalendar()[1]
-            prev_week_date = current_date - timedelta(weeks=1)
-            prev_year = prev_week_date.year
-            prev_week_num = prev_week_date.isocalendar()[1]
-
-            query = text(f"""
-                SELECT
-                    r.ride_id,
-                    r.queue_times_id,
-                    p.queue_times_id AS park_queue_times_id,
-                    r.name AS ride_name,
-                    r.tier,
-                    p.park_id,
-                    p.name AS park_name,
-                    CONCAT(p.city, ', ', p.state_province) AS location,
-                    rws.avg_wait_time AS avg_wait_minutes,
-                    rws.peak_wait_time AS peak_wait_minutes,
-                    -- Get current status
-                    (
-                        SELECT computed_is_open
-                        FROM ride_status_snapshots
-                        WHERE ride_id = r.ride_id
-                        ORDER BY recorded_at DESC
-                        LIMIT 1
-                    ) AS current_is_open,
-                    -- Park is operating if ANY ride has wait_time > 0 (not just "open" flag)
-                    (
-                        SELECT CASE WHEN MAX(rss2.wait_time) > 0 THEN 1 ELSE 0 END
-                        FROM ride_status_snapshots rss2
-                        JOIN rides r2 ON rss2.ride_id = r2.ride_id
-                        WHERE r2.park_id = p.park_id
-                        AND rss2.recorded_at = (
-                            SELECT MAX(recorded_at)
-                            FROM ride_status_snapshots
-                            WHERE ride_id = rss2.ride_id
-                        )
-                    ) AS park_is_open,
-                    -- Trend: compare to previous week's average
-                    CASE
-                        WHEN prev_week.avg_wait_time > 0 THEN
-                            ((rws.avg_wait_time - prev_week.avg_wait_time) / prev_week.avg_wait_time) * 100
-                        ELSE NULL
-                    END AS trend_percentage
-                FROM ride_weekly_stats rws
-                JOIN rides r ON rws.ride_id = r.ride_id
-                JOIN parks p ON r.park_id = p.park_id
-                LEFT JOIN ride_weekly_stats prev_week ON rws.ride_id = prev_week.ride_id
-                    AND prev_week.year = :prev_year
-                    AND prev_week.week_number = :prev_week
-                WHERE rws.year = :year
-                    AND rws.week_number = :week_number
-                    AND rws.avg_wait_time > 0
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'  -- Only include mechanical rides
-                    AND p.is_active = TRUE
-                    {filter_clause}
-                ORDER BY rws.avg_wait_time DESC
-                LIMIT :limit
-            """)
-            params = {
-                "year": year,
-                "week_number": week_number,
-                "prev_year": prev_year,
-                "prev_week": prev_week_num,
-                "limit": limit
-            }
-
-        else:  # 30days
-            # Query 30-day average from ride_monthly_stats
-            current_date = datetime.now()
-            year = current_date.year
-            month = current_date.month
-            prev_month_date = current_date.replace(day=1) - timedelta(days=1)
-            prev_year = prev_month_date.year
-            prev_month = prev_month_date.month
-
-            query = text(f"""
-                SELECT
-                    r.ride_id,
-                    r.queue_times_id,
-                    p.queue_times_id AS park_queue_times_id,
-                    r.name AS ride_name,
-                    r.tier,
-                    p.park_id,
-                    p.name AS park_name,
-                    CONCAT(p.city, ', ', p.state_province) AS location,
-                    rms.avg_wait_time AS avg_wait_minutes,
-                    rms.peak_wait_time AS peak_wait_minutes,
-                    -- Get current status
-                    (
-                        SELECT computed_is_open
-                        FROM ride_status_snapshots
-                        WHERE ride_id = r.ride_id
-                        ORDER BY recorded_at DESC
-                        LIMIT 1
-                    ) AS current_is_open,
-                    -- Park is operating if ANY ride has wait_time > 0 (not just "open" flag)
-                    (
-                        SELECT CASE WHEN MAX(rss2.wait_time) > 0 THEN 1 ELSE 0 END
-                        FROM ride_status_snapshots rss2
-                        JOIN rides r2 ON rss2.ride_id = r2.ride_id
-                        WHERE r2.park_id = p.park_id
-                        AND rss2.recorded_at = (
-                            SELECT MAX(recorded_at)
-                            FROM ride_status_snapshots
-                            WHERE ride_id = rss2.ride_id
-                        )
-                    ) AS park_is_open,
-                    -- Trend: compare to previous month's average
-                    CASE
-                        WHEN prev_month.avg_wait_time > 0 THEN
-                            ((rms.avg_wait_time - prev_month.avg_wait_time) / prev_month.avg_wait_time) * 100
-                        ELSE NULL
-                    END AS trend_percentage
-                From ride_monthly_stats rms
-                JOIN rides r ON rms.ride_id = r.ride_id
-                JOIN parks p ON r.park_id = p.park_id
-                LEFT JOIN ride_monthly_stats prev_month ON rms.ride_id = prev_month.ride_id
-                    AND prev_month.year = :prev_year
-                    AND prev_month.month = :prev_month
-                WHERE rms.year = :year
-                    AND rms.month = :month
-                    AND rms.avg_wait_time > 0
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'  -- Only include mechanical rides
-                    AND p.is_active = TRUE
-                    {filter_clause}
-                ORDER BY rms.avg_wait_time DESC
-                LIMIT :limit
-            """)
-            params = {
-                "year": year,
-                "month": month,
-                "prev_year": prev_year,
-                "prev_month": prev_month,
-                "limit": limit
-            }
-
-        result = self.conn.execute(query, params)
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    def get_park_wait_times_by_period(
-        self,
-        period: str = 'today',
-        filter_disney_universal: bool = False,
-        limit: int = 50
-    ) -> List[Dict[str, Any]]:
-        """
-        Get park-level wait times aggregated from ride data for a specified period.
-
-        Args:
-            period: Time period - 'today', '7days', or '30days'
-            filter_disney_universal: If True, only include Disney & Universal parks
-            limit: Maximum number of parks to return
-
-        Returns:
-            List of parks sorted by longest average wait times descending
-        """
-        from datetime import timedelta
-
-        filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-
-        if period == 'today':
-            # Get Pacific day bounds in UTC - "today" means Pacific calendar day
-            today_pacific = get_today_pacific()
-            start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
-            yesterday_pacific = today_pacific - timedelta(days=1)
-
-            # Query today's average wait times from LIVE snapshots aggregated by park
-            query = text(f"""
-                SELECT
-                    p.park_id,
-                    p.queue_times_id,
-                    p.name AS park_name,
-                    CONCAT(p.city, ', ', p.state_province) AS location,
-                    ROUND(AVG(rss.wait_time), 0) AS avg_wait_minutes,
-                    MAX(rss.wait_time) AS peak_wait_minutes,
-                    COUNT(DISTINCT r.ride_id) AS rides_reporting,
-                    -- Trend: compare to yesterday's park daily stats
-                    CASE
-                        WHEN prev_day.avg_wait_time > 0 THEN
-                            ((AVG(rss.wait_time) - prev_day.avg_wait_time) / prev_day.avg_wait_time) * 100
-                        ELSE NULL
-                    END AS trend_percentage,
-                    -- Park is operating if ANY ride has wait_time > 0
-                    (
-                        SELECT CASE WHEN MAX(rss2.wait_time) > 0 THEN 1 ELSE 0 END
-                        FROM ride_status_snapshots rss2
-                        JOIN rides r2 ON rss2.ride_id = r2.ride_id
-                        WHERE r2.park_id = p.park_id
-                        AND r2.category = 'ATTRACTION'  -- Only include mechanical rides
-                        AND rss2.recorded_at = (
-                            SELECT MAX(recorded_at)
-                            FROM ride_status_snapshots
-                            WHERE ride_id = rss2.ride_id
-                        )
-                    ) AS park_is_open
-                FROM ride_status_snapshots rss
-                JOIN rides r ON rss.ride_id = r.ride_id
-                JOIN parks p ON r.park_id = p.park_id
-                INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                    AND pas.recorded_at = rss.recorded_at
-                LEFT JOIN park_daily_stats prev_day ON p.park_id = prev_day.park_id
-                    AND prev_day.stat_date = :yesterday_pacific
-                WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                    AND rss.wait_time > 0
-                    AND (rss.status = 'OPERATING' OR (rss.status IS NULL AND rss.computed_is_open = TRUE))
-                    AND pas.park_appears_open = TRUE
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'  -- Only include mechanical rides
-                    AND p.is_active = TRUE
-                    {filter_clause}
-                GROUP BY p.park_id, p.queue_times_id, p.name, p.city, p.state_province, prev_day.avg_wait_time
-                HAVING AVG(rss.wait_time) > 0
-                ORDER BY avg_wait_minutes DESC
-                LIMIT :limit
-            """)
-            params = {
-                "limit": limit,
-                "start_utc": start_utc,
-                "end_utc": end_utc,
-                "yesterday_pacific": yesterday_pacific
-            }
-
-        elif period == '7days':
-            # Query 7-day average aggregated by park from daily stats
-            end_date = date.today()
-            start_date = end_date - timedelta(days=6)
-
-            query = text(f"""
-                SELECT
-                    p.park_id,
-                    p.queue_times_id,
-                    p.name AS park_name,
-                    CONCAT(p.city, ', ', p.state_province) AS location,
-                    ROUND(AVG(rds.avg_wait_time), 0) AS avg_wait_minutes,
-                    MAX(rds.peak_wait_time) AS peak_wait_minutes,
-                    COUNT(DISTINCT r.ride_id) AS rides_reporting,
-                    NULL AS trend_percentage,
-                    -- Park is operating if ANY ride has wait_time > 0
-                    (
-                        SELECT CASE WHEN MAX(rss2.wait_time) > 0 THEN 1 ELSE 0 END
-                        FROM ride_status_snapshots rss2
-                        JOIN rides r2 ON rss2.ride_id = r2.ride_id
-                        WHERE r2.park_id = p.park_id
-                        AND r2.category = 'ATTRACTION'  -- Only include mechanical rides
-                        AND rss2.recorded_at = (
-                            SELECT MAX(recorded_at)
-                            FROM ride_status_snapshots
-                            WHERE ride_id = rss2.ride_id
-                        )
-                    ) AS park_is_open
-                FROM ride_daily_stats rds
-                JOIN rides r ON rds.ride_id = r.ride_id
-                JOIN parks p ON r.park_id = p.park_id
-                WHERE rds.stat_date BETWEEN :start_date AND :end_date
-                    AND rds.avg_wait_time > 0
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'  -- Only include mechanical rides
-                    AND p.is_active = TRUE
-                    {filter_clause}
-                GROUP BY p.park_id, p.queue_times_id, p.name, p.city, p.state_province
-                HAVING AVG(rds.avg_wait_time) > 0
-                ORDER BY avg_wait_minutes DESC
-                LIMIT :limit
-            """)
-            params = {
-                "start_date": start_date,
-                "end_date": end_date,
-                "limit": limit
-            }
-
-        else:  # 30days
-            # Query 30-day average aggregated by park from daily stats
-            end_date = date.today()
-            start_date = end_date - timedelta(days=29)
-
-            query = text(f"""
-                SELECT
-                    p.park_id,
-                    p.queue_times_id,
-                    p.name AS park_name,
-                    CONCAT(p.city, ', ', p.state_province) AS location,
-                    ROUND(AVG(rds.avg_wait_time), 0) AS avg_wait_minutes,
-                    MAX(rds.peak_wait_time) AS peak_wait_minutes,
-                    COUNT(DISTINCT r.ride_id) AS rides_reporting,
-                    NULL AS trend_percentage,
-                    -- Park is operating if ANY ride has wait_time > 0
-                    (
-                        SELECT CASE WHEN MAX(rss2.wait_time) > 0 THEN 1 ELSE 0 END
-                        FROM ride_status_snapshots rss2
-                        JOIN rides r2 ON rss2.ride_id = r2.ride_id
-                        WHERE r2.park_id = p.park_id
-                        AND r2.category = 'ATTRACTION'  -- Only include mechanical rides
-                        AND rss2.recorded_at = (
-                            SELECT MAX(recorded_at)
-                            FROM ride_status_snapshots
-                            WHERE ride_id = rss2.ride_id
-                        )
-                    ) AS park_is_open
-                FROM ride_daily_stats rds
-                JOIN rides r ON rds.ride_id = r.ride_id
-                JOIN parks p ON r.park_id = p.park_id
-                WHERE rds.stat_date BETWEEN :start_date AND :end_date
-                    AND rds.avg_wait_time > 0
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'  -- Only include mechanical rides
-                    AND p.is_active = TRUE
-                    {filter_clause}
-                GROUP BY p.park_id, p.queue_times_id, p.name, p.city, p.state_province
-                HAVING AVG(rds.avg_wait_time) > 0
-                ORDER BY avg_wait_minutes DESC
-                LIMIT :limit
-            """)
-            params = {
-                "start_date": start_date,
-                "end_date": end_date,
-                "limit": limit
-            }
-
-        result = self.conn.execute(query, params)
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    # ========================================
-    # Trend Analysis Methods (User Story 8)
-    # ========================================
-
-    def get_parks_improving(
-        self,
-        period: str = '7days',
-        park_filter: str = 'all-parks',
-        limit: int = 50
-    ) -> List[Dict[str, Any]]:
-        """
-        Get parks showing ≥5% uptime improvement (Query 8).
-
-        Args:
-            period: 'today', '7days', or '30days'
-            park_filter: 'disney-universal' or 'all-parks'
-            limit: Maximum number of results
-
-        Returns:
-            List of parks with improvement metrics
-        """
-        from datetime import timedelta
-
-        today = datetime.now().date()
-
-        if period == 'today':
-            # Daily comparison: today vs yesterday
-            current_date = today
-            previous_date = today - timedelta(days=1)
-
-            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
-
-            query = text(f"""
-                WITH current_period AS (
-                    SELECT
-                        pds.park_id,
-                        p.name AS park_name,
-                        CONCAT(p.city, ', ', p.state_province) AS location,
-                        pds.avg_uptime_percentage,
-                        pds.total_downtime_hours
-                    FROM park_daily_stats pds
-                    JOIN parks p ON pds.park_id = p.park_id
-                    WHERE pds.stat_date = :current_date
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                ),
-                previous_period AS (
-                    SELECT
-                        pds.park_id,
-                        pds.avg_uptime_percentage,
-                        pds.total_downtime_hours
-                    FROM park_daily_stats pds
-                    JOIN parks p ON pds.park_id = p.park_id
-                    WHERE pds.stat_date = :previous_date
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                )
-                SELECT
-                    cp.park_id,
-                    cp.park_name,
-                    cp.location,
-                    cp.avg_uptime_percentage AS current_uptime,
-                    pp.avg_uptime_percentage AS previous_uptime,
-                    (cp.avg_uptime_percentage - pp.avg_uptime_percentage) AS improvement_percentage,
-                    cp.total_downtime_hours AS current_downtime_hours,
-                    pp.total_downtime_hours AS previous_downtime_hours
-                FROM current_period cp
-                JOIN previous_period pp ON cp.park_id = pp.park_id
-                WHERE (cp.avg_uptime_percentage - pp.avg_uptime_percentage) >= :threshold
-                ORDER BY improvement_percentage DESC
-                LIMIT :limit
-            """)
-
-            result = self.conn.execute(query, {
-                "current_date": current_date,
-                "previous_date": previous_date,
-                "threshold": 2.0,  # Lower threshold for daily comparisons
-                "limit": limit
-            })
-
-        elif period == '7days':
-            # Weekly comparison: current week vs previous week
-            current_week = today.isocalendar()[1]
-            current_year = today.year
-
-            prev_week_date = today - timedelta(weeks=1)
-            prev_week = prev_week_date.isocalendar()[1]
-            prev_year = prev_week_date.year
-
-            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
-
-            query = text(f"""
-                WITH current_period AS (
-                    SELECT
-                        pws.park_id,
-                        p.name AS park_name,
-                        CONCAT(p.city, ', ', p.state_province) AS location,
-                        pws.avg_uptime_percentage,
-                        pws.total_downtime_hours
-                    FROM park_weekly_stats pws
-                    JOIN parks p ON pws.park_id = p.park_id
-                    WHERE pws.year = :current_year
-                        AND pws.week_number = :current_week
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                ),
-                previous_period AS (
-                    SELECT
-                        pws.park_id,
-                        pws.avg_uptime_percentage,
-                        pws.total_downtime_hours
-                    FROM park_weekly_stats pws
-                    JOIN parks p ON pws.park_id = p.park_id
-                    WHERE pws.year = :prev_year
-                        AND pws.week_number = :prev_week
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                )
-                SELECT
-                    cp.park_id,
-                    cp.park_name,
-                    cp.location,
-                    cp.avg_uptime_percentage AS current_uptime,
-                    pp.avg_uptime_percentage AS previous_uptime,
-                    (cp.avg_uptime_percentage - pp.avg_uptime_percentage) AS improvement_percentage,
-                    cp.total_downtime_hours AS current_downtime_hours,
-                    pp.total_downtime_hours AS previous_downtime_hours
-                FROM current_period cp
-                JOIN previous_period pp ON cp.park_id = pp.park_id
-                WHERE (cp.avg_uptime_percentage - pp.avg_uptime_percentage) >= 5.0
-                ORDER BY improvement_percentage DESC
-                LIMIT :limit
-            """)
-
-            result = self.conn.execute(query, {
-                "current_year": current_year,
-                "current_week": current_week,
-                "prev_year": prev_year,
-                "prev_week": prev_week,
-                "limit": limit
-            })
-
-        elif period == '30days':
-            # Monthly comparison: current month vs previous month
-            current_month = today.month
-            current_year = today.year
-
-            prev_month_date = today - timedelta(days=30)
-            prev_month = prev_month_date.month
-            prev_year = prev_month_date.year
-
-            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
-
-            query = text(f"""
-                WITH current_period AS (
-                    SELECT
-                        pms.park_id,
-                        p.name AS park_name,
-                        CONCAT(p.city, ', ', p.state_province) AS location,
-                        pms.avg_uptime_percentage,
-                        pms.total_downtime_hours
-                    FROM park_monthly_stats pms
-                    JOIN parks p ON pms.park_id = p.park_id
-                    WHERE pms.year = :current_year
-                        AND pms.month = :current_month
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                ),
-                previous_period AS (
-                    SELECT
-                        pms.park_id,
-                        pms.avg_uptime_percentage,
-                        pms.total_downtime_hours
-                    FROM park_monthly_stats pms
-                    JOIN parks p ON pms.park_id = p.park_id
-                    WHERE pms.year = :prev_year
-                        AND pms.month = :prev_month
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                )
-                SELECT
-                    cp.park_id,
-                    cp.park_name,
-                    cp.location,
-                    cp.avg_uptime_percentage AS current_uptime,
-                    pp.avg_uptime_percentage AS previous_uptime,
-                    (cp.avg_uptime_percentage - pp.avg_uptime_percentage) AS improvement_percentage,
-                    cp.total_downtime_hours AS current_downtime_hours,
-                    pp.total_downtime_hours AS previous_downtime_hours
-                FROM current_period cp
-                JOIN previous_period pp ON cp.park_id = pp.park_id
-                WHERE (cp.avg_uptime_percentage - pp.avg_uptime_percentage) >= 5.0
-                ORDER BY improvement_percentage DESC
-                LIMIT :limit
-            """)
-
-            result = self.conn.execute(query, {
-                "current_year": current_year,
-                "current_month": current_month,
-                "prev_year": prev_year,
-                "prev_month": prev_month,
-                "limit": limit
-            })
-
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    def get_parks_declining(
-        self,
-        period: str = '7days',
-        park_filter: str = 'all-parks',
-        limit: int = 50
-    ) -> List[Dict[str, Any]]:
-        """
-        Get parks showing ≥5% uptime decline (Query 9).
-
-        Args:
-            period: 'today', '7days', or '30days'
-            park_filter: 'disney-universal' or 'all-parks'
-            limit: Maximum number of results
-
-        Returns:
-            List of parks with decline metrics
-        """
-        from datetime import timedelta
-
-        today = datetime.now().date()
-
-        if period == 'today':
-            # Daily comparison: today vs yesterday
-            current_date = today
-            previous_date = today - timedelta(days=1)
-
-            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
-
-            query = text(f"""
-                WITH current_period AS (
-                    SELECT
-                        pds.park_id,
-                        p.name AS park_name,
-                        CONCAT(p.city, ', ', p.state_province) AS location,
-                        pds.avg_uptime_percentage,
-                        pds.total_downtime_hours
-                    FROM park_daily_stats pds
-                    JOIN parks p ON pds.park_id = p.park_id
-                    WHERE pds.stat_date = :current_date
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                ),
-                previous_period AS (
-                    SELECT
-                        pds.park_id,
-                        pds.avg_uptime_percentage,
-                        pds.total_downtime_hours
-                    FROM park_daily_stats pds
-                    JOIN parks p ON pds.park_id = p.park_id
-                    WHERE pds.stat_date = :previous_date
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                )
-                SELECT
-                    cp.park_id,
-                    cp.park_name,
-                    cp.location,
-                    cp.avg_uptime_percentage AS current_uptime,
-                    pp.avg_uptime_percentage AS previous_uptime,
-                    (pp.avg_uptime_percentage - cp.avg_uptime_percentage) AS decline_percentage,
-                    cp.total_downtime_hours AS current_downtime_hours,
-                    pp.total_downtime_hours AS previous_downtime_hours
-                FROM current_period cp
-                JOIN previous_period pp ON cp.park_id = pp.park_id
-                WHERE (pp.avg_uptime_percentage - cp.avg_uptime_percentage) >= :threshold
-                ORDER BY decline_percentage DESC
-                LIMIT :limit
-            """)
-
-            result = self.conn.execute(query, {
-                "current_date": current_date,
-                "previous_date": previous_date,
-                "threshold": 2.0,  # Lower threshold for daily comparisons
-                "limit": limit
-            })
-
-        elif period == '7days':
-            # Weekly comparison: current week vs previous week
-            current_week = today.isocalendar()[1]
-            current_year = today.year
-
-            prev_week_date = today - timedelta(weeks=1)
-            prev_week = prev_week_date.isocalendar()[1]
-            prev_year = prev_week_date.year
-
-            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
-
-            query = text(f"""
-                WITH current_period AS (
-                    SELECT
-                        pws.park_id,
-                        p.name AS park_name,
-                        CONCAT(p.city, ', ', p.state_province) AS location,
-                        pws.avg_uptime_percentage,
-                        pws.total_downtime_hours
-                    FROM park_weekly_stats pws
-                    JOIN parks p ON pws.park_id = p.park_id
-                    WHERE pws.year = :current_year
-                        AND pws.week_number = :current_week
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                ),
-                previous_period AS (
-                    SELECT
-                        pws.park_id,
-                        pws.avg_uptime_percentage,
-                        pws.total_downtime_hours
-                    FROM park_weekly_stats pws
-                    JOIN parks p ON pws.park_id = p.park_id
-                    WHERE pws.year = :prev_year
-                        AND pws.week_number = :prev_week
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                )
-                SELECT
-                    cp.park_id,
-                    cp.park_name,
-                    cp.location,
-                    cp.avg_uptime_percentage AS current_uptime,
-                    pp.avg_uptime_percentage AS previous_uptime,
-                    (pp.avg_uptime_percentage - cp.avg_uptime_percentage) AS decline_percentage,
-                    cp.total_downtime_hours AS current_downtime_hours,
-                    pp.total_downtime_hours AS previous_downtime_hours
-                FROM current_period cp
-                JOIN previous_period pp ON cp.park_id = pp.park_id
-                WHERE (pp.avg_uptime_percentage - cp.avg_uptime_percentage) >= 5.0
-                ORDER BY decline_percentage DESC
-                LIMIT :limit
-            """)
-
-            result = self.conn.execute(query, {
-                "current_year": current_year,
-                "current_week": current_week,
-                "prev_year": prev_year,
-                "prev_week": prev_week,
-                "limit": limit
-            })
-
-        elif period == '30days':
-            # Monthly comparison: current month vs previous month
-            current_month = today.month
-            current_year = today.year
-
-            prev_month_date = today - timedelta(days=30)
-            prev_month = prev_month_date.month
-            prev_year = prev_month_date.year
-
-            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
-
-            query = text(f"""
-                WITH current_period AS (
-                    SELECT
-                        pms.park_id,
-                        p.name AS park_name,
-                        CONCAT(p.city, ', ', p.state_province) AS location,
-                        pms.avg_uptime_percentage,
-                        pms.total_downtime_hours
-                    FROM park_monthly_stats pms
-                    JOIN parks p ON pms.park_id = p.park_id
-                    WHERE pms.year = :current_year
-                        AND pms.month = :current_month
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                ),
-                previous_period AS (
-                    SELECT
-                        pms.park_id,
-                        pms.avg_uptime_percentage,
-                        pms.total_downtime_hours
-                    FROM park_monthly_stats pms
-                    JOIN parks p ON pms.park_id = p.park_id
-                    WHERE pms.year = :prev_year
-                        AND pms.month = :prev_month
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                )
-                SELECT
-                    cp.park_id,
-                    cp.park_name,
-                    cp.location,
-                    cp.avg_uptime_percentage AS current_uptime,
-                    pp.avg_uptime_percentage AS previous_uptime,
-                    (pp.avg_uptime_percentage - cp.avg_uptime_percentage) AS decline_percentage,
-                    cp.total_downtime_hours AS current_downtime_hours,
-                    pp.total_downtime_hours AS previous_downtime_hours
-                FROM current_period cp
-                JOIN previous_period pp ON cp.park_id = pp.park_id
-                WHERE (pp.avg_uptime_percentage - cp.avg_uptime_percentage) >= 5.0
-                ORDER BY decline_percentage DESC
-                LIMIT :limit
-            """)
-
-            result = self.conn.execute(query, {
-                "current_year": current_year,
-                "current_month": current_month,
-                "prev_year": prev_year,
-                "prev_month": prev_month,
-                "limit": limit
-            })
-
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    def get_rides_improving(
-        self,
-        period: str = '7days',
-        park_filter: str = 'all-parks',
-        limit: int = 50
-    ) -> List[Dict[str, Any]]:
-        """
-        Get rides showing ≥5% uptime improvement (Query 10).
-
-        Args:
-            period: 'today', '7days', or '30days'
-            park_filter: 'disney-universal' or 'all-parks'
-            limit: Maximum number of results
-
-        Returns:
-            List of rides with improvement metrics
-        """
-        from datetime import timedelta
-
-        today = datetime.now().date()
-
-        if period == 'today':
-            # Daily comparison: today vs yesterday
-            current_date = today
-            previous_date = today - timedelta(days=1)
-
-            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
-
-            query = text(f"""
-                WITH current_period AS (
-                    SELECT
-                        rds.ride_id,
-                        r.name AS ride_name,
-                        p.name AS park_name,
-                        r.tier,
-                        rds.uptime_percentage,
-                        rds.downtime_minutes
-                    FROM ride_daily_stats rds
-                    JOIN rides r ON rds.ride_id = r.ride_id
-                    JOIN parks p ON r.park_id = p.park_id
-                    WHERE rds.stat_date = :current_date
-                        AND r.is_active = TRUE
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                ),
-                previous_period AS (
-                    SELECT
-                        rds.ride_id,
-                        rds.uptime_percentage,
-                        rds.downtime_minutes
-                    FROM ride_daily_stats rds
-                    JOIN rides r ON rds.ride_id = r.ride_id
-                    JOIN parks p ON r.park_id = p.park_id
-                    WHERE rds.stat_date = :previous_date
-                        AND r.is_active = TRUE
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                )
-                SELECT
-                    cp.ride_id,
-                    cp.ride_name,
-                    cp.park_name,
-                    cp.tier,
-                    cp.uptime_percentage AS current_uptime,
-                    pp.uptime_percentage AS previous_uptime,
-                    (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
-                    cp.downtime_minutes AS current_downtime_minutes,
-                    pp.downtime_minutes AS previous_downtime_minutes
-                FROM current_period cp
-                JOIN previous_period pp ON cp.ride_id = pp.ride_id
-                WHERE (cp.uptime_percentage - pp.uptime_percentage) >= :threshold
-                ORDER BY improvement_percentage DESC
-                LIMIT :limit
-            """)
-
-            result = self.conn.execute(query, {
-                "current_date": current_date,
-                "previous_date": previous_date,
-                "threshold": 2.0,  # Lower threshold for daily comparisons
-                "limit": limit
-            })
-
-        elif period == '7days':
-            # Weekly comparison: current week vs previous week
-            current_week = today.isocalendar()[1]
-            current_year = today.year
-
-            prev_week_date = today - timedelta(weeks=1)
-            prev_week = prev_week_date.isocalendar()[1]
-            prev_year = prev_week_date.year
-
-            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
-
-            query = text(f"""
-                WITH current_period AS (
-                    SELECT
-                        rws.ride_id,
-                        r.name AS ride_name,
-                        p.name AS park_name,
-                        r.tier,
-                        rws.uptime_percentage,
-                        rws.downtime_minutes
-                    FROM ride_weekly_stats rws
-                    JOIN rides r ON rws.ride_id = r.ride_id
-                    JOIN parks p ON r.park_id = p.park_id
-                    WHERE rws.year = :current_year
-                        AND rws.week_number = :current_week
-                        AND r.is_active = TRUE
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                ),
-                previous_period AS (
-                    SELECT
-                        rws.ride_id,
-                        rws.uptime_percentage,
-                        rws.downtime_minutes
-                    FROM ride_weekly_stats rws
-                    JOIN rides r ON rws.ride_id = r.ride_id
-                    JOIN parks p ON r.park_id = p.park_id
-                    WHERE rws.year = :prev_year
-                        AND rws.week_number = :prev_week
-                        AND r.is_active = TRUE
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                )
-                SELECT
-                    cp.ride_id,
-                    cp.ride_name,
-                    cp.park_name,
-                    cp.tier,
-                    cp.uptime_percentage AS current_uptime,
-                    pp.uptime_percentage AS previous_uptime,
-                    (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
-                    cp.downtime_minutes AS current_downtime_minutes,
-                    pp.downtime_minutes AS previous_downtime_minutes
-                FROM current_period cp
-                JOIN previous_period pp ON cp.ride_id = pp.ride_id
-                WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
-                ORDER BY improvement_percentage DESC
-                LIMIT :limit
-            """)
-
-            result = self.conn.execute(query, {
-                "current_year": current_year,
-                "current_week": current_week,
-                "prev_year": prev_year,
-                "prev_week": prev_week,
-                "limit": limit
-            })
-
-        elif period == '30days':
-            # Monthly comparison: current month vs previous month
-            current_month = today.month
-            current_year = today.year
-
-            prev_month_date = today - timedelta(days=30)
-            prev_month = prev_month_date.month
-            prev_year = prev_month_date.year
-
-            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
-
-            query = text(f"""
-                WITH current_period AS (
-                    SELECT
-                        rms.ride_id,
-                        r.name AS ride_name,
-                        p.name AS park_name,
-                        r.tier,
-                        rms.uptime_percentage,
-                        rms.downtime_minutes
-                    FROM ride_monthly_stats rms
-                    JOIN rides r ON rms.ride_id = r.ride_id
-                    JOIN parks p ON r.park_id = p.park_id
-                    WHERE rms.year = :current_year
-                        AND rms.month = :current_month
-                        AND r.is_active = TRUE
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                ),
-                previous_period AS (
-                    SELECT
-                        rms.ride_id,
-                        rms.uptime_percentage,
-                        rms.downtime_minutes
-                    FROM ride_monthly_stats rms
-                    JOIN rides r ON rms.ride_id = r.ride_id
-                    JOIN parks p ON r.park_id = p.park_id
-                    WHERE rms.year = :prev_year
-                        AND rms.month = :prev_month
-                        AND r.is_active = TRUE
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                )
-                SELECT
-                    cp.ride_id,
-                    cp.ride_name,
-                    cp.park_name,
-                    cp.tier,
-                    cp.uptime_percentage AS current_uptime,
-                    pp.uptime_percentage AS previous_uptime,
-                    (cp.uptime_percentage - pp.uptime_percentage) AS improvement_percentage,
-                    cp.downtime_minutes AS current_downtime_minutes,
-                    pp.downtime_minutes AS previous_downtime_minutes
-                FROM current_period cp
-                JOIN previous_period pp ON cp.ride_id = pp.ride_id
-                WHERE (cp.uptime_percentage - pp.uptime_percentage) >= 5.0
-                ORDER BY improvement_percentage DESC
-                LIMIT :limit
-            """)
-
-            result = self.conn.execute(query, {
-                "current_year": current_year,
-                "current_month": current_month,
-                "prev_year": prev_year,
-                "prev_month": prev_month,
-                "limit": limit
-            })
-
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    def get_rides_declining(
-        self,
-        period: str = '7days',
-        park_filter: str = 'all-parks',
-        limit: int = 50
-    ) -> List[Dict[str, Any]]:
-        """
-        Get rides showing ≥5% uptime decline (Query 11).
-
-        Args:
-            period: 'today', '7days', or '30days'
-            park_filter: 'disney-universal' or 'all-parks'
-            limit: Maximum number of results
-
-        Returns:
-            List of rides with decline metrics
-        """
-        from datetime import timedelta
-
-        today = datetime.now().date()
-
-        if period == 'today':
-            # Daily comparison: today vs yesterday
-            current_date = today
-            previous_date = today - timedelta(days=1)
-
-            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
-
-            query = text(f"""
-                WITH current_period AS (
-                    SELECT
-                        rds.ride_id,
-                        r.name AS ride_name,
-                        p.name AS park_name,
-                        r.tier,
-                        rds.uptime_percentage,
-                        rds.downtime_minutes
-                    FROM ride_daily_stats rds
-                    JOIN rides r ON rds.ride_id = r.ride_id
-                    JOIN parks p ON r.park_id = p.park_id
-                    WHERE rds.stat_date = :current_date
-                        AND r.is_active = TRUE
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                ),
-                previous_period AS (
-                    SELECT
-                        rds.ride_id,
-                        rds.uptime_percentage,
-                        rds.downtime_minutes
-                    FROM ride_daily_stats rds
-                    JOIN rides r ON rds.ride_id = r.ride_id
-                    JOIN parks p ON r.park_id = p.park_id
-                    WHERE rds.stat_date = :previous_date
-                        AND r.is_active = TRUE
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                )
-                SELECT
-                    cp.ride_id,
-                    cp.ride_name,
-                    cp.park_name,
-                    cp.tier,
-                    cp.uptime_percentage AS current_uptime,
-                    pp.uptime_percentage AS previous_uptime,
-                    (pp.uptime_percentage - cp.uptime_percentage) AS decline_percentage,
-                    cp.downtime_minutes AS current_downtime_minutes,
-                    pp.downtime_minutes AS previous_downtime_minutes
-                FROM current_period cp
-                JOIN previous_period pp ON cp.ride_id = pp.ride_id
-                WHERE (pp.uptime_percentage - cp.uptime_percentage) >= :threshold
-                ORDER BY decline_percentage DESC
-                LIMIT :limit
-            """)
-
-            result = self.conn.execute(query, {
-                "current_date": current_date,
-                "previous_date": previous_date,
-                "threshold": 2.0,  # Lower threshold for daily comparisons
-                "limit": limit
-            })
-
-        elif period == '7days':
-            # Weekly comparison: current week vs previous week
-            current_week = today.isocalendar()[1]
-            current_year = today.year
-
-            prev_week_date = today - timedelta(weeks=1)
-            prev_week = prev_week_date.isocalendar()[1]
-            prev_year = prev_week_date.year
-
-            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
-
-            query = text(f"""
-                WITH current_period AS (
-                    SELECT
-                        rws.ride_id,
-                        r.name AS ride_name,
-                        p.name AS park_name,
-                        r.tier,
-                        rws.uptime_percentage,
-                        rws.downtime_minutes
-                    FROM ride_weekly_stats rws
-                    JOIN rides r ON rws.ride_id = r.ride_id
-                    JOIN parks p ON r.park_id = p.park_id
-                    WHERE rws.year = :current_year
-                        AND rws.week_number = :current_week
-                        AND r.is_active = TRUE
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                ),
-                previous_period AS (
-                    SELECT
-                        rws.ride_id,
-                        rws.uptime_percentage,
-                        rws.downtime_minutes
-                    FROM ride_weekly_stats rws
-                    JOIN rides r ON rws.ride_id = r.ride_id
-                    JOIN parks p ON r.park_id = p.park_id
-                    WHERE rws.year = :prev_year
-                        AND rws.week_number = :prev_week
-                        AND r.is_active = TRUE
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                )
-                SELECT
-                    cp.ride_id,
-                    cp.ride_name,
-                    cp.park_name,
-                    cp.tier,
-                    cp.uptime_percentage AS current_uptime,
-                    pp.uptime_percentage AS previous_uptime,
-                    (pp.uptime_percentage - cp.uptime_percentage) AS decline_percentage,
-                    cp.downtime_minutes AS current_downtime_minutes,
-                    pp.downtime_minutes AS previous_downtime_minutes
-                FROM current_period cp
-                JOIN previous_period pp ON cp.ride_id = pp.ride_id
-                WHERE (pp.uptime_percentage - cp.uptime_percentage) >= 5.0
-                ORDER BY decline_percentage DESC
-                LIMIT :limit
-            """)
-
-            result = self.conn.execute(query, {
-                "current_year": current_year,
-                "current_week": current_week,
-                "prev_year": prev_year,
-                "prev_week": prev_week,
-                "limit": limit
-            })
-
-        elif period == '30days':
-            # Monthly comparison: current month vs previous month
-            current_month = today.month
-            current_year = today.year
-
-            prev_month_date = today - timedelta(days=30)
-            prev_month = prev_month_date.month
-            prev_year = prev_month_date.year
-
-            filter_clause = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if park_filter == 'disney-universal' else ""
-
-            query = text(f"""
-                WITH current_period AS (
-                    SELECT
-                        rms.ride_id,
-                        r.name AS ride_name,
-                        p.name AS park_name,
-                        r.tier,
-                        rms.uptime_percentage,
-                        rms.downtime_minutes
-                    FROM ride_monthly_stats rms
-                    JOIN rides r ON rms.ride_id = r.ride_id
-                    JOIN parks p ON r.park_id = p.park_id
-                    WHERE rms.year = :current_year
-                        AND rms.month = :current_month
-                        AND r.is_active = TRUE
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                ),
-                previous_period AS (
-                    SELECT
-                        rms.ride_id,
-                        rms.uptime_percentage,
-                        rms.downtime_minutes
-                    FROM ride_monthly_stats rms
-                    JOIN rides r ON rms.ride_id = r.ride_id
-                    JOIN parks p ON r.park_id = p.park_id
-                    WHERE rms.year = :prev_year
-                        AND rms.month = :prev_month
-                        AND r.is_active = TRUE
-                        AND p.is_active = TRUE
-                        {filter_clause}
-                )
-                SELECT
-                    cp.ride_id,
-                    cp.ride_name,
-                    cp.park_name,
-                    cp.tier,
-                    cp.uptime_percentage AS current_uptime,
-                    pp.uptime_percentage AS previous_uptime,
-                    (pp.uptime_percentage - cp.uptime_percentage) AS decline_percentage,
-                    cp.downtime_minutes AS current_downtime_minutes,
-                    pp.downtime_minutes AS previous_downtime_minutes
-                FROM current_period cp
-                JOIN previous_period pp ON cp.ride_id = pp.ride_id
-                WHERE (pp.uptime_percentage - cp.uptime_percentage) >= 5.0
-                ORDER BY decline_percentage DESC
-                LIMIT :limit
-            """)
-
-            result = self.conn.execute(query, {
-                "current_year": current_year,
-                "current_month": current_month,
-                "prev_year": prev_year,
-                "prev_month": prev_month,
-                "limit": limit
-            })
-
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    # =========================================================================
-    # SORT ORDER HELPER
-    # =========================================================================
-
-    def _get_order_by_clause(self, sort_by: str) -> str:
-        """
-        Get the ORDER BY clause for park downtime rankings.
-
-        Args:
-            sort_by: Column to sort by
-
-        Returns:
-            SQL ORDER BY expression (column + direction)
-        """
-        # Map sort options to SQL expressions
-        # Note: uptime_percentage sorts ASC (higher is better), others sort DESC (higher = worse)
-        sort_mapping = {
-            "shame_score": "shame_score DESC",
-            "total_downtime_hours": "total_downtime_hours DESC",
-            "uptime_percentage": "uptime_percentage ASC",  # Higher uptime is better
-            "rides_down": "rides_down DESC",
-        }
-        return sort_mapping.get(sort_by, "shame_score DESC")
-
-    def _get_ride_order_by_clause(self, sort_by: str) -> str:
-        """
-        Get the ORDER BY clause for ride downtime rankings.
-
-        Args:
-            sort_by: Column to sort by
-
-        Returns:
-            SQL ORDER BY expression (column + direction)
-        """
-        # Map sort options to SQL expressions
-        # current_is_open ASC puts down rides (0) first
-        # uptime_percentage ASC puts lowest uptime (worst) first
-        sort_mapping = {
-            "current_is_open": "current_is_open ASC, downtime_hours DESC",
-            "downtime_hours": "downtime_hours DESC",
-            "uptime_percentage": "uptime_percentage ASC",  # Lower uptime = worse
-            "trend_percentage": "trend_percentage DESC",
-        }
-        return sort_mapping.get(sort_by, "downtime_hours DESC")
-
-    # Live Downtime Rankings (for "Today" period - computed from snapshots)
-
-    def get_park_live_downtime_rankings(
-        self,
-        filter_disney_universal: bool = False,
-        limit: int = 50,
-        sort_by: str = "shame_score"
-    ) -> List[Dict[str, Any]]:
-        """
-        Get park downtime rankings calculated live from today's snapshots.
-
-        This method computes downtime in real-time from ride_status_snapshots,
-        providing up-to-the-minute accuracy for the "Today" period.
-
-        CRITICAL: Shame score only counts rides that are CURRENTLY down.
-        Rides that were down earlier but are now operating do NOT contribute
-        to the shame score. "Rides Down" shows count of currently down rides.
-
-        Uses centralized SQL helpers for consistent status logic.
-
-        Args:
-            filter_disney_universal: If True, only include Disney & Universal parks
-            limit: Maximum number of parks to return
-            sort_by: Column to sort by - 'shame_score', 'total_downtime_hours',
-                     'uptime_percentage', 'rides_down'
-
-        Returns:
-            List of parks ranked by specified column (descending, except uptime which is ascending)
-        """
-        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
-
-        # Get Pacific day bounds in UTC - "today" means Pacific calendar day
-        start_utc, end_utc = get_pacific_day_range_utc(get_today_pacific())
-
-        # Use centralized helpers for consistent logic
-        # PARK-TYPE AWARE: Disney/Universal only counts DOWN, others count CLOSED too
-        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
-        park_open = ParkStatusSQL.park_appears_open_filter("pas")
-        # Use schedule-based filtering (not heuristic) for more accurate downtime
-        # This fixes the bug where park_appears_open heuristic marked parks as open
-        # before official opening time due to test rides operating
-        # PARK-TYPE AWARE: Disney/Universal only count DOWN status (not CLOSED)
-        downtime_hours = DowntimeSQL.downtime_hours_rounded("rss", "pas", park_id_expr="p.park_id", parks_alias="p")
-        weighted_downtime = DowntimeSQL.weighted_downtime_hours("rss", "pas", "COALESCE(rc.tier_weight, 2)")
-        uptime_pct = UptimeSQL.uptime_percentage("rss", "pas")
-        park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
-
-        # INSTANTANEOUS shame score - uses centralized helper for single source of truth
-        shame_score_sql = ShameScoreSQL.instantaneous_shame_score()
-
-        # CRITICAL: Only count downtime for rides that have operated at some point today
-        # PARK-TYPE AWARE: Disney/Universal needs 1 snapshot, others need 6 (30 min)
-        # This filters out seasonal closures while allowing legitimate breakdowns
-        # Must pass park_id_expr to check park_appears_open during operation
-        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p", park_id_expr="r.park_id")
-
-        # For latest snapshot check - used in rides_currently_down CTE
-        # Now uses p_inner alias for park-type-aware logic
-        is_down_latest = RideStatusSQL.is_down("rss_latest", parks_alias="p_inner")
-        park_open_latest = ParkStatusSQL.park_appears_open_filter("pas_latest")
-
-        # CRITICAL: Also need is_operating for rides_that_operated CTE
-        is_operating_cte = RideStatusSQL.is_operating("rss_op")
-
-        # PARK-TYPE AWARE: For rides_currently_down CTE (uses p_inner and r_inner aliases)
-        # Must pass park_id_expr to check park_appears_open during operation
-        has_operated_cte = RideStatusSQL.has_operated_for_park_type("r_inner.ride_id", "p_inner", park_id_expr="r_inner.park_id")
-
-        query = text(f"""
-            WITH
-            latest_snapshot AS (
-                -- Find the most recent snapshot timestamp for each ride today
-                SELECT ride_id, MAX(recorded_at) as latest_recorded_at
-                FROM ride_status_snapshots
-                WHERE recorded_at >= :start_utc AND recorded_at < :end_utc
-                GROUP BY ride_id
-            ),
-            rides_that_operated AS (
-                -- Only include rides that showed OPERATING status at some point today
-                -- This excludes seasonal closures and scheduled maintenance
-                SELECT DISTINCT rss_op.ride_id
-                FROM ride_status_snapshots rss_op
-                WHERE rss_op.recorded_at >= :start_utc AND rss_op.recorded_at < :end_utc
-                    AND ({is_operating_cte})
-            ),
-            rides_currently_down AS (
-                -- Identify rides that are DOWN in their latest snapshot
-                -- CRITICAL: Only count rides that have operated at some point today
-                -- PARK-TYPE AWARE: Disney/Universal only count DOWN, others count CLOSED too
-                -- PARK-TYPE AWARE: Disney/Universal need 1 operating snapshot, others need 6
-                SELECT DISTINCT r_inner.ride_id, r_inner.park_id
-                FROM rides r_inner
-                INNER JOIN parks p_inner ON r_inner.park_id = p_inner.park_id
-                INNER JOIN ride_status_snapshots rss_latest ON r_inner.ride_id = rss_latest.ride_id
-                INNER JOIN latest_snapshot ls ON rss_latest.ride_id = ls.ride_id
-                    AND rss_latest.recorded_at = ls.latest_recorded_at
-                INNER JOIN park_activity_snapshots pas_latest ON r_inner.park_id = pas_latest.park_id
-                    AND pas_latest.recorded_at = rss_latest.recorded_at
-                WHERE r_inner.is_active = TRUE
-                    AND r_inner.category = 'ATTRACTION'
-                    AND {is_down_latest}
-                    AND {park_open_latest}
-                    AND {has_operated_cte}
-            ),
-            park_weights AS (
-                -- Calculate total weight for each park based on tier classifications
-                -- Only count rides that have actually operated today
-                SELECT
-                    p.park_id,
-                    SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
-                FROM parks p
-                INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE p.is_active = TRUE
-                    AND {has_operated}
-                    {filter_clause}
-                GROUP BY p.park_id
             )
-            SELECT
-                p.park_id,
-                p.queue_times_id,
-                p.name AS park_name,
-                CONCAT(p.city, ', ', p.state_province) AS location,
+            .all()
+        )
 
-                -- Calculate total downtime hours using centralized helper
-                {downtime_hours} AS total_downtime_hours,
+        result = []
+        for r in excluded:
+            # Calculate days_since_operation using last_operated_at
+            days_since = None
+            if r.last_operated_at:
+                days_since = (now - r.last_operated_at).days
 
-                -- Calculate weighted downtime hours using centralized helper
-                {weighted_downtime} AS weighted_downtime_hours,
-
-                -- Shame Score = INSTANTANEOUS (rides currently down, not cumulative)
-                -- Uses centralized ShameScoreSQL helper for single source of truth
-                {shame_score_sql} AS shame_score,
-
-                -- Count of rides CURRENTLY down (not cumulative)
-                COUNT(DISTINCT rcd.ride_id) AS rides_down,
-
-                -- Calculate uptime percentage using centralized helper
-                {uptime_pct} AS uptime_percentage,
-
-                -- Trend: NULL for live data (no historical comparison needed for "Today")
-                NULL AS trend_percentage,
-
-                -- Park operating status using centralized helper
-                {park_is_open_sq}
-
-            FROM parks p
-            INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
-            INNER JOIN park_weights pw ON p.park_id = pw.park_id
-            LEFT JOIN rides_currently_down rcd ON r.ride_id = rcd.ride_id
-            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                AND p.is_active = TRUE
-                AND {has_operated}
-                {filter_clause}
-            GROUP BY p.park_id, p.name, p.city, p.state_province, pw.total_park_weight
-            HAVING total_downtime_hours > 0  -- Hall of Shame: only parks with actual downtime
-            ORDER BY {self._get_order_by_clause(sort_by)}
-            LIMIT :limit
-        """)
-
-        result = self.conn.execute(query, {
-            "limit": limit,
-            "start_utc": start_utc,
-            "end_utc": end_utc
-        })
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    # ==========================================================================
-    # PRE-AGGREGATED LIVE RANKINGS (instant response from cached tables)
-    # ==========================================================================
-
-    def get_park_live_rankings_cached(
-        self,
-        filter_disney_universal: bool = False,
-        limit: int = 50,
-        sort_by: str = "shame_score",
-        max_staleness_minutes: int = 20
-    ) -> List[Dict[str, Any]]:
-        """
-        Get park rankings from pre-aggregated cache table.
-
-        Returns instant results (~10ms) instead of computing from snapshots (~7s).
-        Data is refreshed every 10 minutes after snapshot collection.
-
-        Args:
-            filter_disney_universal: If True, only include Disney & Universal parks
-            limit: Maximum number of parks to return
-            sort_by: Column to sort by
-            max_staleness_minutes: Max acceptable data age (returns empty if exceeded)
-
-        Returns:
-            List of parks with pre-computed rankings, or empty list if data is stale
-
-        Raises:
-            None - returns empty list on stale data or missing table
-        """
-        filter_clause = ""
-        if filter_disney_universal:
-            filter_clause = "AND (plr.is_disney = TRUE OR plr.is_universal = TRUE)"
-
-        # Only show parks that are currently open (based on schedules)
-        # Parks without schedules or that are closed today are filtered out
-        filter_clause += " AND plr.park_is_open = TRUE"
-
-        # Map sort_by to column
-        sort_mapping = {
-            "shame_score": "plr.shame_score DESC",
-            "total_downtime_hours": "plr.total_downtime_hours DESC",
-            "rides_down": "plr.rides_down DESC",
-            "uptime_percentage": "plr.shame_score ASC",  # Lower shame = higher uptime
-        }
-        order_by = sort_mapping.get(sort_by, "plr.shame_score DESC")
-
-        query = text(f"""
-            SELECT
-                plr.park_id,
-                plr.queue_times_id,
-                plr.park_name,
-                plr.location,
-                plr.timezone,
-                plr.is_disney,
-                plr.is_universal,
-                plr.rides_down,
-                plr.total_rides,
-                plr.shame_score,
-                plr.park_is_open,
-                plr.total_downtime_hours,
-                plr.weighted_downtime_hours,
-                plr.total_park_weight,
-                plr.calculated_at,
-                -- Calculate uptime percentage
-                ROUND(100 - (plr.rides_down * 100.0 / NULLIF(plr.total_rides, 0)), 1) as uptime_percentage
-            FROM park_live_rankings plr
-            WHERE plr.calculated_at >= DATE_SUB(NOW(), INTERVAL :max_staleness MINUTE)
-                {filter_clause}
-            ORDER BY {order_by}
-            LIMIT :limit
-        """)
-
-        try:
-            result = self.conn.execute(query, {
-                "limit": limit,
-                "max_staleness": max_staleness_minutes,
+            result.append({
+                'ride_id': r.ride_id,
+                'ride_name': r.name,
+                'tier': r.tier,
+                'tier_weight': {1: 3, 2: 2, 3: 1}.get(r.tier, 2),
+                'last_operated_at': r.last_operated_at,
+                'days_since_operation': days_since,
+                'reason': 'No operation in last 7 days'
             })
-            rows = [dict(row._mapping) for row in result.fetchall()]
 
-            if not rows:
-                logger.warning("Park live rankings cache is empty or stale")
+        return result
 
-            return rows
-
-        except Exception as e:
-            logger.error(f"Error reading park_live_rankings cache: {e}")
-            return []
-
-    def get_ride_live_rankings_cached(
-        self,
-        filter_disney_universal: bool = False,
-        limit: int = 100,
-        sort_by: str = "downtime_hours",
-        max_staleness_minutes: int = 20
-    ) -> List[Dict[str, Any]]:
+    def get_active_rides(self, park_id: int) -> List[Dict[str, Any]]:
         """
-        Get ride rankings from pre-aggregated cache table.
-
-        Returns instant results (~10ms) instead of computing from snapshots (~7s).
-        Data is refreshed every 10 minutes after snapshot collection.
+        Get list of active rides that have operated in the last 7 days.
 
         Args:
-            filter_disney_universal: If True, only include Disney & Universal parks
-            limit: Maximum number of rides to return
-            sort_by: Column to sort by
-            max_staleness_minutes: Max acceptable data age (returns empty if exceeded)
+            park_id: Park ID
 
         Returns:
-            List of rides with pre-computed rankings, or empty list if data is stale
+            List of active ride dictionaries with tier info
         """
-        filter_clause = ""
-        if filter_disney_universal:
-            filter_clause = "AND (rlr.is_disney = TRUE OR rlr.is_universal = TRUE)"
-
-        # Map sort_by to column
-        sort_mapping = {
-            "downtime_hours": "rlr.downtime_hours DESC",
-            "is_down": "rlr.is_down DESC, rlr.downtime_hours DESC",
-            "current_wait_time": "rlr.current_wait_time DESC",
-            "avg_wait_time": "rlr.avg_wait_time DESC",
-        }
-        order_by = sort_mapping.get(sort_by, "rlr.downtime_hours DESC")
-
-        query = text(f"""
-            SELECT
-                rlr.ride_id,
-                rlr.park_id,
-                rlr.queue_times_id,
-                rlr.ride_name,
-                rlr.park_name,
-                rlr.tier,
-                rlr.tier_weight,
-                rlr.category,
-                rlr.is_disney,
-                rlr.is_universal,
-                rlr.is_down,
-                rlr.current_status,
-                rlr.current_wait_time,
-                rlr.last_status_change,
-                rlr.downtime_hours,
-                rlr.downtime_incidents,
-                rlr.avg_wait_time,
-                rlr.max_wait_time,
-                rlr.calculated_at
-            FROM ride_live_rankings rlr
-            WHERE rlr.calculated_at >= DATE_SUB(NOW(), INTERVAL :max_staleness MINUTE)
-                {filter_clause}
-            ORDER BY {order_by}
-            LIMIT :limit
-        """)
-
-        try:
-            result = self.conn.execute(query, {
-                "limit": limit,
-                "max_staleness": max_staleness_minutes,
-            })
-            rows = [dict(row._mapping) for row in result.fetchall()]
-
-            if not rows:
-                logger.warning("Ride live rankings cache is empty or stale")
-
-            return rows
-
-        except Exception as e:
-            logger.error(f"Error reading ride_live_rankings cache: {e}")
-            return []
-
-    def get_live_rankings_freshness(self) -> Dict[str, Any]:
-        """
-        Check the freshness of the live rankings cache.
-
-        Returns:
-            Dict with calculated_at timestamp and staleness info
-        """
-        query = text("""
-            SELECT
-                MAX(calculated_at) as last_updated,
-                TIMESTAMPDIFF(MINUTE, MAX(calculated_at), NOW()) as staleness_minutes
-            FROM park_live_rankings
-        """)
-
-        try:
-            result = self.conn.execute(query)
-            row = result.fetchone()
-            if row:
-                return {
-                    "last_updated": row.last_updated,
-                    "staleness_minutes": row.staleness_minutes or 999,
-                    "is_fresh": (row.staleness_minutes or 999) < 20,
-                }
-        except Exception as e:
-            logger.error(f"Error checking live rankings freshness: {e}")
-
-        return {
-            "last_updated": None,
-            "staleness_minutes": 999,
-            "is_fresh": False,
-        }
-
-    def get_ride_live_downtime_rankings(
-        self,
-        filter_disney_universal: bool = False,
-        limit: int = 100,
-        sort_by: str = "downtime_hours"
-    ) -> List[Dict[str, Any]]:
-        """
-        Get ride downtime rankings calculated live from today's snapshots.
-
-        This method computes downtime in real-time from ride_status_snapshots,
-        providing up-to-the-minute accuracy for the "Today" period.
-
-        Uses centralized SQL helpers to ensure current_status matches the
-        status summary panel counts.
-
-        Args:
-            filter_disney_universal: If True, only include Disney & Universal parks
-            limit: Maximum number of rides to return
-            sort_by: Column to sort by (current_is_open, downtime_hours, uptime_percentage, trend_percentage)
-
-        Returns:
-            List of rides ranked by specified sort column with current status
-        """
-        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
-        order_by_clause = self._get_ride_order_by_clause(sort_by)
-
-        # Get Pacific day bounds in UTC - "today" means Pacific calendar day
-        today_pacific = get_today_pacific()
-        start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
-
-        # Use centralized helpers for consistent logic across all queries
-        # PARK-TYPE AWARE: Disney/Universal only counts DOWN, others count CLOSED too
-        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
-        is_operating = RideStatusSQL.is_operating("rss")
-        park_open = ParkStatusSQL.park_appears_open_filter("pas")
-        active_filter = RideFilterSQL.active_attractions_filter("r", "p")
-        # Use schedule-based filtering (not heuristic) for more accurate downtime
-        # This fixes the bug where park_appears_open heuristic marked parks as open
-        # before official opening time due to test rides operating
-        # PARK-TYPE AWARE: Disney/Universal only count DOWN status (not CLOSED)
-        downtime_hours = DowntimeSQL.downtime_hours_rounded("rss", "pas", park_id_expr="p.park_id", parks_alias="p")
-        uptime_pct = UptimeSQL.uptime_percentage("rss", "pas")
-
-        # CRITICAL: Only count downtime for rides that have operated at some point today
-        # Rides that have NEVER been OPERATING during the period are likely seasonal closures
-        # or scheduled maintenance, not unplanned outages
-        # PARK-TYPE AWARE: Disney/Universal needs 1 snapshot, others need 6 (30 min)
-        # Must pass park_id_expr to check park_appears_open during operation
-        has_operated = RideStatusSQL.has_operated_for_park_type("r.ride_id", "p", park_id_expr="r.park_id")
-
-        # CRITICAL: Use helper subqueries that include time window filter
-        # This ensures current_status matches the status summary panel
-        # Pass park_id_expr to ensure rides at closed parks show PARK_CLOSED, not DOWN
-        current_status_sq = RideStatusSQL.current_status_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
-        current_is_open_sq = RideStatusSQL.current_is_open_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
-        park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
-
-        query = text(f"""
-            SELECT
-                r.ride_id,
-                r.queue_times_id,
-                p.queue_times_id AS park_queue_times_id,
-                r.name AS ride_name,
-                rc.tier,
-                p.park_id,
-                p.name AS park_name,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-
-                -- Calculate downtime hours from today's snapshots using centralized helper
-                {downtime_hours} AS downtime_hours,
-
-                -- Calculate uptime percentage using centralized helper
-                {uptime_pct} AS uptime_percentage,
-
-                -- Wait time stats from today's snapshots
-                ROUND(AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END), 2) AS avg_wait_time,
-                MAX(rss.wait_time) AS peak_wait_time,
-
-                -- Get current status using centralized helper (includes time window for consistency)
-                {current_status_sq},
-
-                -- Boolean for frontend compatibility using centralized helper
-                {current_is_open_sq},
-
-                -- Park operating status using centralized helper
-                {park_is_open_sq},
-
-                -- Trend: compare to yesterday's aggregated stats
-                CASE
-                    WHEN prev_day.downtime_minutes > 0 THEN
-                        ROUND(
-                            ((SUM(CASE
-                                WHEN {park_open} AND {is_down}
-                                THEN 5
-                                ELSE 0
-                            END) - prev_day.downtime_minutes) / prev_day.downtime_minutes) * 100,
-                            2
-                        )
-                    ELSE NULL
-                END AS trend_percentage
-
-            FROM rides r
-            INNER JOIN parks p ON r.park_id = p.park_id
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            LEFT JOIN ride_daily_stats prev_day ON r.ride_id = prev_day.ride_id
-                AND prev_day.stat_date = :yesterday_pacific
-            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                AND {active_filter}
-                AND {has_operated}
-                {filter_clause}
-            GROUP BY r.ride_id, r.name, rc.tier, p.park_id, p.name, p.city, p.state_province, prev_day.downtime_minutes
-            HAVING (downtime_hours > 0 AND uptime_percentage > 0) OR current_status = 'DOWN'  -- Include rides with downtime OR currently down
-            ORDER BY {order_by_clause}
-            LIMIT :limit
-        """)
-
         from datetime import timedelta
-        yesterday_pacific = today_pacific - timedelta(days=1)
-        result = self.conn.execute(query, {
-            "limit": limit,
-            "start_utc": start_utc,
-            "end_utc": end_utc,
-            "yesterday_pacific": yesterday_pacific
-        })
-        return [dict(row._mapping) for row in result.fetchall()]
 
-    def get_live_status_summary(
-        self,
-        filter_disney_universal: bool = False,
-        park_id: Optional[int] = None
-    ) -> Dict[str, Any]:
-        """
-        Get live status summary counts by status type for rides at OPEN parks only.
+        seven_days_ago = datetime.utcnow() - timedelta(days=7)
 
-        Uses the most recent snapshot for each ride to count:
-        - OPERATING: Rides currently running
-        - DOWN: Rides experiencing unscheduled breakdowns
-        - CLOSED: Rides on scheduled closure (at open parks)
-        - REFURBISHMENT: Rides on extended maintenance
-
-        For parks without ThemeParks.wiki data (status is NULL),
-        maps computed_is_open to OPERATING/DOWN.
-
-        Only includes rides at parks that are currently operating
-        (park_appears_open = TRUE in latest park_activity_snapshot).
-
-        Uses centralized SQL helpers for consistent status logic.
-
-        Args:
-            filter_disney_universal: If True, only include Disney/Universal parks
-            park_id: Optional park ID to filter to a single park
-
-        Returns:
-            Dictionary with status counts and totals
-        """
-        filter_clause = ""
-        params = {}
-
-        if filter_disney_universal:
-            filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}"
-        if park_id:
-            filter_clause += " AND p.park_id = :park_id"
-            params["park_id"] = park_id
-
-        # Use centralized helpers for consistent logic
-        time_window = RideFilterSQL.live_time_window_filter("pas.recorded_at")
-        time_window_rss = RideFilterSQL.live_time_window_filter("rss.recorded_at")
-        active_filter = RideFilterSQL.active_attractions_filter("r", "p")
-        status_expr = RideStatusSQL.status_expression("ls")
-
-        query = text(f"""
-            WITH latest_park_status AS (
-                -- Get the latest park activity snapshot for each park
-                SELECT
-                    pas.park_id,
-                    pas.park_appears_open,
-                    ROW_NUMBER() OVER (PARTITION BY pas.park_id ORDER BY pas.recorded_at DESC) as rn
-                FROM park_activity_snapshots pas
-                WHERE {time_window}
-            ),
-            latest_snapshots AS (
-                SELECT
-                    rss.ride_id,
-                    rss.status,
-                    rss.computed_is_open,
-                    rss.recorded_at,
-                    r.park_id,
-                    ROW_NUMBER() OVER (PARTITION BY rss.ride_id ORDER BY rss.recorded_at DESC) as rn
-                FROM ride_status_snapshots rss
-                JOIN rides r ON rss.ride_id = r.ride_id
-                JOIN parks p ON r.park_id = p.park_id
-                WHERE {time_window_rss}
-                    AND {active_filter}
-                    {filter_clause}
+        # Subquery for rides that have operated recently
+        # (status='OPERATING' means ride was running)
+        operated_rides = (
+            self.session.query(distinct(RideStatusSnapshot.ride_id))
+            .filter(
+                and_(
+                    RideStatusSnapshot.recorded_at >= seven_days_ago,
+                    RideStatusSnapshot.status == 'OPERATING'
+                )
             )
-            SELECT
-                -- Map NULL status to OPERATING/DOWN based on computed_is_open
-                {status_expr} as status_type,
-                COUNT(*) as count
-            FROM latest_snapshots ls
-            JOIN latest_park_status lps ON ls.park_id = lps.park_id AND lps.rn = 1
-            WHERE ls.rn = 1
-                AND lps.park_appears_open = TRUE  -- Only count rides at open parks
-            GROUP BY status_type
-        """)
+            .subquery()
+        )
 
-        result = self.conn.execute(query, params)
-        rows = result.fetchall()
-
-        # Build status summary with defaults
-        summary = {
-            "OPERATING": 0,
-            "DOWN": 0,
-            "CLOSED": 0,
-            "REFURBISHMENT": 0,
-            "total": 0
-        }
-
-        for row in rows:
-            status = row[0]
-            count = row[1]
-            if status in summary:
-                summary[status] = count
-            summary["total"] += count
-
-        return summary
-
-    # Chart Data Methods for Trends Visualization
-
-    def get_park_shame_score_history(
-        self,
-        start_date: date,
-        end_date: date,
-        filter_disney_universal: bool = True,
-        limit: int = 10
-    ) -> Dict[str, Any]:
-        """
-        Get historical shame scores for top parks over a date range.
-
-        Returns data formatted for Chart.js line charts.
-
-        Args:
-            start_date: Start date for data
-            end_date: End date for data
-            filter_disney_universal: Filter to only Disney/Universal parks
-            limit: Number of parks to include (default 10)
-
-        Returns:
-            Dict with 'labels' (dates) and 'datasets' (park data series)
-        """
-        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-
-        # First, identify the top parks by total shame score in the period
-        top_parks_query = text(f"""
-            WITH park_weights AS (
-                SELECT
-                    p.park_id,
-                    SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
-                FROM parks p
-                INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE p.is_active = TRUE
-                    {disney_filter}
-                GROUP BY p.park_id
+        # Get active rides
+        active = (
+            self.session.query(Ride)
+            .filter(
+                and_(
+                    Ride.park_id == park_id,
+                    Ride.is_active.is_(True),
+                    Ride.ride_id.in_(operated_rides)
+                )
             )
-            SELECT
-                pds.park_id,
-                p.name AS park_name,
-                SUM(pds.shame_score) AS total_shame_score
-            FROM park_daily_stats pds
-            INNER JOIN parks p ON pds.park_id = p.park_id
-            INNER JOIN park_weights pw ON p.park_id = pw.park_id
-            WHERE pds.stat_date BETWEEN :start_date AND :end_date
-                AND p.is_active = TRUE
-                AND pds.operating_hours_minutes > 0
-                AND pds.shame_score IS NOT NULL
-                {disney_filter}
-            GROUP BY pds.park_id, p.name
-            ORDER BY total_shame_score DESC
-            LIMIT :limit
-        """)
+            .all()
+        )
 
-        result = self.conn.execute(top_parks_query, {
-            "start_date": start_date,
-            "end_date": end_date,
-            "limit": limit
-        })
-        top_parks = [dict(row._mapping) for row in result]
+        # Define tier weights (same as used in shame calculations)
+        tier_weights = {1: 10, 2: 5, 3: 2, None: 1}
 
-        if not top_parks:
-            return {"labels": [], "datasets": []}
+        return [
+            {
+                'ride_id': r.ride_id,
+                'name': r.name,
+                'tier': r.tier,
+                'weight': tier_weights.get(r.tier, 1)
+            }
+            for r in active
+        ]
 
-        # Get the park IDs
-        park_ids = [p['park_id'] for p in top_parks]
+    # === DEPRECATED METHODS ===
+    # The following methods have been migrated to modular query classes.
+    # Raise NotImplementedError to guide developers to the new classes.
 
-        # Generate all dates in range for labels
-        labels = []
-        current = start_date
-        while current <= end_date:
-            labels.append(current.strftime('%b %d'))
-            current += timedelta(days=1)
+    def get_park_daily_rankings(self, *args, **kwargs):
+        """DEPRECATED: Use queries/rankings/park_downtime_rankings.py instead."""
+        raise NotImplementedError(
+            "get_park_daily_rankings() is deprecated. "
+            "Use ParkDowntimeRankingsQuery from queries/rankings/park_downtime_rankings.py"
+        )
 
-        # Get daily shame scores for each park
-        datasets = []
-        for park in top_parks:
-            history_query = text("""
-                SELECT
-                    stat_date,
-                    COALESCE(shame_score, 0) AS shame_score
-                FROM park_daily_stats
-                WHERE park_id = :park_id
-                    AND stat_date BETWEEN :start_date AND :end_date
-                ORDER BY stat_date ASC
-            """)
+    def get_ride_daily_rankings(self, *args, **kwargs):
+        """DEPRECATED: Use queries/rankings/ride_downtime_rankings.py instead."""
+        raise NotImplementedError(
+            "get_ride_daily_rankings() is deprecated. "
+            "Use RideDowntimeRankingsQuery from queries/rankings/ride_downtime_rankings.py"
+        )
 
-            result = self.conn.execute(history_query, {
-                "park_id": park['park_id'],
-                "start_date": start_date,
-                "end_date": end_date
-            })
-            scores = {row.stat_date: float(row.shame_score) for row in result}
+    def get_park_shame_breakdown(self, park_id: int) -> Dict[str, Any]:
+        """
+        Get current live shame breakdown using recent snapshots.
 
-            # Build data array with None for missing dates
-            data = []
-            current = start_date
-            while current <= end_date:
-                if current in scores:
-                    data.append(round(scores[current], 2))
-                else:
-                    data.append(None)
-                current += timedelta(days=1)
+        Args:
+            park_id: Park ID
 
-            datasets.append({
-                "label": park['park_name'],
-                "data": data
-            })
+        Returns:
+            Dictionary with current shame score
+        """
+        # Get most recent park activity snapshot for live data
+        latest = (
+            self.session.query(ParkActivitySnapshot)
+            .filter(ParkActivitySnapshot.park_id == park_id)
+            .order_by(ParkActivitySnapshot.recorded_at.desc())
+            .first()
+        )
+
+        if not latest:
+            return {'shame_score': 0, 'is_live': True}
 
         return {
-            "labels": labels,
-            "datasets": datasets
+            'shame_score': float(latest.shame_score or 0),
+            'is_live': True,
+            'last_updated': latest.recorded_at.isoformat() if latest.recorded_at else None
         }
 
-    def get_ride_downtime_history(
-        self,
-        start_date: date,
-        end_date: date,
-        filter_disney_universal: bool = True,
-        limit: int = 10
-    ) -> Dict[str, Any]:
-        """
-        Get historical downtime percentages for top rides over a date range.
-
-        Returns data formatted for Chart.js line charts.
-
-        Args:
-            start_date: Start date for data
-            end_date: End date for data
-            filter_disney_universal: Filter to only Disney/Universal parks
-            limit: Number of rides to include (default 10)
-
-        Returns:
-            Dict with 'labels' (dates) and 'datasets' (ride data series)
-        """
-        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-
-        # First, identify the top rides by total downtime in the period
-        top_rides_query = text(f"""
-            SELECT
-                rds.ride_id,
-                r.name AS ride_name,
-                p.name AS park_name,
-                SUM(rds.downtime_minutes) AS total_downtime
-            FROM ride_daily_stats rds
-            INNER JOIN rides r ON rds.ride_id = r.ride_id
-            INNER JOIN parks p ON r.park_id = p.park_id
-            WHERE rds.stat_date BETWEEN :start_date AND :end_date
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND p.is_active = TRUE
-                AND rds.operating_hours_minutes > 0
-                {disney_filter}
-            GROUP BY rds.ride_id, r.name, p.name
-            ORDER BY total_downtime DESC
-            LIMIT :limit
-        """)
-
-        result = self.conn.execute(top_rides_query, {
-            "start_date": start_date,
-            "end_date": end_date,
-            "limit": limit
-        })
-        top_rides = [dict(row._mapping) for row in result]
-
-        if not top_rides:
-            return {"labels": [], "datasets": []}
-
-        # Generate all dates in range for labels
-        labels = []
-        current = start_date
-        while current <= end_date:
-            labels.append(current.strftime('%b %d'))
-            current += timedelta(days=1)
-
-        # Get daily downtime percentages for each ride
-        datasets = []
-        for ride in top_rides:
-            history_query = text("""
-                SELECT
-                    stat_date,
-                    CASE
-                        WHEN operating_hours_minutes > 0
-                        THEN ROUND((100.0 - uptime_percentage), 1)
-                        ELSE 0
-                    END AS downtime_percentage
-                FROM ride_daily_stats
-                WHERE ride_id = :ride_id
-                    AND stat_date BETWEEN :start_date AND :end_date
-                ORDER BY stat_date ASC
-            """)
-
-            result = self.conn.execute(history_query, {
-                "ride_id": ride['ride_id'],
-                "start_date": start_date,
-                "end_date": end_date
-            })
-            percentages = {row.stat_date: float(row.downtime_percentage) for row in result}
-
-            # Build data array with None for missing dates
-            data = []
-            current = start_date
-            while current <= end_date:
-                if current in percentages:
-                    data.append(percentages[current])
-                else:
-                    data.append(None)
-                current += timedelta(days=1)
-
-            datasets.append({
-                "label": ride['ride_name'],
-                "park": ride['park_name'],
-                "data": data
-            })
-
-        return {
-            "labels": labels,
-            "datasets": datasets
-        }
-
-    def get_park_hourly_shame_scores(
-        self,
-        target_date: date,
-        filter_disney_universal: bool = True,
-        limit: int = 10
-    ) -> Dict[str, Any]:
-        """
-        Get hourly shame scores for top parks on a specific date.
-
-        Calculates shame score per hour by querying ride_status_snapshots
-        and computing weighted downtime for each hour of the day.
-
-        Args:
-            target_date: The date to get hourly data for (usually today)
-            filter_disney_universal: Filter to only Disney/Universal parks
-            limit: Number of parks to include (default 10)
-
-        Returns:
-            Dict with 'labels' (hours) and 'datasets' (park data series)
-        """
-        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-
-        # Convert target_date to UTC datetime range using existing utility
-        utc_start, utc_end = get_pacific_day_range_utc(target_date)
-
-        # First, identify the top parks by weighted downtime today
-        # Excludes parks that are completely closed (no rides open at all = seasonal closure)
-        top_parks_query = text(f"""
-            WITH park_weights AS (
-                SELECT
-                    p.park_id,
-                    p.name AS park_name,
-                    SUM(COALESCE(rc.tier_weight, 2)) AS total_park_weight
-                FROM parks p
-                INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE p.is_active = TRUE
-                    {disney_filter}
-                GROUP BY p.park_id, p.name
-            ),
-            park_activity AS (
-                SELECT
-                    r.park_id,
-                    SUM(CASE WHEN rss.computed_is_open = FALSE THEN COALESCE(rc.tier_weight, 2) ELSE 0 END) AS weighted_downtime_count,
-                    SUM(CASE WHEN rss.computed_is_open = TRUE THEN 1 ELSE 0 END) AS open_snapshots
-                FROM ride_status_snapshots rss
-                INNER JOIN rides r ON rss.ride_id = r.ride_id
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE rss.recorded_at >= :utc_start
-                    AND rss.recorded_at <= :utc_end
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                GROUP BY r.park_id
-            )
-            SELECT
-                pw.park_id,
-                pw.park_name,
-                pw.total_park_weight,
-                COALESCE(pa.weighted_downtime_count, 0) AS weighted_downtime_count
-            FROM park_weights pw
-            INNER JOIN park_activity pa ON pw.park_id = pa.park_id
-            WHERE pa.open_snapshots > 0
-            ORDER BY COALESCE(pa.weighted_downtime_count, 0) DESC
-            LIMIT :limit
-        """)
-
-        result = self.conn.execute(top_parks_query, {
-            "utc_start": utc_start,
-            "utc_end": utc_end,
-            "limit": limit
-        })
-        top_parks = [dict(row._mapping) for row in result]
-
-        if not top_parks:
-            return {"labels": [], "datasets": []}
-
-        # Generate hourly labels (6am to 11pm Pacific - typical park hours)
-        labels = [f"{h}:00" for h in range(6, 24)]
-
-        # Get hourly data for each park
-        datasets = []
-        for park in top_parks:
-            # Note: Using DATE_SUB with INTERVAL 8 HOUR for PST (winter)
-            # MySQL timezone tables aren't loaded so CONVERT_TZ returns NULL
-            hourly_query = text("""
-                SELECT
-                    HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) AS hour_of_day,
-                    COUNT(*) AS total_snapshots,
-                    SUM(CASE WHEN rss.computed_is_open = FALSE THEN COALESCE(rc.tier_weight, 2) ELSE 0 END) AS weighted_downtime,
-                    SUM(COALESCE(rc.tier_weight, 2)) AS total_weight
-                FROM ride_status_snapshots rss
-                INNER JOIN rides r ON rss.ride_id = r.ride_id
-                LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-                WHERE rss.recorded_at >= :utc_start
-                    AND rss.recorded_at <= :utc_end
-                    AND r.park_id = :park_id
-                    AND r.is_active = TRUE
-                    AND r.category = 'ATTRACTION'
-                GROUP BY hour_of_day
-                ORDER BY hour_of_day
-            """)
-
-            result = self.conn.execute(hourly_query, {
-                "utc_start": utc_start,
-                "utc_end": utc_end,
-                "park_id": park['park_id']
-            })
-
-            hourly_scores = {}
-            for row in result:
-                if row.hour_of_day is None:
-                    continue
-                hour = int(row.hour_of_day)
-                if row.total_snapshots and row.total_snapshots > 0:
-                    # Use centralized metrics for consistent calculations
-                    # Convert weighted downtime snapshots to hours using SNAPSHOT_INTERVAL_MINUTES
-                    weighted_downtime_hours = float(row.weighted_downtime) * (SNAPSHOT_INTERVAL_MINUTES / 60.0)
-                    # Calculate shame score using centralized function
-                    hourly_shame = calculate_shame_score(
-                        weighted_downtime_hours,
-                        float(park['total_park_weight'])
-                    )
-                    if hourly_shame is not None:
-                        hourly_scores[hour] = hourly_shame
-
-            # Build CUMULATIVE data array for hours 6-23
-            # Shame score grows throughout the day as downtime accumulates
-            data = []
-            cumulative = 0.0
-            first_data_seen = False
-            for h in range(6, 24):
-                if h in hourly_scores:
-                    first_data_seen = True
-                    cumulative += hourly_scores[h]
-                    data.append(round(cumulative, 2))
-                elif first_data_seen:
-                    # After first data, show cumulative even if no new downtime this hour
-                    data.append(round(cumulative, 2))
-                else:
-                    # Before first data (park not open yet), show null
-                    data.append(None)
-
-            datasets.append({
-                "label": park['park_name'],
-                "data": data
-            })
-
-        return {
-            "labels": labels,
-            "datasets": datasets
-        }
-
-    def get_ride_hourly_downtime(
-        self,
-        target_date: date,
-        filter_disney_universal: bool = True,
-        limit: int = 10
-    ) -> Dict[str, Any]:
-        """
-        Get hourly downtime percentages for top rides on a specific date.
-
-        Args:
-            target_date: The date to get hourly data for (usually today)
-            filter_disney_universal: Filter to only Disney/Universal parks
-            limit: Number of rides to include (default 10)
-
-        Returns:
-            Dict with 'labels' (hours) and 'datasets' (ride data series)
-        """
-        disney_filter = "AND (p.is_disney = TRUE OR p.is_universal = TRUE)" if filter_disney_universal else ""
-
-        # Convert target_date to UTC datetime range using existing utility
-        utc_start, utc_end = get_pacific_day_range_utc(target_date)
-
-        # First, identify the top rides by downtime today
-        # Excludes rides at closed parks (rides with 0 open snapshots = seasonal closure)
-        top_rides_query = text(f"""
-            SELECT
-                r.ride_id,
-                r.name AS ride_name,
-                p.name AS park_name,
-                COUNT(*) AS total_snapshots,
-                SUM(CASE WHEN rss.computed_is_open = FALSE THEN 1 ELSE 0 END) AS downtime_snapshots,
-                SUM(CASE WHEN rss.computed_is_open = TRUE THEN 1 ELSE 0 END) AS open_snapshots
-            FROM ride_status_snapshots rss
-            INNER JOIN rides r ON rss.ride_id = r.ride_id
-            INNER JOIN parks p ON r.park_id = p.park_id
-            WHERE rss.recorded_at >= :utc_start
-                AND rss.recorded_at <= :utc_end
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND p.is_active = TRUE
-                {disney_filter}
-            GROUP BY r.ride_id, r.name, p.name
-            HAVING downtime_snapshots > 0 AND open_snapshots > 0
-            ORDER BY downtime_snapshots DESC
-            LIMIT :limit
-        """)
-
-        result = self.conn.execute(top_rides_query, {
-            "utc_start": utc_start,
-            "utc_end": utc_end,
-            "limit": limit
-        })
-        top_rides = [dict(row._mapping) for row in result]
-
-        if not top_rides:
-            return {"labels": [], "datasets": []}
-
-        # Generate hourly labels (6am to 11pm Pacific - typical park hours)
-        labels = [f"{h}:00" for h in range(6, 24)]
-
-        # Get hourly data for each ride
-        datasets = []
-        for ride in top_rides:
-            # Note: Using DATE_SUB with INTERVAL 8 HOUR for PST (winter)
-            # MySQL timezone tables aren't loaded so CONVERT_TZ returns NULL
-            hourly_query = text("""
-                SELECT
-                    HOUR(DATE_SUB(rss.recorded_at, INTERVAL 8 HOUR)) AS hour_of_day,
-                    COUNT(*) AS total_snapshots,
-                    SUM(CASE WHEN rss.computed_is_open = FALSE THEN 1 ELSE 0 END) AS downtime_snapshots
-                FROM ride_status_snapshots rss
-                WHERE rss.recorded_at >= :utc_start
-                    AND rss.recorded_at <= :utc_end
-                    AND rss.ride_id = :ride_id
-                GROUP BY hour_of_day
-                ORDER BY hour_of_day
-            """)
-
-            result = self.conn.execute(hourly_query, {
-                "utc_start": utc_start,
-                "utc_end": utc_end,
-                "ride_id": ride['ride_id']
-            })
-
-            hourly_downtime = {}
-            for row in result:
-                if row.hour_of_day is None:
-                    continue
-                hour = int(row.hour_of_day)
-                if row.total_snapshots and row.total_snapshots > 0:
-                    # Use centralized metrics for consistent calculations
-                    # This matches the downtime_hours metric shown in tables
-                    downtime_hours = calculate_downtime_hours(int(row.downtime_snapshots))
-                    hourly_downtime[hour] = downtime_hours
-
-            # Build CUMULATIVE data array for hours 6-23
-            # Downtime grows throughout the day as issues accumulate
-            data = []
-            cumulative = 0.0
-            first_data_seen = False
-            for h in range(6, 24):
-                if h in hourly_downtime:
-                    first_data_seen = True
-                    cumulative += hourly_downtime[h]
-                    data.append(round(cumulative, 2))
-                elif first_data_seen:
-                    # After first data, show cumulative even if no downtime this hour
-                    data.append(round(cumulative, 2))
-                else:
-                    # Before first data (ride not tracked yet), show null
-                    data.append(None)
-
-            datasets.append({
-                "label": ride['ride_name'],
-                "park": ride['park_name'],
-                "data": data
-            })
-
-        return {
-            "labels": labels,
-            "datasets": datasets
-        }
-
-    # Live Wait Time Rankings Methods
-
-    def get_ride_live_wait_time_rankings(
-        self,
-        filter_disney_universal: bool = False,
-        limit: int = 100
-    ) -> List[Dict[str, Any]]:
-        """
-        Get ride wait time rankings calculated live from today's snapshots.
-
-        This method computes wait times in real-time from ride_status_snapshots,
-        providing up-to-the-minute accuracy for the "Today" period.
-
-        CONSISTENCY: Uses the same filtering as downtime rankings:
-        - park_activity_snapshots join for park_appears_open
-        - has_operated check (ride must have operated at least once)
-        - active_filter for is_active and ATTRACTION category
-
-        Args:
-            filter_disney_universal: If True, only include Disney & Universal parks
-            limit: Maximum number of rides to return
-
-        Returns:
-            List of rides ranked by average wait time (descending)
-        """
-        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
-
-        # Get Pacific day bounds in UTC - "today" means Pacific calendar day
-        today_pacific = get_today_pacific()
-        start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
-
-        # Calculate yesterday's date for trend comparison
-        from datetime import timedelta
-        yesterday_pacific = today_pacific - timedelta(days=1)
-
-        # Use centralized helpers for consistent logic across all queries
-        # CRITICAL: Must match downtime rankings filtering for consistency
-        active_filter = RideFilterSQL.active_attractions_filter("r", "p")
-        park_open = ParkStatusSQL.park_appears_open_filter("pas")
-        has_operated = RideStatusSQL.has_operated_subquery("r.ride_id")
-
-        # CRITICAL: Use helper subqueries that include time window filter
-        # This ensures current_status matches the status summary panel
-        # Pass park_id_expr to ensure rides at closed parks show PARK_CLOSED, not DOWN
-        current_status_sq = RideStatusSQL.current_status_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
-        current_is_open_sq = RideStatusSQL.current_is_open_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
-        park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
-
-        query = text(f"""
-            SELECT
-                r.ride_id,
-                r.queue_times_id,
-                p.queue_times_id AS park_queue_times_id,
-                r.name AS ride_name,
-                p.park_id,
-                p.name AS park_name,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-
-                -- Wait time stats from today's snapshots (field names match frontend expectations)
-                -- Only count wait times when park is open
-                ROUND(AVG(CASE WHEN {park_open} AND rss.wait_time > 0 THEN rss.wait_time END), 1) AS avg_wait_minutes,
-                MAX(CASE WHEN {park_open} THEN rss.wait_time END) AS peak_wait_minutes,
-
-                -- Ride tier from classifications (frontend displays tier badge)
-                COALESCE(rc.tier, 3) AS tier,
-
-                -- Trend percentage: compare today's avg to yesterday's avg from ride_daily_stats
-                -- Formula: ((today - yesterday) / yesterday) * 100
-                -- NULL if yesterday has no data (ride was closed, new ride, etc.)
-                CASE
-                    WHEN yesterday_stats.avg_wait_time IS NOT NULL AND yesterday_stats.avg_wait_time > 0
-                    THEN ROUND(
-                        ((AVG(CASE WHEN {park_open} AND rss.wait_time > 0 THEN rss.wait_time END) - yesterday_stats.avg_wait_time)
-                         / yesterday_stats.avg_wait_time) * 100,
-                        1
-                    )
-                    ELSE NULL
-                END AS trend_percentage,
-
-                -- Get current status using centralized helper (includes time window for consistency)
-                {current_status_sq},
-
-                -- Boolean for frontend compatibility using centralized helper
-                {current_is_open_sq},
-
-                -- Park operating status using centralized helper
-                {park_is_open_sq}
-
-            FROM rides r
-            INNER JOIN parks p ON r.park_id = p.park_id
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            -- CRITICAL: Join park_activity_snapshots for consistent park filtering
-            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            -- LEFT JOIN yesterday's stats for trend calculation
-            LEFT JOIN ride_daily_stats yesterday_stats
-                ON r.ride_id = yesterday_stats.ride_id
-                AND yesterday_stats.stat_date = :yesterday_date
-            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                AND {active_filter}
-                AND {has_operated}
-                AND rss.wait_time IS NOT NULL
-                AND rss.wait_time > 0
-                {filter_clause}
-            GROUP BY r.ride_id, r.name, p.park_id, p.name, p.city, p.state_province,
-                     rc.tier, yesterday_stats.avg_wait_time
-            HAVING avg_wait_minutes > 0
-            ORDER BY avg_wait_minutes DESC
-            LIMIT :limit
-        """)
-
-        result = self.conn.execute(query, {
-            "limit": limit,
-            "start_utc": start_utc,
-            "end_utc": end_utc,
-            "yesterday_date": yesterday_pacific
-        })
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    def get_park_live_wait_time_rankings(
-        self,
-        filter_disney_universal: bool = False,
-        limit: int = 50
-    ) -> List[Dict[str, Any]]:
-        """
-        Get park wait time rankings calculated live from today's snapshots.
-
-        This method computes wait times in real-time from ride_status_snapshots,
-        providing up-to-the-minute accuracy for the "Today" period.
-
-        Args:
-            filter_disney_universal: If True, only include Disney & Universal parks
-            limit: Maximum number of parks to return
-
-        Returns:
-            List of parks ranked by average wait time (descending)
-        """
-        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
-
-        # Get Pacific day bounds in UTC - "today" means Pacific calendar day
-        today_pacific = get_today_pacific()
-        start_utc, end_utc = get_pacific_day_range_utc(today_pacific)
-
-        # Calculate yesterday's date for trend comparison
-        from datetime import timedelta
-        yesterday_pacific = today_pacific - timedelta(days=1)
-
-        # Park operating status
-        park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
-
-        query = text(f"""
-            SELECT
-                p.park_id,
-                p.queue_times_id,
-                p.name AS park_name,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-
-                -- Park-level wait time stats from today's snapshots (field names match frontend)
-                ROUND(AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END), 1) AS avg_wait_minutes,
-                MAX(rss.wait_time) AS peak_wait_minutes,
-
-                -- Count of rides reporting wait times (frontend displays in Rides column)
-                COUNT(DISTINCT r.ride_id) AS rides_reporting,
-
-                -- Trend percentage: compare today's avg to yesterday's avg from park_daily_stats
-                -- Formula: ((today - yesterday) / yesterday) * 100
-                -- NULL if yesterday has no data (park was closed, new park, etc.)
-                CASE
-                    WHEN yesterday_stats.avg_wait_time IS NOT NULL AND yesterday_stats.avg_wait_time > 0
-                    THEN ROUND(
-                        ((AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END) - yesterday_stats.avg_wait_time)
-                         / yesterday_stats.avg_wait_time) * 100,
-                        1
-                    )
-                    ELSE NULL
-                END AS trend_percentage,
-
-                -- Park operating status using centralized helper
-                {park_is_open_sq}
-
-            FROM parks p
-            INNER JOIN rides r ON p.park_id = r.park_id AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            -- LEFT JOIN yesterday's stats for trend calculation
-            LEFT JOIN park_daily_stats yesterday_stats
-                ON p.park_id = yesterday_stats.park_id
-                AND yesterday_stats.stat_date = :yesterday_date
-            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                AND p.is_active = TRUE
-                AND rss.wait_time IS NOT NULL
-                AND rss.wait_time > 0
-                {filter_clause}
-            GROUP BY p.park_id, p.name, p.city, p.state_province, yesterday_stats.avg_wait_time
-            HAVING avg_wait_minutes > 0
-                AND park_is_open = 1
-            ORDER BY avg_wait_minutes DESC
-            LIMIT :limit
-        """)
-
-        result = self.conn.execute(query, {
-            "limit": limit,
-            "start_utc": start_utc,
-            "end_utc": end_utc,
-            "yesterday_date": yesterday_pacific
-        })
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    def get_excluded_rides(self, park_id: int) -> list:
-        """
-        Get rides excluded from shame score calculation (7+ days without operation).
-
-        A ride is excluded if:
-        - last_operated_at IS NULL (never operated), OR
-        - last_operated_at < UTC_TIMESTAMP() - INTERVAL 7 DAY
-
-        Returns:
-            List of dicts with ride_id, ride_name, tier, tier_weight,
-            last_operated_at, days_since_operation
-        """
-        query = text("""
-            SELECT
-                r.ride_id,
-                r.name AS ride_name,
-                r.land_area,
-                COALESCE(rc.tier, 'Tier 2') AS tier,
-                COALESCE(rc.tier_weight, 2) AS tier_weight,
-                r.last_operated_at,
-                CASE
-                    WHEN r.last_operated_at IS NULL THEN NULL
-                    ELSE DATEDIFF(UTC_TIMESTAMP(), r.last_operated_at)
-                END AS days_since_operation
-            FROM rides r
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE r.park_id = :park_id
-              AND r.is_active = TRUE
-              AND r.category = 'ATTRACTION'
-              AND (r.last_operated_at IS NULL
-                   OR r.last_operated_at < UTC_TIMESTAMP() - INTERVAL 7 DAY)
-            ORDER BY days_since_operation DESC, r.name ASC
-        """)
-
-        result = self.conn.execute(query, {"park_id": park_id})
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    def get_active_rides(self, park_id: int) -> list:
-        """
-        Get rides included in shame score calculation (operated in last 7 days).
-
-        These rides have last_operated_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY.
-
-        Returns:
-            List of dicts with ride_id, ride_name, tier, tier_weight,
-            last_operated_at, current_status
-        """
-        query = text("""
-            SELECT
-                r.ride_id,
-                r.name AS ride_name,
-                r.land_area,
-                COALESCE(rc.tier, 'Tier 2') AS tier,
-                COALESCE(rc.tier_weight, 2) AS tier_weight,
-                r.last_operated_at,
-                -- Get current status from most recent snapshot
-                (
-                    SELECT rss.status
-                    FROM ride_status_snapshots rss
-                    WHERE rss.ride_id = r.ride_id
-                    ORDER BY rss.recorded_at DESC
-                    LIMIT 1
-                ) AS current_status
-            FROM rides r
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            WHERE r.park_id = :park_id
-              AND r.is_active = TRUE
-              AND r.category = 'ATTRACTION'
-              AND r.last_operated_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY
-            ORDER BY rc.tier_weight DESC, r.name ASC
-        """)
-
-        result = self.conn.execute(query, {"park_id": park_id})
-        return [dict(row._mapping) for row in result.fetchall()]
-
-    def get_hourly_stats(
-        self,
-        park_id: Optional[int] = None,
-        start_hour: datetime = None,
-        end_hour: datetime = None
-    ) -> List[Dict]:
-        """
-        Get hourly statistics from park_hourly_stats table.
-
-        Args:
-            park_id: Optional park filter (None = all parks)
-            start_hour: Start hour (inclusive)
-            end_hour: End hour (exclusive)
-
-        Returns:
-            List of dicts with hourly stats (shame_score, rides_operating, etc.)
-        """
-        # Build dynamic WHERE clause
-        where_conditions = []
-        params = {}
-
-        if start_hour is not None:
-            where_conditions.append("hour_start_utc >= :start_hour")
-            params['start_hour'] = start_hour
-
-        if end_hour is not None:
-            where_conditions.append("hour_start_utc < :end_hour")
-            params['end_hour'] = end_hour
-
-        if park_id is not None:
-            where_conditions.append("park_id = :park_id")
-            params['park_id'] = park_id
-
-        where_clause = "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
-
-        query = text(f"""
-            SELECT
-                park_id,
-                hour_start_utc,
-                shame_score,
-                rides_operating,
-                rides_down,
-                total_downtime_hours,
-                weighted_downtime_hours,
-                effective_park_weight,
-                snapshot_count,
-                park_was_open
-            FROM park_hourly_stats
-            {where_clause}
-            ORDER BY hour_start_utc ASC, park_id ASC
-        """)
-
-        result = self.conn.execute(query, params)
-        return [dict(row._mapping) for row in result.fetchall()]
+    def get_live_wait_times(self, *args, **kwargs):
+        """DEPRECATED: Use queries/live/ query classes instead."""
+        raise NotImplementedError(
+            "get_live_wait_times() is deprecated. "
+            "Use query classes from queries/live/"
+        )
+
+    def get_park_hourly_shame_scores(self, *args, **kwargs):
+        """DEPRECATED: Use queries/charts/park_shame_history.py instead."""
+        raise NotImplementedError(
+            "get_park_hourly_shame_scores() is deprecated. "
+            "Use ParkShameHistoryQuery from queries/charts/park_shame_history.py"
+        )

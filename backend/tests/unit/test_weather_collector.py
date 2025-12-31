@@ -5,7 +5,7 @@ Unit Tests: Weather Collector
 Tests WeatherCollector with mocked dependencies.
 
 Test Strategy:
-- Mock API client, repository, and database connection
+- Mock API client, repository, and database session
 - Test collection logic for single park
 - Test failure threshold logic
 - Test concurrent collection orchestration
@@ -27,12 +27,10 @@ class TestWeatherCollector:
     """Unit tests for WeatherCollector."""
 
     @pytest.fixture
-    def mock_db_connection(self):
-        """Mock database connection."""
-        connection = MagicMock()
-        cursor = MagicMock()
-        connection.cursor.return_value.__enter__.return_value = cursor
-        return connection
+    def mock_db_session(self):
+        """Mock database session."""
+        session = MagicMock()
+        return session
 
     @pytest.fixture
     def mock_api_client(self):
@@ -76,16 +74,16 @@ class TestWeatherCollector:
         return repo
 
     @pytest.fixture
-    def collector(self, mock_db_connection, mock_api_client, mock_repository):
+    def collector(self, mock_db_session, mock_api_client, mock_repository):
         """Create WeatherCollector with mocked dependencies."""
         with patch('scripts.collect_weather.get_openmeteo_client', return_value=mock_api_client):
             with patch('scripts.collect_weather.WeatherObservationRepository', return_value=mock_repository):
-                collector = WeatherCollector(mock_db_connection)
+                collector = WeatherCollector(mock_db_session)
                 return collector
 
-    def test_initialization(self, collector, mock_db_connection):
-        """WeatherCollector should initialize with database connection."""
-        assert collector.db == mock_db_connection
+    def test_initialization(self, collector, mock_db_session):
+        """WeatherCollector should initialize with database session."""
+        assert collector.session == mock_db_session
 
     def test_collect_for_park_success(self, collector, mock_api_client, mock_repository):
         """_collect_for_park() should fetch weather and insert observations."""
@@ -191,7 +189,7 @@ class TestWeatherCollector:
         except RuntimeError:
             pytest.fail("Should not raise error for empty results")
 
-    def test_get_parks_queries_database(self, collector, mock_db_connection):
+    def test_get_parks_queries_database(self, collector, mock_db_session):
         """_get_parks() should query parks table."""
         # Mock SQLAlchemy result rows
         mock_row_1 = MagicMock()
@@ -199,12 +197,12 @@ class TestWeatherCollector:
         mock_row_2 = MagicMock()
         mock_row_2._mapping = {'park_id': 2, 'latitude': 33.8121, 'longitude': -117.9190, 'name': 'Park 2'}
 
-        mock_db_connection.execute.return_value = [mock_row_1, mock_row_2]
+        mock_db_session.execute.return_value = [mock_row_1, mock_row_2]
 
         parks = collector._get_parks()
 
         # Should query database via execute()
-        mock_db_connection.execute.assert_called_once()
+        mock_db_session.execute.assert_called_once()
 
         # Should return parks as list of dicts
         assert len(parks) == 2

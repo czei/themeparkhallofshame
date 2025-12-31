@@ -57,7 +57,7 @@ class TestRideRepositoryCRUD:
     Priority: P0 - Foundation for all other operations
     """
 
-    def test_create_ride(self, mysql_connection, sample_park_data, sample_ride_data):
+    def test_create_ride(self, mysql_session, sample_park_data, sample_ride_data):
         """
         Create a new ride record.
 
@@ -67,11 +67,12 @@ class TestRideRepositoryCRUD:
         """
         from tests.conftest import insert_sample_park
 
-        # First create a park
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        # First create a park using the session's connection
+        conn = mysql_session.connection()
+        park_id = insert_sample_park(conn, sample_park_data)
         sample_ride_data['park_id'] = park_id
 
-        repo = RideRepository(mysql_connection)
+        repo = RideRepository(mysql_session)
         ride = repo.create(sample_ride_data)
 
         assert ride is not None
@@ -81,7 +82,7 @@ class TestRideRepositoryCRUD:
         assert ride.park_id == park_id
         assert ride.tier == sample_ride_data['tier']
 
-    def test_get_by_id_existing_ride(self, mysql_connection, sample_park_data, sample_ride_data):
+    def test_get_by_id_existing_ride(self, mysql_session, sample_park_data, sample_ride_data):
         """
         Fetch ride by ID.
 
@@ -91,10 +92,11 @@ class TestRideRepositoryCRUD:
         """
         from tests.conftest import insert_sample_park
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        conn = mysql_session.connection()
+        park_id = insert_sample_park(conn, sample_park_data)
         sample_ride_data['park_id'] = park_id
 
-        repo = RideRepository(mysql_connection)
+        repo = RideRepository(mysql_session)
         created_ride = repo.create(sample_ride_data)
 
         fetched_ride = repo.get_by_id(created_ride.ride_id)
@@ -103,7 +105,7 @@ class TestRideRepositoryCRUD:
         assert fetched_ride.ride_id == created_ride.ride_id
         assert fetched_ride.name == created_ride.name
 
-    def test_get_by_id_nonexistent_ride(self, mysql_connection):
+    def test_get_by_id_nonexistent_ride(self, mysql_session):
         """
         Fetch ride by ID when ride doesn't exist.
 
@@ -111,13 +113,13 @@ class TestRideRepositoryCRUD:
         When: get_by_id(999) is called
         Then: Return None
         """
-        repo = RideRepository(mysql_connection)
+        repo = RideRepository(mysql_session)
 
         ride = repo.get_by_id(999)
 
         assert ride is None
 
-    def test_get_by_queue_times_id(self, mysql_connection, sample_park_data, sample_ride_data):
+    def test_get_by_queue_times_id(self, mysql_session, sample_park_data, sample_ride_data):
         """
         Fetch ride by Queue-Times.com external ID.
 
@@ -127,10 +129,11 @@ class TestRideRepositoryCRUD:
         """
         from tests.conftest import insert_sample_park
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        conn = mysql_session.connection()
+        park_id = insert_sample_park(conn, sample_park_data)
         sample_ride_data['park_id'] = park_id
 
-        repo = RideRepository(mysql_connection)
+        repo = RideRepository(mysql_session)
         created_ride = repo.create(sample_ride_data)
 
         fetched_ride = repo.get_by_queue_times_id(sample_ride_data['queue_times_id'])
@@ -139,7 +142,7 @@ class TestRideRepositoryCRUD:
         assert fetched_ride.queue_times_id == sample_ride_data['queue_times_id']
         assert fetched_ride.ride_id == created_ride.ride_id
 
-    def test_update_ride(self, mysql_connection, sample_park_data, sample_ride_data):
+    def test_update_ride(self, mysql_session, sample_park_data, sample_ride_data):
         """
         Update existing ride record.
 
@@ -149,10 +152,11 @@ class TestRideRepositoryCRUD:
         """
         from tests.conftest import insert_sample_park
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        conn = mysql_session.connection()
+        park_id = insert_sample_park(conn, sample_park_data)
         sample_ride_data['park_id'] = park_id
 
-        repo = RideRepository(mysql_connection)
+        repo = RideRepository(mysql_session)
         created_ride = repo.create(sample_ride_data)
 
         update_data = {'name': 'Updated Space Mountain', 'tier': 2}
@@ -164,7 +168,7 @@ class TestRideRepositoryCRUD:
         # Other fields unchanged
         assert updated_ride.land_area == sample_ride_data['land_area']
 
-    def test_update_nonexistent_ride(self, mysql_connection):
+    def test_update_nonexistent_ride(self, mysql_session):
         """
         Update ride that doesn't exist.
 
@@ -172,7 +176,7 @@ class TestRideRepositoryCRUD:
         When: update(999, {...}) is called
         Then: Return None
         """
-        repo = RideRepository(mysql_connection)
+        repo = RideRepository(mysql_session)
 
         result = repo.update(999, {'name': 'Ghost Ride'})
 
@@ -190,7 +194,7 @@ class TestRideRepositoryQueries:
     Priority: P1 - Used for ride listings and filtering
     """
 
-    def test_get_by_park_id_returns_park_rides(self, mysql_connection, sample_park_data):
+    def test_get_by_park_id_returns_park_rides(self, mysql_session, sample_park_data):
         """
         get_by_park_id() should return all rides for a specific park.
 
@@ -200,13 +204,15 @@ class TestRideRepositoryQueries:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
+        conn = mysql_session.connection()
+
         # Create 2 parks
-        park1_id = insert_sample_park(mysql_connection, sample_park_data)
+        park1_id = insert_sample_park(conn, sample_park_data)
 
         park2_data = sample_park_data.copy()
         park2_data['queue_times_id'] = 102
         park2_data['name'] = 'Epcot'
-        park2_id = insert_sample_park(mysql_connection, park2_data)
+        park2_id = insert_sample_park(conn, park2_data)
 
         # Create rides for Park 1
         ride1 = {
@@ -217,17 +223,17 @@ class TestRideRepositoryQueries:
             'queue_times_id': 1002, 'park_id': park1_id, 'name': 'Big Thunder',
             'land_area': 'Frontierland', 'tier': 1, 'is_active': 1
         }
-        insert_sample_ride(mysql_connection, ride1)
-        insert_sample_ride(mysql_connection, ride2)
+        insert_sample_ride(conn, ride1)
+        insert_sample_ride(conn, ride2)
 
         # Create ride for Park 2
         ride3 = {
             'queue_times_id': 2001, 'park_id': park2_id, 'name': 'Test Track',
             'land_area': 'Future World', 'tier': 2, 'is_active': 1
         }
-        insert_sample_ride(mysql_connection, ride3)
+        insert_sample_ride(conn, ride3)
 
-        repo = RideRepository(mysql_connection)
+        repo = RideRepository(mysql_session)
         rides = repo.get_by_park_id(park1_id)
 
         assert len(rides) == 2
@@ -236,7 +242,7 @@ class TestRideRepositoryQueries:
         assert 'Space Mountain' in ride_names
         assert 'Test Track' not in ride_names
 
-    def test_get_by_park_id_active_only(self, mysql_connection, sample_park_data):
+    def test_get_by_park_id_active_only(self, mysql_session, sample_park_data):
         """
         get_by_park_id() with active_only=True should filter inactive rides.
 
@@ -246,7 +252,8 @@ class TestRideRepositoryQueries:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        conn = mysql_session.connection()
+        park_id = insert_sample_park(conn, sample_park_data)
 
         # Create 2 active rides
         ride1 = {
@@ -257,17 +264,17 @@ class TestRideRepositoryQueries:
             'queue_times_id': 1002, 'park_id': park_id, 'name': 'Active Ride 2',
             'land_area': 'Area 2', 'tier': 2, 'is_active': 1
         }
-        insert_sample_ride(mysql_connection, ride1)
-        insert_sample_ride(mysql_connection, ride2)
+        insert_sample_ride(conn, ride1)
+        insert_sample_ride(conn, ride2)
 
         # Create 1 inactive ride
         ride3 = {
             'queue_times_id': 1003, 'park_id': park_id, 'name': 'Closed Ride',
             'land_area': 'Area 3', 'tier': 3, 'is_active': 0
         }
-        insert_sample_ride(mysql_connection, ride3)
+        insert_sample_ride(conn, ride3)
 
-        repo = RideRepository(mysql_connection)
+        repo = RideRepository(mysql_session)
         rides = repo.get_by_park_id(park_id, active_only=True)
 
         assert len(rides) == 2
@@ -276,7 +283,7 @@ class TestRideRepositoryQueries:
         assert 'Active Ride 2' in ride_names
         assert 'Closed Ride' not in ride_names
 
-    def test_get_by_park_id_include_inactive(self, mysql_connection, sample_park_data):
+    def test_get_by_park_id_include_inactive(self, mysql_session, sample_park_data):
         """
         get_by_park_id() with active_only=False should return all rides.
 
@@ -286,7 +293,8 @@ class TestRideRepositoryQueries:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        conn = mysql_session.connection()
+        park_id = insert_sample_park(conn, sample_park_data)
 
         # Create active and inactive rides
         for idx in range(3):
@@ -298,14 +306,14 @@ class TestRideRepositoryQueries:
                 'tier': 1,
                 'is_active': 1 if idx < 2 else 0
             }
-            insert_sample_ride(mysql_connection, ride)
+            insert_sample_ride(conn, ride)
 
-        repo = RideRepository(mysql_connection)
+        repo = RideRepository(mysql_session)
         rides = repo.get_by_park_id(park_id, active_only=False)
 
         assert len(rides) == 3
 
-    def test_get_all_active_returns_only_active_rides(self, mysql_connection, sample_park_data):
+    def test_get_all_active_returns_only_active_rides(self, mysql_session, sample_park_data):
         """
         get_all_active() should return only active rides.
 
@@ -315,7 +323,8 @@ class TestRideRepositoryQueries:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        conn = mysql_session.connection()
+        park_id = insert_sample_park(conn, sample_park_data)
 
         # Create rides
         for idx in range(3):
@@ -327,15 +336,15 @@ class TestRideRepositoryQueries:
                 'tier': 1,
                 'is_active': 1 if idx < 2 else 0
             }
-            insert_sample_ride(mysql_connection, ride)
+            insert_sample_ride(conn, ride)
 
-        repo = RideRepository(mysql_connection)
+        repo = RideRepository(mysql_session)
         rides = repo.get_all_active()
 
         assert len(rides) == 2
         assert all(r.is_active in (True, 1) for r in rides)
 
-    def test_get_unclassified_rides(self, mysql_connection, sample_park_data):
+    def test_get_unclassified_rides(self, mysql_session, sample_park_data):
         """
         get_unclassified_rides() should return rides without tier classification.
 
@@ -346,29 +355,30 @@ class TestRideRepositoryQueries:
         from tests.conftest import insert_sample_park, insert_sample_ride
         from sqlalchemy import text
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        conn = mysql_session.connection()
+        park_id = insert_sample_park(conn, sample_park_data)
 
         # Create 3 rides
-        ride1_id = insert_sample_ride(mysql_connection, {
+        ride1_id = insert_sample_ride(conn, {
             'queue_times_id': 1001, 'park_id': park_id, 'name': 'Unclassified 1',
             'land_area': 'Area 1', 'tier': None, 'is_active': 1
         })
-        ride2_id = insert_sample_ride(mysql_connection, {
+        ride2_id = insert_sample_ride(conn, {
             'queue_times_id': 1002, 'park_id': park_id, 'name': 'Unclassified 2',
             'land_area': 'Area 2', 'tier': None, 'is_active': 1
         })
-        ride3_id = insert_sample_ride(mysql_connection, {
+        ride3_id = insert_sample_ride(conn, {
             'queue_times_id': 1003, 'park_id': park_id, 'name': 'Classified',
             'land_area': 'Area 3', 'tier': 1, 'is_active': 1
         })
 
         # Add classification for ride3
-        mysql_connection.execute(text("""
+        conn.execute(text("""
             INSERT INTO ride_classifications (ride_id, tier, tier_weight, classification_method, confidence_score)
             VALUES (:ride_id, 1, 3, 'manual_override', 1.0)
         """), {'ride_id': ride3_id})
 
-        repo = RideRepository(mysql_connection)
+        repo = RideRepository(mysql_session)
         rides = repo.get_unclassified_rides()
 
         assert len(rides) == 2
@@ -389,7 +399,7 @@ class TestRideRepositoryRowConversion:
     Priority: P2 - Internal method but critical for data integrity
     """
 
-    def test_row_to_ride_conversion(self, mysql_connection, sample_park_data, sample_ride_data):
+    def test_row_to_ride_conversion(self, mysql_session, sample_park_data, sample_ride_data):
         """
         _row_to_ride() should correctly convert database row to Ride object.
 
@@ -399,10 +409,11 @@ class TestRideRepositoryRowConversion:
         """
         from tests.conftest import insert_sample_park
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        conn = mysql_session.connection()
+        park_id = insert_sample_park(conn, sample_park_data)
         sample_ride_data['park_id'] = park_id
 
-        repo = RideRepository(mysql_connection)
+        repo = RideRepository(mysql_session)
         created_ride = repo.create(sample_ride_data)
 
         # Verify all fields converted correctly
@@ -429,7 +440,7 @@ class TestRideRepositoryEdgeCases:
     Priority: P2 - Robustness
     """
 
-    def test_create_ride_with_minimal_data(self, mysql_connection, sample_park_data):
+    def test_create_ride_with_minimal_data(self, mysql_session, sample_park_data):
         """
         Create ride with only required fields.
 
@@ -439,9 +450,10 @@ class TestRideRepositoryEdgeCases:
         """
         from tests.conftest import insert_sample_park
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        conn = mysql_session.connection()
+        park_id = insert_sample_park(conn, sample_park_data)
 
-        repo = RideRepository(mysql_connection)
+        repo = RideRepository(mysql_session)
 
         minimal_data = {
             'queue_times_id': 9999,
@@ -459,7 +471,7 @@ class TestRideRepositoryEdgeCases:
         assert ride.tier is None
         assert ride.land_area is None
 
-    def test_update_only_tier(self, mysql_connection, sample_park_data, sample_ride_data):
+    def test_update_only_tier(self, mysql_session, sample_park_data, sample_ride_data):
         """
         Update ride with single field change (tier).
 
@@ -469,10 +481,11 @@ class TestRideRepositoryEdgeCases:
         """
         from tests.conftest import insert_sample_park
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        conn = mysql_session.connection()
+        park_id = insert_sample_park(conn, sample_park_data)
         sample_ride_data['park_id'] = park_id
 
-        repo = RideRepository(mysql_connection)
+        repo = RideRepository(mysql_session)
         created_ride = repo.create(sample_ride_data)
         original_name = created_ride.name
 
@@ -481,7 +494,7 @@ class TestRideRepositoryEdgeCases:
         assert updated_ride.tier == 3
         assert updated_ride.name == original_name  # Unchanged
 
-    def test_get_by_park_id_empty_park(self, mysql_connection, sample_park_data):
+    def test_get_by_park_id_empty_park(self, mysql_session, sample_park_data):
         """
         get_by_park_id() should return empty list for park with no rides.
 
@@ -491,9 +504,10 @@ class TestRideRepositoryEdgeCases:
         """
         from tests.conftest import insert_sample_park
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        conn = mysql_session.connection()
+        park_id = insert_sample_park(conn, sample_park_data)
 
-        repo = RideRepository(mysql_connection)
+        repo = RideRepository(mysql_session)
         rides = repo.get_by_park_id(park_id)
 
         assert rides == []

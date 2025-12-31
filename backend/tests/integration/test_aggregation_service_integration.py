@@ -52,7 +52,7 @@ class TestDailyAggregationMath:
     """Test daily aggregation calculates correct statistics."""
 
     def test_single_ride_full_day_aggregation(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test daily aggregation for a single ride with full day of data.
@@ -72,9 +72,9 @@ class TestDailyAggregationMath:
         from tests.conftest import insert_sample_park, insert_sample_ride
 
         # Setup: Create park and ride
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         # Setup: Create operating session (9 AM - 11 PM = 14 hours)
         aggregation_date = date.today()
@@ -90,7 +90,7 @@ class TestDailyAggregationMath:
                 :park_id, :session_date, :session_start_utc, :session_end_utc, :operating_minutes
             )
         """)
-        mysql_connection.execute(operating_session_query, {
+        mysql_session.execute(operating_session_query, {
             "park_id": park_id,
             "session_date": aggregation_date,
             "session_start_utc": session_start,
@@ -112,7 +112,7 @@ class TestDailyAggregationMath:
         current_time = session_start
         for i in range(84):
             is_down = i in [10, 20, 30, 40, 50, 60, 70]  # 7 down periods
-            mysql_connection.execute(snapshot_insert, {
+            mysql_session.execute(snapshot_insert, {
                 "ride_id": ride_id,
                 "recorded_at": current_time,
                 "is_open": not is_down,
@@ -123,7 +123,7 @@ class TestDailyAggregationMath:
             current_time += timedelta(minutes=10)
 
         # Act: Run daily aggregation
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_daily(
             aggregation_date=aggregation_date,
             park_timezone=sample_park_data['timezone']
@@ -144,7 +144,7 @@ class TestDailyAggregationMath:
             FROM ride_daily_stats
             WHERE ride_id = :ride_id AND stat_date = :stat_date
         """)
-        ride_stats = mysql_connection.execute(ride_stats_query, {
+        ride_stats = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id,
             "stat_date": aggregation_date
         }).fetchone()
@@ -172,7 +172,7 @@ class TestDailyAggregationMath:
             FROM park_daily_stats
             WHERE park_id = :park_id AND stat_date = :stat_date
         """)
-        park_stats = mysql_connection.execute(park_stats_query, {
+        park_stats = mysql_session.execute(park_stats_query, {
             "park_id": park_id,
             "stat_date": aggregation_date
         }).fetchone()
@@ -190,7 +190,7 @@ class TestDailyAggregationMath:
         assert park_stats.total_rides_tracked == 1, "Should be tracking 1 ride"
 
     def test_multiple_rides_park_aggregation(
-        self, mysql_connection, sample_park_data
+        self, mysql_session, sample_park_data
     ):
         """
         Test park-level aggregation with multiple rides.
@@ -210,7 +210,7 @@ class TestDailyAggregationMath:
         from tests.conftest import insert_sample_park
 
         # Setup: Create park
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         aggregation_date = date.today()
         tz = ZoneInfo(sample_park_data['timezone'])
 
@@ -221,9 +221,9 @@ class TestDailyAggregationMath:
                 INSERT INTO rides (park_id, queue_times_id, name, is_active)
                 VALUES (:park_id, :queue_times_id, :name, 1)
             """)
-            result = mysql_connection.execute(ride_insert, {
+            result = mysql_session.execute(ride_insert, {
                 "park_id": park_id,
-                "queue_times_id": 1000 + i,
+                "queue_times_id": 91000 + i,  # >= 90000 to distinguish from production
                 "name": f"Ride {chr(65+i)}"  # A, B, C
             })
             rides.append(result.lastrowid)
@@ -239,7 +239,7 @@ class TestDailyAggregationMath:
                 :park_id, :session_date, :session_start_utc, :session_end_utc, :operating_minutes
             )
         """)
-        mysql_connection.execute(operating_session_query, {
+        mysql_session.execute(operating_session_query, {
             "park_id": park_id,
             "session_date": aggregation_date,
             "session_start_utc": session_start,
@@ -264,7 +264,7 @@ class TestDailyAggregationMath:
 
             for i in range(84):
                 is_down = i in down_indices
-                mysql_connection.execute(snapshot_insert, {
+                mysql_session.execute(snapshot_insert, {
                     "ride_id": ride_id,
                     "recorded_at": current_time,
                     "is_open": not is_down,
@@ -275,7 +275,7 @@ class TestDailyAggregationMath:
                 current_time += timedelta(minutes=10)
 
         # Act: Run daily aggregation
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_daily(
             aggregation_date=aggregation_date,
             park_timezone=sample_park_data['timezone']
@@ -291,7 +291,7 @@ class TestDailyAggregationMath:
             FROM park_daily_stats
             WHERE park_id = :park_id AND stat_date = :stat_date
         """)
-        park_stats = mysql_connection.execute(park_stats_query, {
+        park_stats = mysql_session.execute(park_stats_query, {
             "park_id": park_id,
             "stat_date": aggregation_date
         }).fetchone()
@@ -312,7 +312,7 @@ class TestDailyAggregationMath:
         assert park_stats.total_rides_tracked == 3
 
     def test_no_operating_hours_skips_aggregation(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test that aggregation is skipped when no operating hours detected.
@@ -327,16 +327,16 @@ class TestDailyAggregationMath:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         aggregation_date = date.today()
 
         # NO operating session created - park appears closed
 
         # Act: Run daily aggregation
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_daily(
             aggregation_date=aggregation_date,
             park_timezone=sample_park_data['timezone']
@@ -347,7 +347,7 @@ class TestDailyAggregationMath:
             SELECT COUNT(*) FROM park_daily_stats
             WHERE park_id = :park_id AND stat_date = :stat_date
         """)
-        park_count = mysql_connection.execute(park_stats_query, {
+        park_count = mysql_session.execute(park_stats_query, {
             "park_id": park_id,
             "stat_date": aggregation_date
         }).scalar()
@@ -358,7 +358,7 @@ class TestDailyAggregationMath:
             SELECT COUNT(*) FROM ride_daily_stats
             WHERE ride_id = :ride_id AND stat_date = :stat_date
         """)
-        ride_count = mysql_connection.execute(ride_stats_query, {
+        ride_count = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id,
             "stat_date": aggregation_date
         }).scalar()
@@ -366,7 +366,7 @@ class TestDailyAggregationMath:
         assert ride_count == 0, "Should not create ride_daily_stats without operating hours"
 
     def test_upsert_behavior_on_rerun(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test that running aggregation twice UPDATES existing records (UPSERT).
@@ -383,9 +383,9 @@ class TestDailyAggregationMath:
         """
         from tests.conftest import insert_sample_park, insert_sample_ride
 
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         aggregation_date = date.today()
         tz = ZoneInfo(sample_park_data['timezone'])
@@ -401,7 +401,7 @@ class TestDailyAggregationMath:
                 :park_id, :session_date, :session_start_utc, :session_end_utc, :operating_minutes
             )
         """)
-        mysql_connection.execute(operating_session_query, {
+        mysql_session.execute(operating_session_query, {
             "park_id": park_id,
             "session_date": aggregation_date,
             "session_start_utc": session_start,
@@ -421,7 +421,7 @@ class TestDailyAggregationMath:
         current_time = session_start
         for i in range(50):
             is_down = i < 5  # First 5 are down
-            mysql_connection.execute(snapshot_insert, {
+            mysql_session.execute(snapshot_insert, {
                 "ride_id": ride_id,
                 "recorded_at": current_time,
                 "is_open": not is_down,
@@ -432,7 +432,7 @@ class TestDailyAggregationMath:
             current_time += timedelta(minutes=10)
 
         # Act 1: Run aggregation first time
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result1 = service.aggregate_daily(
             aggregation_date=aggregation_date,
             park_timezone=sample_park_data['timezone']
@@ -445,7 +445,7 @@ class TestDailyAggregationMath:
             SELECT downtime_minutes FROM ride_daily_stats
             WHERE ride_id = :ride_id AND stat_date = :stat_date
         """)
-        initial_downtime = mysql_connection.execute(ride_stats_query, {
+        initial_downtime = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id,
             "stat_date": aggregation_date
         }).scalar()
@@ -456,7 +456,7 @@ class TestDailyAggregationMath:
         # Setup: Add more snapshots (34 more, 2 down = different ratio)
         for i in range(34):
             is_down = i < 2  # 2 more down periods
-            mysql_connection.execute(snapshot_insert, {
+            mysql_session.execute(snapshot_insert, {
                 "ride_id": ride_id,
                 "recorded_at": current_time,
                 "is_open": not is_down,
@@ -479,7 +479,7 @@ class TestDailyAggregationMath:
             SELECT COUNT(*) FROM ride_daily_stats
             WHERE ride_id = :ride_id AND stat_date = :stat_date
         """)
-        count = mysql_connection.execute(count_query, {
+        count = mysql_session.execute(count_query, {
             "ride_id": ride_id,
             "stat_date": aggregation_date
         }).scalar()
@@ -487,7 +487,7 @@ class TestDailyAggregationMath:
         assert count == 1, "Should have exactly 1 record (UPSERT behavior)"
 
         # Assert: Values updated
-        updated_downtime = mysql_connection.execute(ride_stats_query, {
+        updated_downtime = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id,
             "stat_date": aggregation_date
         }).scalar()
@@ -498,7 +498,7 @@ class TestDailyAggregationMath:
 
 
     def test_100_percent_downtime_ride(
-        self, mysql_connection, sample_park_data, sample_ride_data
+        self, mysql_session, sample_park_data, sample_ride_data
     ):
         """
         Test ride that is down for 100% of the operating day.
@@ -517,9 +517,9 @@ class TestDailyAggregationMath:
         from tests.conftest import insert_sample_park, insert_sample_ride
 
         # Setup: Create park and ride
-        park_id = insert_sample_park(mysql_connection, sample_park_data)
+        park_id = insert_sample_park(mysql_session, sample_park_data)
         sample_ride_data['park_id'] = park_id  # Link ride to park
-        ride_id = insert_sample_ride(mysql_connection, sample_ride_data)
+        ride_id = insert_sample_ride(mysql_session, sample_ride_data)
 
         aggregation_date = date.today()
         tz = ZoneInfo(sample_park_data['timezone'])
@@ -536,7 +536,7 @@ class TestDailyAggregationMath:
 
         current_time = session_start
         for i in range(84):
-            mysql_connection.execute(snapshot_insert, {
+            mysql_session.execute(snapshot_insert, {
                 "ride_id": ride_id,
                 "recorded_at": current_time,
                 "is_open": False,
@@ -547,7 +547,7 @@ class TestDailyAggregationMath:
             current_time += timedelta(minutes=10)
 
         # Act: Run aggregation
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_daily(
             aggregation_date=aggregation_date,
             park_timezone=sample_park_data['timezone']
@@ -567,7 +567,7 @@ class TestDailyAggregationMath:
             FROM ride_daily_stats
             WHERE ride_id = :ride_id AND stat_date = :stat_date
         """)
-        ride_stats = mysql_connection.execute(ride_stats_query, {
+        ride_stats = mysql_session.execute(ride_stats_query, {
             "ride_id": ride_id,
             "stat_date": aggregation_date
         }).fetchone()
@@ -583,7 +583,7 @@ class TestTimezoneAwareAggregation:
     """Test aggregation respects park timezones."""
 
     def test_multiple_timezones_aggregated_separately(
-        self, mysql_connection, sample_park_data
+        self, mysql_session, sample_park_data
     ):
         """
         Test that parks in different timezones are aggregated correctly.
@@ -604,14 +604,14 @@ class TestTimezoneAwareAggregation:
         park_est_data = sample_park_data.copy()
         park_est_data['timezone'] = 'America/New_York'
         park_est_data['name'] = 'Magic Kingdom'
-        park_est_id = insert_sample_park(mysql_connection, park_est_data)
+        park_est_id = insert_sample_park(mysql_session, park_est_data)
 
         # Create park in PST
         park_pst_data = sample_park_data.copy()
-        park_pst_data['queue_times_id'] = 102
+        park_pst_data['queue_times_id'] = 9102  # >= 9000 to distinguish from production
         park_pst_data['timezone'] = 'America/Los_Angeles'
         park_pst_data['name'] = 'Disneyland'
-        park_pst_id = insert_sample_park(mysql_connection, park_pst_data)
+        park_pst_id = insert_sample_park(mysql_session, park_pst_data)
 
         aggregation_date = date.today()
 
@@ -623,9 +623,9 @@ class TestTimezoneAwareAggregation:
                 INSERT INTO rides (park_id, queue_times_id, name, is_active)
                 VALUES (:park_id, :queue_times_id, :name, 1)
             """)
-            result = mysql_connection.execute(ride_insert, {
+            result = mysql_session.execute(ride_insert, {
                 "park_id": park_id,
-                "queue_times_id": 2000 + park_id,
+                "queue_times_id": 92000 + park_id,  # >= 90000 to distinguish from production
                 "name": f"Test Ride {park_id}"
             })
             ride_id = result.lastrowid
@@ -645,7 +645,7 @@ class TestTimezoneAwareAggregation:
             # Create 73 snapshots (9 AM to 9 PM = 12 hours = 72 intervals + 1)
             current_time = session_start
             for i in range(73):
-                mysql_connection.execute(snapshot_insert, {
+                mysql_session.execute(snapshot_insert, {
                     "ride_id": ride_id,
                     "recorded_at": current_time,
                     "is_open": True,
@@ -656,7 +656,7 @@ class TestTimezoneAwareAggregation:
                 current_time += timedelta(minutes=10)
 
         # Act: Run aggregation for all timezones
-        service = AggregationService(mysql_connection)
+        service = AggregationService(mysql_session)
         result = service.aggregate_daily(
             aggregation_date=aggregation_date,
             park_timezone=None  # Aggregate all timezones
@@ -672,7 +672,7 @@ class TestTimezoneAwareAggregation:
             WHERE stat_date = :stat_date
             ORDER BY park_id
         """)
-        park_stats = mysql_connection.execute(park_stats_query, {
+        park_stats = mysql_session.execute(park_stats_query, {
             "stat_date": aggregation_date
         }).fetchall()
 

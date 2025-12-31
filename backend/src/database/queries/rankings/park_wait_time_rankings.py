@@ -30,20 +30,21 @@ from datetime import date
 from typing import List, Dict, Any
 
 from sqlalchemy import select, func, and_
-from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session
 
-from database.schema import parks, park_daily_stats
-from database.queries.builders import Filters
+from models.orm_park import Park
+from models.orm_stats import ParkDailyStats
+from utils.query_helpers import QueryClassBase
 from utils.timezone import get_last_week_date_range, get_last_month_date_range
 
 
-class ParkWaitTimeRankingsQuery:
+class ParkWaitTimeRankingsQuery(QueryClassBase):
     """
     Query handler for park wait time rankings.
     """
 
-    def __init__(self, connection: Connection):
-        self.conn = connection
+    def __init__(self, session: Session):
+        super().__init__(session)
 
     def get_by_period(
         self,
@@ -84,39 +85,42 @@ class ParkWaitTimeRankingsQuery:
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         conditions = [
-            parks.c.is_active == True,
-            park_daily_stats.c.stat_date >= start_date,
-            park_daily_stats.c.stat_date <= end_date,
-            park_daily_stats.c.avg_wait_time.isnot(None),
+            Park.is_active == True,
+            ParkDailyStats.stat_date >= start_date,
+            ParkDailyStats.stat_date <= end_date,
+            ParkDailyStats.avg_wait_time.isnot(None),
         ]
 
         if filter_disney_universal:
-            conditions.append(Filters.disney_universal(parks))
+            conditions.append(
+                (Park.is_disney == True) | (Park.is_universal == True)
+            )
 
         stmt = (
             select(
-                parks.c.park_id,
-                parks.c.name.label("park_name"),
-                func.concat(parks.c.city, ", ", parks.c.state_province).label("location"),
-                func.round(func.avg(park_daily_stats.c.avg_wait_time), 1).label(
+                Park.park_id,
+                Park.name.label("park_name"),
+                func.concat(Park.city, ", ", Park.state_province).label("location"),
+                func.round(func.avg(ParkDailyStats.avg_wait_time), 1).label(
                     "avg_wait_time"
                 ),
-                func.max(park_daily_stats.c.peak_wait_time).label("peak_wait_time"),
+                func.max(ParkDailyStats.peak_wait_time).label("peak_wait_time"),
             )
             .select_from(
-                parks.join(park_daily_stats, parks.c.park_id == park_daily_stats.c.park_id)
+                Park.__table__.join(
+                    ParkDailyStats.__table__,
+                    Park.park_id == ParkDailyStats.park_id
+                )
             )
             .where(and_(*conditions))
-            .group_by(parks.c.park_id, parks.c.name, parks.c.city, parks.c.state_province)
-            .order_by(func.avg(park_daily_stats.c.avg_wait_time).desc())
+            .group_by(Park.park_id, Park.name, Park.city, Park.state_province)
+            .order_by(func.avg(ParkDailyStats.avg_wait_time).desc())
             .limit(limit)
         )
 
-        result = self.conn.execute(stmt)
         # Add period_label to each result
         rankings = []
-        for row in result:
-            row_dict = dict(row._mapping)
+        for row_dict in self.execute_and_fetchall(stmt):
             if period_label:
                 row_dict['period_label'] = period_label
             rankings.append(row_dict)

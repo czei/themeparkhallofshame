@@ -20,7 +20,7 @@ import os
 import sys
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
-from sqlalchemy import text
+from sqlalchemy import select, func
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -28,8 +28,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail, Email, To, Content
 
-from database.connection import get_db_connection
+from database.connection import get_db_session
 from utils.logger import logger
+from models import (
+    ParkHourlyStats,
+    RideHourlyStats,
+    RideStatusSnapshot,
+    ParkActivitySnapshot,
+    WeatherObservation
+)
 
 # Configuration
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY")
@@ -64,9 +71,13 @@ def check_hourly_aggregates() -> Dict[str, Any]:
     now = datetime.utcnow()
     cutoff_seconds = MAX_HOURLY_LAG_MINUTES * 60
 
-    with get_db_connection() as conn:
-        park_row = conn.execute(text("SELECT MAX(hour_start_utc) FROM park_hourly_stats")).scalar()
-        ride_row = conn.execute(text("SELECT MAX(hour_start_utc) FROM ride_hourly_stats")).scalar()
+    with get_db_session() as session:
+        park_row = session.execute(
+            select(func.max(ParkHourlyStats.hour_start_utc))
+        ).scalar()
+        ride_row = session.execute(
+            select(func.max(RideHourlyStats.hour_start_utc))
+        ).scalar()
 
     def compute(dt: Optional[datetime]):
         if dt is None:
@@ -102,43 +113,41 @@ def check_recent_snapshots() -> Dict[str, Any]:
         - minutes_since_last_ride_snapshot: int or None
         - minutes_since_last_park_snapshot: int or None
     """
-    with get_db_connection() as conn:
+    with get_db_session() as session:
         now = datetime.now()
         cutoff = now - timedelta(minutes=MAX_DATA_AGE_MINUTES)
 
         # Check ride status snapshots
-        ride_result = conn.execute(text("""
-            SELECT
-                MAX(recorded_at) as most_recent,
-                COUNT(DISTINCT ride_id) as ride_count,
-                COUNT(*) as snapshot_count
-            FROM ride_status_snapshots
-            WHERE recorded_at >= :cutoff
-        """), {"cutoff": cutoff})
+        ride_stmt = (
+            select(
+                func.max(RideStatusSnapshot.recorded_at).label('most_recent'),
+                func.count(func.distinct(RideStatusSnapshot.ride_id)).label('ride_count'),
+                func.count().label('snapshot_count')
+            )
+            .where(RideStatusSnapshot.recorded_at >= cutoff)
+        )
+        ride_result = session.execute(ride_stmt)
         ride_row = ride_result.fetchone()
 
         # Check park activity snapshots
-        park_result = conn.execute(text("""
-            SELECT
-                MAX(recorded_at) as most_recent,
-                COUNT(DISTINCT park_id) as park_count,
-                COUNT(*) as snapshot_count
-            FROM park_activity_snapshots
-            WHERE recorded_at >= :cutoff
-        """), {"cutoff": cutoff})
+        park_stmt = (
+            select(
+                func.max(ParkActivitySnapshot.recorded_at).label('most_recent'),
+                func.count(func.distinct(ParkActivitySnapshot.park_id)).label('park_count'),
+                func.count().label('snapshot_count')
+            )
+            .where(ParkActivitySnapshot.recorded_at >= cutoff)
+        )
+        park_result = session.execute(park_stmt)
         park_row = park_result.fetchone()
 
         # Get overall most recent snapshots (even if older than cutoff)
-        overall_ride_result = conn.execute(text("""
-            SELECT MAX(recorded_at) as most_recent
-            FROM ride_status_snapshots
-        """))
+        overall_ride_stmt = select(func.max(RideStatusSnapshot.recorded_at))
+        overall_ride_result = session.execute(overall_ride_stmt)
         overall_ride_row = overall_ride_result.fetchone()
 
-        overall_park_result = conn.execute(text("""
-            SELECT MAX(recorded_at) as most_recent
-            FROM park_activity_snapshots
-        """))
+        overall_park_stmt = select(func.max(ParkActivitySnapshot.recorded_at))
+        overall_park_result = session.execute(overall_park_stmt)
         overall_park_row = overall_park_result.fetchone()
 
         # Calculate results
@@ -203,26 +212,25 @@ def check_recent_weather() -> Dict[str, Any]:
         - weather_observation_count: int
         - minutes_since_last_weather: int or None
     """
-    with get_db_connection() as conn:
+    with get_db_session() as session:
         now = datetime.now()
         cutoff = now - timedelta(minutes=MAX_DATA_AGE_MINUTES)
 
         # Check weather observations
-        weather_result = conn.execute(text("""
-            SELECT
-                MAX(observation_time) as most_recent,
-                COUNT(DISTINCT park_id) as park_count,
-                COUNT(*) as observation_count
-            FROM weather_observations
-            WHERE observation_time >= :cutoff
-        """), {"cutoff": cutoff})
+        weather_stmt = (
+            select(
+                func.max(WeatherObservation.observation_time).label('most_recent'),
+                func.count(func.distinct(WeatherObservation.park_id)).label('park_count'),
+                func.count().label('observation_count')
+            )
+            .where(WeatherObservation.observation_time >= cutoff)
+        )
+        weather_result = session.execute(weather_stmt)
         weather_row = weather_result.fetchone()
 
         # Get overall most recent weather observation (even if older than cutoff)
-        overall_weather_result = conn.execute(text("""
-            SELECT MAX(observation_time) as most_recent
-            FROM weather_observations
-        """))
+        overall_weather_stmt = select(func.max(WeatherObservation.observation_time))
+        overall_weather_result = session.execute(overall_weather_stmt)
         overall_weather_row = overall_weather_result.fetchone()
 
         # Calculate results

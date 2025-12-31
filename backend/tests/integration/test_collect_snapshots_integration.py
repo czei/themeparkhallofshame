@@ -141,9 +141,9 @@ def cleanup_before_each_collect_snapshots_test(mysql_engine):
 
 
 @pytest.fixture
-def setup_test_park(mysql_connection):
+def setup_test_park(mysql_session):
     """Create a test park in database and return park_id."""
-    park_repo = ParkRepository(mysql_connection)
+    park_repo = ParkRepository(mysql_session)
 
     park_data = {
         'queue_times_id': 201,
@@ -174,20 +174,20 @@ def setup_test_park(mysql_connection):
     # Opening: 1 hour ago, Closing: 24 hours from now
     opening_time = now_utc_naive - timedelta(hours=1)
     closing_time = now_utc_naive + timedelta(hours=24)
-    mysql_connection.execute(text("""
+    mysql_session.execute(text("""
         INSERT INTO park_schedules (park_id, schedule_date, opening_time, closing_time, schedule_type)
         VALUES (:park_id, :schedule_date, :opening_time, :closing_time, 'OPERATING')
     """), {'park_id': park_id, 'schedule_date': today, 'opening_time': opening_time, 'closing_time': closing_time})
 
-    mysql_connection.commit()  # Commit so mocked collector can see the park
+    mysql_session.commit()  # Commit so mocked collector can see the park
     return park_id
 
 
 @pytest.fixture
-def setup_test_rides(mysql_connection, setup_test_park):
+def setup_test_rides(mysql_session, setup_test_park):
     """Create test rides in database and return list of ride_ids."""
     park_id = setup_test_park
-    ride_repo = RideRepository(mysql_connection)
+    ride_repo = RideRepository(mysql_session)
 
     rides_data = [
         {
@@ -235,12 +235,12 @@ def setup_test_rides(mysql_connection, setup_test_park):
         tier = ride_data.get('tier', 2)
         tier_weights = {1: 3, 2: 2, 3: 1}
         from sqlalchemy import text
-        mysql_connection.execute(text("""
+        mysql_session.execute(text("""
             INSERT INTO ride_classifications (ride_id, tier, tier_weight, classification_method)
             VALUES (:ride_id, :tier, :weight, 'manual_override')
         """), {'ride_id': ride_id, 'tier': tier, 'weight': tier_weights.get(tier, 2)})
 
-    mysql_connection.commit()  # Commit so mocked collector can see the rides
+    mysql_session.commit()  # Commit so mocked collector can see the rides
     return ride_ids
 
 
@@ -257,11 +257,11 @@ class TestSnapshotCollectionBasicFlow:
     @patch('scripts.collect_snapshots.QueueTimesClient')
     def test_collect_snapshots_creates_snapshots_in_database(
         self, mock_client_class, mock_get_db, mock_themeparks_wiki, mock_aggregate,
-        mysql_connection, setup_test_rides, sample_api_response_open_park
+        mysql_session, setup_test_rides, sample_api_response_open_park
     ):
         """Snapshot collection should create ride snapshots in database."""
         # Setup mocks
-        mock_get_db.return_value.__enter__.return_value = mysql_connection
+        mock_get_db.return_value.__enter__.return_value = mysql_session
         mock_get_db.return_value.__exit__.return_value = None
         mock_themeparks_wiki.return_value = Mock()  # Mock the wiki client
 
@@ -274,11 +274,11 @@ class TestSnapshotCollectionBasicFlow:
         collector.run()
 
         # Verify snapshots created
-        snapshot_repo = RideStatusSnapshotRepository(mysql_connection)
+        snapshot_repo = RideStatusSnapshotRepository(mysql_session)
 
         # Check Space Mountain snapshot (45 min wait)
         from database.repositories.ride_repository import RideRepository
-        ride_repo = RideRepository(mysql_connection)
+        ride_repo = RideRepository(mysql_session)
         space_mountain = ride_repo.get_by_queue_times_id(2001)
         snapshot = snapshot_repo.get_latest_by_ride(space_mountain.ride_id)
 
@@ -293,11 +293,11 @@ class TestSnapshotCollectionBasicFlow:
     @patch('scripts.collect_snapshots.QueueTimesClient')
     def test_collect_snapshots_creates_park_activity_snapshot(
         self, mock_client_class, mock_get_db, mock_themeparks_wiki, mock_aggregate,
-        mysql_connection, setup_test_rides, sample_api_response_open_park
+        mysql_session, setup_test_rides, sample_api_response_open_park
     ):
         """Snapshot collection should create park activity snapshot."""
         # Setup mocks
-        mock_get_db.return_value.__enter__.return_value = mysql_connection
+        mock_get_db.return_value.__enter__.return_value = mysql_session
         mock_get_db.return_value.__exit__.return_value = None
         mock_themeparks_wiki.return_value = Mock()  # Mock the wiki client
 
@@ -311,10 +311,10 @@ class TestSnapshotCollectionBasicFlow:
 
         # Verify park activity snapshot
         from database.repositories.park_repository import ParkRepository
-        park_repo = ParkRepository(mysql_connection)
+        park_repo = ParkRepository(mysql_session)
         park = park_repo.get_by_queue_times_id(201)
 
-        park_activity_repo = ParkActivitySnapshotRepository(mysql_connection)
+        park_activity_repo = ParkActivitySnapshotRepository(mysql_session)
         activity = park_activity_repo.get_latest_by_park(park.park_id)
 
         assert activity is not None
@@ -337,11 +337,11 @@ class TestStatusChangeDetection:
     @patch('scripts.collect_snapshots.QueueTimesClient')
     def test_detects_ride_going_down(
         self, mock_client_class, mock_get_db, mock_themeparks_wiki, mock_aggregate,
-        mysql_connection, setup_test_rides
+        mysql_session, setup_test_rides
     ):
         """Should detect and record when ride goes from open to closed."""
         # Setup mocks
-        mock_get_db.return_value.__enter__.return_value = mysql_connection
+        mock_get_db.return_value.__enter__.return_value = mysql_session
         mock_get_db.return_value.__exit__.return_value = None
         mock_themeparks_wiki.return_value = Mock()  # Mock the wiki client
 
@@ -362,7 +362,7 @@ class TestStatusChangeDetection:
 
         # CRITICAL: Commit the first snapshot so the second collector can see it
         # when looking up the previous status from the database
-        mysql_connection.commit()
+        mysql_session.commit()
 
         # Second collection - ride is closed
         mock_client.get_park_wait_times.return_value = {
@@ -377,14 +377,14 @@ class TestStatusChangeDetection:
         collector2.run()
 
         # Verify status change recorded
-        status_change_repo = RideStatusChangeRepository(mysql_connection)
+        status_change_repo = RideStatusChangeRepository(mysql_session)
         from database.repositories.ride_repository import RideRepository
-        ride_repo = RideRepository(mysql_connection)
+        ride_repo = RideRepository(mysql_session)
         space_mountain = ride_repo.get_by_queue_times_id(2001)
 
         # Get recent status changes for this ride
         from sqlalchemy import text
-        result = mysql_connection.execute(
+        result = mysql_session.execute(
             text("SELECT * FROM ride_status_changes WHERE ride_id = :ride_id ORDER BY changed_at DESC LIMIT 1"),
             {'ride_id': space_mountain.ride_id}
         )
@@ -408,11 +408,11 @@ class TestErrorHandling:
     @patch('scripts.collect_snapshots.QueueTimesClient')
     def test_handles_api_timeout(
         self, mock_client_class, mock_get_db, mock_themeparks_wiki,
-        mysql_connection, setup_test_park
+        mysql_session, setup_test_park
     ):
         """Should handle API timeout gracefully."""
         # Setup mocks
-        mock_get_db.return_value.__enter__.return_value = mysql_connection
+        mock_get_db.return_value.__enter__.return_value = mysql_session
         mock_get_db.return_value.__exit__.return_value = None
         mock_themeparks_wiki.return_value = Mock()  # Mock the wiki client
 
@@ -434,11 +434,11 @@ class TestErrorHandling:
     @patch('scripts.collect_snapshots.QueueTimesClient')
     def test_handles_empty_api_response(
         self, mock_client_class, mock_get_db, mock_themeparks_wiki,
-        mysql_connection, setup_test_park, sample_api_response_empty
+        mysql_session, setup_test_park, sample_api_response_empty
     ):
         """Should handle empty API response (no rides)."""
         # Setup mocks
-        mock_get_db.return_value.__enter__.return_value = mysql_connection
+        mock_get_db.return_value.__enter__.return_value = mysql_session
         mock_get_db.return_value.__exit__.return_value = None
         mock_themeparks_wiki.return_value = Mock()  # Mock the wiki client
 
@@ -469,11 +469,11 @@ class TestStatisticsTracking:
     @patch('scripts.collect_snapshots.QueueTimesClient')
     def test_tracks_collection_statistics(
         self, mock_client_class, mock_get_db, mock_themeparks_wiki, mock_aggregate,
-        mysql_connection, setup_test_rides, sample_api_response_open_park
+        mysql_session, setup_test_rides, sample_api_response_open_park
     ):
         """Should track collection statistics correctly."""
         # Setup mocks
-        mock_get_db.return_value.__enter__.return_value = mysql_connection
+        mock_get_db.return_value.__enter__.return_value = mysql_session
         mock_get_db.return_value.__exit__.return_value = None
         mock_themeparks_wiki.return_value = Mock()  # Mock the wiki client
 

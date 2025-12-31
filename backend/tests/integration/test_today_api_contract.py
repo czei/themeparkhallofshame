@@ -27,7 +27,7 @@ TODAY_START_UTC = datetime(2025, 12, 5, 8, 0, 0, tzinfo=timezone.utc) # Midnight
 # committed test data (fixing test isolation issues in the full suite).
 
 @pytest.fixture(scope="function")
-def today_api_test_data(mysql_connection):
+def today_api_test_data(mysql_session):
     """
     Set up a controlled dataset for the 'today' API contract test.
 
@@ -37,7 +37,7 @@ def today_api_test_data(mysql_connection):
     - 1 inactive park (should be excluded).
     - Snapshots and hourly stats for a deterministic "today" window.
     """
-    conn = mysql_connection
+    conn = mysql_session
 
     # Use a unique high-ID range to avoid conflicts
     park_qt_ids = {'disney': 9101, 'universal': 9102, 'other': 9103, 'zero_shame': 9104, 'inactive': 9105}
@@ -50,7 +50,7 @@ def today_api_test_data(mysql_connection):
     conn.execute(text("DELETE FROM park_weekly_stats WHERE park_id <= 16 OR park_id >= 9100"))
     conn.execute(text("DELETE FROM park_monthly_stats WHERE park_id <= 16 OR park_id >= 9100"))
     conn.execute(text("DELETE FROM park_activity_snapshots WHERE park_id <= 16 OR park_id >= 9100"))
-    conn.execute(text("DELETE FROM ride_hourly_stats WHERE ride_id <= 200 OR ride_id >= 91000"))
+    # ride_hourly_stats table dropped in migration 003 - no longer exists
     conn.execute(text("DELETE FROM ride_daily_stats WHERE ride_id <= 200 OR ride_id >= 91000"))
     conn.execute(text("DELETE FROM ride_weekly_stats WHERE ride_id <= 200 OR ride_id >= 91000"))
     conn.execute(text("DELETE FROM ride_monthly_stats WHERE ride_id <= 200 OR ride_id >= 91000"))
@@ -287,13 +287,13 @@ def today_api_test_data(mysql_connection):
 
     yield {'client': test_client, 'scenarios': scenarios}
 
-    # Cleanup: Delete test data (connection cleanup handled by mysql_connection fixture)
+    # Cleanup: Delete test data (connection cleanup handled by mysql_session fixture)
     conn.execute(text("DELETE FROM park_hourly_stats WHERE park_id <= 16 OR park_id >= 9100"))
     conn.execute(text("DELETE FROM park_daily_stats WHERE park_id <= 16 OR park_id >= 9100"))
     conn.execute(text("DELETE FROM park_weekly_stats WHERE park_id <= 16 OR park_id >= 9100"))
     conn.execute(text("DELETE FROM park_monthly_stats WHERE park_id <= 16 OR park_id >= 9100"))
     conn.execute(text("DELETE FROM park_activity_snapshots WHERE park_id <= 16 OR park_id >= 9100"))
-    conn.execute(text("DELETE FROM ride_hourly_stats WHERE ride_id <= 200 OR ride_id >= 91000"))
+    # ride_hourly_stats table dropped in migration 003 - no longer exists
     conn.execute(text("DELETE FROM ride_daily_stats WHERE ride_id <= 200 OR ride_id >= 91000"))
     conn.execute(text("DELETE FROM ride_weekly_stats WHERE ride_id <= 200 OR ride_id >= 91000"))
     conn.execute(text("DELETE FROM ride_monthly_stats WHERE ride_id <= 200 OR ride_id >= 91000"))

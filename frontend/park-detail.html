@@ -557,7 +557,8 @@
             document.getElementById('shame-score').textContent = shameScore.toFixed(1);
 
             // Get rides list (different field names for live vs historical)
-            const ridesList = data.shame_breakdown?.rides_with_downtime || data.shame_breakdown?.rides_down || data.shame_breakdown?.rides || [];
+            // IMPORTANT: Check 'rides' first (array), not 'rides_with_downtime' (count)
+            const ridesList = data.shame_breakdown?.rides || data.shame_breakdown?.rides_down || [];
 
             // Worst ride
             if (ridesList.length > 0) {

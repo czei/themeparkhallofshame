@@ -1,0 +1,457 @@
+{
+  "query_date": "2025-12-22",
+  "period": "yesterday",
+  "generated_at": "2025-12-23T16:34:20.033696+00:00",
+  "rides": [
+    {
+      "ride_id": 2773,
+      "ride_name": "Busy Bees",
+      "park_name": "Dollywood",
+      "park_id": 143,
+      "tier": null,
+      "down_snapshots": 58,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2776,
+      "ride_name": "Lucky Ducky",
+      "park_name": "Dollywood",
+      "park_id": 143,
+      "tier": null,
+      "down_snapshots": 57,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 3737,
+      "ride_name": "Ninja",
+      "park_name": "Six Flags Magic Mountain",
+      "park_id": 182,
+      "tier": null,
+      "down_snapshots": 57,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2781,
+      "ride_name": "Waltzing Swinger",
+      "park_name": "Dollywood",
+      "park_id": 143,
+      "tier": null,
+      "down_snapshots": 49,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2791,
+      "ride_name": "Drop Line",
+      "park_name": "Dollywood",
+      "park_id": 143,
+      "tier": null,
+      "down_snapshots": 45,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2825,
+      "ride_name": "Fireman's Flyers",
+      "park_name": "Silver Dollar City",
+      "park_id": 144,
+      "tier": null,
+      "down_snapshots": 41,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2786,
+      "ride_name": "Barnstormer",
+      "park_name": "Dollywood",
+      "park_id": 143,
+      "tier": null,
+      "down_snapshots": 38,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 3197,
+      "ride_name": "Tentacle Twirl",
+      "park_name": "Seaworld San Diego",
+      "park_id": 162,
+      "tier": null,
+      "down_snapshots": 36,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 3087,
+      "ride_name": "Jack Rabbit",
+      "park_name": "Kennywood",
+      "park_id": 152,
+      "tier": null,
+      "down_snapshots": 32,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 3196,
+      "ride_name": "SkyTower",
+      "park_name": "Seaworld San Diego",
+      "park_id": 162,
+      "tier": null,
+      "down_snapshots": 31,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 4081,
+      "ride_name": "Luigi's Joy to the Whirl",
+      "park_name": "Disney California Adventure",
+      "park_id": 194,
+      "tier": null,
+      "down_snapshots": 30,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2822,
+      "ride_name": "Fire Wagon Frenzy",
+      "park_name": "Silver Dollar City",
+      "park_id": 144,
+      "tier": null,
+      "down_snapshots": 29,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 3167,
+      "ride_name": "Cookie Drop",
+      "park_name": "Seaworld Orlando",
+      "park_id": 160,
+      "tier": null,
+      "down_snapshots": 29,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 3184,
+      "ride_name": "Arctic Rescue",
+      "park_name": "Seaworld San Diego",
+      "park_id": 162,
+      "tier": null,
+      "down_snapshots": 29,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2853,
+      "ride_name": "Kid Power Tower",
+      "park_name": "Legoland California",
+      "park_id": 145,
+      "tier": null,
+      "down_snapshots": 25,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2861,
+      "ride_name": "Dune Raiders",
+      "park_name": "Legoland California",
+      "park_id": 145,
+      "tier": null,
+      "down_snapshots": 25,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 3198,
+      "ride_name": "Tidepool Twist",
+      "park_name": "Seaworld San Diego",
+      "park_id": 162,
+      "tier": null,
+      "down_snapshots": 25,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2774,
+      "ride_name": "Demolition Derby",
+      "park_name": "Dollywood",
+      "park_id": 143,
+      "tier": null,
+      "down_snapshots": 24,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 3160,
+      "ride_name": "Flamingo Paddle Boats",
+      "park_name": "Seaworld Orlando",
+      "park_id": 160,
+      "tier": null,
+      "down_snapshots": 23,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2302,
+      "ride_name": "Carolina Cyclone",
+      "park_name": "Carowinds",
+      "park_id": 134,
+      "tier": null,
+      "down_snapshots": 22,
+      "total_snapshots": 143
+    },
+    {
+      "ride_id": 2772,
+      "ride_name": "Amazing Flying Elephants",
+      "park_name": "Dollywood",
+      "park_id": 143,
+      "tier": null,
+      "down_snapshots": 22,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2780,
+      "ride_name": "Sky Rider",
+      "park_name": "Dollywood",
+      "park_id": 143,
+      "tier": null,
+      "down_snapshots": 22,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 4204,
+      "ride_name": "Mickey & Minnie's Runaway Railway",
+      "park_name": "Disneyland",
+      "park_id": 197,
+      "tier": null,
+      "down_snapshots": 22,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2854,
+      "ride_name": "LEGOLAND\u00ae Express",
+      "park_name": "Legoland California",
+      "park_id": 145,
+      "tier": null,
+      "down_snapshots": 20,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 3156,
+      "ride_name": "Sky Tower",
+      "park_name": "Seaworld Orlando",
+      "park_id": 160,
+      "tier": null,
+      "down_snapshots": 20,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 3166,
+      "ride_name": "Abby's Flower Tower",
+      "park_name": "Seaworld Orlando",
+      "park_id": 160,
+      "tier": null,
+      "down_snapshots": 20,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 3719,
+      "ride_name": "Roaring Rapids",
+      "park_name": "Six Flags Magic Mountain",
+      "park_id": 182,
+      "tier": null,
+      "down_snapshots": 19,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2792,
+      "ride_name": "Lumberjack Lifts",
+      "park_name": "Dollywood",
+      "park_id": 143,
+      "tier": null,
+      "down_snapshots": 17,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2828,
+      "ride_name": "Electro Spin",
+      "park_name": "Silver Dollar City",
+      "park_id": 144,
+      "tier": null,
+      "down_snapshots": 17,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2831,
+      "ride_name": "Happy Frogs",
+      "park_name": "Silver Dollar City",
+      "park_id": 144,
+      "tier": null,
+      "down_snapshots": 17,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2334,
+      "ride_name": "Woodstock Express",
+      "park_name": "Carowinds",
+      "park_id": 134,
+      "tier": null,
+      "down_snapshots": 16,
+      "total_snapshots": 143
+    },
+    {
+      "ride_id": 2782,
+      "ride_name": "Blazing Fury",
+      "park_name": "Dollywood",
+      "park_id": 143,
+      "tier": null,
+      "down_snapshots": 16,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2802,
+      "ride_name": "Great Tree Swing",
+      "park_name": "Dollywood",
+      "park_id": 143,
+      "tier": null,
+      "down_snapshots": 16,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 4244,
+      "ride_name": "Frozen Ever After",
+      "park_name": "Epcot",
+      "park_id": 198,
+      "tier": null,
+      "down_snapshots": 16,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2827,
+      "ride_name": "Up The Ladder",
+      "park_name": "Silver Dollar City",
+      "park_id": 144,
+      "tier": null,
+      "down_snapshots": 15,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2778,
+      "ride_name": "Scrambler",
+      "park_name": "Dollywood",
+      "park_id": 143,
+      "tier": null,
+      "down_snapshots": 14,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2784,
+      "ride_name": "Lightning Rod",
+      "park_name": "Dollywood",
+      "park_id": 143,
+      "tier": null,
+      "down_snapshots": 14,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2785,
+      "ride_name": "Rockin' Roadway",
+      "park_name": "Dollywood",
+      "park_id": 143,
+      "tier": null,
+      "down_snapshots": 14,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2840,
+      "ride_name": "Thunderation",
+      "park_name": "Silver Dollar City",
+      "park_id": 144,
+      "tier": null,
+      "down_snapshots": 14,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2938,
+      "ride_name": "LEGO\u00ae NINJAGO\u00ae The Ride",
+      "park_name": "Legoland New York",
+      "park_id": 147,
+      "tier": null,
+      "down_snapshots": 14,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 3157,
+      "ride_name": "Penguin Trek",
+      "park_name": "Seaworld Orlando",
+      "park_id": 160,
+      "tier": null,
+      "down_snapshots": 14,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 3164,
+      "ride_name": "Pipeline: The Surf Coaster",
+      "park_name": "Seaworld Orlando",
+      "park_id": 160,
+      "tier": null,
+      "down_snapshots": 14,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 3963,
+      "ride_name": "Harry Potter and the Battle at the Ministry\u2122",
+      "park_name": "Epic Universe",
+      "park_id": 188,
+      "tier": null,
+      "down_snapshots": 14,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 4084,
+      "ride_name": "Grizzly River Run",
+      "park_name": "Disney California Adventure",
+      "park_id": 194,
+      "tier": null,
+      "down_snapshots": 14,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 4100,
+      "ride_name": "Jessie's Critter Carousel",
+      "park_name": "Disney California Adventure",
+      "park_id": 194,
+      "tier": null,
+      "down_snapshots": 14,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2531,
+      "ride_name": "The Racer Blue",
+      "park_name": "Kings Island",
+      "park_id": 138,
+      "tier": null,
+      "down_snapshots": 13,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2826,
+      "ride_name": "Lucky's Dizzy Dogs",
+      "park_name": "Silver Dollar City",
+      "park_id": 144,
+      "tier": null,
+      "down_snapshots": 13,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2829,
+      "ride_name": "Elephant March",
+      "park_name": "Silver Dollar City",
+      "park_id": 144,
+      "tier": null,
+      "down_snapshots": 13,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2833,
+      "ride_name": "Magnificent Wave Carousel",
+      "park_name": "Silver Dollar City",
+      "park_id": 144,
+      "tier": null,
+      "down_snapshots": 13,
+      "total_snapshots": 144
+    },
+    {
+      "ride_id": 2834,
+      "ride_name": "Mighty Galleon",
+      "park_name": "Silver Dollar City",
+      "park_id": 144,
+      "tier": null,
+      "down_snapshots": 13,
+      "total_snapshots": 144
+    }
+  ]
+}

@@ -4,13 +4,22 @@ Provides data access layer for ride status change events (up/down transitions).
 """
 
 from typing import List, Optional, Dict, Any
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from datetime import datetime, timedelta
+from sqlalchemy.orm import Session
+from sqlalchemy import select, func, case, and_, desc
 
-try:
-    from ...utils.logger import logger, log_database_error
-except ImportError:
-    from utils.logger import log_database_error
+from models import RideStatusChange, Ride, Park
+from utils.logger import logger, log_database_error
+
+
+def _to_dict(obj) -> Dict[str, Any]:
+    """Convert ORM object or Row to dict, handling attribute access"""
+    if hasattr(obj, '__dict__'):
+        # ORM object - extract non-private attributes
+        return {k: v for k, v in obj.__dict__.items() if not k.startswith('_')}
+    else:
+        # Row object from joined query
+        return dict(obj._mapping)
 
 
 class RideStatusChangeRepository:
@@ -23,14 +32,14 @@ class RideStatusChangeRepository:
     - Downtime duration queries
     """
 
-    def __init__(self, connection: Connection):
+    def __init__(self, session: Session):
         """
-        Initialize repository with database connection.
+        Initialize repository with database session.
 
         Args:
-            connection: SQLAlchemy connection object
+            session: SQLAlchemy Session object
         """
-        self.conn = connection
+        self.session = session
 
     def insert(self, change_data: Dict[str, Any]) -> int:
         """
@@ -45,21 +54,11 @@ class RideStatusChangeRepository:
         Raises:
             DatabaseError: If insertion fails
         """
-        query = text("""
-            INSERT INTO ride_status_changes (
-                ride_id, changed_at, previous_status, new_status,
-                duration_in_previous_status, wait_time_at_change
-            )
-            VALUES (
-                :ride_id, :changed_at, :previous_status, :new_status,
-                :duration_in_previous_status, :wait_time_at_change
-            )
-        """)
-
         try:
-            result = self.conn.execute(query, change_data)
-            change_id = result.lastrowid
-            return change_id
+            change = RideStatusChange(**change_data)
+            self.session.add(change)
+            self.session.flush()
+            return change.change_id
 
         except Exception as e:
             log_database_error(e, "Failed to insert ride status change")
@@ -75,22 +74,27 @@ class RideStatusChangeRepository:
         Returns:
             Dictionary with change data or None if not found
         """
-        query = text("""
-            SELECT change_id, ride_id, changed_at, previous_status,
-                   new_status, duration_in_previous_status, wait_time_at_change
-            FROM ride_status_changes
-            WHERE ride_id = :ride_id
-            ORDER BY changed_at DESC
-            LIMIT 1
-        """)
+        stmt = (
+            select(RideStatusChange)
+            .where(RideStatusChange.ride_id == ride_id)
+            .order_by(desc(RideStatusChange.changed_at))
+            .limit(1)
+        )
 
-        result = self.conn.execute(query, {"ride_id": ride_id})
-        row = result.fetchone()
+        result = self.session.execute(stmt).scalars().first()
 
-        if row is None:
+        if result is None:
             return None
 
-        return dict(row._mapping)
+        return {
+            'change_id': result.change_id,
+            'ride_id': result.ride_id,
+            'changed_at': result.changed_at,
+            'previous_status': result.previous_status,
+            'new_status': result.new_status,
+            'duration_in_previous_status': result.duration_in_previous_status,
+            'wait_time_at_change': result.wait_time_at_change
+        }
 
     def get_history(self, ride_id: int, hours: int = 24) -> List[Dict[str, Any]]:
         """
@@ -103,17 +107,33 @@ class RideStatusChangeRepository:
         Returns:
             List of dictionaries with change data
         """
-        query = text("""
-            SELECT change_id, ride_id, changed_at, previous_status,
-                   new_status, duration_in_previous_status, wait_time_at_change
-            FROM ride_status_changes
-            WHERE ride_id = :ride_id
-                AND changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-            ORDER BY changed_at DESC
-        """)
+        cutoff_time = datetime.now() - timedelta(hours=hours)
 
-        result = self.conn.execute(query, {"ride_id": ride_id, "hours": hours})
-        return [dict(row._mapping) for row in result]
+        stmt = (
+            select(RideStatusChange)
+            .where(
+                and_(
+                    RideStatusChange.ride_id == ride_id,
+                    RideStatusChange.changed_at >= cutoff_time
+                )
+            )
+            .order_by(desc(RideStatusChange.changed_at))
+        )
+
+        results = self.session.execute(stmt).scalars().all()
+
+        return [
+            {
+                'change_id': r.change_id,
+                'ride_id': r.ride_id,
+                'changed_at': r.changed_at,
+                'previous_status': r.previous_status,
+                'new_status': r.new_status,
+                'duration_in_previous_status': r.duration_in_previous_status,
+                'wait_time_at_change': r.wait_time_at_change
+            }
+            for r in results
+        ]
 
     def get_downtime_events(self, ride_id: int, hours: int = 24) -> List[Dict[str, Any]]:
         """
@@ -126,18 +146,34 @@ class RideStatusChangeRepository:
         Returns:
             List of dictionaries with downtime events
         """
-        query = text("""
-            SELECT change_id, ride_id, changed_at, previous_status,
-                   new_status, duration_in_previous_status, wait_time_at_change
-            FROM ride_status_changes
-            WHERE ride_id = :ride_id
-                AND new_status = FALSE
-                AND changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-            ORDER BY changed_at DESC
-        """)
+        cutoff_time = datetime.now() - timedelta(hours=hours)
 
-        result = self.conn.execute(query, {"ride_id": ride_id, "hours": hours})
-        return [dict(row._mapping) for row in result]
+        stmt = (
+            select(RideStatusChange)
+            .where(
+                and_(
+                    RideStatusChange.ride_id == ride_id,
+                    RideStatusChange.new_status == False,
+                    RideStatusChange.changed_at >= cutoff_time
+                )
+            )
+            .order_by(desc(RideStatusChange.changed_at))
+        )
+
+        results = self.session.execute(stmt).scalars().all()
+
+        return [
+            {
+                'change_id': r.change_id,
+                'ride_id': r.ride_id,
+                'changed_at': r.changed_at,
+                'previous_status': r.previous_status,
+                'new_status': r.new_status,
+                'duration_in_previous_status': r.duration_in_previous_status,
+                'wait_time_at_change': r.wait_time_at_change
+            }
+            for r in results
+        ]
 
     def get_uptime_events(self, ride_id: int, hours: int = 24) -> List[Dict[str, Any]]:
         """
@@ -150,18 +186,34 @@ class RideStatusChangeRepository:
         Returns:
             List of dictionaries with uptime events
         """
-        query = text("""
-            SELECT change_id, ride_id, changed_at, previous_status,
-                   new_status, duration_in_previous_status, wait_time_at_change
-            FROM ride_status_changes
-            WHERE ride_id = :ride_id
-                AND new_status = TRUE
-                AND changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-            ORDER BY changed_at DESC
-        """)
+        cutoff_time = datetime.now() - timedelta(hours=hours)
 
-        result = self.conn.execute(query, {"ride_id": ride_id, "hours": hours})
-        return [dict(row._mapping) for row in result]
+        stmt = (
+            select(RideStatusChange)
+            .where(
+                and_(
+                    RideStatusChange.ride_id == ride_id,
+                    RideStatusChange.new_status == True,
+                    RideStatusChange.changed_at >= cutoff_time
+                )
+            )
+            .order_by(desc(RideStatusChange.changed_at))
+        )
+
+        results = self.session.execute(stmt).scalars().all()
+
+        return [
+            {
+                'change_id': r.change_id,
+                'ride_id': r.ride_id,
+                'changed_at': r.changed_at,
+                'previous_status': r.previous_status,
+                'new_status': r.new_status,
+                'duration_in_previous_status': r.duration_in_previous_status,
+                'wait_time_at_change': r.wait_time_at_change
+            }
+            for r in results
+        ]
 
     def get_recent_changes_all_rides(
         self,
@@ -180,43 +232,34 @@ class RideStatusChangeRepository:
         Returns:
             List of dictionaries with change data
         """
-        if park_id:
-            query = text("""
-                SELECT rsc.change_id, rsc.ride_id, rsc.changed_at,
-                       rsc.previous_status, rsc.new_status,
-                       rsc.duration_in_previous_status,
-                       r.name as ride_name, r.park_id,
-                       p.name as park_name
-                FROM ride_status_changes rsc
-                INNER JOIN rides r ON rsc.ride_id = r.ride_id
-                INNER JOIN parks p ON r.park_id = p.park_id
-                WHERE rsc.changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-                    AND r.park_id = :park_id
-                ORDER BY rsc.changed_at DESC
-                LIMIT :limit
-            """)
-            result = self.conn.execute(query, {
-                "park_id": park_id,
-                "hours": hours,
-                "limit": limit
-            })
-        else:
-            query = text("""
-                SELECT rsc.change_id, rsc.ride_id, rsc.changed_at,
-                       rsc.previous_status, rsc.new_status,
-                       rsc.duration_in_previous_status,
-                       r.name as ride_name, r.park_id,
-                       p.name as park_name
-                FROM ride_status_changes rsc
-                INNER JOIN rides r ON rsc.ride_id = r.ride_id
-                INNER JOIN parks p ON r.park_id = p.park_id
-                WHERE rsc.changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-                ORDER BY rsc.changed_at DESC
-                LIMIT :limit
-            """)
-            result = self.conn.execute(query, {"hours": hours, "limit": limit})
+        cutoff_time = datetime.now() - timedelta(hours=hours)
 
-        return [dict(row._mapping) for row in result]
+        # Build query with joins
+        stmt = (
+            select(
+                RideStatusChange.change_id,
+                RideStatusChange.ride_id,
+                RideStatusChange.changed_at,
+                RideStatusChange.previous_status,
+                RideStatusChange.new_status,
+                RideStatusChange.duration_in_previous_status,
+                Ride.name.label('ride_name'),
+                Ride.park_id,
+                Park.name.label('park_name')
+            )
+            .join(Ride, RideStatusChange.ride_id == Ride.ride_id)
+            .join(Park, Ride.park_id == Park.park_id)
+            .where(RideStatusChange.changed_at >= cutoff_time)
+        )
+
+        if park_id:
+            stmt = stmt.where(Ride.park_id == park_id)
+
+        stmt = stmt.order_by(desc(RideStatusChange.changed_at)).limit(limit)
+
+        results = self.session.execute(stmt).all()
+
+        return [_to_dict(row) for row in results]
 
     def get_longest_downtimes(
         self,
@@ -235,45 +278,38 @@ class RideStatusChangeRepository:
         Returns:
             List of dictionaries with longest downtime events
         """
-        if park_id:
-            query = text("""
-                SELECT rsc.change_id, rsc.ride_id, rsc.changed_at,
-                       rsc.duration_in_previous_status,
-                       r.name as ride_name, r.park_id,
-                       p.name as park_name
-                FROM ride_status_changes rsc
-                INNER JOIN rides r ON rsc.ride_id = r.ride_id
-                INNER JOIN parks p ON r.park_id = p.park_id
-                WHERE rsc.changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-                    AND rsc.new_status = FALSE
-                    AND rsc.duration_in_previous_status IS NOT NULL
-                    AND r.park_id = :park_id
-                ORDER BY rsc.duration_in_previous_status DESC
-                LIMIT :limit
-            """)
-            result = self.conn.execute(query, {
-                "park_id": park_id,
-                "hours": hours,
-                "limit": limit
-            })
-        else:
-            query = text("""
-                SELECT rsc.change_id, rsc.ride_id, rsc.changed_at,
-                       rsc.duration_in_previous_status,
-                       r.name as ride_name, r.park_id,
-                       p.name as park_name
-                FROM ride_status_changes rsc
-                INNER JOIN rides r ON rsc.ride_id = r.ride_id
-                INNER JOIN parks p ON r.park_id = p.park_id
-                WHERE rsc.changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-                    AND rsc.new_status = FALSE
-                    AND rsc.duration_in_previous_status IS NOT NULL
-                ORDER BY rsc.duration_in_previous_status DESC
-                LIMIT :limit
-            """)
-            result = self.conn.execute(query, {"hours": hours, "limit": limit})
+        cutoff_time = datetime.now() - timedelta(hours=hours)
 
-        return [dict(row._mapping) for row in result]
+        # Build query with joins
+        stmt = (
+            select(
+                RideStatusChange.change_id,
+                RideStatusChange.ride_id,
+                RideStatusChange.changed_at,
+                RideStatusChange.duration_in_previous_status,
+                Ride.name.label('ride_name'),
+                Ride.park_id,
+                Park.name.label('park_name')
+            )
+            .join(Ride, RideStatusChange.ride_id == Ride.ride_id)
+            .join(Park, Ride.park_id == Park.park_id)
+            .where(
+                and_(
+                    RideStatusChange.changed_at >= cutoff_time,
+                    RideStatusChange.new_status == False,
+                    RideStatusChange.duration_in_previous_status.isnot(None)
+                )
+            )
+        )
+
+        if park_id:
+            stmt = stmt.where(Ride.park_id == park_id)
+
+        stmt = stmt.order_by(desc(RideStatusChange.duration_in_previous_status)).limit(limit)
+
+        results = self.session.execute(stmt).all()
+
+        return [_to_dict(row) for row in results]
 
     def count_changes_by_ride(
         self,
@@ -290,24 +326,39 @@ class RideStatusChangeRepository:
         Returns:
             Dictionary with counts {total, to_open, to_closed}
         """
-        query = text("""
-            SELECT
-                COUNT(*) as total,
-                SUM(CASE WHEN new_status = TRUE THEN 1 ELSE 0 END) as to_open,
-                SUM(CASE WHEN new_status = FALSE THEN 1 ELSE 0 END) as to_closed
-            FROM ride_status_changes
-            WHERE ride_id = :ride_id
-                AND changed_at >= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-        """)
+        cutoff_time = datetime.now() - timedelta(hours=hours)
 
-        result = self.conn.execute(query, {"ride_id": ride_id, "hours": hours})
-        row = result.fetchone()
+        stmt = (
+            select(
+                func.count(RideStatusChange.change_id).label('total'),
+                func.sum(
+                    case(
+                        (RideStatusChange.new_status == True, 1),
+                        else_=0
+                    )
+                ).label('to_open'),
+                func.sum(
+                    case(
+                        (RideStatusChange.new_status == False, 1),
+                        else_=0
+                    )
+                ).label('to_closed')
+            )
+            .where(
+                and_(
+                    RideStatusChange.ride_id == ride_id,
+                    RideStatusChange.changed_at >= cutoff_time
+                )
+            )
+        )
 
-        if row is None:
+        result = self.session.execute(stmt).first()
+
+        if result is None:
             return {"total": 0, "to_open": 0, "to_closed": 0}
 
         return {
-            "total": row.total or 0,
-            "to_open": row.to_open or 0,
-            "to_closed": row.to_closed or 0
+            "total": result.total or 0,
+            "to_open": result.to_open or 0,
+            "to_closed": result.to_closed or 0
         }

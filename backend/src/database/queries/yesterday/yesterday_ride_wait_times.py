@@ -7,40 +7,40 @@ UI Location: Rides tab -> Wait Times Rankings (yesterday)
 
 Returns rides ranked by average wait times for the previous full Pacific day.
 
-Uses same snapshot-based approach as TODAY query, but for yesterday's
-full day range instead of partial day.
+PERFORMANCE FIX (2025-12-27):
+- Previously: Joined ride_status_snapshots with park_activity_snapshots using
+  date_format() for minute-level matching - caused 20+ second queries
+- Now: Uses pre-aggregated ride_daily_stats table like last_week/last_month
+- Result: Sub-second queries
 
 Database Tables:
 - rides (ride metadata)
 - parks (park metadata)
-- ride_classifications (tier info)
-- ride_status_snapshots (wait time data)
-- park_activity_snapshots (park open status)
+- ride_daily_stats (pre-aggregated wait time data)
 
 Single Source of Truth:
 - Formulas: utils/metrics.py
-- SQL Helpers: utils/sql_helpers.py
+- ORM Helpers: utils/query_helpers.py
 """
 
 from typing import List, Dict, Any
 
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy import select, func, and_, or_, case
+from sqlalchemy.orm import Session
 
-from utils.timezone import get_yesterday_range_utc
-from utils.sql_helpers import ParkStatusSQL, RideFilterSQL
+from models.orm_ride import Ride
+from models.orm_park import Park
+from models.orm_stats import RideDailyStats
+from utils.query_helpers import QueryClassBase
+from utils.timezone import get_yesterday_date_range
 
 
-class YesterdayRideWaitTimesQuery:
+class YesterdayRideWaitTimesQuery(QueryClassBase):
     """
     Query handler for yesterday's ride wait time rankings.
 
-    Uses snapshot data from yesterday's full Pacific day
-    (midnight to midnight Pacific, converted to UTC).
+    Uses pre-aggregated ride_daily_stats for fast queries.
     """
-
-    def __init__(self, connection: Connection):
-        self.conn = connection
 
     def get_rankings(
         self,
@@ -48,7 +48,7 @@ class YesterdayRideWaitTimesQuery:
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """
-        Get ride wait time rankings from yesterday's full day.
+        Get ride wait time rankings from yesterday's daily stats.
 
         Args:
             filter_disney_universal: Only Disney/Universal parks
@@ -57,64 +57,65 @@ class YesterdayRideWaitTimesQuery:
         Returns:
             List of rides ranked by average wait time (descending)
         """
-        # Get yesterday's full day range in UTC
-        start_utc, end_utc, _ = get_yesterday_range_utc()
+        # Get yesterday's date (Pacific timezone)
+        yesterday_date, _, period_label = get_yesterday_date_range()
 
-        # Use centralized SQL helpers for consistent logic
-        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
-        park_open = ParkStatusSQL.park_appears_open_filter("pas")
+        # Build location string: "city, state_province" or just "city" if no state
+        location_expr = case(
+            (Park.state_province.isnot(None), func.concat(Park.city, ", ", Park.state_province)),
+            else_=Park.city
+        ).label("location")
 
-        query = text(f"""
-            SELECT
-                r.ride_id,
-                r.queue_times_id,
-                p.queue_times_id AS park_queue_times_id,
-                r.name AS ride_name,
-                p.name AS park_name,
-                p.park_id,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-                rc.tier,
+        # Build query using pre-aggregated ride_daily_stats
+        stmt = (
+            select(
+                Ride.ride_id,
+                Ride.name.label("ride_name"),
+                Ride.queue_times_id,
+                Park.name.label("park_name"),
+                Park.park_id,
+                Park.queue_times_id.label("park_queue_times_id"),
+                location_expr,
+                # Wait time metrics from daily stats
+                func.round(RideDailyStats.avg_wait_time, 1).label("avg_wait_minutes"),
+                RideDailyStats.peak_wait_time.label("peak_wait_minutes"),
+                # Tier from rides table (default to 3 if NULL)
+                func.coalesce(Ride.tier, 3).label("tier"),
+            )
+            .select_from(Ride)
+            .join(Park, Ride.park_id == Park.park_id)
+            .join(RideDailyStats, Ride.ride_id == RideDailyStats.ride_id)
+            .where(
+                and_(
+                    Ride.is_active == True,
+                    Ride.category == "ATTRACTION",
+                    Park.is_active == True,
+                    RideDailyStats.stat_date == yesterday_date,
+                    RideDailyStats.avg_wait_time.isnot(None),
+                    RideDailyStats.avg_wait_time > 0,
+                )
+            )
+        )
 
-                -- Average wait time (only when park is open and wait > 0)
-                -- IMPORTANT: Use avg_wait_minutes (not avg_wait_time) for frontend compatibility
-                ROUND(
-                    AVG(CASE
-                        WHEN {park_open} AND rss.wait_time > 0
-                        THEN rss.wait_time
-                    END),
-                    1
-                ) AS avg_wait_minutes,
+        # Apply Disney/Universal filter if requested
+        if filter_disney_universal:
+            stmt = stmt.where(
+                or_(Park.is_disney == True, Park.is_universal == True)
+            )
 
-                -- Peak wait time yesterday
-                -- IMPORTANT: Use peak_wait_minutes (not peak_wait_time) for frontend compatibility
-                MAX(CASE
-                    WHEN {park_open}
-                    THEN rss.wait_time
-                END) AS peak_wait_minutes,
+        # Order by average wait time descending
+        stmt = (
+            stmt
+            .order_by(RideDailyStats.avg_wait_time.desc())
+            .limit(limit)
+        )
 
-                -- Count of snapshots with wait time data
-                COUNT(CASE WHEN rss.wait_time > 0 THEN 1 END) AS snapshots_with_waits
+        # Execute and add period label
+        result = self.session.execute(stmt)
+        rankings = []
+        for row in result:
+            row_dict = dict(row._mapping)
+            row_dict['period_label'] = period_label
+            rankings.append(row_dict)
 
-            FROM rides r
-            INNER JOIN parks p ON r.park_id = p.park_id
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
-            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND p.is_active = TRUE
-                {filter_clause}
-            GROUP BY r.ride_id, r.name, p.name, p.park_id, p.city, p.state_province, rc.tier
-            HAVING avg_wait_minutes IS NOT NULL
-            ORDER BY avg_wait_minutes DESC
-            LIMIT :limit
-        """)
-
-        result = self.conn.execute(query, {
-            "start_utc": start_utc,
-            "end_utc": end_utc,
-            "limit": limit
-        })
-        return [dict(row._mapping) for row in result]
+        return rankings

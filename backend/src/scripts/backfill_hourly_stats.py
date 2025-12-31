@@ -1,6 +1,21 @@
 #!/usr/bin/env python3
 """
 Theme Park Downtime Tracker - Hourly Stats Backfill Script
+
+DEPRECATED (2025-12-24 - ORM Refactoring Feature 003):
+=======================================================
+This script is no longer used. The hourly_stats table has been dropped.
+Hourly metrics are now computed on-the-fly via ORM queries.
+
+This script is retained only for:
+1. Historical reference
+2. Potential rollback scenarios
+
+See specs/003-orm-refactoring/tasks.md for migration context.
+
+---
+ORIGINAL DOCSTRING (for reference):
+
 Populates historical hourly aggregation tables from existing snapshot data.
 
 This script processes hours in reverse chronological order (newest first) to
@@ -43,8 +58,10 @@ backend_src = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_src.absolute()))
 
 from utils.logger import logger
-from database.connection import get_db_connection
-from sqlalchemy import text
+from database.connection import get_db_session
+from sqlalchemy import select, func
+from models.orm_stats import ParkHourlyStats
+from models.orm_snapshots import ParkActivitySnapshot
 
 # Import the HourlyAggregator class from aggregate_hourly
 try:
@@ -194,14 +211,15 @@ class HourlyBackfiller:
             True if already aggregated
         """
         try:
-            with get_db_connection() as conn:
-                result = conn.execute(text("""
-                    SELECT COUNT(*) as count
-                    FROM park_hourly_stats
-                    WHERE hour_start_utc = :hour
-                """), {'hour': hour})
-                row = result.fetchone()
-                return row is not None and row[0] > 0
+            with get_db_session() as session:
+                stmt = (
+                    select(func.count())
+                    .select_from(ParkHourlyStats)
+                    .where(ParkHourlyStats.hour_start_utc == hour)
+                )
+                result = session.execute(stmt)
+                count = result.scalar()
+                return count > 0
         except:
             return False
 
@@ -217,15 +235,16 @@ class HourlyBackfiller:
         """
         hour_end = hour + timedelta(hours=1)
         try:
-            with get_db_connection() as conn:
-                result = conn.execute(text("""
-                    SELECT COUNT(*) as count
-                    FROM park_activity_snapshots
-                    WHERE recorded_at >= :hour_start
-                      AND recorded_at < :hour_end
-                """), {'hour_start': hour, 'hour_end': hour_end})
-                row = result.fetchone()
-                return row is not None and row[0] > 0
+            with get_db_session() as session:
+                stmt = (
+                    select(func.count())
+                    .select_from(ParkActivitySnapshot)
+                    .where(ParkActivitySnapshot.recorded_at >= hour)
+                    .where(ParkActivitySnapshot.recorded_at < hour_end)
+                )
+                result = session.execute(stmt)
+                count = result.scalar()
+                return count > 0
         except:
             return False
 

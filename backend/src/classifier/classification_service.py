@@ -13,8 +13,10 @@ from datetime import datetime
 from classifier.ai_classifier import AIClassifier
 from classifier.pattern_matcher import PatternMatcher
 from utils.logger import logger
-from database.connection import get_db_connection
-from sqlalchemy import text
+from database.connection import get_db_session
+from sqlalchemy import update
+from sqlalchemy.dialects.mysql import insert as mysql_insert
+from models import Ride, RideClassification
 
 
 VALID_CATEGORIES = ['ATTRACTION', 'MEET_AND_GREET', 'SHOW', 'EXPERIENCE']
@@ -479,64 +481,35 @@ class ClassificationService:
 
         return results
 
-    def save_classification(self, result: ClassificationResult, conn=None):
+    def save_classification(self, result: ClassificationResult, session=None):
         """
         Save classification result to database.
 
         Args:
             result: ClassificationResult to save
-            conn: Optional database connection (for testing with transactions)
+            session: Optional ORM session (for testing with transactions)
         """
-        if conn is not None:
-            # Use provided connection (for testing)
-            self._save_classification_with_connection(conn, result)
+        if session is not None:
+            # Use provided session (for testing)
+            self._save_classification_with_session(session, result)
         else:
-            # Create new connection (production use)
-            with get_db_connection() as conn:
-                self._save_classification_with_connection(conn, result)
+            # Create new session (production use)
+            with get_db_session() as session:
+                self._save_classification_with_session(session, result)
+                session.commit()
 
-    def _save_classification_with_connection(self, conn, result: ClassificationResult):
-        """Internal method to save classification with a given connection."""
-        # Update ride tier and category
-        update_ride = text("""
-            UPDATE rides
-            SET tier = :tier, category = :category
-            WHERE ride_id = :ride_id
-        """)
+    def _save_classification_with_session(self, session, result: ClassificationResult):
+        """Internal method to save classification with a given ORM session."""
+        # Update ride tier and category using ORM
+        update_ride_stmt = (
+            update(Ride)
+            .where(Ride.ride_id == result.ride_id)
+            .values(tier=result.tier, category=result.category)
+        )
+        session.execute(update_ride_stmt)
 
-        conn.execute(update_ride, {
-            "tier": result.tier,
-            "category": result.category,
-            "ride_id": result.ride_id
-        })
-
-        # Insert/update classification record
-        upsert_classification = text("""
-            INSERT INTO ride_classifications (
-                ride_id, tier, tier_weight, category, classification_method,
-                confidence_score, reasoning_text, override_reason,
-                research_sources, cache_key, schema_version
-            )
-            VALUES (
-                :ride_id, :tier, :tier_weight, :category, :classification_method,
-                :confidence_score, :reasoning_text, :override_reason,
-                :research_sources, :cache_key, :schema_version
-            )
-            ON DUPLICATE KEY UPDATE
-                tier = VALUES(tier),
-                tier_weight = VALUES(tier_weight),
-                category = VALUES(category),
-                classification_method = VALUES(classification_method),
-                confidence_score = VALUES(confidence_score),
-                reasoning_text = VALUES(reasoning_text),
-                override_reason = VALUES(override_reason),
-                research_sources = VALUES(research_sources),
-                cache_key = VALUES(cache_key),
-                schema_version = VALUES(schema_version),
-                updated_at = CURRENT_TIMESTAMP
-        """)
-
-        conn.execute(upsert_classification, {
+        # Insert/update classification record using MySQL ON DUPLICATE KEY UPDATE
+        classification_data = {
             "ride_id": result.ride_id,
             "tier": result.tier,
             "tier_weight": result.tier_weight,
@@ -548,7 +521,22 @@ class ClassificationService:
             "research_sources": json.dumps(result.research_sources) if result.research_sources else None,
             "cache_key": result.cache_key,
             "schema_version": self.SCHEMA_VERSION
-        })
+        }
+
+        insert_stmt = mysql_insert(RideClassification).values(**classification_data)
+        upsert_stmt = insert_stmt.on_duplicate_key_update(
+            tier=insert_stmt.inserted.tier,
+            tier_weight=insert_stmt.inserted.tier_weight,
+            category=insert_stmt.inserted.category,
+            classification_method=insert_stmt.inserted.classification_method,
+            confidence_score=insert_stmt.inserted.confidence_score,
+            reasoning_text=insert_stmt.inserted.reasoning_text,
+            override_reason=insert_stmt.inserted.override_reason,
+            research_sources=insert_stmt.inserted.research_sources,
+            cache_key=insert_stmt.inserted.cache_key,
+            schema_version=insert_stmt.inserted.schema_version
+        )
+        session.execute(upsert_stmt)
 
         logger.info(f"Saved classification for ride {result.ride_id}: Tier {result.tier}, Category {result.category}")
 

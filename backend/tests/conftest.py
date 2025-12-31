@@ -34,11 +34,15 @@ def sample_park_data():
     """
     Sample park dictionary for testing.
 
+    Note: Uses queue_times_id >= 9000 to distinguish from production data.
+    Mirror validation tests check for queue_times_id < 9000 to identify
+    real production data vs test fixtures.
+
     Returns:
         Dictionary with park data matching parks table schema
     """
     return {
-        'queue_times_id': 101,
+        'queue_times_id': 9101,  # >= 9000 to distinguish from production
         'name': 'Magic Kingdom',
         'city': 'Orlando',
         'state_province': 'FL',
@@ -58,11 +62,13 @@ def sample_ride_data():
     """
     Sample ride dictionary for testing.
 
+    Note: Uses queue_times_id >= 90000 to distinguish from production data.
+
     Returns:
         Dictionary with ride data matching rides table schema
     """
     return {
-        'queue_times_id': 1001,
+        'queue_times_id': 91001,  # >= 90000 to distinguish from production
         'park_id': 1,  # Assumes park with ID 1 exists
         'name': 'Space Mountain',
         'land_area': 'Tomorrowland',

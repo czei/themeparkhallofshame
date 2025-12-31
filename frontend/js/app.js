@@ -5,7 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Global application state
     const globalState = {
-        filter: 'all-parks',  // Global filter: 'all-parks' or 'disney-universal'
+        filter: 'disney-universal',  // Global filter: 'all-parks' or 'disney-universal' (DEFAULT: disney-universal to hide buggy non-Disney/Universal data)
         period: 'today',      // Time period: 'live', 'today', 'yesterday', 'last_week', 'last_month'
         currentView: 'downtime',  // Track current view for filter visibility
         entity: 'parks'       // Entity type: 'parks' or 'rides'

@@ -18,7 +18,7 @@ and see the complete trace from raw data to final number.
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
 
-from database.connection import get_db_connection
+from database.connection import get_db_connection, get_db_session
 from database.audit import AnomalyDetector, ComputationTracer
 from database.audit.validation_checks import run_hourly_audit
 from database.repositories.data_quality_repository import DataQualityRepository
@@ -184,8 +184,8 @@ def get_audit_status():
         target_date = get_today_pacific() - timedelta(days=1)
 
     try:
-        with get_db_connection() as conn:
-            summary = run_hourly_audit(conn, target_date)
+        with get_db_session() as session:
+            summary = run_hourly_audit(session, target_date)
             summary["success"] = True
 
             return jsonify(summary), 200
@@ -368,13 +368,14 @@ def trigger_audit():
         target_date = get_today_pacific() - timedelta(days=1)
 
     try:
-        with get_db_connection() as conn:
+        with get_db_session() as session:
             # Run validation checks
-            summary = run_hourly_audit(conn, target_date)
+            summary = run_hourly_audit(session, target_date)
 
-            # Also run anomaly detection
-            detector = AnomalyDetector(conn)
-            anomalies = detector.detect_anomalies(target_date)
+            # Also run anomaly detection (still uses Connection)
+            with get_db_connection() as conn:
+                detector = AnomalyDetector(conn)
+                anomalies = detector.detect_anomalies(target_date)
 
             summary["success"] = True
             summary["anomalies_detected"] = len(anomalies)
@@ -435,8 +436,8 @@ def get_data_quality_issues():
     unresolved_only = request.args.get("unresolved", "true").lower() == "true"
 
     try:
-        with get_db_connection() as conn:
-            repo = DataQualityRepository(conn)
+        with get_db_session() as session:
+            repo = DataQualityRepository(session)
             issues = repo.get_recent_issues(
                 hours=hours,
                 data_source=data_source,
@@ -495,8 +496,8 @@ def get_data_quality_summary():
     data_source = request.args.get("source", "themeparks_wiki")
 
     try:
-        with get_db_connection() as conn:
-            repo = DataQualityRepository(conn)
+        with get_db_session() as session:
+            repo = DataQualityRepository(session)
             summary = repo.get_summary_for_reporting(
                 days=days,
                 data_source=data_source,

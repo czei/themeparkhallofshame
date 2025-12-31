@@ -26,23 +26,20 @@ Example Response:
 from datetime import date, timedelta
 from typing import List, Dict, Any
 
-from sqlalchemy import select, func, and_
-from sqlalchemy.engine import Connection
+from sqlalchemy import select, func, and_, or_
+from sqlalchemy.orm import Session, aliased
 
-from database.schema import parks, rides, ride_weekly_stats
-from database.queries.builders import Filters
+from models import Park, Ride, RideWeeklyStats
+from utils.query_helpers import QueryClassBase
 
 
 DECLINE_THRESHOLD = 5.0
 
 
-class DecliningRidesQuery:
+class DecliningRidesQuery(QueryClassBase):
     """
     Query for rides showing uptime decline.
     """
-
-    def __init__(self, connection: Connection):
-        self.conn = connection
 
     def get_declining(
         self,
@@ -68,54 +65,54 @@ class DecliningRidesQuery:
         prev_week_date = today - timedelta(weeks=1)
         prev_year = prev_week_date.year
         prev_week_number = prev_week_date.isocalendar()[1]
-        prev_week = ride_weekly_stats.alias("prev_week")
+
+        # Create alias for previous week stats
+        prev_week = aliased(RideWeeklyStats)
 
         conditions = [
-            rides.c.is_active == True,
-            rides.c.category == "ATTRACTION",
-            parks.c.is_active == True,
-            ride_weekly_stats.c.year == year,
-            ride_weekly_stats.c.week_number == week_number,
+            Ride.is_active == True,
+            Ride.category == "ATTRACTION",
+            Park.is_active == True,
+            RideWeeklyStats.year == year,
+            RideWeeklyStats.week_number == week_number,
             # Positive trend = declining (more downtime)
-            ride_weekly_stats.c.trend_vs_previous_week > DECLINE_THRESHOLD,
+            RideWeeklyStats.trend_vs_previous_week > DECLINE_THRESHOLD,
         ]
 
         if filter_disney_universal:
-            conditions.append(Filters.disney_universal(parks))
+            conditions.append(or_(Park.is_disney == True, Park.is_universal == True))
 
         stmt = (
             select(
-                rides.c.ride_id,
-                rides.c.queue_times_id,
-                parks.c.queue_times_id.label("park_queue_times_id"),
-                rides.c.name.label("ride_name"),
-                parks.c.name.label("park_name"),
-                ride_weekly_stats.c.uptime_percentage.label("current_uptime"),
+                Ride.ride_id,
+                Ride.queue_times_id,
+                Park.queue_times_id.label("park_queue_times_id"),
+                Ride.name.label("ride_name"),
+                Park.name.label("park_name"),
+                RideWeeklyStats.uptime_percentage.label("current_uptime"),
                 func.round(
-                    ride_weekly_stats.c.uptime_percentage
-                    / (1 + ride_weekly_stats.c.trend_vs_previous_week / 100),
+                    RideWeeklyStats.uptime_percentage
+                    / (1 + RideWeeklyStats.trend_vs_previous_week / 100),
                     2,
                 ).label("previous_uptime"),
-                ride_weekly_stats.c.trend_vs_previous_week.label("decline_percentage"),
-                (ride_weekly_stats.c.downtime_minutes / 60.0).label("current_downtime_hours"),
-                (prev_week.c.downtime_minutes / 60.0).label("previous_downtime_hours"),
+                RideWeeklyStats.trend_vs_previous_week.label("decline_percentage"),
+                (RideWeeklyStats.downtime_minutes / 60.0).label("current_downtime_hours"),
+                (prev_week.downtime_minutes / 60.0).label("previous_downtime_hours"),
             )
-            .select_from(
-                rides.join(parks, rides.c.park_id == parks.c.park_id).join(
-                    ride_weekly_stats, rides.c.ride_id == ride_weekly_stats.c.ride_id
-                ).outerjoin(
-                    prev_week,
-                    and_(
-                        prev_week.c.ride_id == ride_weekly_stats.c.ride_id,
-                        prev_week.c.year == prev_year,
-                        prev_week.c.week_number == prev_week_number,
-                    ),
-                )
+            .select_from(Ride)
+            .join(Park, Ride.park_id == Park.park_id)
+            .join(RideWeeklyStats, Ride.ride_id == RideWeeklyStats.ride_id)
+            .outerjoin(
+                prev_week,
+                and_(
+                    prev_week.ride_id == RideWeeklyStats.ride_id,
+                    prev_week.year == prev_year,
+                    prev_week.week_number == prev_week_number,
+                ),
             )
             .where(and_(*conditions))
-            .order_by(ride_weekly_stats.c.trend_vs_previous_week.desc())
+            .order_by(RideWeeklyStats.trend_vs_previous_week.desc())
             .limit(limit)
         )
 
-        result = self.conn.execute(stmt)
-        return [dict(row._mapping) for row in result]
+        return self.execute_and_fetchall(stmt)

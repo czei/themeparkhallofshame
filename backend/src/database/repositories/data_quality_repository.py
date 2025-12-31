@@ -5,13 +5,11 @@ Tracks and queries data quality issues from external APIs for reporting.
 
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session
+from sqlalchemy import select, func, update, and_, or_
 
-try:
-    from ...utils.logger import logger, log_database_error
-except ImportError:
-    from utils.logger import logger, log_database_error
+from models import DataQualityIssue, Park, Ride
+from utils.logger import logger, log_database_error
 
 
 class DataQualityRepository:
@@ -27,14 +25,14 @@ class DataQualityRepository:
     # Minimum time between logging duplicate issues for same ride (minutes)
     DEDUP_WINDOW_MINUTES = 60
 
-    def __init__(self, connection: Connection):
+    def __init__(self, session: Session):
         """
-        Initialize repository with database connection.
+        Initialize repository with database session.
 
         Args:
-            connection: SQLAlchemy connection object
+            session: SQLAlchemy ORM session
         """
-        self.conn = connection
+        self.session = session
 
     def log_stale_data(
         self,
@@ -70,62 +68,63 @@ class DataQualityRepository:
             issue_id if logged, None if deduplicated
         """
         # Check for recent duplicate (same ride, same issue type)
-        dedup_check = text("""
-            SELECT issue_id FROM data_quality_issues
-            WHERE data_source = :data_source
-              AND issue_type = 'STALE_DATA'
-              AND (
-                  (themeparks_wiki_id IS NOT NULL AND themeparks_wiki_id = :themeparks_wiki_id)
-                  OR (ride_id IS NOT NULL AND ride_id = :ride_id)
-              )
-              AND detected_at > :dedup_cutoff
-            LIMIT 1
-        """)
-
         dedup_cutoff = datetime.now() - timedelta(minutes=self.DEDUP_WINDOW_MINUTES)
 
         try:
-            result = self.conn.execute(dedup_check, {
-                "data_source": data_source,
-                "themeparks_wiki_id": themeparks_wiki_id,
-                "ride_id": ride_id,
-                "dedup_cutoff": dedup_cutoff,
-            })
-            if result.fetchone():
+            # Build dedup check conditions
+            dedup_conditions = [
+                DataQualityIssue.data_source == data_source,
+                DataQualityIssue.issue_type == "STALE_DATA",
+                DataQualityIssue.detected_at > dedup_cutoff
+            ]
+
+            # Check either by themeparks_wiki_id or ride_id
+            id_conditions = []
+            if themeparks_wiki_id:
+                id_conditions.append(
+                    and_(
+                        DataQualityIssue.themeparks_wiki_id.isnot(None),
+                        DataQualityIssue.themeparks_wiki_id == themeparks_wiki_id
+                    )
+                )
+            if ride_id:
+                id_conditions.append(
+                    and_(
+                        DataQualityIssue.ride_id.isnot(None),
+                        DataQualityIssue.ride_id == ride_id
+                    )
+                )
+
+            if id_conditions:
+                dedup_conditions.append(or_(*id_conditions))
+
+            stmt = select(DataQualityIssue.issue_id).where(and_(*dedup_conditions)).limit(1)
+            result = self.session.execute(stmt).first()
+
+            if result:
                 # Already logged recently
                 return None
 
             # Insert the issue
-            insert_query = text("""
-                INSERT INTO data_quality_issues (
-                    data_source, issue_type, detected_at,
-                    park_id, ride_id, themeparks_wiki_id, queue_times_id,
-                    entity_name, last_updated_api, data_age_minutes,
-                    reported_status, details
-                )
-                VALUES (
-                    :data_source, 'STALE_DATA', :detected_at,
-                    :park_id, :ride_id, :themeparks_wiki_id, :queue_times_id,
-                    :entity_name, :last_updated_api, :data_age_minutes,
-                    :reported_status, :details
-                )
-            """)
+            new_issue = DataQualityIssue(
+                data_source=data_source,
+                issue_type="STALE_DATA",
+                detected_at=datetime.now(),
+                park_id=park_id,
+                ride_id=ride_id,
+                themeparks_wiki_id=themeparks_wiki_id,
+                queue_times_id=queue_times_id,
+                entity_name=entity_name,
+                last_updated_api=last_updated_api,
+                data_age_minutes=data_age_minutes,
+                reported_status=reported_status,
+                details=details,
+            )
 
-            result = self.conn.execute(insert_query, {
-                "data_source": data_source,
-                "detected_at": datetime.now(),
-                "park_id": park_id,
-                "ride_id": ride_id,
-                "themeparks_wiki_id": themeparks_wiki_id,
-                "queue_times_id": queue_times_id,
-                "entity_name": entity_name,
-                "last_updated_api": last_updated_api,
-                "data_age_minutes": data_age_minutes,
-                "reported_status": reported_status,
-                "details": details,
-            })
+            self.session.add(new_issue)
+            self.session.flush()  # Flush to get the issue_id
 
-            issue_id = result.lastrowid
+            issue_id = new_issue.issue_id
             logger.warning(
                 f"Data quality issue logged: {entity_name} has stale data "
                 f"({data_age_minutes} minutes old, status={reported_status})"
@@ -159,46 +158,43 @@ class DataQualityRepository:
         """
         cutoff = datetime.now() - timedelta(hours=hours)
 
-        filters = ["dqi.detected_at >= :cutoff"]
-        params = {"cutoff": cutoff, "limit": limit}
+        # Build dynamic WHERE conditions
+        conditions = [DataQualityIssue.detected_at >= cutoff]
 
         if data_source:
-            filters.append("dqi.data_source = :data_source")
-            params["data_source"] = data_source
+            conditions.append(DataQualityIssue.data_source == data_source)
 
         if issue_type:
-            filters.append("dqi.issue_type = :issue_type")
-            params["issue_type"] = issue_type
+            conditions.append(DataQualityIssue.issue_type == issue_type)
 
         if unresolved_only:
-            filters.append("dqi.is_resolved = FALSE")
+            conditions.append(DataQualityIssue.is_resolved == False)
 
-        where_clause = " AND ".join(filters)
+        # Build query with LEFT JOINs
+        stmt = (
+            select(
+                DataQualityIssue.issue_id,
+                DataQualityIssue.data_source,
+                DataQualityIssue.issue_type,
+                DataQualityIssue.detected_at,
+                DataQualityIssue.themeparks_wiki_id,
+                DataQualityIssue.queue_times_id,
+                DataQualityIssue.entity_name,
+                DataQualityIssue.last_updated_api,
+                DataQualityIssue.data_age_minutes,
+                DataQualityIssue.reported_status,
+                DataQualityIssue.is_resolved,
+                Park.name.label('park_name'),
+                Ride.name.label('ride_name')
+            )
+            .outerjoin(Park, DataQualityIssue.park_id == Park.park_id)
+            .outerjoin(Ride, DataQualityIssue.ride_id == Ride.ride_id)
+            .where(and_(*conditions))
+            .order_by(DataQualityIssue.detected_at.desc())
+            .limit(limit)
+        )
 
-        query = text(f"""
-            SELECT
-                dqi.issue_id,
-                dqi.data_source,
-                dqi.issue_type,
-                dqi.detected_at,
-                dqi.themeparks_wiki_id,
-                dqi.queue_times_id,
-                dqi.entity_name,
-                dqi.last_updated_api,
-                dqi.data_age_minutes,
-                dqi.reported_status,
-                dqi.is_resolved,
-                p.name as park_name,
-                r.name as ride_name
-            FROM data_quality_issues dqi
-            LEFT JOIN parks p ON dqi.park_id = p.park_id
-            LEFT JOIN rides r ON dqi.ride_id = r.ride_id
-            WHERE {where_clause}
-            ORDER BY dqi.detected_at DESC
-            LIMIT :limit
-        """)
-
-        result = self.conn.execute(query, params)
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def get_summary_for_reporting(
@@ -218,30 +214,32 @@ class DataQualityRepository:
         """
         cutoff = datetime.now() - timedelta(days=days)
 
-        query = text("""
-            SELECT
-                dqi.themeparks_wiki_id,
-                dqi.entity_name,
-                p.name as park_name,
-                COUNT(*) as issue_count,
-                MAX(dqi.data_age_minutes) as max_staleness_minutes,
-                AVG(dqi.data_age_minutes) as avg_staleness_minutes,
-                MIN(dqi.detected_at) as first_detected,
-                MAX(dqi.detected_at) as last_detected,
-                GROUP_CONCAT(DISTINCT dqi.reported_status) as statuses_seen
-            FROM data_quality_issues dqi
-            LEFT JOIN parks p ON dqi.park_id = p.park_id
-            WHERE dqi.data_source = :data_source
-              AND dqi.issue_type = 'STALE_DATA'
-              AND dqi.detected_at >= :cutoff
-            GROUP BY dqi.themeparks_wiki_id, dqi.entity_name, p.name
-            ORDER BY issue_count DESC, max_staleness_minutes DESC
-        """)
+        # Build aggregation query with GROUP BY
+        stmt = (
+            select(
+                DataQualityIssue.themeparks_wiki_id,
+                DataQualityIssue.entity_name,
+                Park.name.label('park_name'),
+                func.count().label('issue_count'),
+                func.max(DataQualityIssue.data_age_minutes).label('max_staleness_minutes'),
+                func.avg(DataQualityIssue.data_age_minutes).label('avg_staleness_minutes'),
+                func.min(DataQualityIssue.detected_at).label('first_detected'),
+                func.max(DataQualityIssue.detected_at).label('last_detected'),
+                func.group_concat(func.distinct(DataQualityIssue.reported_status)).label('statuses_seen')
+            )
+            .outerjoin(Park, DataQualityIssue.park_id == Park.park_id)
+            .where(
+                and_(
+                    DataQualityIssue.data_source == data_source,
+                    DataQualityIssue.issue_type == "STALE_DATA",
+                    DataQualityIssue.detected_at >= cutoff
+                )
+            )
+            .group_by(DataQualityIssue.themeparks_wiki_id, DataQualityIssue.entity_name, Park.name)
+            .order_by(func.count().desc(), func.max(DataQualityIssue.data_age_minutes).desc())
+        )
 
-        result = self.conn.execute(query, {
-            "data_source": data_source,
-            "cutoff": cutoff,
-        })
+        result = self.session.execute(stmt)
         return [dict(row._mapping) for row in result]
 
     def mark_resolved(self, issue_ids: List[int]) -> int:
@@ -257,14 +255,11 @@ class DataQualityRepository:
         if not issue_ids:
             return 0
 
-        query = text("""
-            UPDATE data_quality_issues
-            SET is_resolved = TRUE, resolved_at = :resolved_at
-            WHERE issue_id IN :issue_ids
-        """)
+        stmt = (
+            update(DataQualityIssue)
+            .where(DataQualityIssue.issue_id.in_(issue_ids))
+            .values(is_resolved=True, resolved_at=datetime.now())
+        )
 
-        result = self.conn.execute(query, {
-            "resolved_at": datetime.now(),
-            "issue_ids": tuple(issue_ids),
-        })
+        result = self.session.execute(stmt)
         return result.rowcount

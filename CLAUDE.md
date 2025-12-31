@@ -7,6 +7,8 @@ Auto-generated from all feature plans. Last updated: 2025-12-08
 - MySQL/MariaDB with existing schema (park_activity_snapshots, ride_status_snapshots, park_daily_stats, etc.) (001-aggregation-tables)
 - Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ (Core only), mysqlclient 2.2+, tenacity, requests (002-weather-collection)
 - MySQL/MariaDB (existing database, new tables: weather_observations, weather_forecasts) (002-weather-collection)
+- Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ Core (migrating to ORM models), Alembic 1.13+ (new - migration framework), mysqlclient 2.2+, tenacity 8.2+ (003-orm-refactoring)
+- MySQL 5.7+ or MariaDB 10.3+ (existing production database - schema modifications only) (003-orm-refactoring)
 
 - Python 3.11+ (001-theme-park-tracker)
 
@@ -26,8 +28,8 @@ cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLO
 Python 3.11+: Follow standard conventions
 
 ## Recent Changes
+- 003-orm-refactoring: Added Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ Core (migrating to ORM models), Alembic 1.13+ (new - migration framework), mysqlclient 2.2+, tenacity 8.2+
 - 002-weather-collection: Added Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ (Core only), mysqlclient 2.2+, tenacity, requests
-- 001-aggregation-tables: Added Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ (Core only, no ORM models), mysqlclient 2.2+
 - 001-aggregation-tables: Added Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ (Core only, no ORM models), mysqlclient 2.2+
 
 
@@ -252,6 +254,39 @@ Other parks (Dollywood, Busch Gardens, etc.) only report `CLOSED` for all non-op
 **Implementation:**
 - Use `RideStatusSQL.is_down(table_alias, parks_alias="p")` with the parks_alias parameter
 - The helper automatically applies park-type-aware logic
+
+### Rule 4: Shame Score is a RATE, Not Cumulative (CRITICAL)
+
+**The shame score is a 0-10 RATE indicating "% of ride capacity down", NOT a cumulative value.**
+
+```
+                           Σ(weighted_downtime_hours)
+DAILY shame_score = ──────────────────────────────────────── × 10
+                    effective_park_weight × operating_hours
+```
+
+**Components:**
+- `weighted_downtime_hours` = SUM(ride_downtime_hours × tier_weight) for all rides
+- `effective_park_weight` = SUM(tier_weight) for rides that operated (uptime > 0)
+- `operating_hours` = AVG(ride operating_hours_minutes) / 60
+
+**Tier Weights:**
+- Tier 1 (flagship): 3
+- Tier 2 (standard): 2
+- Tier 3 (minor): 1
+- Default: 2
+
+**Key Invariant:**
+> If hourly shame = 1.0 for all hours, daily shame should ≈ 1.0
+
+**Why this matters:**
+- The `operating_hours` in the denominator normalizes the score to a rate
+- Without time normalization, daily shame would be ~10x hourly shame (WRONG)
+- AVG(hourly_shame) should approximately equal daily_shame
+
+**Implementation:**
+- Daily aggregation: `scripts/aggregate_daily.py` (shame_score_expr)
+- The formula was corrected on 2025-12-29 to include `operating_hours` in denominator
 
 ### Single Source of Truth
 
@@ -647,6 +682,79 @@ Claude: [NOW marks task as complete]
 - Claude cannot see what the user sees in their browser
 - Only a human can verify the full user experience
 - Killing servers before verification wastes the user's time
+
+---
+
+## 🚨 CRITICAL: Code-Team MCP Server for All Coding Tasks 🚨
+
+**MANDATORY: ALL coding, implementation, and refactoring tasks MUST be delegated to the code-team MCP server FIRST.**
+
+### The Rule
+
+**BEFORE writing ANY code yourself, you MUST use the code-team MCP server.**
+
+The code-team MCP server provides:
+- **Specialized coding agents** with deep expertise in different programming tasks
+- **Context-aware implementation** that follows project conventions and patterns
+- **Parallel execution** of complex multi-step implementations
+- **Cost efficiency** by using specialized models instead of expensive Claude reasoning
+- **Better results** through focused, expert-level code generation
+
+### When to Use Code-Team
+
+Use the code-team MCP server for:
+
+1. **Writing new code** - Any new functions, classes, modules, or features
+2. **Modifying existing code** - Refactoring, bug fixes, enhancements
+3. **Implementing features** - Complete feature implementation from specifications
+4. **Debugging code** - Root cause analysis and fixes
+5. **Code refactoring** - Improving code structure, organization, or performance
+6. **Test implementation** - Writing unit tests, integration tests, or test fixtures
+7. **Database queries** - Writing or optimizing SQL queries
+8. **API endpoints** - Creating or modifying Flask routes and handlers
+
+### How to Use Code-Team
+
+```python
+# Load the code-team tool first
+MCPSearch(query="select:mcp__code-team__code_team")
+
+# Then delegate the coding task
+mcp__code_team__code_team(
+    task="Your detailed coding task description here",
+    context="Any relevant context, constraints, or requirements"
+)
+```
+
+### Why This Matters
+
+- **Quality**: Code-team produces higher quality code that follows project patterns
+- **Efficiency**: Faster implementation with specialized coding models
+- **Cost**: Cheaper than using Claude for all coding tasks
+- **Consistency**: Ensures all code follows the same conventions and standards
+- **TDD Compliance**: Code-team understands and follows the project's TDD requirements
+
+### Your Role After Code-Team
+
+After code-team completes the implementation:
+
+1. **Review** the generated code for correctness
+2. **Run tests** to verify functionality
+3. **Integrate** the code into the project
+4. **Coordinate** manual verification with the user
+5. **Handle** git commits (following commit policy)
+
+### Exception: Trivial Changes
+
+The ONLY time you can skip code-team is for truly trivial changes:
+- Single-line typo fixes
+- Adding simple comments
+- Renaming a variable in one place
+- Other changes that take literally 5 seconds
+
+If you're unsure whether to use code-team, **use code-team**.
+
+---
 
 ## Zen AI Capabilities for Cost and Context Efficiency
 

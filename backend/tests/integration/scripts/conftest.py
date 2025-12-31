@@ -120,7 +120,7 @@ def patched_hourly_aggregator(monkeypatch, get_pacific_day_range_utc):
 
 
 @pytest.fixture
-def snapshot_creator(mysql_connection):
+def snapshot_creator(mysql_session):
     """Provides a helper function to create snapshots for tests."""
     def _create_snapshots(
         park_id: int,
@@ -142,13 +142,13 @@ def snapshot_creator(mysql_connection):
             wait_time = 10 if is_open else 0
 
             # Insert park activity snapshot
-            mysql_connection.execute(text("""
+            mysql_session.execute(text("""
                 INSERT INTO park_activity_snapshots (park_id, recorded_at, park_appears_open, rides_open, rides_closed)
                 VALUES (:park_id, :ts, :park_open, 0, 0)
             """), {'park_id': park_id, 'ts': ts, 'park_open': park_open})
 
             # Insert ride status snapshot
-            mysql_connection.execute(text("""
+            mysql_session.execute(text("""
                 INSERT INTO ride_status_snapshots (ride_id, recorded_at, status, computed_is_open, wait_time)
                 VALUES (:ride_id, :ts, :status, :is_open, :wait_time)
             """), {'ride_id': ride_id, 'ts': ts, 'status': status, 'is_open': is_open, 'wait_time': wait_time})

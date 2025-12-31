@@ -20,40 +20,32 @@ Database Tables:
 
 Single Source of Truth:
 - Formulas: utils/metrics.py
-- SQL Helpers: utils/sql_helpers.py (used here)
-- Python calculations: utils/metrics.py
+- ORM Helpers: utils/query_helpers.py
 
-Performance: Uses raw SQL with centralized helpers for consistency.
+Performance: Uses SQLAlchemy ORM with status expressions.
 """
 
 from typing import List, Dict, Any
 
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy import select, func, case, literal, and_, or_
+from sqlalchemy.orm import Session, aliased
 
+from models import Park, Ride, RideClassification, RideStatusSnapshot, ParkActivitySnapshot
+from utils.query_helpers import QueryClassBase, TimeIntervalHelper
 from utils.timezone import get_today_pacific, get_pacific_day_range_utc
-from utils.sql_helpers import (
-    RideStatusSQL,
-    ParkStatusSQL,
-    DowntimeSQL,
-    UptimeSQL,
-    RideFilterSQL,
-)
+from utils.metrics import SNAPSHOT_INTERVAL_MINUTES, LIVE_WINDOW_HOURS
 
 
-class LiveRideRankingsQuery:
+class LiveRideRankingsQuery(QueryClassBase):
     """
     Query handler for live (today) ride rankings.
 
-    Uses centralized SQL helpers from utils/sql_helpers.py to ensure
+    Uses SQLAlchemy ORM with centralized status expressions for
     consistent calculations across all queries.
 
     NOTE: For production use, prefer StatsRepository.get_ride_live_downtime_rankings()
     which has additional optimizations.
     """
-
-    def __init__(self, connection: Connection):
-        self.conn = connection
 
     def get_rankings(
         self,
@@ -63,7 +55,7 @@ class LiveRideRankingsQuery:
         """
         Get live ride rankings for today from real-time snapshots.
 
-        Uses centralized SQL helpers for consistent status logic.
+        Uses ORM status expressions for consistent status logic.
 
         Args:
             filter_disney_universal: Only Disney/Universal parks
@@ -76,68 +68,232 @@ class LiveRideRankingsQuery:
         today = get_today_pacific()
         start_utc, end_utc = get_pacific_day_range_utc(today)
 
-        # Use centralized SQL helpers for consistent logic
-        filter_clause = f"AND {RideFilterSQL.disney_universal_filter('p')}" if filter_disney_universal else ""
-        is_down = RideStatusSQL.is_down("rss", parks_alias="p")
-        park_open = ParkStatusSQL.park_appears_open_filter("pas")
-        # Use schedule-based filtering (not heuristic) for more accurate downtime
-        # This fixes the bug where park_appears_open heuristic marked parks as open
-        # before official opening time due to test rides operating
-        # PARK-TYPE AWARE: Disney/Universal only count DOWN status (not CLOSED)
-        downtime_hours = DowntimeSQL.downtime_hours_rounded("rss", "pas", park_id_expr="p.park_id", parks_alias="p")
-        uptime_pct = UptimeSQL.uptime_percentage("rss", "pas")
-        current_status_sq = RideStatusSQL.current_status_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
-        current_is_open_sq = RideStatusSQL.current_is_open_subquery("r.ride_id", include_time_window=True, park_id_expr="r.park_id")
-        park_is_open_sq = ParkStatusSQL.park_is_open_subquery("p.park_id")
+        # Live window cutoff for current status (last 2 hours)
+        live_cutoff = TimeIntervalHelper.hours_ago(LIVE_WINDOW_HOURS)
 
-        query = text(f"""
-            SELECT
-                r.ride_id,
-                r.queue_times_id,
-                p.queue_times_id AS park_queue_times_id,
-                r.name AS ride_name,
-                p.name AS park_name,
-                p.park_id,
-                CONCAT(p.city, ', ', p.state_province) AS location,
-                rc.tier,
+        # =====================================================================
+        # PARK-TYPE AWARE DOWNTIME LOGIC
+        # =====================================================================
+        # Disney/Universal: Only DOWN status counts
+        # Other parks: DOWN, CLOSED, or NULL+computed_is_open=False counts
+        parks_with_down_status = or_(
+            Park.is_disney == True,
+            Park.is_universal == True,
+            Park.name == 'Dollywood'
+        )
 
-                -- Total downtime hours (using centralized helper)
-                -- Formula from utils/metrics.py: calculate_downtime_hours()
-                {downtime_hours} AS downtime_hours,
+        is_down_expr = case(
+            (parks_with_down_status, RideStatusSnapshot.status == 'DOWN'),
+            else_=or_(
+                RideStatusSnapshot.status.in_(['DOWN', 'CLOSED']),
+                and_(
+                    RideStatusSnapshot.status.is_(None),
+                    RideStatusSnapshot.computed_is_open == False
+                )
+            )
+        )
 
-                -- Uptime percentage (using centralized helper)
-                -- Formula from utils/metrics.py: calculate_uptime_percentage()
-                {uptime_pct} AS uptime_percentage,
+        # Park open filter
+        park_open = ParkActivitySnapshot.park_appears_open == True
 
-                -- Current status using centralized helper with park awareness
-                {current_status_sq},
-                {current_is_open_sq},
-                {park_is_open_sq},
+        # Downtime hours calculation: count minutes where park open AND ride down
+        downtime_case = case(
+            (and_(park_open, is_down_expr), SNAPSHOT_INTERVAL_MINUTES / 60.0),
+            else_=0
+        )
 
-                -- Wait time data (live)
-                MAX(rss.wait_time) AS peak_wait_time,
-                ROUND(AVG(CASE WHEN rss.wait_time > 0 THEN rss.wait_time END), 0) AS avg_wait_time
+        # Operating snapshots: park open AND ride operating
+        is_operating_expr = or_(
+            RideStatusSnapshot.status == 'OPERATING',
+            and_(
+                RideStatusSnapshot.status.is_(None),
+                RideStatusSnapshot.computed_is_open == True
+            )
+        )
 
-            FROM rides r
-            INNER JOIN parks p ON r.park_id = p.park_id
-            LEFT JOIN ride_classifications rc ON r.ride_id = rc.ride_id
-            INNER JOIN ride_status_snapshots rss ON r.ride_id = rss.ride_id
-            INNER JOIN park_activity_snapshots pas ON p.park_id = pas.park_id
-                AND pas.recorded_at = rss.recorded_at
-            WHERE rss.recorded_at >= :start_utc AND rss.recorded_at < :end_utc
-                AND r.is_active = TRUE
-                AND r.category = 'ATTRACTION'
-                AND p.is_active = TRUE
-                {filter_clause}
-            GROUP BY r.ride_id, r.name, p.name, p.park_id, p.city, p.state_province, rc.tier
-            HAVING downtime_hours > 0
-            ORDER BY downtime_hours DESC
-            LIMIT :limit
-        """)
+        operating_case = case(
+            (and_(park_open, is_operating_expr), 1),
+            else_=0
+        )
 
-        result = self.conn.execute(query, {
-            "start_utc": start_utc,
-            "end_utc": end_utc,
-            "limit": limit
-        })
-        return [dict(row._mapping) for row in result]
+        park_open_case = case(
+            (park_open, 1),
+            else_=0
+        )
+
+        # =====================================================================
+        # SUBQUERY: Current status from latest snapshot
+        # =====================================================================
+        rss_current = aliased(RideStatusSnapshot)
+        pas_current = aliased(ParkActivitySnapshot)
+
+        # Latest snapshot subquery
+        latest_snapshot_subq = (
+            select(
+                rss_current.ride_id,
+                rss_current.status,
+                rss_current.computed_is_open,
+                func.row_number().over(
+                    partition_by=rss_current.ride_id,
+                    order_by=rss_current.recorded_at.desc()
+                ).label('rn')
+            )
+            .where(rss_current.recorded_at >= live_cutoff)
+            .subquery()
+        )
+
+        # Current park status subquery
+        park_status_subq = (
+            select(
+                pas_current.park_id,
+                pas_current.park_appears_open,
+                func.row_number().over(
+                    partition_by=pas_current.park_id,
+                    order_by=pas_current.recorded_at.desc()
+                ).label('rn')
+            )
+            .where(pas_current.recorded_at >= live_cutoff)
+            .subquery()
+        )
+
+        # Current status expression
+        # Use MAX() around subquery columns for MySQL GROUP BY compatibility
+        current_status_expr = case(
+            (func.max(park_status_subq.c.park_appears_open) == False, literal('PARK_CLOSED')),
+            else_=func.coalesce(
+                func.max(latest_snapshot_subq.c.status),
+                case(
+                    (func.max(latest_snapshot_subq.c.computed_is_open) == True, literal('OPERATING')),
+                    else_=literal('DOWN')
+                )
+            )
+        ).label('current_status')
+
+        # Current is_open boolean
+        # Use MAX() around subquery columns for MySQL GROUP BY compatibility
+        current_is_open_expr = case(
+            (func.max(park_status_subq.c.park_appears_open) == False, literal(False)),
+            else_=or_(
+                func.max(latest_snapshot_subq.c.status) == 'OPERATING',
+                and_(
+                    func.max(latest_snapshot_subq.c.status).is_(None),
+                    func.max(latest_snapshot_subq.c.computed_is_open) == True
+                )
+            )
+        ).label('current_is_open')
+
+        # Park is_open boolean
+        # Use MAX() around subquery column for MySQL GROUP BY compatibility
+        park_is_open_expr = func.coalesce(
+            func.max(park_status_subq.c.park_appears_open),
+            literal(False)
+        ).label('park_is_open')
+
+        # =====================================================================
+        # MAIN QUERY: Aggregate from ride_status_snapshots
+        # =====================================================================
+        stmt = (
+            select(
+                Ride.ride_id,
+                Ride.queue_times_id,
+                Park.queue_times_id.label('park_queue_times_id'),
+                Ride.name.label('ride_name'),
+                Park.name.label('park_name'),
+                Park.park_id,
+                func.concat(Park.city, ', ', Park.state_province).label('location'),
+                RideClassification.tier,
+
+                # Total downtime hours (using park-type aware logic)
+                # Formula from utils/metrics.py: calculate_downtime_hours()
+                func.round(func.sum(downtime_case), 2).label('downtime_hours'),
+
+                # Uptime percentage (operating snapshots / park-open snapshots)
+                # Formula from utils/metrics.py: calculate_uptime_percentage()
+                func.round(
+                    100.0 - (
+                        func.sum(operating_case) * 100.0 /
+                        func.nullif(func.sum(park_open_case), 0)
+                    ),
+                    1
+                ).label('uptime_percentage'),
+
+                # Current status columns (from subqueries)
+                current_status_expr,
+                current_is_open_expr,
+                park_is_open_expr,
+
+                # Wait time data (live)
+                func.max(RideStatusSnapshot.wait_time).label('peak_wait_time'),
+                func.round(
+                    func.avg(
+                        case(
+                            (RideStatusSnapshot.wait_time > 0, RideStatusSnapshot.wait_time),
+                            else_=None
+                        )
+                    ),
+                    0
+                ).label('avg_wait_time')
+            )
+            .select_from(Ride)
+            .join(Park, Ride.park_id == Park.park_id)
+            .outerjoin(RideClassification, Ride.ride_id == RideClassification.ride_id)
+            .join(RideStatusSnapshot, Ride.ride_id == RideStatusSnapshot.ride_id)
+            .join(ParkActivitySnapshot, and_(
+                Park.park_id == ParkActivitySnapshot.park_id,
+                ParkActivitySnapshot.recorded_at == RideStatusSnapshot.recorded_at
+            ))
+            .outerjoin(
+                latest_snapshot_subq,
+                and_(
+                    Ride.ride_id == latest_snapshot_subq.c.ride_id,
+                    latest_snapshot_subq.c.rn == 1
+                )
+            )
+            .outerjoin(
+                park_status_subq,
+                and_(
+                    Park.park_id == park_status_subq.c.park_id,
+                    park_status_subq.c.rn == 1
+                )
+            )
+            .where(RideStatusSnapshot.recorded_at >= start_utc)
+            .where(RideStatusSnapshot.recorded_at < end_utc)
+            .where(Ride.is_active == True)
+            .where(Ride.category == 'ATTRACTION')
+            .where(Park.is_active == True)
+        )
+
+        # Apply Disney/Universal filter if requested
+        if filter_disney_universal:
+            stmt = stmt.where(
+                or_(
+                    Park.is_disney == True,
+                    Park.is_universal == True
+                )
+            )
+
+        # Group by all non-aggregated columns
+        stmt = stmt.group_by(
+            Ride.ride_id,
+            Ride.queue_times_id,
+            Park.queue_times_id,
+            Ride.name,
+            Park.name,
+            Park.park_id,
+            Park.city,
+            Park.state_province,
+            RideClassification.tier
+        )
+
+        # Having clause: only rides with downtime
+        stmt = stmt.having(func.sum(downtime_case) > 0)
+
+        # Order by downtime hours descending
+        # Note: Must use the actual expression, not literal() which creates a string constant
+        stmt = stmt.order_by(func.sum(downtime_case).desc())
+
+        # Apply limit
+        stmt = stmt.limit(limit)
+
+        # Execute and return results
+        return self.execute_and_fetchall(stmt)

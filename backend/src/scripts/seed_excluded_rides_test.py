@@ -27,32 +27,34 @@ from typing import Dict, List
 backend_src = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_src.absolute()))
 
-from sqlalchemy import text
-from database.connection import get_db_connection
+from sqlalchemy import delete
+from database.connection import get_db_session
+from models import Park, Ride, RideClassification, RideStatusSnapshot, ParkActivitySnapshot
 
 
-def clear_test_data(conn):
+def clear_test_data(session):
     """Clear existing test data from relevant tables."""
     print("Clearing existing data...")
-    tables = [
-        "ride_status_snapshots",
-        "park_activity_snapshots",
-        "ride_classifications",
-        "rides",
-        "parks",
+    # Delete in order respecting foreign key constraints
+    models = [
+        RideStatusSnapshot,
+        ParkActivitySnapshot,
+        RideClassification,
+        Ride,
+        Park,
     ]
-    for table in tables:
+    for model in models:
         try:
-            conn.execute(text(f"DELETE FROM {table}"))
-            print(f"  Cleared {table}")
+            session.execute(delete(model))
+            print(f"  Cleared {model.__tablename__}")
         except Exception as e:
-            print(f"  Warning: Could not clear {table}: {e}")
+            print(f"  Warning: Could not clear {model.__tablename__}: {e}")
 
 
-def seed_parks(conn) -> Dict[str, int]:
+def seed_parks(session) -> Dict[str, int]:
     """Insert test parks and return name->id mapping."""
     print("\nSeeding parks...")
-    parks = [
+    parks_data = [
         {
             "name": "Test Park Alpha",
             "city": "Orlando",
@@ -74,26 +76,26 @@ def seed_parks(conn) -> Dict[str, int]:
     ]
 
     park_ids = {}
-    for park in parks:
-        result = conn.execute(text("""
-            INSERT INTO parks (queue_times_id, name, city, state_province, country, timezone, operator, is_active)
-            VALUES (:qt_id, :name, :city, :state, :country, :tz, :operator, TRUE)
-        """), {
-            "qt_id": park["queue_times_id"],
-            "name": park["name"],
-            "city": park["city"],
-            "state": park["state"],
-            "country": park["country"],
-            "tz": park["tz"],
-            "operator": park["operator"],
-        })
-        park_ids[park["name"]] = result.lastrowid
-        print(f"  Created {park['name']} (ID: {result.lastrowid})")
+    for park_data in parks_data:
+        park = Park(
+            queue_times_id=park_data["queue_times_id"],
+            name=park_data["name"],
+            city=park_data["city"],
+            state_province=park_data["state"],
+            country=park_data["country"],
+            timezone=park_data["tz"],
+            operator=park_data["operator"],
+            is_active=True
+        )
+        session.add(park)
+        session.flush()  # Get the park_id
+        park_ids[park_data["name"]] = park.park_id
+        print(f"  Created {park_data['name']} (ID: {park.park_id})")
 
     return park_ids
 
 
-def seed_rides(conn, park_ids: Dict[str, int]) -> Dict[str, List[int]]:
+def seed_rides(session, park_ids: Dict[str, int]) -> Dict[str, List[int]]:
     """
     Insert test rides with varying last_operated_at dates.
 
@@ -131,32 +133,33 @@ def seed_rides(conn, park_ids: Dict[str, int]) -> Dict[str, List[int]]:
     ride_ids = {"Test Park Alpha": [], "Test Park Beta": []}
     qt_counter = 99001
 
-    for park_name, rides in [("Test Park Alpha", alpha_rides), ("Test Park Beta", beta_rides)]:
+    for park_name, rides_data in [("Test Park Alpha", alpha_rides), ("Test Park Beta", beta_rides)]:
         park_id = park_ids[park_name]
-        for ride in rides:
+        for ride_data in rides_data:
             qt_counter += 1
-            last_op = now - timedelta(days=ride["days_ago"]) if ride["days_ago"] is not None else None
+            last_op = now - timedelta(days=ride_data["days_ago"]) if ride_data["days_ago"] is not None else None
 
-            result = conn.execute(text("""
-                INSERT INTO rides (queue_times_id, park_id, name, tier, is_active, category, last_operated_at)
-                VALUES (:qt_id, :park_id, :name, :tier, TRUE, 'ATTRACTION', :last_op)
-            """), {
-                "qt_id": qt_counter,
-                "park_id": park_id,
-                "name": ride["name"],
-                "tier": ride["tier"],
-                "last_op": last_op,
-            })
-            ride_ids[park_name].append(result.lastrowid)
+            ride = Ride(
+                queue_times_id=qt_counter,
+                park_id=park_id,
+                name=ride_data["name"],
+                tier=ride_data["tier"],
+                is_active=True,
+                category='ATTRACTION',
+                last_operated_at=last_op
+            )
+            session.add(ride)
+            session.flush()  # Get the ride_id
+            ride_ids[park_name].append(ride.ride_id)
 
-            excluded = ride["days_ago"] > 7 if ride["days_ago"] is not None else True
+            excluded = ride_data["days_ago"] > 7 if ride_data["days_ago"] is not None else True
             status = "EXCLUDED" if excluded else "active"
-            print(f"  {park_name}: {ride['name']} (Tier {ride['tier']}, {ride['days_ago']} days ago) [{status}]")
+            print(f"  {park_name}: {ride_data['name']} (Tier {ride_data['tier']}, {ride_data['days_ago']} days ago) [{status}]")
 
     return ride_ids
 
 
-def seed_ride_classifications(conn, ride_ids: Dict[str, List[int]]):
+def seed_ride_classifications(session, ride_ids: Dict[str, List[int]]):
     """Insert ride_classifications with tier_weight values."""
     print("\nSeeding ride_classifications...")
 
@@ -164,22 +167,24 @@ def seed_ride_classifications(conn, ride_ids: Dict[str, List[int]]):
     all_ride_ids = ride_ids["Test Park Alpha"] + ride_ids["Test Park Beta"]
 
     for ride_id in all_ride_ids:
-        result = conn.execute(text("SELECT tier FROM rides WHERE ride_id = :rid"), {"rid": ride_id})
-        row = result.fetchone()
-        if row:
-            tier = row[0]
+        # Query the ride to get its tier using ORM
+        ride = session.get(Ride, ride_id)
+        if ride:
+            tier = ride.tier
             # Tier weights: Tier 1 = 3, Tier 2 = 2, Tier 3 = 1
             tier_weight = {1: 3, 2: 2, 3: 1}.get(tier, 2)
 
-            conn.execute(text("""
-                INSERT INTO ride_classifications (ride_id, tier, tier_weight)
-                VALUES (:rid, :tier, :weight)
-            """), {"rid": ride_id, "tier": tier, "weight": tier_weight})
+            classification = RideClassification(
+                ride_id=ride_id,
+                tier=tier,
+                tier_weight=tier_weight
+            )
+            session.add(classification)
 
     print(f"  Created {len(all_ride_ids)} ride classifications")
 
 
-def seed_ride_status_snapshots(conn, ride_ids: Dict[str, List[int]]):
+def seed_ride_status_snapshots(session, ride_ids: Dict[str, List[int]]):
     """Insert current ride status snapshots (some rides down)."""
     print("\nSeeding ride_status_snapshots (live status)...")
     now = datetime.utcnow()
@@ -197,23 +202,21 @@ def seed_ride_status_snapshots(conn, ride_ids: Dict[str, List[int]]):
             is_open = rid not in all_down
             wait_time = 45 if is_open else 0
 
-            conn.execute(text("""
-                INSERT INTO ride_status_snapshots (ride_id, recorded_at, is_open, wait_time, computed_is_open, status)
-                VALUES (:rid, :rec, :is_open, :wait, :computed, :status)
-            """), {
-                "rid": rid,
-                "rec": now,
-                "is_open": is_open,
-                "wait": wait_time,
-                "computed": is_open,
-                "status": "OPERATING" if is_open else "CLOSED",
-            })
+            snapshot = RideStatusSnapshot(
+                ride_id=rid,
+                recorded_at=now,
+                is_open=is_open,
+                wait_time=wait_time,
+                computed_is_open=is_open,
+                status="OPERATING" if is_open else "CLOSED"
+            )
+            session.add(snapshot)
 
     print(f"  Created snapshots for {len(ride_ids['Test Park Alpha']) + len(ride_ids['Test Park Beta'])} rides")
     print(f"  Rides currently DOWN: {len(all_down)}")
 
 
-def seed_park_activity_snapshots(conn, park_ids: Dict[str, int]):
+def seed_park_activity_snapshots(session, park_ids: Dict[str, int]):
     """Insert park_activity_snapshots with pre-calculated shame_score."""
     print("\nSeeding park_activity_snapshots...")
     now = datetime.utcnow()
@@ -228,25 +231,23 @@ def seed_park_activity_snapshots(conn, park_ids: Dict[str, int]):
     # - 1 ride currently down (Launch=3) = 3 down weight
     # - Shame score = (3/12) * 10 = 2.5
 
-    snapshots = [
+    snapshots_data = [
         {"park_id": park_ids["Test Park Alpha"], "shame_score": 4.2, "total_rides": 9, "rides_open": 4, "rides_closed": 2},
         {"park_id": park_ids["Test Park Beta"], "shame_score": 2.5, "total_rides": 6, "rides_open": 5, "rides_closed": 1},
     ]
 
-    for snap in snapshots:
-        conn.execute(text("""
-            INSERT INTO park_activity_snapshots
-            (park_id, recorded_at, total_rides_tracked, rides_open, rides_closed, park_appears_open, shame_score)
-            VALUES (:pid, :rec, :total, :rides_open, :rides_closed, TRUE, :shame)
-        """), {
-            "pid": snap["park_id"],
-            "rec": now,
-            "total": snap["total_rides"],
-            "rides_open": snap["rides_open"],
-            "rides_closed": snap["rides_closed"],
-            "shame": snap["shame_score"],
-        })
-        print(f"  Park ID {snap['park_id']}: shame_score={snap['shame_score']}, rides_closed={snap['rides_closed']}")
+    for snap_data in snapshots_data:
+        snapshot = ParkActivitySnapshot(
+            park_id=snap_data["park_id"],
+            recorded_at=now,
+            total_rides_tracked=snap_data["total_rides"],
+            rides_open=snap_data["rides_open"],
+            rides_closed=snap_data["rides_closed"],
+            park_appears_open=True,
+            shame_score=snap_data["shame_score"]
+        )
+        session.add(snapshot)
+        print(f"  Park ID {snap_data['park_id']}: shame_score={snap_data['shame_score']}, rides_closed={snap_data['rides_closed']}")
 
 
 def print_summary(park_ids: Dict[str, int]):
@@ -286,13 +287,14 @@ def main():
     print("EXCLUDED RIDES FEATURE - LOCAL TEST DATA SEED")
     print("=" * 60)
 
-    with get_db_connection() as conn:
-        clear_test_data(conn)
-        park_ids = seed_parks(conn)
-        ride_ids = seed_rides(conn, park_ids)
-        seed_ride_classifications(conn, ride_ids)
-        seed_ride_status_snapshots(conn, ride_ids)
-        seed_park_activity_snapshots(conn, park_ids)
+    with get_db_session() as session:
+        clear_test_data(session)
+        park_ids = seed_parks(session)
+        ride_ids = seed_rides(session, park_ids)
+        seed_ride_classifications(session, ride_ids)
+        seed_ride_status_snapshots(session, ride_ids)
+        seed_park_activity_snapshots(session, park_ids)
+        session.commit()
 
     print_summary(park_ids)
 

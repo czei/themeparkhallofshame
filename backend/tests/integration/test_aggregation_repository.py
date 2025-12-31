@@ -8,6 +8,10 @@ Tests AggregationLogRepository:
 - Aggregation verification (is_date_aggregated)
 
 Priority: P1 - Critical for safe cleanup verification
+
+NOTE (2025-12-24 ORM Migration):
+- Repositories now use SQLAlchemy ORM Session
+- Tests updated to use mysql_session fixture instead of mysql_session
 """
 
 import pytest
@@ -24,9 +28,9 @@ from database.repositories.aggregation_repository import AggregationLogRepositor
 class TestAggregationLogRepository:
     """Test aggregation log operations."""
 
-    def test_insert_aggregation_log(self, mysql_connection):
+    def test_insert_aggregation_log(self, mysql_session):
         """Insert a new aggregation log entry."""
-        repo = AggregationLogRepository(mysql_connection)
+        repo = AggregationLogRepository(mysql_session)
 
         log_data = {
             'aggregation_date': date.today(),
@@ -42,9 +46,9 @@ class TestAggregationLogRepository:
         assert log_id is not None
         assert log_id > 0
 
-    def test_get_by_id(self, mysql_connection):
+    def test_get_by_id(self, mysql_session):
         """Get aggregation log by ID."""
-        repo = AggregationLogRepository(mysql_connection)
+        repo = AggregationLogRepository(mysql_session)
 
         log_data = {
             'aggregation_date': date.today(),
@@ -62,17 +66,17 @@ class TestAggregationLogRepository:
         assert fetched_log['log_id'] == log_id
         assert fetched_log['aggregation_type'] == 'daily'
 
-    def test_get_by_id_not_found(self, mysql_connection):
+    def test_get_by_id_not_found(self, mysql_session):
         """Get aggregation log for nonexistent ID."""
-        repo = AggregationLogRepository(mysql_connection)
+        repo = AggregationLogRepository(mysql_session)
 
         result = repo.get_by_id(999)
 
         assert result is None
 
-    def test_update_aggregation_log(self, mysql_connection):
+    def test_update_aggregation_log(self, mysql_session):
         """Update an aggregation log entry."""
-        repo = AggregationLogRepository(mysql_connection)
+        repo = AggregationLogRepository(mysql_session)
 
         log_data = {
             'aggregation_date': date.today(),
@@ -100,10 +104,9 @@ class TestAggregationLogRepository:
         assert fetched_log['parks_processed'] == 5
         assert fetched_log['rides_processed'] == 25
 
-    @pytest.mark.skip(reason="Requires MySQL-specific NOW() function")
-    def test_mark_complete(self, mysql_connection):
+    def test_mark_complete(self, mysql_session):
         """Mark an aggregation as successfully completed."""
-        repo = AggregationLogRepository(mysql_connection)
+        repo = AggregationLogRepository(mysql_session)
 
         log_data = {
             'aggregation_date': date.today(),
@@ -126,10 +129,9 @@ class TestAggregationLogRepository:
         assert fetched_log['rides_processed'] == 50
         assert fetched_log['completed_at'] is not None
 
-    @pytest.mark.skip(reason="Requires MySQL-specific NOW() function")
-    def test_mark_failed(self, mysql_connection):
+    def test_mark_failed(self, mysql_session):
         """Mark an aggregation as failed."""
-        repo = AggregationLogRepository(mysql_connection)
+        repo = AggregationLogRepository(mysql_session)
 
         log_data = {
             'aggregation_date': date.today(),
@@ -151,10 +153,9 @@ class TestAggregationLogRepository:
         assert fetched_log['error_message'] == 'Test error'
         assert fetched_log['completed_at'] is not None
 
-    @pytest.mark.skip(reason="Requires MySQL-specific NOW() function (calls mark_complete)")
-    def test_is_date_aggregated_success(self, mysql_connection):
+    def test_is_date_aggregated_success(self, mysql_session):
         """Check if a date has been successfully aggregated."""
-        repo = AggregationLogRepository(mysql_connection)
+        repo = AggregationLogRepository(mysql_session)
 
         target_date = date.today()
         log_data = {
@@ -173,18 +174,17 @@ class TestAggregationLogRepository:
 
         assert is_aggregated is True
 
-    def test_is_date_aggregated_not_found(self, mysql_connection):
+    def test_is_date_aggregated_not_found(self, mysql_session):
         """Check if non-aggregated date returns False."""
-        repo = AggregationLogRepository(mysql_connection)
+        repo = AggregationLogRepository(mysql_session)
 
         is_aggregated = repo.is_date_aggregated(date(2099, 12, 31), 'daily')
 
         assert is_aggregated is False
 
-    @pytest.mark.skip(reason="Requires MySQL-specific NOW() function (calls mark_failed)")
-    def test_is_date_aggregated_failed_status(self, mysql_connection):
+    def test_is_date_aggregated_failed_status(self, mysql_session):
         """Check that failed aggregations don't count as aggregated."""
-        repo = AggregationLogRepository(mysql_connection)
+        repo = AggregationLogRepository(mysql_session)
 
         target_date = date.today()
         log_data = {
@@ -203,9 +203,9 @@ class TestAggregationLogRepository:
 
         assert is_aggregated is False
 
-    def test_get_aggregation_status(self, mysql_connection):
+    def test_get_aggregation_status(self, mysql_session):
         """Get the status of an aggregation for a specific date."""
-        repo = AggregationLogRepository(mysql_connection)
+        repo = AggregationLogRepository(mysql_session)
 
         target_date = date.today()
         log_data = {
@@ -223,9 +223,9 @@ class TestAggregationLogRepository:
 
         assert status == 'success'
 
-    def test_get_aggregation_status_not_found(self, mysql_connection):
+    def test_get_aggregation_status_not_found(self, mysql_session):
         """Get status for non-existent aggregation."""
-        repo = AggregationLogRepository(mysql_connection)
+        repo = AggregationLogRepository(mysql_session)
 
         status = repo.get_aggregation_status(date(2099, 12, 31), 'daily')
 

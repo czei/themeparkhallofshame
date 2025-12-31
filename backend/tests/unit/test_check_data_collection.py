@@ -49,7 +49,7 @@ class TestCheckRecentSnapshots:
 
         mock_conn.execute.return_value = mock_cursor
 
-        with patch('scripts.check_data_collection.get_db_connection') as mock_get_conn:
+        with patch('scripts.check_data_collection.get_db_session') as mock_get_conn:
             mock_get_conn.return_value.__enter__.return_value = mock_conn
 
             result = check_recent_snapshots()
@@ -81,7 +81,7 @@ class TestCheckRecentSnapshots:
 
         mock_conn.execute.return_value = mock_cursor
 
-        with patch('scripts.check_data_collection.get_db_connection') as mock_get_conn:
+        with patch('scripts.check_data_collection.get_db_session') as mock_get_conn:
             mock_get_conn.return_value.__enter__.return_value = mock_conn
 
             result = check_recent_snapshots()
@@ -111,7 +111,7 @@ class TestCheckRecentSnapshots:
 
         mock_conn.execute.return_value = mock_cursor
 
-        with patch('scripts.check_data_collection.get_db_connection') as mock_get_conn:
+        with patch('scripts.check_data_collection.get_db_session') as mock_get_conn:
             mock_get_conn.return_value.__enter__.return_value = mock_conn
 
             result = check_recent_snapshots()
@@ -138,7 +138,7 @@ class TestCheckRecentSnapshots:
 
         mock_conn.execute.return_value = mock_cursor
 
-        with patch('scripts.check_data_collection.get_db_connection') as mock_get_conn:
+        with patch('scripts.check_data_collection.get_db_session') as mock_get_conn:
             mock_get_conn.return_value.__enter__.return_value = mock_conn
 
             result = check_recent_snapshots()
@@ -162,7 +162,7 @@ class TestCheckRecentSnapshots:
 
         mock_conn.execute.return_value = mock_cursor
 
-        with patch('scripts.check_data_collection.get_db_connection') as mock_get_conn:
+        with patch('scripts.check_data_collection.get_db_session') as mock_get_conn:
             mock_get_conn.return_value.__enter__.return_value = mock_conn
 
             result = check_recent_snapshots()

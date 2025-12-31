@@ -82,10 +82,37 @@ class TestSummaryStatsIntegration:
                 'wait': 30.0
             })
 
-        # Insert park_daily_stats data (last 30 days)
-        today = datetime.utcnow().date()
-        for day_offset in range(30):
-            stat_date = today - timedelta(days=day_offset)
+        # Insert park_daily_stats data for:
+        # 1. Yesterday (Pacific)
+        # 2. Previous calendar week (Sun-Sat)
+        # 3. Previous calendar month
+        from utils.timezone import (
+            get_yesterday_date_range,
+            get_last_week_date_range,
+            get_last_month_date_range
+        )
+
+        yesterday, _, _ = get_yesterday_date_range()
+        week_start, week_end, _ = get_last_week_date_range()
+        month_start, month_end, _ = get_last_month_date_range()
+
+        # Collect all dates we need to populate
+        dates_to_insert = set()
+        dates_to_insert.add(yesterday)
+
+        # Add all days in previous calendar week
+        current = week_start
+        while current <= week_end:
+            dates_to_insert.add(current)
+            current += timedelta(days=1)
+
+        # Add all days in previous calendar month
+        current = month_start
+        while current <= month_end:
+            dates_to_insert.add(current)
+            current += timedelta(days=1)
+
+        for stat_date in dates_to_insert:
             for park_id in [9901, 9902]:
                 mysql_session.execute(text("""
                     INSERT INTO park_daily_stats
@@ -93,6 +120,8 @@ class TestSummaryStatsIntegration:
                          total_downtime_hours, avg_uptime_percentage, operating_hours_minutes)
                     VALUES
                         (:park_id, :stat_date, :rides, :rides_down, :downtime, :uptime, 720)
+                    ON DUPLICATE KEY UPDATE
+                        total_downtime_hours = VALUES(total_downtime_hours)
                 """), {
                     'park_id': park_id,
                     'stat_date': stat_date,
@@ -182,11 +211,11 @@ class TestSummaryStatsIntegration:
         # Yesterday should have data from our test fixtures
         assert result['total_downtime_hours'] >= 4.0  # 3.0 + 1.0
 
-    def test_last_week_aggregates_7_days(self, mysql_session):
+    def test_last_week_aggregates_calendar_week(self, mysql_session):
         """
-        Given: Test data in park_daily_stats for last 7 days
+        Given: Test data in park_daily_stats for previous calendar week (Sun-Sat)
         When: get_aggregate_park_stats(period='last_week') is called
-        Then: Returns aggregated stats from park_daily_stats for 7 days
+        Then: Returns aggregated stats from park_daily_stats for the calendar week
         """
         from database.repositories.stats_repository import StatsRepository
 
@@ -196,14 +225,15 @@ class TestSummaryStatsIntegration:
 
         assert result['period'] == 'last_week'
         assert result['total_parks'] >= 2
-        # 7 days * 2 parks * (3.0 + 1.0) = at least some accumulated downtime
+        # Calendar week = 7 days * 2 parks * (3.0 + 1.0) = 56 hours min
+        # But some days might overlap with month, so just check for some downtime
         assert result['total_downtime_hours'] >= 7 * 4.0  # 7 days
 
-    def test_last_month_aggregates_30_days(self, mysql_session):
+    def test_last_month_aggregates_calendar_month(self, mysql_session):
         """
-        Given: Test data in park_daily_stats for last 30 days
+        Given: Test data in park_daily_stats for previous calendar month
         When: get_aggregate_park_stats(period='last_month') is called
-        Then: Returns aggregated stats from park_daily_stats for 30 days
+        Then: Returns aggregated stats from park_daily_stats for the calendar month
         """
         from database.repositories.stats_repository import StatsRepository
 
@@ -213,8 +243,9 @@ class TestSummaryStatsIntegration:
 
         assert result['period'] == 'last_month'
         assert result['total_parks'] >= 2
-        # 30 days of data should have significant downtime
-        assert result['total_downtime_hours'] >= 30 * 4.0  # 30 days
+        # Calendar month varies (28-31 days), so use minimum 28 days
+        # 28 days * 2 parks * (3.0 + 1.0) = 224 hours min
+        assert result['total_downtime_hours'] >= 28 * 4.0  # At least 28 days
 
     def test_result_keys_are_consistent(self, mysql_session):
         """

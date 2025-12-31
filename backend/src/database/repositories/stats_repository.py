@@ -211,15 +211,36 @@ class StatsRepository:
         filter_disney_universal: bool,
         period_name: str
     ) -> Dict[str, Any]:
-        """Get summary stats from ParkDailyStats for specified number of days using ORM."""
-        today = date.today()
+        """Get summary stats from ParkDailyStats for specified period using ORM.
 
-        if days == 1:
-            # Yesterday only
-            date_filter = ParkDailyStats.stat_date == today - timedelta(days=1)
+        Uses calendar-based date ranges to match the rankings queries:
+        - yesterday: Pacific yesterday
+        - last_week: Previous calendar week (Sun-Sat)
+        - last_month: Previous calendar month
+        """
+        from utils.timezone import (
+            get_yesterday_date_range,
+            get_last_week_date_range,
+            get_last_month_date_range
+        )
+
+        if period_name == 'yesterday':
+            start_date, end_date, _ = get_yesterday_date_range()
+        elif period_name == 'last_week':
+            start_date, end_date, _ = get_last_week_date_range()
+        elif period_name == 'last_month':
+            start_date, end_date, _ = get_last_month_date_range()
         else:
-            # Last N days
-            date_filter = ParkDailyStats.stat_date >= today - timedelta(days=days)
+            # Fallback to simple days calculation
+            today = date.today()
+            start_date = today - timedelta(days=days)
+            end_date = today
+
+        # Filter by date range
+        date_filter = and_(
+            ParkDailyStats.stat_date >= start_date,
+            ParkDailyStats.stat_date <= end_date
+        )
 
         query = self.session.query(
             func.count(distinct(ParkDailyStats.park_id)).label('total_parks'),
@@ -243,12 +264,17 @@ class StatsRepository:
         period: str,
         filter_disney_universal: bool
     ) -> Dict[str, Any]:
-        """Format ORM query result into standard summary stats dict."""
+        """Format ORM query result into standard summary stats dict.
+
+        Note: Field names must match what frontend expects:
+        - total_parks_tracked (not total_parks)
+        """
         if not result or result.total_parks is None:
             return {
                 'period': period,
                 'filter_disney_universal': filter_disney_universal,
                 'total_parks': 0,
+                'total_parks_tracked': 0,  # Frontend expects this field
                 'rides_operating': 0,
                 'rides_down': 0,
                 'rides_closed': 0,
@@ -259,11 +285,13 @@ class StatsRepository:
 
         total_rides = int(result.total_rides or 0)
         rides_down = int(result.rides_down or 0)
+        total_parks = int(result.total_parks or 0)
 
         return {
             'period': period,
             'filter_disney_universal': filter_disney_universal,
-            'total_parks': int(result.total_parks or 0),
+            'total_parks': total_parks,
+            'total_parks_tracked': total_parks,  # Frontend expects this field
             'rides_operating': total_rides - rides_down,
             'rides_down': rides_down,
             'rides_closed': 0,

@@ -216,8 +216,10 @@ class ParkDowntimeRankingsQuery(QueryClassBase):
             .where(and_(
                 ParkDailyStats.stat_date >= start_date,
                 ParkDailyStats.stat_date <= end_date,
-                Park.is_active == True,
-                ParkDailyStats.operating_hours_minutes > 0
+                Park.is_active == True
+                # NOTE: Removed operating_hours_minutes > 0 filter because:
+                # 1. Historical data (Dec 21-29) was aggregated before this field was populated
+                # 2. The HAVING clause (shame_score > 0) already filters non-operating parks
             ))
         )
 

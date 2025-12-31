@@ -246,22 +246,24 @@ class TestRoutePassesSortByToQuery:
 
     def test_today_period_passes_sort_by(self):
         """
-        CRITICAL: Today period should use TodayRideRankingsQuery.
+        CRITICAL: Today period uses LiveRideRankingsQuery (same as live).
 
-        NOTE (2025-12-24 ORM Migration):
-        - Route now uses TodayRideRankingsQuery instead of stats_repo method
+        NOTE (2025-12-30 ORM Migration):
+        - Route uses LiveRideRankingsQuery for both 'live' and 'today' periods
+        - Both aggregate from midnight Pacific to now using real-time snapshots
+        - ride_hourly_stats table was dropped, so TODAY uses same query as LIVE
         - Query class handles sorting internally via ORM order_by
         """
         from api.routes.rides import get_ride_downtime_rankings
         source = inspect.getsource(get_ride_downtime_rankings)
 
-        # Look for the TodayRideRankingsQuery usage (ORM migration)
-        assert 'TodayRideRankingsQuery' in source, \
-            "Route must use TodayRideRankingsQuery for today period"
+        # Look for the LiveRideRankingsQuery usage (same for live and today)
+        assert 'LiveRideRankingsQuery' in source, \
+            "Route must use LiveRideRankingsQuery for today period"
 
-        # Check that the query is being used
-        assert 'query = TodayRideRankingsQuery' in source or 'TodayRideRankingsQuery(' in source, \
-            "Route must instantiate TodayRideRankingsQuery"
+        # Check that the query is being used for today period
+        assert "period == 'today'" in source, \
+            "Route must handle today period"
 
     def test_weekly_period_passes_sort_by(self):
         """

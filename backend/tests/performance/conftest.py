@@ -68,3 +68,17 @@ def mysql_connection(mysql_engine):
         yield connection
     finally:
         connection.close()
+
+
+@pytest.fixture
+def mysql_session(mysql_engine):
+    """
+    Provide MySQL Session for performance tests.
+
+    Required for query classes that use ORM Session.query() API
+    like TodayParkWaitTimesQuery which uses StatsRepository.
+    """
+    from sqlalchemy.orm import Session
+
+    with Session(mysql_engine) as session:
+        yield session

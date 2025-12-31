@@ -60,19 +60,22 @@ def hourly_chart_test_data(mysql_session):
     ]
 
     for utc_time, downtime_hours, expected_pacific_hour in hours_utc:
+        # shame_score is required by _query_hourly_tables - use downtime_hours as test value
+        shame_score = downtime_hours  # For testing, shame_score = downtime_hours
         conn.execute(text("""
             INSERT INTO park_hourly_stats (
-                park_id, hour_start_utc, total_downtime_hours, rides_down,
+                park_id, hour_start_utc, total_downtime_hours, shame_score, rides_down,
                 avg_wait_time_minutes, park_was_open, snapshot_count
             )
             VALUES (
-                :park_id, :hour_start_utc, :total_downtime_hours, :rides_down,
+                :park_id, :hour_start_utc, :total_downtime_hours, :shame_score, :rides_down,
                 :avg_wait_minutes, :park_was_open, :snapshot_count
             )
         """), {
             "park_id": park_id,
             "hour_start_utc": utc_time,
             "total_downtime_hours": downtime_hours,
+            "shame_score": shame_score,
             "rides_down": 5 if downtime_hours > 0 else 0,
             "avg_wait_minutes": 30.0,
             "park_was_open": True,

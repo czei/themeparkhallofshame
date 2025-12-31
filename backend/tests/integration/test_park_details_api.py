@@ -147,6 +147,7 @@ class TestStatsRepositoryShameBreakdown:
         from database.repositories.stats_repository import StatsRepository
         from models.orm_park import Park
         from models.orm_stats import ParkDailyStats
+        from utils.timezone import get_yesterday_date_range
 
         with get_db_session() as session:
             # Clean up any existing test data
@@ -169,7 +170,8 @@ class TestStatsRepositoryShameBreakdown:
             session.merge(park)
             session.flush()
 
-            yesterday = date.today() - timedelta(days=1)
+            # CRITICAL: Use Pacific timezone yesterday to match what repository queries
+            yesterday, _, _ = get_yesterday_date_range()
             stat = ParkDailyStats(
                 park_id=9997,
                 stat_date=yesterday,
@@ -197,6 +199,7 @@ class TestStatsRepositoryShameBreakdown:
         from database.repositories.stats_repository import StatsRepository
         from models.orm_park import Park
         from models.orm_stats import ParkDailyStats
+        from utils.timezone import get_last_month_date_range
 
         with get_db_session() as session:
             # Clean up any existing test data
@@ -219,13 +222,16 @@ class TestStatsRepositoryShameBreakdown:
             session.merge(park)
             session.flush()
 
-            # Insert daily stats for last 30 days
-            today = date.today()
-            for i in range(1, 31):
-                stat_date = today - timedelta(days=i)
+            # CRITICAL: Use Pacific timezone last month to match what repository queries
+            # Repository uses get_last_month_date_range() which returns previous calendar month
+            start_date, end_date, _ = get_last_month_date_range()
+
+            # Insert daily stats for the previous calendar month
+            current_date = start_date
+            while current_date <= end_date:
                 stat = ParkDailyStats(
                     park_id=9996,
-                    stat_date=stat_date,
+                    stat_date=current_date,
                     shame_score=Decimal('3.0'),
                     total_downtime_hours=Decimal('5.0'),
                     total_rides_tracked=15,
@@ -233,6 +239,7 @@ class TestStatsRepositoryShameBreakdown:
                     operating_hours_minutes=600
                 )
                 session.merge(stat)
+                current_date += timedelta(days=1)
             session.commit()
 
             repo = StatsRepository(session)

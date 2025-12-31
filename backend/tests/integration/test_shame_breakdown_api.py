@@ -236,7 +236,7 @@ class TestShameBreakdownResponseStructure:
         # Verify response structure
         assert 'rides' in breakdown, "Weekly breakdown must have 'rides' key"
         assert isinstance(breakdown['rides'], list), "'rides' must be a list"
-        assert 'days_in_period' in breakdown, "Must have days_in_period"
+        assert 'days_tracked' in breakdown, "Must have days_tracked"
         assert 'period_label' in breakdown, "Must have period_label for display"
 
 

@@ -81,7 +81,7 @@ class TestTodayQueryPerformance:
         assert avg_time < 30.0, \
             f"TODAY ride wait times took {avg_time:.1f}s avg, expected < 30s"
 
-    def test_today_park_wait_times_performance(self, mysql_connection):
+    def test_today_park_wait_times_performance(self, mysql_session):
         """
         Measure TODAY park wait times query performance.
 
@@ -89,11 +89,14 @@ class TestTodayQueryPerformance:
         - Aggregates wait times at park level
         - Groups by park with AVG, MAX, COUNT calculations
         - Joins ride_status_snapshots, rides, parks, park_activity_snapshots
+
+        NOTE: Uses mysql_session (not mysql_connection) because TodayParkWaitTimesQuery
+        uses StatsRepository which requires Session.query() API.
         """
         from database.queries.today.today_park_wait_times import TodayParkWaitTimesQuery
 
         def run_query():
-            query = TodayParkWaitTimesQuery(mysql_connection)
+            query = TodayParkWaitTimesQuery(mysql_session)
             return query.get_rankings(limit=50)
 
         min_time, avg_time, max_time = measure_query_time(run_query)

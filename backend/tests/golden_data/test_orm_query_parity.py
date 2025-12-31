@@ -60,7 +60,7 @@ class TestRideOperatedParity:
 
     @pytest.mark.golden_data
     @freeze_time(FROZEN_TIME)
-    def test_rides_operated_orm_vs_sql(self, mysql_session: Session, golden_2025_12_21):
+    def test_rides_operated_orm_vs_sql(self, mysql_session: Session, golden_data_2025_12_21):
         """
         Verify ORM rides_operated query matches raw SQL CTE.
 
@@ -146,7 +146,7 @@ class TestDowntimeCalculationParity:
 
     @pytest.mark.golden_data
     @freeze_time(FROZEN_TIME)
-    def test_disney_downtime_status_logic(self, mysql_session: Session, golden_2025_12_21):
+    def test_disney_downtime_status_logic(self, mysql_session: Session, golden_data_2025_12_21):
         """
         Verify Disney parks use correct DOWN (not CLOSED) status logic.
 
@@ -233,7 +233,7 @@ class TestDowntimeCalculationParity:
 
     @pytest.mark.golden_data
     @freeze_time(FROZEN_TIME)
-    def test_regional_park_downtime_includes_closed(self, mysql_session: Session, golden_2025_12_21):
+    def test_regional_park_downtime_includes_closed(self, mysql_session: Session, golden_data_2025_12_21):
         """
         Verify non-Disney/Universal parks treat CLOSED as potential downtime.
 
@@ -364,7 +364,7 @@ class TestParkOpenStatusParity:
 
     @pytest.mark.golden_data
     @freeze_time(FROZEN_TIME)
-    def test_park_appears_open_filter(self, mysql_session: Session, golden_2025_12_21):
+    def test_park_appears_open_filter(self, mysql_session: Session, golden_data_2025_12_21):
         """
         Verify park_appears_open filter works identically in ORM and SQL.
 
@@ -442,7 +442,7 @@ class TestInstantBugFixValidation:
 
     @pytest.mark.golden_data
     @freeze_time(FROZEN_TIME)
-    def test_orm_query_returns_consistent_historical_results(self, mysql_session: Session, golden_2025_12_21):
+    def test_orm_query_returns_consistent_historical_results(self, mysql_session: Session, golden_data_2025_12_21):
         """
         Verify ORM queries return consistent results across "time travel".
 

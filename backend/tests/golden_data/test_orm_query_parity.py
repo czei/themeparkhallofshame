@@ -500,9 +500,9 @@ class TestInstantBugFixValidation:
 
         # Document the difference for the benefit of reviewers
         difference = after_fix.downtime_count - before_fix.downtime_count
-        print(f"\nInstant Bug Fix Benefit:")
+        print("\nInstant Bug Fix Benefit:")
         print(f"  Before fix (DOWN only): {before_fix.downtime_count:,} downtime snapshots")
         print(f"  After fix (+CLOSED): {after_fix.downtime_count:,} downtime snapshots")
         print(f"  Difference: +{difference:,} snapshots now correctly counted")
-        print(f"\n  With ORM + on-the-fly queries, this fix applies instantly to ALL historical data.")
-        print(f"  No backfill required!")
+        print("\n  With ORM + on-the-fly queries, this fix applies instantly to ALL historical data.")
+        print("  No backfill required!")

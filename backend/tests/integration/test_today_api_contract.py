@@ -146,8 +146,10 @@ def today_api_test_data(mysql_session):
             is_t2_down = scenario['down_ride_tier'] == 2 and i < down_snapshots
 
             shame_score = 0
-            if is_t1_down: shame_score = (3 / scenario['total_weight']) * 10
-            if is_t2_down: shame_score = (2 / scenario['total_weight']) * 10
+            if is_t1_down:
+                shame_score = (3 / scenario['total_weight']) * 10
+            if is_t2_down:
+                shame_score = (2 / scenario['total_weight']) * 10
 
             rides_open = (0 if is_t1_down else 1) + (0 if is_t2_down else 1)
             rides_closed = 2 - rides_open
@@ -207,7 +209,8 @@ def today_api_test_data(mysql_session):
                 hourly_stats[hour_start]['rides_operating'] += 1
 
         for hour, stats in hourly_stats.items():
-            if not stats['shame_scores']: continue
+            if not stats['shame_scores']:
+                continue
             avg_shame = sum(stats['shame_scores']) / len(stats['shame_scores'])
             conn.execute(text("""
                 INSERT INTO park_hourly_stats (

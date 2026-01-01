@@ -106,7 +106,7 @@ class TestSnapshotIntervalConsistency:
                             violations.append(f"{py_file.relative_to(backend_root)}:{i}: {line.strip()}")
 
         assert not violations, (
-            f"Found hardcoded 5-minute interval in SQL queries:\n"
+            "Found hardcoded 5-minute interval in SQL queries:\n"
             + "\n".join(f"  {v}" for v in violations)
         )
 
@@ -349,7 +349,7 @@ class TestHourlyAggregationDowntimeCalculation:
 
         # Find lines with downtime calculation
         lines = content.split('\n')
-        downtime_lines = [l for l in lines if '/ 60' in l and 'downtime' in l.lower()]
+        downtime_lines = [line for line in lines if '/ 60' in line and 'downtime' in line.lower()]
 
         for line in downtime_lines:
             # Skip comments

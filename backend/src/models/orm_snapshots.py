@@ -8,8 +8,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.ext.hybrid import hybrid_method, hybrid_property
 from models.base import Base
 from datetime import datetime
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from decimal import Decimal
+
+if TYPE_CHECKING:
+    from models.orm_ride import Ride
+    from models.orm_park import Park
 
 
 class RideStatusSnapshot(Base):
@@ -62,6 +66,14 @@ class RideStatusSnapshot(Base):
         nullable=False,
         default=False,
         comment="TRUE if ride is operating (status='OPERATING' OR wait_time > 0)"
+    )
+
+    # Data Source (Feature 004)
+    data_source: Mapped[str] = mapped_column(
+        Enum('LIVE', 'ARCHIVE', name='data_source_enum'),
+        nullable=False,
+        server_default='LIVE',
+        comment="Source of data: LIVE (collected) or ARCHIVE (imported from archive.themeparks.wiki)"
     )
 
     # Composite Indexes for Performance (already exist in database)

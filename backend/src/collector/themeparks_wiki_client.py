@@ -36,6 +36,28 @@ class EntityType(Enum):
     PARK = "PARK"
 
 
+class QueueType(Enum):
+    """Queue types from ThemeParks.wiki API."""
+    STANDBY = "STANDBY"
+    SINGLE_RIDER = "SINGLE_RIDER"
+    RETURN_TIME = "RETURN_TIME"
+    PAID_RETURN_TIME = "PAID_RETURN_TIME"
+    BOARDING_GROUP = "BOARDING_GROUP"
+
+
+@dataclass
+class QueueData:
+    """Queue information for a single queue type."""
+    queue_type: str
+    wait_time: Optional[int] = None
+    return_start: Optional[str] = None
+    return_end: Optional[str] = None
+    price_amount: Optional[float] = None
+    price_currency: Optional[str] = None
+    state: Optional[str] = None  # For BOARDING_GROUP
+    current_group: Optional[str] = None  # For BOARDING_GROUP
+
+
 @dataclass
 class LiveRideData:
     """Parsed live data for a single ride."""
@@ -43,9 +65,10 @@ class LiveRideData:
     name: str
     entity_type: str
     status: str
-    wait_time: Optional[int]
+    wait_time: Optional[int]  # Shortcut for STANDBY wait time
     operating_hours: Optional[List[Dict]]
     last_updated: Optional[str]
+    queues: Optional[List[QueueData]] = None  # All queue types
 
 
 class ThemeParksWikiClient:
@@ -229,11 +252,30 @@ class ThemeParksWikiClient:
             if entity_type != "ATTRACTION":
                 continue
 
-            # Extract wait time from queue data
+            # Extract all queue types
             wait_time = None
-            queue = item.get("queue", {})
-            if queue and "STANDBY" in queue:
-                wait_time = queue["STANDBY"].get("waitTime")
+            queues = []
+            queue_data = item.get("queue", {})
+
+            for queue_type, queue_info in queue_data.items():
+                if not isinstance(queue_info, dict):
+                    continue
+
+                queue = QueueData(
+                    queue_type=queue_type,
+                    wait_time=queue_info.get("waitTime"),
+                    return_start=queue_info.get("returnStart"),
+                    return_end=queue_info.get("returnEnd"),
+                    price_amount=queue_info.get("price", {}).get("amount") if queue_info.get("price") else None,
+                    price_currency=queue_info.get("price", {}).get("currency") if queue_info.get("price") else None,
+                    state=queue_info.get("state"),
+                    current_group=queue_info.get("currentGroup")
+                )
+                queues.append(queue)
+
+                # Preserve STANDBY wait_time as shortcut for backwards compatibility
+                if queue_type == "STANDBY":
+                    wait_time = queue_info.get("waitTime")
 
             ride = LiveRideData(
                 entity_id=item.get("id", ""),
@@ -242,7 +284,8 @@ class ThemeParksWikiClient:
                 status=item.get("status", ""),
                 wait_time=wait_time,
                 operating_hours=item.get("operatingHours"),
-                last_updated=item.get("lastUpdated")
+                last_updated=item.get("lastUpdated"),
+                queues=queues if queues else None
             )
             results.append(ride)
 

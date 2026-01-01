@@ -989,7 +989,7 @@ def test_parks_downtime_live_all_parks(client, comprehensive_test_data):
 
         print(f"\n✓ Verified {len(data['data'])} parks with live downtime data")
     else:
-        print(f"\n✓ Live mode returned no data (expected in test environment)")
+        print("\n✓ Live mode returned no data (expected in test environment)")
 
 
 @freeze_time(MOCKED_NOW_UTC)
@@ -1443,7 +1443,7 @@ def test_rides_downtime_live_all_parks(client, comprehensive_test_data):
 
         print(f"\n✓ Verified {len(data['data'])} rides with live downtime data")
     else:
-        print(f"\n✓ Live mode returned no data (expected in test environment)")
+        print("\n✓ Live mode returned no data (expected in test environment)")
 
 
 @freeze_time(MOCKED_NOW_UTC)
@@ -1615,7 +1615,7 @@ def test_rides_waittimes_live_mode(client, comprehensive_test_data):
 
         print(f"\n✓ Verified {len(data['data'])} rides with live wait times")
     else:
-        print(f"\n✓ Live mode returned no data (expected in test environment with mocked time)")
+        print("\n✓ Live mode returned no data (expected in test environment with mocked time)")
 
 
 @freeze_time(MOCKED_NOW_UTC)
@@ -1647,7 +1647,7 @@ def test_rides_waittimes_disney_universal_filter(client, comprehensive_test_data
 
         print(f"\n✓ Verified {len(data['data'])} Disney/Universal rides with live wait times")
     else:
-        print(f"\n✓ Live mode returned no data (expected in test environment with mocked time)")
+        print("\n✓ Live mode returned no data (expected in test environment with mocked time)")
 
 
 @freeze_time(MOCKED_NOW_UTC)
@@ -1702,7 +1702,7 @@ def test_rides_waittimes_today_disney_universal(client, comprehensive_test_data)
         park_name = ride['park_name']
         assert park_name in disney_universal_parks
 
-    print(f"\n✓ Verified Disney/Universal filter for today's wait times")
+    print("\n✓ Verified Disney/Universal filter for today's wait times")
 
 
 @freeze_time(MOCKED_NOW_UTC)
@@ -1757,7 +1757,7 @@ def test_rides_waittimes_yesterday_disney_universal(client, comprehensive_test_d
         park_name = ride['park_name']
         assert park_name in disney_universal_parks
 
-    print(f"\n✓ Verified Disney/Universal filter for yesterday's wait times")
+    print("\n✓ Verified Disney/Universal filter for yesterday's wait times")
 
 
 @freeze_time(MOCKED_NOW_UTC)
@@ -1812,7 +1812,7 @@ def test_rides_waittimes_last_week_disney_universal(client, comprehensive_test_d
         park_name = ride['park_name']
         assert park_name in disney_universal_parks
 
-    print(f"\n✓ Verified Disney/Universal filter for weekly wait times")
+    print("\n✓ Verified Disney/Universal filter for weekly wait times")
 
 
 @freeze_time(MOCKED_NOW_UTC)
@@ -1867,7 +1867,7 @@ def test_rides_waittimes_last_month_disney_universal(client, comprehensive_test_
         park_name = ride['park_name']
         assert park_name in disney_universal_parks
 
-    print(f"\n✓ Verified Disney/Universal filter for monthly wait times")
+    print("\n✓ Verified Disney/Universal filter for monthly wait times")
 
 
 # ============================================================================
@@ -1905,7 +1905,7 @@ def test_parks_waittimes_live_all_parks(client, comprehensive_test_data):
 
         print(f"\n✓ Verified {len(data['data'])} parks with live wait times")
     else:
-        print(f"\n✓ Live mode returned no data (expected in test environment)")
+        print("\n✓ Live mode returned no data (expected in test environment)")
 
 
 @freeze_time(MOCKED_NOW_UTC)
@@ -2198,7 +2198,7 @@ def test_live_status_summary_all_parks(client, comprehensive_test_data):
     # The summary may contain various statuses - at minimum it should be a dict
     assert isinstance(summary, (dict, list))
 
-    print(f"\n✓ Live status summary returned for all parks")
+    print("\n✓ Live status summary returned for all parks")
 
 
 @freeze_time(MOCKED_NOW_UTC)

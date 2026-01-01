@@ -22,6 +22,12 @@ PERIOD_ALIASES = {
     '30days': 'last_month',
 }
 
+# Cache for ZoneInfo objects to avoid repeated parsing
+_timezone_cache: dict[str, ZoneInfo] = {
+    'America/Los_Angeles': PACIFIC_TZ,
+    'UTC': UTC_TZ,
+}
+
 
 def get_today_pacific() -> date:
     """
@@ -55,6 +61,172 @@ def get_current_utc() -> datetime:
         datetime: Current datetime with UTC timezone
     """
     return datetime.now(UTC_TZ)
+
+
+# =============================================================================
+# Park-Specific Timezone Functions (Feature 004)
+# =============================================================================
+# These functions support parks with different timezones (e.g., European parks,
+# Asian parks) by reading the timezone from the parks.timezone database column.
+
+def get_park_timezone(timezone_str: str) -> ZoneInfo:
+    """
+    Get ZoneInfo for a park's timezone string.
+
+    Uses a cache to avoid repeated ZoneInfo parsing.
+
+    Args:
+        timezone_str: IANA timezone string (e.g., 'America/New_York', 'Europe/Paris')
+
+    Returns:
+        ZoneInfo: Timezone object for the given string
+
+    Example:
+        tz = get_park_timezone('America/New_York')
+        now_local = datetime.now(tz)
+    """
+    if timezone_str not in _timezone_cache:
+        _timezone_cache[timezone_str] = ZoneInfo(timezone_str)
+    return _timezone_cache[timezone_str]
+
+
+def get_park_today(timezone_str: str) -> date:
+    """
+    Get current date in a park's local timezone.
+
+    Args:
+        timezone_str: IANA timezone string from parks.timezone column
+
+    Returns:
+        date: Current date in the park's local timezone
+
+    Example:
+        # For a park in Orlando (Eastern Time)
+        today = get_park_today('America/New_York')
+    """
+    park_tz = get_park_timezone(timezone_str)
+    return datetime.now(park_tz).date()
+
+
+def get_park_now(timezone_str: str) -> datetime:
+    """
+    Get current datetime in a park's local timezone.
+
+    Args:
+        timezone_str: IANA timezone string from parks.timezone column
+
+    Returns:
+        datetime: Current datetime with park's timezone
+
+    Example:
+        now = get_park_now('Europe/Paris')
+    """
+    park_tz = get_park_timezone(timezone_str)
+    return datetime.now(park_tz)
+
+
+def get_park_day_range_utc(target_date: date, timezone_str: str) -> tuple[datetime, datetime]:
+    """
+    Get UTC datetime range for a calendar day in a park's local timezone.
+
+    This is the park-specific equivalent of get_pacific_day_range_utc().
+    Use for parks outside the US or when per-park precision is needed.
+
+    Args:
+        target_date: The calendar date in the park's local timezone
+        timezone_str: IANA timezone string from parks.timezone column
+
+    Returns:
+        tuple: (start_utc, end_utc) where:
+            - start_utc = midnight in park's timezone, converted to UTC
+            - end_utc = next midnight in park's timezone, converted to UTC
+
+    Example:
+        # Get UTC bounds for December 15, 2025 at Disneyland Paris
+        start, end = get_park_day_range_utc(
+            date(2025, 12, 15),
+            'Europe/Paris'
+        )
+        # In winter (CET = UTC+1):
+        # start = 2025-12-14 23:00:00 UTC
+        # end = 2025-12-15 23:00:00 UTC
+    """
+    park_tz = get_park_timezone(timezone_str)
+
+    # Create midnight in park's local timezone
+    start_local = datetime(
+        target_date.year,
+        target_date.month,
+        target_date.day,
+        hour=0,
+        minute=0,
+        second=0,
+        tzinfo=park_tz
+    )
+
+    # Next midnight in park's local timezone
+    end_local = start_local + timedelta(days=1)
+
+    # Convert to UTC for database queries
+    return (
+        start_local.astimezone(UTC_TZ),
+        end_local.astimezone(UTC_TZ)
+    )
+
+
+def get_park_yesterday_range_utc(timezone_str: str) -> tuple[datetime, datetime, str]:
+    """
+    Get UTC datetime range for yesterday in a park's local timezone.
+
+    Args:
+        timezone_str: IANA timezone string from parks.timezone column
+
+    Returns:
+        tuple: (start_utc, end_utc, label) where:
+            - start_utc = yesterday midnight in park's timezone, in UTC
+            - end_utc = today midnight in park's timezone, in UTC
+            - label = Human-readable date (e.g., "Dec 1, 2025")
+    """
+    today_local = get_park_today(timezone_str)
+    yesterday_local = today_local - timedelta(days=1)
+
+    start_utc, end_utc = get_park_day_range_utc(yesterday_local, timezone_str)
+
+    # Format label
+    label = yesterday_local.strftime("%b %-d, %Y")
+
+    return (start_utc, end_utc, label)
+
+
+def utc_to_park_date(utc_datetime: datetime, timezone_str: str) -> date:
+    """
+    Convert a UTC datetime to a date in a park's local timezone.
+
+    Useful for determining which park-local "day" a UTC timestamp belongs to.
+
+    Args:
+        utc_datetime: A datetime in UTC (or timezone-aware)
+        timezone_str: IANA timezone string from parks.timezone column
+
+    Returns:
+        date: The date in the park's timezone this timestamp falls within
+
+    Example:
+        # UTC timestamp: 2025-12-16 02:00:00 UTC
+        # Park timezone: Europe/Paris (CET = UTC+1)
+        # Result: 2025-12-16 (because 02:00 UTC = 03:00 Paris)
+        park_date = utc_to_park_date(
+            datetime(2025, 12, 16, 2, 0, 0, tzinfo=UTC_TZ),
+            'Europe/Paris'
+        )
+    """
+    if utc_datetime.tzinfo is None:
+        # Assume naive datetime is UTC
+        utc_datetime = utc_datetime.replace(tzinfo=UTC_TZ)
+
+    park_tz = get_park_timezone(timezone_str)
+    park_dt = utc_datetime.astimezone(park_tz)
+    return park_dt.date()
 
 
 def get_pacific_day_range_utc(target_date: date) -> tuple[datetime, datetime]:

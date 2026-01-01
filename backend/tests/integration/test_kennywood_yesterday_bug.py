@@ -65,7 +65,7 @@ class TestKennywoodYesterdayBug:
 
         # Assert: Kennywood should have a reasonable shame score
         if kennywood:
-            print(f"\n🔍 Kennywood YESTERDAY data:")
+            print("\n🔍 Kennywood YESTERDAY data:")
             print(f"   Shame score: {kennywood['shame_score']}")
             print(f"   Downtime hours: {kennywood.get('total_downtime_hours', 'N/A')}")
             print(f"   Weighted downtime: {kennywood.get('weighted_downtime_hours', 'N/A')}")

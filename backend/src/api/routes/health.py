@@ -56,11 +56,28 @@ def health_check():
                 age_seconds = (datetime.utcnow() - last_collection.replace(tzinfo=None)).total_seconds()
                 age_minutes = int(age_seconds / 60)
 
+                # Feature 004: Data freshness threshold for alerting
+                # 30 min = stale (monitoring alert), 60 min = critical
+                DATA_FRESHNESS_STALE_MINUTES = 30
+                DATA_FRESHNESS_CRITICAL_MINUTES = 60
+
+                if age_minutes >= DATA_FRESHNESS_CRITICAL_MINUTES:
+                    freshness_status = "critical"
+                    freshness_message = f"CRITICAL: Data is {age_minutes} minutes stale - check collection pipeline"
+                elif age_minutes >= DATA_FRESHNESS_STALE_MINUTES:
+                    freshness_status = "stale"
+                    freshness_message = f"Warning: Data is {age_minutes} minutes stale"
+                else:
+                    freshness_status = "healthy"
+                    freshness_message = f"Data fresh ({age_minutes} min old)"
+
                 health_data["checks"]["data_collection"] = {
-                    "status": "healthy" if age_minutes < 30 else "stale",
+                    "status": freshness_status,
                     "last_collection": last_collection.isoformat() + 'Z',
                     "age_minutes": age_minutes,
-                    "message": f"Last collection {age_minutes} minutes ago"
+                    "stale_threshold_minutes": DATA_FRESHNESS_STALE_MINUTES,
+                    "critical_threshold_minutes": DATA_FRESHNESS_CRITICAL_MINUTES,
+                    "message": freshness_message
                 }
             else:
                 health_data["checks"]["data_collection"] = {
@@ -198,6 +215,10 @@ def health_check():
 
     if "unhealthy" in check_statuses:
         health_data["status"] = "unhealthy"
+        return jsonify(health_data), 503
+    elif "critical" in check_statuses:
+        # Feature 004: Critical status for data pipeline failures
+        health_data["status"] = "critical"
         return jsonify(health_data), 503
     elif "stale" in check_statuses or "no_data" in check_statuses:
         health_data["status"] = "degraded"

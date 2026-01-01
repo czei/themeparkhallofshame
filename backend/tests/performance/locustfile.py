@@ -260,7 +260,7 @@ def validate_performance(environment, **kwargs):
         print(f"  FAIL: Error rate ({error_rate:.2f}%) should be 0%")
         passed = False
     else:
-        print(f"  PASS: Error rate is 0%")
+        print("  PASS: Error rate is 0%")
 
     print("=" * 60)
     print(f"  OVERALL: {'PASSED' if passed else 'FAILED'}")

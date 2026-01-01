@@ -131,6 +131,10 @@ class Filters:
         """
         Filter to snapshots within the live time window (last 2 hours).
 
+        NOTE: This uses func.now() which is NOT partition-friendly.
+        For partitioned tables (ride_status_snapshots), prefer:
+            Filters.within_partition_aware_live_window()
+
         Replaces: RideFilterSQL.live_time_window_filter()
 
         Args:
@@ -144,6 +148,33 @@ class Filters:
 
         # Use timedelta for database-agnostic date math
         return recorded_at_column >= (func.now() - timedelta(hours=LIVE_WINDOW_HOURS))
+
+    @staticmethod
+    def within_partition_aware_live_window(
+        recorded_at_column,
+        reference_time: Optional[datetime] = None
+    ) -> ColumnElement:
+        """
+        Partition-friendly filter for live time window.
+
+        Feature 004: Uses explicit Python-computed bounds for MySQL partition pruning.
+        The ride_status_snapshots table is partitioned by month, and partition
+        pruning requires explicit datetime bounds (not SQL function calls).
+
+        Args:
+            recorded_at_column: The recorded_at column to filter on
+            reference_time: Reference time (defaults to UTC now)
+
+        Returns:
+            Expression: recorded_at >= (now - 2 hours) AND recorded_at < now
+        """
+        now = reference_time or datetime.utcnow()
+        start = now - timedelta(hours=LIVE_WINDOW_HOURS)
+
+        return and_(
+            recorded_at_column >= start,
+            recorded_at_column < now
+        )
 
     @staticmethod
     def within_date_range(
@@ -163,6 +194,147 @@ class Filters:
         return and_(
             date_column >= start_date,
             date_column <= end_date,
+        )
+
+    @staticmethod
+    def partition_aware_date_range(
+        recorded_at_column,
+        start: datetime,
+        end: datetime
+    ) -> ColumnElement:
+        """
+        Partition-friendly date range filter for ride_status_snapshots.
+
+        Feature 004: Uses explicit datetime bounds with >= and < operators
+        to enable MySQL partition pruning on the partitioned table.
+
+        CRITICAL: Use >= start and < end (exclusive end) pattern.
+        This ensures partition boundaries are respected.
+
+        Args:
+            recorded_at_column: The recorded_at column to filter on
+            start: Start of range (inclusive)
+            end: End of range (exclusive)
+
+        Returns:
+            Expression: recorded_at >= start AND recorded_at < end
+        """
+        return and_(
+            recorded_at_column >= start,
+            recorded_at_column < end
+        )
+
+    @staticmethod
+    def for_today(recorded_at_column, reference_time: Optional[datetime] = None) -> ColumnElement:
+        """
+        Partition-friendly filter for TODAY period.
+
+        Uses explicit Python-computed bounds from midnight to midnight.
+
+        Args:
+            recorded_at_column: The recorded_at column
+            reference_time: Reference time (defaults to UTC now)
+
+        Returns:
+            Expression for today's date range
+        """
+        from utils.query_helpers import PartitionAwareDateRange
+        bounds = PartitionAwareDateRange.for_today(reference_time)
+        return and_(
+            recorded_at_column >= bounds.start,
+            recorded_at_column < bounds.end
+        )
+
+    @staticmethod
+    def for_yesterday(recorded_at_column, reference_time: Optional[datetime] = None) -> ColumnElement:
+        """
+        Partition-friendly filter for YESTERDAY period.
+
+        Uses explicit Python-computed bounds from yesterday midnight to today midnight.
+
+        Args:
+            recorded_at_column: The recorded_at column
+            reference_time: Reference time (defaults to UTC now)
+
+        Returns:
+            Expression for yesterday's date range
+        """
+        from utils.query_helpers import PartitionAwareDateRange
+        bounds = PartitionAwareDateRange.for_yesterday(reference_time)
+        return and_(
+            recorded_at_column >= bounds.start,
+            recorded_at_column < bounds.end
+        )
+
+    @staticmethod
+    def for_last_week(recorded_at_column, reference_time: Optional[datetime] = None) -> ColumnElement:
+        """
+        Partition-friendly filter for LAST_WEEK period (7 days).
+
+        Uses explicit Python-computed bounds.
+
+        Args:
+            recorded_at_column: The recorded_at column
+            reference_time: Reference time (defaults to UTC now)
+
+        Returns:
+            Expression for last week's date range
+        """
+        from utils.query_helpers import PartitionAwareDateRange
+        bounds = PartitionAwareDateRange.for_last_week(reference_time)
+        return and_(
+            recorded_at_column >= bounds.start,
+            recorded_at_column < bounds.end
+        )
+
+    @staticmethod
+    def for_last_month(recorded_at_column, reference_time: Optional[datetime] = None) -> ColumnElement:
+        """
+        Partition-friendly filter for LAST_MONTH period (30 days).
+
+        Uses explicit Python-computed bounds.
+
+        Args:
+            recorded_at_column: The recorded_at column
+            reference_time: Reference time (defaults to UTC now)
+
+        Returns:
+            Expression for last month's date range
+        """
+        from utils.query_helpers import PartitionAwareDateRange
+        bounds = PartitionAwareDateRange.for_last_month(reference_time)
+        return and_(
+            recorded_at_column >= bounds.start,
+            recorded_at_column < bounds.end
+        )
+
+    @staticmethod
+    def for_period(
+        recorded_at_column,
+        period: str,
+        reference_time: Optional[datetime] = None
+    ) -> ColumnElement:
+        """
+        Partition-friendly filter for any named period.
+
+        Convenience method that dispatches to the appropriate period filter.
+
+        Args:
+            recorded_at_column: The recorded_at column
+            period: 'today', 'yesterday', 'last_week', 'last_month', or 'live'
+            reference_time: Reference time (defaults to UTC now)
+
+        Returns:
+            Expression for the requested period's date range
+
+        Raises:
+            ValueError: If period is not recognized
+        """
+        from utils.query_helpers import PartitionAwareDateRange
+        bounds = PartitionAwareDateRange.for_period(period, reference_time)
+        return and_(
+            recorded_at_column >= bounds.start,
+            recorded_at_column < bounds.end
         )
 
     # =========================================================================

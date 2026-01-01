@@ -111,6 +111,12 @@ class Ride(Base):
         lazy="select",
         uselist=False
     )
+    entity_metadata: Mapped[Optional["EntityMetadata"]] = relationship(
+        "EntityMetadata",
+        back_populates="ride",
+        lazy="select",
+        uselist=False
+    )
 
     # Model Methods (Business Logic)
     def get_current_status(self, session: Optional["Session"] = None):

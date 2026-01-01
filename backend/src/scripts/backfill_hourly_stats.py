@@ -115,7 +115,7 @@ class HourlyBackfiller:
         logger.info(f"Date range: {self.start_date} to {self.end_date}")
         logger.info(f"Total hours: {self.total_hours}")
         logger.info(f"Batch size: {self.batch_size} hours")
-        logger.info(f"Strategy: Newest first (reverse chronological)")
+        logger.info("Strategy: Newest first (reverse chronological)")
         logger.info("=" * 70)
 
         # Generate list of hours to process (newest first)

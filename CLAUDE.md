@@ -9,6 +9,8 @@ Auto-generated from all feature plans. Last updated: 2025-12-08
 - MySQL/MariaDB (existing database, new tables: weather_observations, weather_forecasts) (002-weather-collection)
 - Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ Core (migrating to ORM models), Alembic 1.13+ (new - migration framework), mysqlclient 2.2+, tenacity 8.2+ (003-orm-refactoring)
 - MySQL 5.7+ or MariaDB 10.3+ (existing production database - schema modifications only) (003-orm-refactoring)
+- Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ ORM, Alembic 1.13+ + mysqlclient 2.2+, tenacity 8.2+, requests, boto3 (S3 access) (004-themeparks-data-collection)
+- MySQL 5.7+ with RANGE partitioning by month on ride_status_snapshots (004-themeparks-data-collection)
 
 - Python 3.11+ (001-theme-park-tracker)
 
@@ -28,9 +30,53 @@ cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLO
 Python 3.11+: Follow standard conventions
 
 ## Recent Changes
+- 004-themeparks-data-collection: Added Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ ORM, Alembic 1.13+ + mysqlclient 2.2+, tenacity 8.2+, requests, boto3 (S3 access)
 - 003-orm-refactoring: Added Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ Core (migrating to ORM models), Alembic 1.13+ (new - migration framework), mysqlclient 2.2+, tenacity 8.2+
 - 002-weather-collection: Added Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ (Core only), mysqlclient 2.2+, tenacity, requests
-- 001-aggregation-tables: Added Python 3.11+ + Flask 3.0+, SQLAlchemy 2.0+ (Core only, no ORM models), mysqlclient 2.2+
+
+## ORM Models (Feature 004)
+
+All ORM models are in `backend/src/models/`:
+
+| Model | Table | Purpose |
+|-------|-------|---------|
+| `Park` | `parks` | Theme park with latitude/longitude, timezone |
+| `Ride` | `rides` | Individual attractions with tier classification |
+| `EntityMetadata` | `entity_metadata` | Rich attraction metadata from ThemeParks.wiki (coordinates, indoor/outdoor, height requirements) |
+| `DataQualityLog` | `data_quality_log` | Tracks mapping failures, parse errors, data gaps |
+| `StorageMetrics` | `storage_metrics` | Daily table size measurements for capacity planning |
+| `ImportCheckpoint` | `import_checkpoints` | Historical data import progress tracking |
+| `RideStatusSnapshot` | `ride_status_snapshots` | Real-time ride status (partitioned by month) |
+| `ParkActivitySnapshot` | `park_activity_snapshots` | Park-level activity data |
+| `RideDailyStats` | `ride_daily_stats` | Aggregated daily ride statistics |
+| `ParkDailyStats` | `park_daily_stats` | Aggregated daily park statistics |
+| `WeatherObservation` | `weather_observations` | Weather data correlated with park conditions |
+
+## Admin API Endpoints (Feature 004)
+
+### Storage Monitoring (`/admin/storage/*`)
+- `GET /admin/storage/current` - Current table sizes and total storage
+- `GET /admin/storage/history` - Historical storage growth over time
+- `GET /admin/storage/projections` - 30/90/365-day growth projections
+- `GET /admin/storage/alerts` - Active storage threshold alerts
+
+### Data Quality (`/admin/quality/*`)
+- `GET /admin/quality/summary` - Quality metrics summary (mapping failures, parse errors, gaps)
+- `GET /admin/quality/gaps` - Data collection gaps by park
+- `GET /admin/quality/issues` - Recent data quality issues with severity
+- `PATCH /admin/quality/issues/{log_id}` - Update issue status (acknowledged/resolved)
+- `GET /admin/quality/freshness` - Data freshness by park (last snapshot time)
+- `GET /admin/quality/coverage` - Metadata coverage statistics
+
+## Cron Jobs (Feature 004)
+
+Added to `deployment/config/crontab.prod`:
+
+| Schedule | Job | Description |
+|----------|-----|-------------|
+| 3:00 AM UTC | `sync_metadata` | Syncs entity metadata from ThemeParks.wiki |
+| 2:00 AM UTC | `measure_storage` | Measures table sizes for capacity planning |
+| Mon 9 AM Pacific | Storage alerts check | Alerts if storage exceeds thresholds |
 
 
 <!-- MANUAL ADDITIONS START -->

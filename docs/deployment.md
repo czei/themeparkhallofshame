@@ -610,6 +610,99 @@ ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "sudo systemctl start th
 
 ---
 
+## Feature 004: ThemeParks Data Collection
+
+### New Environment Variables
+
+Add these to `backend/.env` for historical import and entity metadata:
+
+```bash
+# Archive data access (optional - for historical import)
+ARCHIVE_S3_BUCKET=archive.themeparks.wiki
+ARCHIVE_S3_REGION=eu-west-2
+
+# Import settings
+IMPORT_BATCH_SIZE=10000
+IMPORT_CHECKPOINT_INTERVAL=1000
+```
+
+### New Database Migrations
+
+Feature 004 includes 7 new Alembic migrations:
+
+```bash
+cd backend
+DB_PASSWORD=<password> alembic upgrade head
+```
+
+New tables created:
+- `entity_metadata` - Rich entity metadata (coordinates, indoor/outdoor, height requirements)
+- `queue_data` - Extended queue data (Lightning Lane, Virtual Queue, Single Rider)
+- `import_checkpoints` - Historical import progress tracking
+- `storage_metrics` - Storage monitoring and capacity planning
+- `data_quality_log` - Data quality issue tracking
+
+Schema changes:
+- `ride_status_snapshots.data_source` - Tracks LIVE vs ARCHIVE data
+- `parks.themeparks_wiki_id` and `rides.themeparks_wiki_id` - UUID mapping
+
+### New Cron Jobs
+
+Add these to the production crontab:
+
+```bash
+# Storage monitoring - daily at 2:30 AM
+30 2 * * * /opt/themeparkhallofshame/venv/bin/python /opt/themeparkhallofshame/backend/src/scripts/cron_wrapper.py /opt/themeparkhallofshame/venv/bin/python -m scripts.measure_storage
+
+# Metadata sync - weekly on Sundays at 3:00 AM
+0 3 * * 0 /opt/themeparkhallofshame/venv/bin/python /opt/themeparkhallofshame/backend/src/scripts/cron_wrapper.py /opt/themeparkhallofshame/venv/bin/python -m scripts.sync_metadata
+
+# Data quality alerts - daily at 6:00 AM
+0 6 * * * /opt/themeparkhallofshame/venv/bin/python /opt/themeparkhallofshame/backend/src/scripts/cron_wrapper.py /opt/themeparkhallofshame/venv/bin/python -m scripts.send_data_quality_alert
+```
+
+### Running Historical Import
+
+After deployment, to import historical data:
+
+```bash
+# From production server
+cd /opt/themeparkhallofshame/backend
+source ../.env
+
+# Import specific park
+/opt/themeparkhallofshame/venv/bin/python -m scripts.import_historical \
+    --park-id 134 \
+    --start-date 2020-01-01 \
+    --end-date 2025-12-31
+
+# Or import all parks (runs with checkpointing)
+/opt/themeparkhallofshame/venv/bin/python -m scripts.import_historical --all-parks
+```
+
+### Monitoring Storage Growth
+
+Check storage usage:
+
+```bash
+ssh -i ~/.ssh/michael-2.pem ec2-user@webperformance.com "mysql -u root -p -e '
+SELECT
+    partition_name,
+    table_rows,
+    ROUND(data_length / 1024 / 1024, 2) as data_mb
+FROM information_schema.partitions
+WHERE table_name = \"ride_status_snapshots\"
+ORDER BY partition_name DESC
+LIMIT 12;
+' themepark_tracker"
+```
+
+### Rollback for Feature 004
+
+See `backend/docs/partitioning-rollback.md` for detailed rollback procedures specific to Feature 004 schema changes.
+
+---
+
 ## SSL/HTTPS Setup
 
 After the site is ready for public access:

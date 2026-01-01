@@ -628,7 +628,7 @@ def get_park_rides_comparison_chart(park_id: int):
             "granularity": "hourly" | "daily"
         }
     """
-    from datetime import date, timedelta
+    from datetime import date
     from utils.timezone import (
         get_today_pacific,
         get_last_week_date_range,

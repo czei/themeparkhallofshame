@@ -35,6 +35,7 @@ from models import Ride, RideClassification
 from collector.queue_times_client import QueueTimesClient
 from collector.themeparks_wiki_client import get_themeparks_wiki_client
 from collector.status_calculator import computed_is_open, validate_wait_time
+from collector.queue_data_collector import QueueDataCollector
 from database.connection import get_db_connection, get_db_session
 from database.repositories.park_repository import ParkRepository
 from database.repositories.ride_repository import RideRepository
@@ -275,11 +276,14 @@ class SnapshotCollector:
                                  avg_wait, max_wait, park_activity_repo, shame_score,
                                  snapshot_timestamp)
 
+        # Feature 004: Initialize queue data collector for extended queue types
+        queue_data_collector = QueueDataCollector(snapshot_repo.session)
+
         # Process each ride
         for ride_data in live_data:
             self._process_ride_themeparks_wiki(
                 ride_data, park_id, ride_repo, snapshot_repo, status_change_repo,
-                data_quality_repo, snapshot_timestamp
+                data_quality_repo, queue_data_collector, snapshot_timestamp
             )
 
         logger.info(f"  ✓ Processed {len(live_data)} rides "
@@ -290,6 +294,7 @@ class SnapshotCollector:
                                        snapshot_repo: RideStatusSnapshotRepository,
                                        status_change_repo: RideStatusChangeRepository,
                                        data_quality_repo: DataQualityRepository,
+                                       queue_data_collector: QueueDataCollector,
                                        snapshot_timestamp: datetime):
         """
         Process a single ride from ThemeParks.wiki data.
@@ -301,6 +306,7 @@ class SnapshotCollector:
             snapshot_repo: Ride status snapshot repository
             status_change_repo: Ride status change repository
             data_quality_repo: Data quality issue tracking repository
+            queue_data_collector: Collector for extended queue data
             snapshot_timestamp: Synchronized timestamp for this collection cycle
         """
         try:
@@ -368,10 +374,18 @@ class SnapshotCollector:
             )
 
             # Store snapshot with rich status
-            self._store_snapshot_with_status(
+            snapshot_id = self._store_snapshot_with_status(
                 ride_id, wait_time, is_operating, is_operating, status,
                 ride_data.last_updated, snapshot_repo, snapshot_timestamp
             )
+
+            # Feature 004: Save extended queue data (Lightning Lane, Virtual Queue, etc.)
+            if snapshot_id and ride_data.queues:
+                queue_records = queue_data_collector.save_queue_data(
+                    snapshot_id, ride_data, snapshot_timestamp
+                )
+                if queue_records:
+                    self.stats['queue_data_saved'] = self.stats.get('queue_data_saved', 0) + len(queue_records)
 
         except Exception as e:
             logger.error(f"Error processing ride {ride_data.name}: {e}")
@@ -406,14 +420,17 @@ class SnapshotCollector:
                 'is_open': is_open_api,
                 'computed_is_open': computed_status,
                 'status': status_enum,
-                'last_updated_api': effective_last_updated
+                'last_updated_api': effective_last_updated,
+                'data_source': 'LIVE'  # Feature 004: permanent retention tracking
             }
 
-            snapshot_repo.insert(snapshot_record)
+            snapshot_id = snapshot_repo.insert(snapshot_record)
             self.stats['snapshots_created'] += 1
+            return snapshot_id  # Return for queue data collection
 
         except Exception as e:
             logger.error(f"Failed to store snapshot for ride {ride_id}: {e}")
+            return None
 
     def _detect_status_change_rich(self, ride_id: int, current_status: str,
                                     snapshot_repo: RideStatusSnapshotRepository,
@@ -806,7 +823,8 @@ class SnapshotCollector:
                 'is_open': is_open_api,
                 'computed_is_open': computed_status,
                 'status': None,  # Queue-Times doesn't provide rich status
-                'last_updated_api': effective_last_updated
+                'last_updated_api': effective_last_updated,
+                'data_source': 'LIVE'  # Feature 004: permanent retention tracking
             }
 
             snapshot_repo.insert(snapshot_record)
@@ -908,6 +926,7 @@ class SnapshotCollector:
         logger.info(f"Parks processed:     {self.stats['parks_processed']}")
         logger.info(f"Rides processed:     {self.stats['rides_processed']}")
         logger.info(f"Snapshots created:   {self.stats['snapshots_created']}")
+        logger.info(f"Queue data saved:    {self.stats.get('queue_data_saved', 0)}")
         logger.info(f"Status changes:      {self.stats['status_changes']}")
         logger.info(f"Last operated updates: {self.stats.get('last_operated_updates', 0)}")
         logger.info(f"Schedules refreshed: {self.stats.get('schedules_refreshed', 0)}")

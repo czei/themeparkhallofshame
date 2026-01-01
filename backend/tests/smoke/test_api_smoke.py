@@ -133,7 +133,7 @@ class TestRidesDowntimeSmoke:
         assert total_rides >= 500, f"Should have at least 500 active rides, got {total_rides}"
 
         # Report tier distribution (informational)
-        print(f"\n=== Tier Distribution ===")
+        print("\n=== Tier Distribution ===")
         for r in result:
             tier_name = f"Tier {r.tier}" if r.tier else "Unclassified"
             print(f"  {tier_name}: {r.count} rides")
@@ -301,7 +301,7 @@ class TestDataFreshnessSmoke:
 
     def test_data_freshness_report(self, smoke_connection, data_freshness):
         """Report on data freshness (informational)."""
-        print(f"\n=== Data Freshness Report ===")
+        print("\n=== Data Freshness Report ===")
         print(f"Latest snapshot: {data_freshness['latest_snapshot']}")
         print(f"Hours old: {data_freshness['hours_old']}")
         print(f"Parks with data: {data_freshness['parks_with_data']}")

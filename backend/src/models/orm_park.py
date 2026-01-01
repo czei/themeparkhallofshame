@@ -116,6 +116,11 @@ class Park(Base):
         back_populates="park",
         lazy="select"
     )
+    import_checkpoints: Mapped[List["ImportCheckpoint"]] = relationship(
+        "ImportCheckpoint",
+        back_populates="park",
+        lazy="select"
+    )
 
     # Model Methods (Business Logic)
     def is_operating_at(self, timestamp: datetime, session: Optional["Session"] = None) -> bool:

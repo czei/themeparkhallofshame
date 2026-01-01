@@ -59,7 +59,8 @@ class RideStatusSnapshotRepository:
                 is_open=snapshot_data.get('is_open'),
                 computed_is_open=snapshot_data.get('computed_is_open', False),
                 status=snapshot_data.get('status'),
-                last_updated_api=last_updated_api or datetime.utcnow()
+                last_updated_api=last_updated_api or datetime.utcnow(),
+                data_source=snapshot_data.get('data_source', 'LIVE')
             )
 
             self.session.add(snapshot)

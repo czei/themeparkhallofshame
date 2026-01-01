@@ -20,6 +20,12 @@ from .orm_weather import WeatherObservation, WeatherForecast
 from .orm_aggregation import AggregationLog, AggregationType, AggregationStatus
 from .orm_data_quality import DataQualityIssue
 from .orm_operating_session import ParkOperatingSession
+# Feature 004: Data Warehouse models
+from .orm_import import ImportCheckpoint, ImportStatus
+from .orm_metadata import EntityMetadata, IndoorOutdoor
+from .orm_queue import QueueData, QueueType
+from .orm_storage import StorageMetrics
+from .orm_quality_log import DataQualityLog, LogIssueType, ResolutionStatus
 
 __all__ = [
     'Base',
@@ -52,4 +58,15 @@ __all__ = [
     'AggregationStatus',
     'DataQualityIssue',
     'ParkOperatingSession',
+    # Feature 004: Data Warehouse exports
+    'ImportCheckpoint',
+    'ImportStatus',
+    'EntityMetadata',
+    'IndoorOutdoor',
+    'QueueData',
+    'QueueType',
+    'StorageMetrics',
+    'DataQualityLog',
+    'LogIssueType',
+    'ResolutionStatus',
 ]

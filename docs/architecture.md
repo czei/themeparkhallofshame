@@ -772,26 +772,6 @@ from tenacity import (
     wait=wait_exponential(multiplier=1, min=4, max=60),
     reraise=True
 )
-def fetch_park_queue_times(park_id):
-    """
-    Fetch queue times from Queue-Times API with automatic retries
-
-    Retry strategy:
-    - Attempt 1: immediate
-    - Attempt 2: 4s wait
-    - Attempt 3: 8s wait
-    - Attempt 4: 16s wait
-    - Attempt 5: 32s wait
-    - Give up after 5 attempts and raise exception
-    """
-    url = f"https://queue-times.com/parks/{park_id}/queue_times.json"
-
-    response = requests.get(url, timeout=10)
-    response.raise_for_status()  # Raises HTTPError for 4xx/5xx
-
-    return response.json()
-```
-
 **Advanced: Retry on HTTP 429 (Rate Limit)**:
 
 ```python

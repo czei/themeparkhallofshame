@@ -14,6 +14,7 @@ from api.routes.rides import rides_bp
 from api.routes.trends import trends_bp
 from api.routes.audit import audit_bp
 from api.routes.search import search_bp
+from api.routes.admin import admin_bp
 from api.middleware.error_handler import register_error_handlers
 from models.base import db_session
 
@@ -49,6 +50,7 @@ def create_app() -> Flask:
     app.register_blueprint(trends_bp, url_prefix='/api')
     app.register_blueprint(audit_bp, url_prefix='/api')
     app.register_blueprint(search_bp, url_prefix='/api')
+    app.register_blueprint(admin_bp, url_prefix='/api')
 
     # Register error handlers
     register_error_handlers(app)
@@ -76,7 +78,8 @@ def create_app() -> Flask:
                 "rides": "/api/rides",
                 "trends": "/api/trends",
                 "audit": "/api/audit",
-                "search": "/api/search"
+                "search": "/api/search",
+                "admin": "/api/admin"
             }
         })
 

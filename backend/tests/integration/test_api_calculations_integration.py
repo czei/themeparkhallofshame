@@ -612,7 +612,7 @@ def test_park_daily_rankings_weighted_calculations(mysql_session, comprehensive_
     assert len(set([round(s, 1) for s in shame_scores])) == 1, \
         f"All parks should have equal shame scores, got: {shame_scores}"
 
-    print(f"\n✓ VERIFIED: Weighted scoring calculation is consistent across all parks")
+    print("\n✓ VERIFIED: Weighted scoring calculation is consistent across all parks")
     print(f"  Shame scores: {shame_scores[0]:.1f} (all parks)")
     print("  Weighted downtime: 2×180×3 + 5×60×2 + 3×30×1 = 1080 + 600 + 90 = 1770 min = 29.5 hrs")
 
@@ -680,7 +680,7 @@ def test_park_monthly_rankings_calculations(mysql_session, comprehensive_api_tes
         assert abs(actual_downtime - expected_weekly) < 0.5, \
             f"Monthly downtime calculation WRONG! Expected {expected_weekly}h, got {actual_downtime}h"
 
-    print(f"\n✓ VERIFIED: Monthly aggregation works correctly over available data")
+    print("\n✓ VERIFIED: Monthly aggregation works correctly over available data")
 
 
 # ============================================================================
@@ -757,7 +757,7 @@ def test_ride_weekly_rankings_calculations(mysql_session, comprehensive_api_test
     if tier1_rides and tier2_rides:
         assert float(tier1_rides[0]['downtime_hours']) >= float(tier2_rides[0]['downtime_hours'])
 
-    print(f"\n✓ VERIFIED: Weekly ride downtime rankings sorted correctly")
+    print("\n✓ VERIFIED: Weekly ride downtime rankings sorted correctly")
 
 
 def test_ride_monthly_rankings_calculations(mysql_session, comprehensive_api_test_data):
@@ -790,7 +790,7 @@ def test_ride_monthly_rankings_calculations(mysql_session, comprehensive_api_tes
     if tier1_rides and tier2_rides:
         assert float(tier1_rides[0]['downtime_hours']) >= float(tier2_rides[0]['downtime_hours'])
 
-    print(f"\n✓ VERIFIED: Monthly ride downtime rankings working correctly")
+    print("\n✓ VERIFIED: Monthly ride downtime rankings working correctly")
 
 
 # ============================================================================
@@ -862,7 +862,6 @@ def test_average_wait_times_calculations(mysql_session, comprehensive_api_test_d
 
     NOTE: Updated to use RideWaitTimeRankingsQuery instead of deprecated method.
     """
-    from database.queries.rankings.ride_wait_time_rankings import RideWaitTimeRankingsQuery
     from datetime import timedelta
 
     query = RideWaitTimeRankingsQuery(mysql_session)
@@ -911,7 +910,6 @@ def test_peak_wait_times_calculations(mysql_session, comprehensive_api_test_data
     NOTE: Updated to use RideWaitTimeRankingsQuery instead of deprecated method.
     The query aggregates from ride_daily_stats, not ride_weekly_stats.
     """
-    from database.queries.rankings.ride_wait_time_rankings import RideWaitTimeRankingsQuery
     from datetime import timedelta
 
     query = RideWaitTimeRankingsQuery(mysql_session)

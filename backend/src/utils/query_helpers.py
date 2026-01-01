@@ -601,6 +601,238 @@ class TimeIntervalHelper:
         return datetime.utcnow() - timedelta(minutes=n)
 
 
+class PartitionAwareDateRange:
+    """
+    Partition-aware date range helpers for MySQL partition pruning.
+
+    Feature 004: The ride_status_snapshots table is partitioned by:
+    RANGE (YEAR(recorded_at) * 100 + MONTH(recorded_at))
+
+    Partitions: p_before_2024, p202401...p203012, p_future
+
+    CRITICAL: For MySQL to use partition pruning, queries MUST include:
+    - Explicit recorded_at >= start_time bounds
+    - Explicit recorded_at < end_time bounds
+    - Bounds passed as parameters (not computed in SQL)
+
+    Anti-patterns that PREVENT partition pruning:
+    - WHERE YEAR(recorded_at) = 2025 (function on column)
+    - WHERE DATE(recorded_at) = '2025-01-01' (function on column)
+    - WHERE recorded_at BETWEEN (func.now() - interval) AND func.now() (computed bounds)
+
+    Usage:
+        bounds = PartitionAwareDateRange.for_period('yesterday')
+        stmt = select(RideStatusSnapshot).where(
+            RideStatusSnapshot.recorded_at >= bounds.start,
+            RideStatusSnapshot.recorded_at < bounds.end
+        )
+    """
+
+    class DateBounds(NamedTuple):
+        """Start and end bounds for a date range query."""
+        start: datetime
+        end: datetime
+        period_name: str
+
+    @staticmethod
+    def for_today(reference_time: Optional[datetime] = None) -> 'PartitionAwareDateRange.DateBounds':
+        """
+        Get partition-friendly bounds for TODAY period.
+
+        Args:
+            reference_time: Reference time (defaults to UTC now)
+
+        Returns:
+            DateBounds with start at midnight today, end at midnight tomorrow
+        """
+        now = reference_time or datetime.utcnow()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow_start = today_start + timedelta(days=1)
+        return PartitionAwareDateRange.DateBounds(
+            start=today_start,
+            end=tomorrow_start,
+            period_name='today'
+        )
+
+    @staticmethod
+    def for_yesterday(reference_time: Optional[datetime] = None) -> 'PartitionAwareDateRange.DateBounds':
+        """
+        Get partition-friendly bounds for YESTERDAY period.
+
+        Args:
+            reference_time: Reference time (defaults to UTC now)
+
+        Returns:
+            DateBounds with start at midnight yesterday, end at midnight today
+        """
+        now = reference_time or datetime.utcnow()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        yesterday_start = today_start - timedelta(days=1)
+        return PartitionAwareDateRange.DateBounds(
+            start=yesterday_start,
+            end=today_start,
+            period_name='yesterday'
+        )
+
+    @staticmethod
+    def for_last_week(reference_time: Optional[datetime] = None) -> 'PartitionAwareDateRange.DateBounds':
+        """
+        Get partition-friendly bounds for LAST_WEEK period (7 days).
+
+        Args:
+            reference_time: Reference time (defaults to UTC now)
+
+        Returns:
+            DateBounds with start 7 days ago at midnight, end at midnight today
+        """
+        now = reference_time or datetime.utcnow()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        week_ago = today_start - timedelta(days=7)
+        return PartitionAwareDateRange.DateBounds(
+            start=week_ago,
+            end=today_start,
+            period_name='last_week'
+        )
+
+    @staticmethod
+    def for_last_month(reference_time: Optional[datetime] = None) -> 'PartitionAwareDateRange.DateBounds':
+        """
+        Get partition-friendly bounds for LAST_MONTH period (30 days).
+
+        Args:
+            reference_time: Reference time (defaults to UTC now)
+
+        Returns:
+            DateBounds with start 30 days ago at midnight, end at midnight today
+        """
+        now = reference_time or datetime.utcnow()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        month_ago = today_start - timedelta(days=30)
+        return PartitionAwareDateRange.DateBounds(
+            start=month_ago,
+            end=today_start,
+            period_name='last_month'
+        )
+
+    @staticmethod
+    def for_specific_month(year: int, month: int) -> 'PartitionAwareDateRange.DateBounds':
+        """
+        Get partition-friendly bounds for a specific calendar month.
+
+        This is optimal for partition pruning as it exactly matches partition boundaries.
+
+        Args:
+            year: Year (e.g., 2025)
+            month: Month (1-12)
+
+        Returns:
+            DateBounds with start at month start, end at next month start
+        """
+        month_start = datetime(year, month, 1, 0, 0, 0)
+        if month == 12:
+            next_month_start = datetime(year + 1, 1, 1, 0, 0, 0)
+        else:
+            next_month_start = datetime(year, month + 1, 1, 0, 0, 0)
+        return PartitionAwareDateRange.DateBounds(
+            start=month_start,
+            end=next_month_start,
+            period_name=f'{year}-{month:02d}'
+        )
+
+    @staticmethod
+    def for_specific_year(year: int) -> 'PartitionAwareDateRange.DateBounds':
+        """
+        Get partition-friendly bounds for a specific calendar year.
+
+        This accesses exactly 12 partitions (one per month).
+
+        Args:
+            year: Year (e.g., 2025)
+
+        Returns:
+            DateBounds with start at Jan 1, end at Jan 1 next year
+        """
+        year_start = datetime(year, 1, 1, 0, 0, 0)
+        next_year_start = datetime(year + 1, 1, 1, 0, 0, 0)
+        return PartitionAwareDateRange.DateBounds(
+            start=year_start,
+            end=next_year_start,
+            period_name=f'{year}'
+        )
+
+    @staticmethod
+    def for_period(period: str, reference_time: Optional[datetime] = None) -> 'PartitionAwareDateRange.DateBounds':
+        """
+        Get partition-friendly bounds for a named period.
+
+        Args:
+            period: Period name ('today', 'yesterday', 'last_week', 'last_month')
+            reference_time: Reference time (defaults to UTC now)
+
+        Returns:
+            DateBounds for the requested period
+
+        Raises:
+            ValueError: If period is not recognized
+        """
+        period_lower = period.lower().replace('-', '_')
+
+        if period_lower in ('today', 'live'):
+            return PartitionAwareDateRange.for_today(reference_time)
+        elif period_lower == 'yesterday':
+            return PartitionAwareDateRange.for_yesterday(reference_time)
+        elif period_lower in ('last_week', 'week', '7d'):
+            return PartitionAwareDateRange.for_last_week(reference_time)
+        elif period_lower in ('last_month', 'month', '30d'):
+            return PartitionAwareDateRange.for_last_month(reference_time)
+        else:
+            raise ValueError(f"Unknown period: {period}. Use 'today', 'yesterday', 'last_week', or 'last_month'")
+
+    @staticmethod
+    def for_custom_range(start: datetime, end: datetime, period_name: str = 'custom') -> 'PartitionAwareDateRange.DateBounds':
+        """
+        Create partition-friendly bounds for a custom date range.
+
+        Args:
+            start: Start datetime (inclusive)
+            end: End datetime (exclusive)
+            period_name: Optional name for this range
+
+        Returns:
+            DateBounds for the custom range
+        """
+        return PartitionAwareDateRange.DateBounds(
+            start=start,
+            end=end,
+            period_name=period_name
+        )
+
+    @staticmethod
+    def apply_to_query(
+        stmt: Select,
+        bounds: 'PartitionAwareDateRange.DateBounds',
+        column=None
+    ) -> Select:
+        """
+        Apply partition-friendly date bounds to a query.
+
+        Args:
+            stmt: SQLAlchemy Select statement
+            bounds: DateBounds from any for_* method
+            column: Column to apply bounds to (defaults to RideStatusSnapshot.recorded_at)
+
+        Returns:
+            Modified Select statement with partition-friendly WHERE clauses
+        """
+        if column is None:
+            column = RideStatusSnapshot.recorded_at
+
+        return stmt.where(
+            column >= bounds.start,
+            column < bounds.end
+        )
+
+
 class QueryClassBase(ABC):
     """
     Base class for all ORM query handler classes.

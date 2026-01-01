@@ -30,10 +30,16 @@ def upgrade() -> None:
     Apply monthly RANGE partitioning to ride_status_snapshots.
 
     MySQL requires the partition key to be part of all unique/primary keys.
+    MySQL also does NOT support foreign keys with partitioning.
+
     We need to:
-    1. Drop the existing primary key
-    2. Recreate with composite key including recorded_at
-    3. Apply partitioning
+    1. Drop the foreign key constraint to rides table
+    2. Drop the existing primary key
+    3. Recreate with composite key including recorded_at
+    4. Apply partitioning
+
+    Note: Foreign key is dropped permanently. Data integrity is maintained
+    at application level. This is a common tradeoff for partitioned tables.
     """
     connection = op.get_bind()
 
@@ -50,20 +56,59 @@ def upgrade() -> None:
         print("Table is already partitioned, skipping...")
         return
 
-    # Step 1: Modify primary key to include partition key
-    # MySQL requires partition key in all unique keys
-    connection.execute(sa.text("""
-        ALTER TABLE ride_status_snapshots
-        DROP PRIMARY KEY,
-        ADD PRIMARY KEY (snapshot_id, recorded_at)
+    # Step 1: Drop foreign key constraint (MySQL doesn't support FK with partitioning)
+    # Find and drop any foreign keys on this table
+    fk_result = connection.execute(sa.text("""
+        SELECT CONSTRAINT_NAME
+        FROM information_schema.TABLE_CONSTRAINTS
+        WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'ride_status_snapshots'
+        AND CONSTRAINT_TYPE = 'FOREIGN KEY'
     """))
+    for fk_row in fk_result.fetchall():
+        fk_name = fk_row[0]
+        print(f"Dropping foreign key: {fk_name}")
+        connection.execute(sa.text(f"""
+            ALTER TABLE ride_status_snapshots
+            DROP FOREIGN KEY {fk_name}
+        """))
 
-    # Step 2: Generate partition DDL for 2024-2030
-    # Using RANGE on YEAR(recorded_at) * 100 + MONTH(recorded_at) for monthly partitions
+    # Step 2: Check if primary key already includes recorded_at
+    pk_result = connection.execute(sa.text("""
+        SELECT COUNT(*) as col_count
+        FROM information_schema.KEY_COLUMN_USAGE
+        WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'ride_status_snapshots'
+        AND CONSTRAINT_NAME = 'PRIMARY'
+        AND COLUMN_NAME = 'recorded_at'
+    """))
+    pk_row = pk_result.fetchone()
+    pk_already_composite = pk_row and pk_row[0] > 0
+
+    # Only modify PK if not already composite
+    if not pk_already_composite:
+        print("Modifying primary key to include recorded_at...")
+        connection.execute(sa.text("""
+            ALTER TABLE ride_status_snapshots
+            DROP PRIMARY KEY,
+            ADD PRIMARY KEY (snapshot_id, recorded_at)
+        """))
+    else:
+        print("Primary key already includes recorded_at, skipping...")
+
+    # Step 3: Generate partition DDL for 2024-2030
+    # Using RANGE with UNIX_TIMESTAMP for TIMESTAMP columns
+    # RANGE COLUMNS doesn't support TIMESTAMP type
     partitions = []
 
+    # Calculate UNIX timestamps for partition boundaries
+    # Unix timestamp for 2024-01-01 00:00:00 UTC = 1704067200
+    import calendar
+    from datetime import datetime as dt
+
     # Historical partition for data before 2024
-    partitions.append("PARTITION p_before_2024 VALUES LESS THAN (202401)")
+    before_2024_ts = int(calendar.timegm(dt(2024, 1, 1, 0, 0, 0).timetuple()))
+    partitions.append(f"PARTITION p_before_2024 VALUES LESS THAN ({before_2024_ts})")
 
     # Monthly partitions for 2024-2030
     current_year = 2024
@@ -78,17 +123,17 @@ def upgrade() -> None:
             if next_month > 12:
                 next_month = 1
                 next_year = year + 1
-            boundary = next_year * 100 + next_month
-            partitions.append(f"PARTITION {partition_name} VALUES LESS THAN ({boundary})")
+            boundary_ts = int(calendar.timegm(dt(next_year, next_month, 1, 0, 0, 0).timetuple()))
+            partitions.append(f"PARTITION {partition_name} VALUES LESS THAN ({boundary_ts})")
 
     # Future partition for data after 2030
-    partitions.append("PARTITION p_future VALUES LESS THAN MAXVALUE")
+    partitions.append("PARTITION p_future VALUES LESS THAN (MAXVALUE)")
 
-    # Step 3: Apply partitioning
+    # Step 4: Apply partitioning
     partition_ddl = ",\n    ".join(partitions)
     connection.execute(sa.text(f"""
         ALTER TABLE ride_status_snapshots
-        PARTITION BY RANGE (YEAR(recorded_at) * 100 + MONTH(recorded_at)) (
+        PARTITION BY RANGE (UNIX_TIMESTAMP(recorded_at)) (
             {partition_ddl}
         )
     """))
@@ -104,6 +149,10 @@ def downgrade() -> None:
     1. Removes all partitions (data is preserved)
     2. Reverts to non-partitioned table
     3. May take significant time for large tables
+
+    NOTE: The foreign key to rides table is NOT recreated.
+    This was intentionally dropped to enable partitioning.
+    Data integrity is maintained at the application level.
     """
     connection = op.get_bind()
 

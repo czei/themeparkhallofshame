@@ -17,11 +17,11 @@
 
 **Purpose**: Project initialization and dependency configuration
 
-- [ ] T001 Create feature branch `004-themeparks-data-collection` from main
-- [ ] T002 [P] Add boto3 to requirements.txt for S3 archive access
-- [ ] T003 [P] Add Levenshtein library to requirements.txt for fuzzy matching
-- [ ] T004 [P] Create `backend/src/importer/` directory for import modules
-- [ ] T005 [P] Add environment variables to `.env.example`: `ARCHIVE_S3_BUCKET`, `ARCHIVE_S3_REGION`, `IMPORT_BATCH_SIZE`, `IMPORT_CHECKPOINT_INTERVAL`
+- [x] T001 Create feature branch `004-themeparks-data-collection` from main
+- [x] T002 [P] Add boto3 to requirements.txt for S3 archive access
+- [x] T003 [P] Add Levenshtein library to requirements.txt for fuzzy matching
+- [x] T004 [P] Create `backend/src/importer/` directory for import modules
+- [x] T005 [P] Add environment variables to `.env.example`: `ARCHIVE_S3_BUCKET`, `ARCHIVE_S3_REGION`, `IMPORT_BATCH_SIZE`, `IMPORT_CHECKPOINT_INTERVAL`
 
 ---
 
@@ -33,30 +33,30 @@
 
 ### Database Migrations
 
-- [ ] T006 Create Alembic migration for `data_source` ENUM column on `ride_status_snapshots` in `backend/src/database/migrations/versions/004_add_data_source_column.py`
-- [ ] T007 Create Alembic migration for `import_checkpoints` table in `backend/src/database/migrations/versions/004_create_import_checkpoints.py`
-- [ ] T008 [P] Create Alembic migration for `entity_metadata` table in `backend/src/database/migrations/versions/004_create_entity_metadata.py`
-- [ ] T009 [P] Create Alembic migration for `queue_data` table in `backend/src/database/migrations/versions/004_create_queue_data.py`
-- [ ] T010 [P] Create Alembic migration for `storage_metrics` table in `backend/src/database/migrations/versions/004_create_storage_metrics.py`
-- [ ] T011 [P] Create Alembic migration for `data_quality_log` table in `backend/src/database/migrations/versions/004_create_data_quality_log.py`
-- [ ] T012 Create Alembic migration for monthly RANGE partitioning on `ride_status_snapshots` in `backend/src/database/migrations/versions/004_partition_snapshots.py`
+- [x] T006 Create Alembic migration for `data_source` ENUM column on `ride_status_snapshots` in `backend/src/database/migrations/versions/004_add_data_source_column.py`
+- [x] T007 Create Alembic migration for `import_checkpoints` table in `backend/src/database/migrations/versions/004_create_import_checkpoints.py`
+- [x] T008 [P] Create Alembic migration for `entity_metadata` table in `backend/src/database/migrations/versions/004_create_entity_metadata.py`
+- [x] T009 [P] Create Alembic migration for `queue_data` table in `backend/src/database/migrations/versions/004_create_queue_data.py`
+- [x] T010 [P] Create Alembic migration for `storage_metrics` table in `backend/src/database/migrations/versions/004_create_storage_metrics.py`
+- [x] T011 [P] Create Alembic migration for `data_quality_log` table in `backend/src/database/migrations/versions/004_create_data_quality_log.py`
+- [x] T012 Create Alembic migration for monthly RANGE partitioning on `ride_status_snapshots` in `backend/src/database/migrations/versions/004_partition_snapshots.py`
 
 ### ORM Models
 
-- [ ] T013 Update `backend/src/models/orm_snapshots.py` to add `data_source` column with ENUM ('LIVE', 'ARCHIVE')
-- [ ] T014 [P] Create `backend/src/models/orm_import.py` with ImportCheckpoint model per data-model.md
-- [ ] T015 [P] Create `backend/src/models/orm_metadata.py` with EntityMetadata model per data-model.md
-- [ ] T016 [P] Create `backend/src/models/orm_queue.py` with QueueData model and QueueType enum per data-model.md
-- [ ] T017 [P] Create `backend/src/models/orm_storage.py` with StorageMetrics model per data-model.md
-- [ ] T018 [P] Create `backend/src/models/orm_quality.py` with DataQualityLog model per data-model.md
-- [ ] T019 Update `backend/src/models/__init__.py` to export all new ORM models
+- [x] T013 Update `backend/src/models/orm_snapshots.py` to add `data_source` column with ENUM ('LIVE', 'ARCHIVE')
+- [x] T014 [P] Create `backend/src/models/orm_import.py` with ImportCheckpoint model per data-model.md
+- [x] T015 [P] Create `backend/src/models/orm_metadata.py` with EntityMetadata model per data-model.md
+- [x] T016 [P] Create `backend/src/models/orm_queue.py` with QueueData model and QueueType enum per data-model.md
+- [x] T017 [P] Create `backend/src/models/orm_storage.py` with StorageMetrics model per data-model.md
+- [x] T018 [P] Create `backend/src/models/orm_quality.py` with DataQualityLog model per data-model.md
+- [x] T019 Update `backend/src/models/__init__.py` to export all new ORM models
 
 ### Core Infrastructure
 
-- [ ] T020 Create `backend/src/importer/__init__.py` with module exports
-- [ ] T021 [P] Create `backend/src/database/repositories/import_repository.py` with CRUD operations for ImportCheckpoint
-- [ ] T022 [P] Create `backend/src/database/repositories/quality_repository.py` with CRUD operations for DataQualityLog
-- [ ] T023 [P] Create `backend/src/database/repositories/storage_repository.py` with CRUD operations for StorageMetrics
+- [x] T020 Create `backend/src/importer/__init__.py` with module exports
+- [x] T021 [P] Create `backend/src/database/repositories/import_repository.py` with CRUD operations for ImportCheckpoint
+- [x] T022 [P] Create `backend/src/database/repositories/quality_repository.py` with CRUD operations for DataQualityLog
+- [x] T023 [P] Create `backend/src/database/repositories/storage_repository.py` with CRUD operations for StorageMetrics
 
 **Checkpoint**: Foundation ready - run `alembic upgrade head` and verify all tables exist
 
@@ -70,18 +70,18 @@
 
 ### Implementation
 
-- [ ] T024 [US1] Create `backend/src/importer/archive_parser.py` with zlib decompression and JSON parsing per research.md
-- [ ] T025 [US1] Create `backend/src/importer/id_mapper.py` with UUID-to-internal-ID reconciliation using Levenshtein matching
-- [ ] T026 [US1] Create `backend/src/importer/archive_importer.py` with:
+- [x] T024 [US1] Create `backend/src/importer/archive_parser.py` with zlib decompression and JSON parsing per research.md
+- [x] T025 [US1] Create `backend/src/importer/id_mapper.py` with UUID-to-internal-ID reconciliation using Levenshtein matching
+- [x] T026 [US1] Create `backend/src/importer/archive_importer.py` with:
   - S3 file listing for destination UUIDs
   - Checkpoint creation/resumption
   - Batch processing with configurable size
   - Error logging to data_quality_log
-- [ ] T027 [US1] Create `backend/src/scripts/import_historical.py` CLI with argparse:
+- [x] T027 [US1] Create `backend/src/scripts/import_historical.py` CLI with argparse:
   - `--all-parks` flag for full import
   - `--park-id` and `--start-date`/`--end-date` for targeted import
   - `--resume` flag to continue from checkpoint
-- [ ] T028 [US1] Create `backend/src/api/routes/admin.py` with import management endpoints:
+- [x] T028 [US1] Create `backend/src/api/routes/admin.py` with import management endpoints:
   - `POST /api/admin/import/start` - Start new import
   - `GET /api/admin/import/status/{import_id}` - Get import status
   - `POST /api/admin/import/resume/{import_id}` - Resume paused import
@@ -89,13 +89,13 @@
   - `DELETE /api/admin/import/cancel/{import_id}` - Cancel import
   - `GET /api/admin/import/list` - List all imports with pagination
   - `GET /api/admin/import/quality/{import_id}` - Get quality report
-- [ ] T029 [US1] Register admin blueprint in `backend/src/api/app.py`
-- [ ] T030 [US1] Create integration test `backend/tests/integration/test_historical_import.py` verifying:
+- [x] T029 [US1] Register admin blueprint in `backend/src/api/app.py`
+- [x] T030 [US1] Create integration test `backend/tests/integration/test_historical_import.py` verifying:
   - Checkpoint creation on interruption
   - Resume from checkpoint
   - Data integrity after import
-- [ ] T031 [US1] Create unit test `backend/tests/unit/test_archive_parser.py` for zlib decompression and JSON parsing
-- [ ] T032 [US1] Create unit test `backend/tests/unit/test_id_mapper.py` for UUID reconciliation and fuzzy matching
+- [x] T031 [US1] Create unit test `backend/tests/unit/test_archive_parser.py` for zlib decompression and JSON parsing
+- [x] T032 [US1] Create unit test `backend/tests/unit/test_id_mapper.py` for UUID reconciliation and fuzzy matching
 
 **Checkpoint**: Historical import functional - test with single park before full import
 
@@ -109,16 +109,16 @@
 
 ### Implementation
 
-- [ ] T033 [US2] Update `backend/src/collector/themeparks_wiki_client.py` to extract all queue types:
+- [x] T033 [US2] Update `backend/src/collector/themeparks_wiki_client.py` to extract all queue types:
   - STANDBY, SINGLE_RIDER, RETURN_TIME, PAID_RETURN_TIME, BOARDING_GROUP
-- [ ] T034 [US2] Create `backend/src/collector/queue_data_collector.py` to save extended queue data to queue_data table
-- [ ] T035 [US2] Update `backend/src/scripts/collect_snapshots.py` to:
+- [x] T034 [US2] Create `backend/src/collector/queue_data_collector.py` to save extended queue data to queue_data table
+- [x] T035 [US2] Update `backend/src/scripts/collect_snapshots.py` to:
   - Set `data_source='LIVE'` on new snapshots
   - Call queue_data_collector for extended queue types
-- [ ] T036 [US2] Remove or disable snapshot deletion cron job in `deployment/config/crontab.prod`
-- [ ] T037 [US2] Update `backend/src/api/routes/health.py` to include data freshness check (alert if >30 min stale)
-- [ ] T038 [US2] Create integration test `backend/tests/integration/test_permanent_retention.py` verifying data persists beyond 24h
-- [ ] T039 [US2] Create integration test `backend/tests/integration/test_queue_data_collection.py` for all queue types
+- [x] T036 [US2] Remove or disable snapshot deletion cron job in `deployment/config/crontab.prod`
+- [x] T037 [US2] Update `backend/src/api/routes/health.py` to include data freshness check (alert if >30 min stale)
+- [x] T038 [US2] Create integration test `backend/tests/integration/test_permanent_retention.py` verifying data persists beyond 24h
+- [x] T039 [US2] Create integration test `backend/tests/integration/test_queue_data_collection.py` for all queue types
 
 **Checkpoint**: Live collection capturing all queue types with permanent retention
 
@@ -132,12 +132,12 @@
 
 ### Implementation
 
-- [ ] T040 [US3] Verify partition pruning works by creating `backend/tests/integration/test_partitioned_queries.py` with EXPLAIN analysis
-- [ ] T041 [US3] Update `backend/src/utils/query_helpers.py` to include partition-aware date range hints in common queries
-- [ ] T042 [US3] Update all date-range queries in `backend/src/database/queries/` to include `recorded_at` filter for partition pruning
-- [ ] T043 [US3] Create performance test `backend/tests/performance/test_partition_performance.py` for year-over-year queries
-- [ ] T044 [US3] Verify all existing frontend API endpoints work with partitioned table (manual testing checklist)
-- [ ] T045 [US3] Update aggregation scripts to use park-specific timezone from `parks.timezone` instead of hardcoded Pacific
+- [x] T040 [US3] Verify partition pruning works by creating `backend/tests/integration/test_partitioned_queries.py` with EXPLAIN analysis
+- [x] T041 [US3] Update `backend/src/utils/query_helpers.py` to include partition-aware date range hints in common queries
+- [x] T042 [US3] Update all date-range queries in `backend/src/database/queries/` to include `recorded_at` filter for partition pruning
+- [x] T043 [US3] Create performance test `backend/tests/performance/test_partition_performance.py` for year-over-year queries
+- [x] T044 [US3] Verify all existing frontend API endpoints work with partitioned table (manual testing checklist)
+- [x] T045 [US3] Update aggregation scripts to use park-specific timezone from `parks.timezone` instead of hardcoded Pacific
 
 **Checkpoint**: All queries use partition pruning; frontend works unchanged
 
@@ -151,20 +151,20 @@
 
 ### Implementation
 
-- [ ] T046 [P] [US4] Create `backend/src/scripts/measure_storage.py` script to populate storage_metrics table from information_schema
-- [ ] T047 [US4] Add storage measurement to daily cron in `deployment/config/crontab.prod`
-- [ ] T048 [US4] Add storage endpoints to `backend/src/api/routes/admin.py`:
+- [x] T046 [P] [US4] Create `backend/src/scripts/measure_storage.py` script to populate storage_metrics table from information_schema
+- [x] T047 [US4] Add storage measurement to daily cron in `deployment/config/crontab.prod`
+- [x] T048 [US4] Add storage endpoints to `backend/src/api/routes/admin.py`:
   - `GET /api/admin/storage/summary` - Current usage
   - `GET /api/admin/storage/growth` - Growth analysis and projections
   - `GET /api/admin/storage/partitions` - Partition-level details
   - `GET /api/admin/storage/retention-comparison` - Strategy comparison
   - `GET /api/admin/storage/alerts` - Active alerts
   - `POST /api/admin/storage/measure` - Trigger immediate measurement
-- [ ] T049 [US4] Implement alert generation in `backend/src/database/repositories/storage_repository.py`:
+- [x] T049 [US4] Implement alert generation in `backend/src/database/repositories/storage_repository.py`:
   - Capacity threshold alerts (60% warning, 80% critical)
   - Growth rate change alerts (>10% change)
   - Days-until-full projections
-- [ ] T050 [US4] Create integration test `backend/tests/integration/test_storage_metrics.py` for storage calculations
+- [x] T050 [US4] Create integration test `backend/tests/integration/test_storage_metrics.py` for storage calculations
 
 **Checkpoint**: Storage monitoring dashboard functional with projections
 
@@ -178,23 +178,23 @@
 
 ### Implementation
 
-- [ ] T051 [P] [US5] Create `backend/src/collector/metadata_collector.py` with:
+- [x] T051 [P] [US5] Create `backend/src/collector/metadata_collector.py` with:
   - themeparks.wiki entity API integration
   - Coordinate extraction (latitude, longitude)
   - Indoor/outdoor classification
   - Height requirement parsing
   - Tag extraction
-- [ ] T052 [US5] Create `backend/src/scripts/sync_metadata.py` CLI for manual metadata sync
-- [ ] T053 [US5] Add daily metadata sync to cron in `deployment/config/crontab.prod`
-- [ ] T054 [US5] Add data quality endpoints to `backend/src/api/routes/admin.py`:
+- [x] T052 [US5] Create `backend/src/scripts/sync_metadata.py` CLI for manual metadata sync
+- [x] T053 [US5] Add daily metadata sync to cron in `deployment/config/crontab.prod`
+- [x] T054 [US5] Add data quality endpoints to `backend/src/api/routes/admin.py`:
   - `GET /api/admin/quality/summary` - Overall health
   - `GET /api/admin/quality/gaps` - Gap detection
   - `GET /api/admin/quality/issues` - Open issues
   - `PATCH /api/admin/quality/issues/{log_id}` - Update issue status
   - `GET /api/admin/quality/freshness` - Data freshness by park
   - `GET /api/admin/quality/coverage` - Coverage statistics
-- [ ] T055 [US5] Create integration test `backend/tests/integration/test_metadata_collection.py` for metadata sync
-- [ ] T056 [US5] Create integration test `backend/tests/integration/test_spatial_queries.py` for ST_Distance_Sphere queries
+- [x] T055 [US5] Create integration test `backend/tests/integration/test_metadata_collection.py` for metadata sync
+- [x] T056 [US5] Create integration test `backend/tests/integration/test_spatial_queries.py` for ST_Distance_Sphere queries
 
 **Checkpoint**: Metadata complete for 90%+ of attractions; spatial queries functional
 
@@ -204,13 +204,13 @@
 
 **Purpose**: Documentation, cleanup, and validation
 
-- [ ] T057 [P] Update CLAUDE.md with new ORM models and admin endpoints
-- [ ] T058 [P] Create destination UUID mapping reference file `backend/docs/destination-uuids.md`
-- [ ] T059 Run full test suite and fix any failures: `pytest`
-- [ ] T060 Run linting and fix issues: `ruff check .`
-- [ ] T061 Execute quickstart.md validation checklist manually
-- [ ] T062 Update deployment documentation with new cron jobs and environment variables
-- [ ] T063 Create rollback runbook in `backend/docs/partitioning-rollback.md` per data-model.md procedure
+- [x] T057 [P] Update CLAUDE.md with new ORM models and admin endpoints
+- [x] T058 [P] Create destination UUID mapping reference file `backend/docs/destination-uuids.md`
+- [x] T059 Run full test suite and fix any failures: `pytest`
+- [x] T060 Run linting and fix issues: `ruff check .`
+- [x] T061 Execute quickstart.md validation checklist manually
+- [x] T062 Update deployment documentation with new cron jobs and environment variables
+- [x] T063 Create rollback runbook in `backend/docs/partitioning-rollback.md` per data-model.md procedure
 
 ---
 
